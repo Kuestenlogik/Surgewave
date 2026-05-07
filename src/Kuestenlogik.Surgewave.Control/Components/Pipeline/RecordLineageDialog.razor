@@ -1,0 +1,62 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Timeline" Class="mr-2" />
+            Record Lineage
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (Steps.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No provenance data available</MudAlert>
+        }
+        else
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @for (var i = 0; i < Steps.Count; i++)
+                {
+                    var step = Steps[i];
+                    var latency = i > 0
+                        ? $"+{(Steps[i].Timestamp - Steps[i - 1].Timestamp).TotalMilliseconds:F0}ms"
+                        : "Start";
+
+                    <MudTimelineItem Color="Color.Primary" Size="MudBlazor.Size.Small">
+                        <ItemContent>
+                            <MudText Typo="Typo.body2"><strong>@step.NodeId</strong></MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @step.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff") (@latency)
+                            </MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.Highlight"
+                       OnClick="HighlightOnDiagram">
+                Highlight on Diagram
+            </MudButton>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public List<ProvenanceStep> Steps { get; set; } = [];
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void HighlightOnDiagram()
+    {
+        var nodeIds = Steps.Select(s => s.NodeId).ToList();
+        MudDialog.Close(DialogResult.Ok(nodeIds));
+    }
+}

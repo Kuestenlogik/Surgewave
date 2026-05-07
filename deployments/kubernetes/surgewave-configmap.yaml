@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgewave-config
+  labels:
+    app: surgewave
+    app.kubernetes.io/name: surgewave
+data:
+  appsettings.json: |
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning"
+        }
+      },
+      "Surgewave": {
+        "BrokerId": 0,
+        "Host": "0.0.0.0",
+        "Port": 9092,
+        "GrpcPort": 9093,
+        "DataDirectory": "/data",
+        "LogDirectory": "/data/logs",
+        "AutoCreateTopics": true,
+        "DefaultReplicationFactor": 3,
+        "DefaultNumPartitions": 3,
+        "UseRaftConsensus": true,
+        "RaftDataDirectory": "/data/raft",
+        "LogRetentionHours": 168,
+        "TieredStorage": {
+          "Enabled": false
+        },
+        "SchemaRegistry": {
+          "Enabled": true
+        },
+        "Connect": {
+          "Enabled": false
+        },
+        "Security": {
+          "SaslEnabled": false,
+          "AclEnabled": false
+        }
+      }
+    }

@@ -1,0 +1,238 @@
+@page "/cluster-linking"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Cluster Linking - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Cluster Linking</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Cross-cluster topic mirroring with offset translation</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreateLinkDialog"
+                   StartIcon="@Icons.Material.Filled.Add">Create Link</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Link" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Cluster Links</MudText>
+                        <MudText Typo="Typo.h5">@_links.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ContentCopy" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Mirror Topics</MudText>
+                        <MudText Typo="Typo.h5">@_mirrors.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active</MudText>
+                        <MudText Typo="Typo.h5">@_links.Count(l => l.State == "Active")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Cluster Links Table *@
+<MudText Typo="Typo.h6" Class="mb-2">Cluster Links</MudText>
+<MudTable Items="_links" Hover="true" Dense="true" Elevation="2" Class="mb-4">
+    <HeaderContent>
+        <MudTh>Link ID</MudTh>
+        <MudTh>Source Cluster</MudTh>
+        <MudTh>Bootstrap Servers</MudTh>
+        <MudTh>State</MudTh>
+        <MudTh>Mirrors</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Link ID"><code>@context.LinkId</code></MudTd>
+        <MudTd DataLabel="Source Cluster">@context.SourceClusterId</MudTd>
+        <MudTd DataLabel="Bootstrap Servers">@context.BootstrapServers</MudTd>
+        <MudTd DataLabel="State">
+            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)">@context.State</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Mirrors">@context.MirrorCount</MudTd>
+        <MudTd DataLabel="Actions">
+            <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                <MudButton Color="Color.Primary" OnClick="() => OpenCreateMirrorDialog(context.LinkId)"
+                           StartIcon="@Icons.Material.Filled.Add">Mirror</MudButton>
+                <MudButton Color="Color.Error" OnClick="() => DeleteLinkAsync(context.LinkId)"
+                           StartIcon="@Icons.Material.Filled.Delete">Delete</MudButton>
+            </MudButtonGroup>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>No cluster links configured.</MudText></NoRecordsContent>
+</MudTable>
+
+@* Mirror Topics Table *@
+<MudText Typo="Typo.h6" Class="mb-2">Mirror Topics</MudText>
+<MudTable Items="_mirrors" Hover="true" Dense="true" Elevation="2">
+    <HeaderContent>
+        <MudTh>Local Topic</MudTh>
+        <MudTh>Source Topic</MudTh>
+        <MudTh>Link ID</MudTh>
+        <MudTh>State</MudTh>
+        <MudTh>Lag</MudTh>
+        <MudTh>Mirrored</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Local Topic"><strong>@context.EffectiveLocalName</strong></MudTd>
+        <MudTd DataLabel="Source Topic">@context.SourceTopic</MudTd>
+        <MudTd DataLabel="Link ID"><code>@context.LinkId</code></MudTd>
+        <MudTd DataLabel="State">
+            <MudChip T="string" Size="Size.Small" Color="@GetMirrorStateColor(context.State)">@context.State</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Lag">@context.SourceLag</MudTd>
+        <MudTd DataLabel="Mirrored">@context.MessagesMirrored.ToString("N0")</MudTd>
+        <MudTd DataLabel="Actions">
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+                       OnClick="() => PromoteMirrorAsync(context.EffectiveLocalName)"
+                       StartIcon="@Icons.Material.Filled.Upgrade">Promote</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>No mirror topics.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<ClusterLinkInfo> _links = [];
+    private List<MirrorTopicInfo> _mirrors = [];
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _links = await Http.GetFromJsonAsync<List<ClusterLinkInfo>>("/api/cluster-links") ?? [];
+            _mirrors = await Http.GetFromJsonAsync<List<MirrorTopicInfo>>("/api/mirrors") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load cluster linking data: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OpenCreateLinkDialog()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreateClusterLinkDialog>("Create Cluster Link", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Cluster link created"); await LoadDataAsync(); }
+    }
+
+    private async Task OpenCreateMirrorDialog(string linkId)
+    {
+        var parameters = new DialogParameters<CreateMirrorDialog> { { x => x.LinkId, linkId } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreateMirrorDialog>("Create Mirror Topic", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Mirror topic created"); await LoadDataAsync(); }
+    }
+
+    private async Task DeleteLinkAsync(string linkId)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Delete Link",
+            $"Delete cluster link '{linkId}' and stop all mirrors?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try { await Http.DeleteAsync($"/api/cluster-links/{linkId}"); await LoadDataAsync(); }
+            catch (Exception ex) { Notification.ShowError($"Delete failed: {ex.Message}"); }
+        }
+    }
+
+    private async Task PromoteMirrorAsync(string topic)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Promote Mirror",
+            $"Promote mirror '{topic}' to a normal writable topic? This cannot be undone.", yesText: "Promote", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try
+            {
+                var response = await Http.PostAsync($"/api/mirrors/{topic}/promote", null);
+                if (response.IsSuccessStatusCode)
+                    Notification.ShowSuccess($"Mirror '{topic}' promoted");
+                else
+                    Notification.ShowError("Promote failed");
+                await LoadDataAsync();
+            }
+            catch (Exception ex) { Notification.ShowError($"Promote failed: {ex.Message}"); }
+        }
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Active" => Color.Success,
+        "Paused" => Color.Warning,
+        "Error" or "Failed" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static Color GetMirrorStateColor(string state) => state switch
+    {
+        "Mirroring" or "Active" => Color.Success,
+        "Stopped" => Color.Default,
+        "Promoted" => Color.Info,
+        "Error" => Color.Error,
+        _ => Color.Default
+    };
+
+    private sealed class ClusterLinkInfo
+    {
+        public string LinkId { get; set; } = "";
+        public string SourceClusterId { get; set; } = "";
+        public string BootstrapServers { get; set; } = "";
+        public string State { get; set; } = "";
+        public int MirrorCount { get; set; }
+    }
+
+    private sealed class MirrorTopicInfo
+    {
+        public string EffectiveLocalName { get; set; } = "";
+        public string SourceTopic { get; set; } = "";
+        public string LinkId { get; set; } = "";
+        public string State { get; set; } = "";
+        public long SourceLag { get; set; }
+        public long MessagesMirrored { get; set; }
+    }
+}

@@ -1,0 +1,191 @@
+# 3-Node Surgewave Cluster with Raft Consensus
+#
+# Usage:
+#   docker-compose -f docker-compose.cluster.yml up --build
+#
+# This creates a 3-node cluster with:
+#   - Raft consensus for controller election and metadata replication
+#   - Automatic leader election and failover
+#   - External Kafka ports: 9092 (surgewave-1), 9093 (surgewave-2), 9094 (surgewave-3)
+#
+# Test connectivity:
+#   surgewave cluster status --bootstrap surgewave-1:9092
+#   surgewave cluster nodes --bootstrap surgewave-1:9092
+
+services:
+  surgewave-1:
+    build: .
+    container_name: surgewave-1
+    hostname: surgewave-1
+    ports:
+      - "9092:9092"      # Kafka wire protocol
+      - "9095:9095"      # gRPC API
+      - "10092:10092"    # Replication port
+    volumes:
+      - surgewave-1-data:/app/data
+      - surgewave-1-logs:/app/logs
+      - surgewave-1-raft:/app/data/raft
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - Surgewave__BrokerId=1
+      - Surgewave__Host=surgewave-1
+      - Surgewave__Port=9092
+      - Surgewave__GrpcPort=9095
+      - Surgewave__ReplicationPort=10092
+      - Surgewave__UseRaftConsensus=true
+      - Surgewave__RaftDataDirectory=/app/data/raft
+      - Surgewave__ClusterNodes=1:surgewave-1:10092,2:surgewave-2:10092,3:surgewave-3:10092
+      - Surgewave__DataDirectory=/app/data
+      - Surgewave__AutoCreateTopics=true
+      - Surgewave__DefaultNumPartitions=3
+      - Surgewave__DefaultReplicationFactor=3
+      - Surgewave__MinInSyncReplicas=2
+    restart: unless-stopped
+    networks:
+      - surgewave-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9095/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  surgewave-2:
+    build: .
+    container_name: surgewave-2
+    hostname: surgewave-2
+    ports:
+      - "9093:9092"      # Kafka wire protocol (external 9093)
+      - "9096:9095"      # gRPC API
+      - "10093:10092"    # Replication port
+    volumes:
+      - surgewave-2-data:/app/data
+      - surgewave-2-logs:/app/logs
+      - surgewave-2-raft:/app/data/raft
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - Surgewave__BrokerId=2
+      - Surgewave__Host=surgewave-2
+      - Surgewave__Port=9092
+      - Surgewave__GrpcPort=9095
+      - Surgewave__ReplicationPort=10092
+      - Surgewave__UseRaftConsensus=true
+      - Surgewave__RaftDataDirectory=/app/data/raft
+      - Surgewave__ClusterNodes=1:surgewave-1:10092,2:surgewave-2:10092,3:surgewave-3:10092
+      - Surgewave__DataDirectory=/app/data
+      - Surgewave__AutoCreateTopics=true
+      - Surgewave__DefaultNumPartitions=3
+      - Surgewave__DefaultReplicationFactor=3
+      - Surgewave__MinInSyncReplicas=2
+    restart: unless-stopped
+    networks:
+      - surgewave-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9095/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      surgewave-1:
+        condition: service_started
+
+  surgewave-3:
+    build: .
+    container_name: surgewave-3
+    hostname: surgewave-3
+    ports:
+      - "9094:9092"      # Kafka wire protocol (external 9094)
+      - "9097:9095"      # gRPC API
+      - "10094:10092"    # Replication port
+    volumes:
+      - surgewave-3-data:/app/data
+      - surgewave-3-logs:/app/logs
+      - surgewave-3-raft:/app/data/raft
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - Surgewave__BrokerId=3
+      - Surgewave__Host=surgewave-3
+      - Surgewave__Port=9092
+      - Surgewave__GrpcPort=9095
+      - Surgewave__ReplicationPort=10092
+      - Surgewave__UseRaftConsensus=true
+      - Surgewave__RaftDataDirectory=/app/data/raft
+      - Surgewave__ClusterNodes=1:surgewave-1:10092,2:surgewave-2:10092,3:surgewave-3:10092
+      - Surgewave__DataDirectory=/app/data
+      - Surgewave__AutoCreateTopics=true
+      - Surgewave__DefaultNumPartitions=3
+      - Surgewave__DefaultReplicationFactor=3
+      - Surgewave__MinInSyncReplicas=2
+    restart: unless-stopped
+    networks:
+      - surgewave-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9095/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      surgewave-1:
+        condition: service_started
+
+  # Optional: Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: surgewave-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus-cluster.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - surgewave-cluster
+    depends_on:
+      - surgewave-1
+      - surgewave-2
+      - surgewave-3
+    profiles:
+      - monitoring
+
+  # Optional: Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: surgewave-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - surgewave-cluster
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+volumes:
+  surgewave-1-data:
+    driver: local
+  surgewave-1-logs:
+    driver: local
+  surgewave-1-raft:
+    driver: local
+  surgewave-2-data:
+    driver: local
+  surgewave-2-logs:
+    driver: local
+  surgewave-2-raft:
+    driver: local
+  surgewave-3-data:
+    driver: local
+  surgewave-3-logs:
+    driver: local
+  surgewave-3-raft:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  surgewave-cluster:
+    driver: bridge

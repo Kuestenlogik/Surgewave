@@ -1,0 +1,73 @@
+<section class="comparison" id="comparison">
+  <div class="container">
+    <h2 class="section-title">Surgewave vs the field</h2>
+    <p class="section-lede">Surgewave is built end-to-end on .NET 10 with a low-latency native transport, signed plugin ecosystem, AI pipeline nodes, and embedded mode &mdash; plus full Kafka-wire compatibility for migration. Here's where each tool lands.</p>
+
+    <div class="comparison-table-wrap">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th scope="col">Capability</th>
+            <th scope="col" class="comparison-col-self">Surgewave</th>
+            <th scope="col">Apache Kafka</th>
+            <th scope="col">Redpanda</th>
+            <th scope="col">Aeron</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Setup &amp; ops</th>
+            <td class="comparison-cell-self">Single binary, no JVM, no ZooKeeper</td>
+            <td>JVM cluster + KRaft / ZooKeeper</td>
+            <td>Single binary (C++)</td>
+            <td>Library, run in your process</td>
+          </tr>
+          <tr>
+            <th scope="row">Kafka wire compat</th>
+            <td class="comparison-cell-self">100 % (Kafka 4.x RPCs)</td>
+            <td>Native</td>
+            <td>100 %</td>
+            <td>None</td>
+          </tr>
+          <tr>
+            <th scope="row">Latency profile</th>
+            <td class="comparison-cell-self">Low-latency native, Kafka-wire on par with Kafka</td>
+            <td>JVM-bounded</td>
+            <td>C++ broker, low-latency</td>
+            <td>Microsecond UDP (library)</td>
+          </tr>
+          <tr>
+            <th scope="row">Runtime</th>
+            <td class="comparison-cell-self">.NET 10 / C# 14, AOT-ready</td>
+            <td>JVM (Scala/Java)</td>
+            <td>C++</td>
+            <td>JVM</td>
+          </tr>
+          <tr>
+            <th scope="row">Plugin model</th>
+            <td class="comparison-cell-self">Signed <code>.swpkg</code> packages, ALC isolation</td>
+            <td>JAR plugins (Connect, MM2)</td>
+            <td>Wasm transforms</td>
+            <td>None</td>
+          </tr>
+          <tr>
+            <th scope="row">Embedded mode</th>
+            <td class="comparison-cell-self">In-process broker (<code>surgewave://embedded</code>)</td>
+            <td>No</td>
+            <td>No</td>
+            <td>Yes (it's a library)</td>
+          </tr>
+          <tr>
+            <th scope="row">Tiered storage</th>
+            <td class="comparison-cell-self">Built-in (S3, Azure, GCS)</td>
+            <td>3.6+ (preview)</td>
+            <td>Yes</td>
+            <td>No</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="comparison-footnote">Surgewave fits .NET teams that want Kafka-wire compatibility, an embedded broker mode, and a signed plugin ecosystem &mdash; all in a single binary, no JVM. Public head-to-head benchmarks land with the 1.0 release; the table above summarises architecture, not measured numbers.</p>
+  </div>
+</section>

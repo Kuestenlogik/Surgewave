@@ -1,0 +1,31 @@
+{
+    "id": "docs-testing-chaos",
+    "title": "Chaos Testing Documentation Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "overview",
+            "title": "Chaos Testing Framework",
+            "text": "The Kuestenlogik.Surgewave.Testing.Chaos package provides a chaos engineering framework for testing cluster resilience. Inject faults into storage, transport, and Raft consensus to verify graceful failure handling.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "fault-types",
+            "title": "9 Fault Types",
+            "text": "The framework supports NetworkPartition, NodeCrash, DiskIoError, SlowNetwork, MessageCorruption, LeaderElectionDisruption, StorageFullError, ConnectionReset, and PartialWrite. Each fault can be scoped to specific brokers and peers.",
+            "attachTo": { "element": "#fault-types", "on": "bottom" }
+        },
+        {
+            "id": "chaos-cluster",
+            "title": "ChaosCluster",
+            "text": "ChaosCluster creates a multi-broker test environment where each broker has its own ChaosEngine. Use convenience methods like PartitionBroker, CrashBroker, and InjectLatency to write resilience integration tests.",
+            "attachTo": { "element": "#chaoscluster", "on": "bottom" }
+        },
+        {
+            "id": "scenarios",
+            "title": "Scenarios and Scheduling",
+            "text": "Pre-built scenario helpers compose multiple faults into realistic failure patterns. FaultSchedule activates faults after a delay and auto-deactivates after a duration for simulating transient failures.",
+            "attachTo": { "element": "#scenario-helpers", "on": "bottom" }
+        }
+    ]
+}

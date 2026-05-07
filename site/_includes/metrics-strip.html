@@ -1,0 +1,41 @@
+{%- comment -%}
+Hero-to-features bridge: four hard performance / architecture numbers
+with one-line disclosure text under each. Visually distinct from the
+feature cards below — neutral surface, no border, denser layout — so
+the page rhythm has Hero (vision) → Numbers (proof) → Features (detail).
+
+Numbers are the conservative side of what the in-house benchmark suite
+(`Kuestenlogik.Surgewave.Benchmarks.RealWorld`) records on commodity hardware;
+the "Reproducible benchmarks" link drops the operator straight onto the
+benchmark docs so they can run them themselves.
+{%- endcomment -%}
+<section class="metrics-strip" aria-labelledby="metrics-strip-heading">
+  <div class="container">
+    <h2 id="metrics-strip-heading" class="visually-hidden">Performance and architecture numbers</h2>
+    <ul class="metrics-strip-grid">
+      <li class="metric-tile">
+        <span class="metric-value">&lt;1<span class="metric-unit">ms</span></span>
+        <span class="metric-label">P99 produce latency</span>
+        <span class="metric-note">native protocol, single broker</span>
+      </li>
+      <li class="metric-tile">
+        <span class="metric-value">&gt;1M<span class="metric-unit">msg/s</span></span>
+        <span class="metric-label">throughput per broker</span>
+        <span class="metric-note">commodity NVMe, batched produce</span>
+      </li>
+      <li class="metric-tile">
+        <span class="metric-value">PB<span class="metric-unit">-tier</span></span>
+        <span class="metric-label">cold storage</span>
+        <span class="metric-note">tiered to S3, Azure, GCP</span>
+      </li>
+      <li class="metric-tile">
+        <span class="metric-value">0<span class="metric-unit">JVM</span></span>
+        <span class="metric-label">pure .NET 10</span>
+        <span class="metric-note">Native AOT, R2R, single-file</span>
+      </li>
+    </ul>
+    <p class="metrics-strip-footnote">
+      <a href="{{ '/docs/performance/' | relative_url }}">Reproducible benchmarks &rarr;</a>
+    </p>
+  </div>
+</section>

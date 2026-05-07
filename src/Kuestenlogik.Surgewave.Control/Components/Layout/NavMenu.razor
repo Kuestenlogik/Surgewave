@@ -1,0 +1,103 @@
+<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+        Dashboard
+    </MudNavLink>
+
+    <MudNavGroup Title="Cluster" Icon="@Icons.Material.Filled.Lan" Expanded="true">
+        <MudNavLink Href="/clusters" Icon="@Icons.Material.Filled.Cloud">Cluster Overview</MudNavLink>
+        <MudNavLink Href="/brokers" Icon="@Icons.Material.Filled.Dns">Brokers</MudNavLink>
+        <MudNavLink Href="/health" Icon="@Icons.Material.Filled.MonitorHeart">Health</MudNavLink>
+        <MudNavLink Href="/cluster-linking" Icon="@Icons.Material.Filled.Link">Cluster Linking</MudNavLink>
+        <MudNavLink Href="/replication" Icon="@Icons.Material.Filled.SyncAlt">Geo-Replication</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="Data" Icon="@Icons.Material.Filled.Storage" Expanded="true">
+        <MudNavLink Href="/topics" Icon="@Icons.Material.Filled.Topic">Topics</MudNavLink>
+        <MudNavLink Href="/topics/intent" Icon="@Icons.Material.Filled.AutoFixHigh">Intent Creator</MudNavLink>
+        <MudNavLink Href="/messages" Icon="@Icons.Material.Filled.ViewList">Message Browser</MudNavLink>
+        <MudNavLink Href="/consumer-groups" Icon="@Icons.Material.Filled.Group">Consumer Groups</MudNavLink>
+        <MudNavLink Href="/sql" Icon="@Icons.Material.Filled.Code">SQL Query</MudNavLink>
+        <MudNavLink Href="/bulk" Icon="@Icons.Material.Filled.Checklist">Bulk Operations</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="Integration" Icon="@Icons.Material.Filled.Extension" Expanded="true">
+        <MudNavLink Href="/pipelines" Icon="@Icons.Material.Filled.AccountTree">Pipelines</MudNavLink>
+        <MudNavLink Href="/pipelines/lineage" Icon="@Icons.Material.Filled.DeviceHub">Pipeline Lineage</MudNavLink>
+        <MudNavLink Href="/connectors" Icon="@Icons.Material.Filled.Cable">Connectors</MudNavLink>
+        <MudNavLink Href="/connectors/health" Icon="@Icons.Material.Filled.MonitorHeart">Connector Health</MudNavLink>
+        <MudNavLink Href="/plugins" Icon="@Icons.Material.Filled.Extension">Plugins</MudNavLink>
+        <MudNavLink Href="/plugins/sources" Icon="@Icons.Material.Filled.Source">Plugin Sources</MudNavLink>
+        <MudNavLink Href="/schemas" Icon="@Icons.Material.Filled.Schema">Schema Registry</MudNavLink>
+        <MudNavLink Href="/schemas/graph" Icon="@Icons.Material.Filled.DeviceHub">Schema Graph</MudNavLink>
+        <MudNavLink Href="/schemas/evolution" Icon="@Icons.Material.Filled.CompareArrows">Schema Evolution</MudNavLink>
+        <MudNavLink Href="/schemas/migration" Icon="@Icons.Material.Filled.Transform">Schema Migration</MudNavLink>
+        <MudNavLink Href="/schemas/linking" Icon="@Icons.Material.Filled.SyncAlt">Schema Linking</MudNavLink>
+        <MudNavLink Href="/agents" Icon="@Icons.Material.Filled.SmartToy">AI Agents</MudNavLink>
+        <MudNavLink Href="/wasm" Icon="@Icons.Material.Filled.Memory">WASM Plugins</MudNavLink>
+        <MudNavLink Href="/cdc" Icon="@Icons.Material.Filled.Storage">CDC</MudNavLink>
+        <MudNavLink Href="/functions" Icon="@Icons.Material.Filled.Functions">Functions</MudNavLink>
+        <MudNavLink Href="/ml" Icon="@Icons.Material.Filled.ModelTraining">ML Scoring</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="Governance" Icon="@Icons.Material.Filled.Policy" Expanded="false">
+        <MudNavLink Href="/tenants" Icon="@Icons.Material.Filled.Business">Multi-Tenancy</MudNavLink>
+        <MudNavLink Href="/catalog" Icon="@Icons.Material.Filled.MenuBook">Data Catalog</MudNavLink>
+        <MudNavLink Href="/data-mesh" Icon="@Icons.Material.Filled.Hub">Data Mesh</MudNavLink>
+        <MudNavLink Href="/privacy" Icon="@Icons.Material.Filled.PrivacyTip">Privacy (GDPR)</MudNavLink>
+        <MudNavLink Href="/dlq" Icon="@Icons.Material.Filled.ErrorOutline">Dead Letter Queues</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="Operations" Icon="@Icons.Material.Filled.Engineering" Expanded="false">
+        <MudNavLink Href="/queue" Icon="@Icons.Material.Filled.Queue">Queue Inspector</MudNavLink>
+        <MudNavLink Href="/auto-tuning" Icon="@Icons.Material.Filled.AutoFixHigh">Auto-Tuning</MudNavLink>
+        <MudNavLink Href="/cruise-control" Icon="@Icons.Material.Filled.Balance">Cruise Control</MudNavLink>
+        <MudNavLink Href="/upgrades" Icon="@Icons.Material.Filled.Upgrade">Rolling Upgrades</MudNavLink>
+        <MudNavLink Href="/partitions/reassignment" Icon="@Icons.Material.Filled.SwapHoriz">Partition Reassignment</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="Security" Icon="@Icons.Material.Filled.Security" Expanded="false">
+        <MudNavLink Href="/acls" Icon="@Icons.Material.Filled.AdminPanelSettings">ACLs</MudNavLink>
+        <MudNavLink Href="/quotas" Icon="@Icons.Material.Filled.Speed">Quotas</MudNavLink>
+        <MudNavLink Href="/quotas/bandwidth" Icon="@Icons.Material.Filled.NetworkCheck">Bandwidth Quotas</MudNavLink>
+        <MudNavLink Href="/roles" Icon="@Icons.Material.Filled.ManageAccounts">Role Management</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="Monitoring" Icon="@Icons.Material.Filled.Insights" Expanded="false">
+        <MudNavLink Href="/metrics" Icon="@Icons.Material.Filled.QueryStats">Metrics</MudNavLink>
+        <MudNavLink Href="/consumer-lag" Icon="@Icons.Material.Filled.TrendingDown">Consumer Lag</MudNavLink>
+        <MudNavLink Href="/alerts" Icon="@Icons.Material.Filled.NotificationsActive">Alerts</MudNavLink>
+        <MudNavLink Href="/performance-advisor" Icon="@Icons.Material.Filled.AutoFixHigh">Performance Advisor</MudNavLink>
+        <MudNavLink Href="/assistant" Icon="@Icons.Material.Filled.Psychology">Surgewave Assistant</MudNavLink>
+        <MudNavLink Href="/audit" Icon="@Icons.Material.Filled.History">Audit Logs</MudNavLink>
+        <MudNavLink Href="/debug/timeline" Icon="@Icons.Material.Filled.Timeline">Timeline Debugger</MudNavLink>
+    </MudNavGroup>
+
+    @* Dynamic plugin nav items *@
+    @foreach (var group in _pluginNavGroups)
+    {
+        <MudNavGroup Title="@group.Key" Icon="@Icons.Material.Filled.Extension" Expanded="false">
+            @foreach (var item in group)
+            {
+                <MudNavLink Href="@item.Href" Icon="@item.Icon">@item.Title</MudNavLink>
+            }
+        </MudNavGroup>
+    }
+
+    <MudDivider Class="my-2" />
+
+    <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+    <MudNavLink Href="/help" Icon="@Icons.Material.Filled.Help">Help Center</MudNavLink>
+</MudNavMenu>
+
+@code {
+    [Inject] private ControlPluginRegistry PluginRegistry { get; set; } = null!;
+
+    private ILookup<string, Kuestenlogik.Surgewave.Plugins.ControlNavItem> _pluginNavGroups =
+        Enumerable.Empty<Kuestenlogik.Surgewave.Plugins.ControlNavItem>().ToLookup(_ => "");
+
+    protected override void OnInitialized()
+    {
+        _pluginNavGroups = PluginRegistry.NavItems
+            .ToLookup(n => n.Group ?? "Plugins");
+    }
+}

@@ -1,0 +1,48 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_topicPattern" Label="Topic Pattern" Variant="Variant.Outlined"
+                      Required="true" HelperText="e.g., user-events.* or orders.*" Class="mb-3" />
+        <MudSelect T="string" @bind-Value="_classification" Label="Data Classification" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem Value="@("Public")">Public</MudSelectItem>
+            <MudSelectItem Value="@("Internal")">Internal</MudSelectItem>
+            <MudSelectItem Value="@("Confidential")">Confidential</MudSelectItem>
+            <MudSelectItem Value="@("Restricted")">Restricted</MudSelectItem>
+        </MudSelect>
+        <MudSwitch T="bool" @bind-Value="_piiScanEnabled" Label="Enable PII Scanning" Color="Color.Primary" Class="mb-2" />
+        <MudSwitch T="bool" @bind-Value="_encryptionRequired" Label="Require Encryption" Color="Color.Primary" Class="mb-2" />
+        <MudSwitch T="bool" @bind-Value="_erasureEnabled" Label="Enable Erasure" Color="Color.Primary" Class="mb-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_topicPattern))">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _topicPattern = "";
+    private string _classification = "Internal";
+    private bool _piiScanEnabled;
+    private bool _encryptionRequired;
+    private bool _erasureEnabled;
+
+    private async Task Submit()
+    {
+        var payload = new
+        {
+            topicPattern = _topicPattern,
+            dataClassification = _classification,
+            piiScanEnabled = _piiScanEnabled,
+            encryptionRequired = _encryptionRequired,
+            erasureEnabled = _erasureEnabled
+        };
+        var response = await Http.PostAsJsonAsync("/api/privacy/policies", payload);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

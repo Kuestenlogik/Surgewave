@@ -1,0 +1,216 @@
+@page "/ml"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>ML Scoring - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">ML Scoring (ONNX)</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Load, manage, and test ONNX models for inline scoring</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenLoadModelDialog"
+                   StartIcon="@Icons.Material.Filled.Upload">Load Model</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="DiscoverModelsAsync"
+                   StartIcon="@Icons.Material.Filled.FolderOpen">Discover</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="4">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ModelTraining" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Loaded Models</MudText>
+                        <MudText Typo="Typo.h5">@_models.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="4">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Discovered</MudText>
+                        <MudText Typo="Typo.h5">@_discoveredModels.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Loaded Models Table *@
+<MudText Typo="Typo.h6" Class="mb-2">Loaded Models</MudText>
+<MudTable Items="_models" Hover="true" Dense="true" Elevation="2" Class="mb-4">
+    <HeaderContent>
+        <MudTh>Model ID</MudTh>
+        <MudTh>File Path</MudTh>
+        <MudTh>Inputs</MudTh>
+        <MudTh>Outputs</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Model ID"><code>@context.Id</code></MudTd>
+        <MudTd DataLabel="File Path">@context.FilePath</MudTd>
+        <MudTd DataLabel="Inputs">
+            @foreach (var input in context.Inputs)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info">@input.Name [@(string.Join("x", input.Shape))]</MudChip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Outputs">
+            @foreach (var output in context.Outputs)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success">@output.Name [@(string.Join("x", output.Shape))]</MudChip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Actions">
+            <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                <MudButton Color="Color.Primary" OnClick="() => OpenScoreDialog(context)"
+                           StartIcon="@Icons.Material.Filled.PlayArrow">Test</MudButton>
+                <MudButton Color="Color.Error" OnClick="() => UnloadModelAsync(context.Id)"
+                           StartIcon="@Icons.Material.Filled.Delete">Unload</MudButton>
+            </MudButtonGroup>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>No ONNX models loaded. Use "Load Model" or "Discover" to get started.</MudText></NoRecordsContent>
+</MudTable>
+
+@* Discovered Models *@
+@if (_discoveredModels.Count > 0)
+{
+    <MudText Typo="Typo.h6" Class="mb-2">Discovered Models (on disk)</MudText>
+    <MudList T="string" Dense="true">
+        @foreach (var path in _discoveredModels)
+        {
+            <MudListItem T="string" Icon="@Icons.Material.Filled.InsertDriveFile">
+                <div class="d-flex align-center justify-space-between" style="width:100%">
+                    <MudText Typo="Typo.body2">@path</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                               OnClick="() => LoadModelAsync(path)">Load</MudButton>
+                </div>
+            </MudListItem>
+        }
+    </MudList>
+}
+
+@* Score Result *@
+@if (_scoreResult != null)
+{
+    <MudPaper Elevation="2" Class="pa-4 mt-4">
+        <MudText Typo="Typo.h6" Class="mb-2">Score Result</MudText>
+        <pre style="overflow-x:auto; font-size:13px;">@System.Text.Json.JsonSerializer.Serialize(_scoreResult, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })</pre>
+    </MudPaper>
+}
+
+@code {
+    private List<OnnxModelInfoDto> _models = [];
+    private List<string> _discoveredModels = [];
+    private object? _scoreResult;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _models = await Http.GetFromJsonAsync<List<OnnxModelInfoDto>>("/api/ml/models") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load models: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task DiscoverModelsAsync()
+    {
+        try
+        {
+            _discoveredModels = await Http.GetFromJsonAsync<List<string>>("/api/ml/models/discover") ?? [];
+            if (_discoveredModels.Count == 0)
+                Notification.ShowInfo("No .onnx files found in models directory");
+        }
+        catch (Exception ex) { Notification.ShowError($"Discover failed: {ex.Message}"); }
+        StateHasChanged();
+    }
+
+    private async Task LoadModelAsync(string path)
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync("/api/ml/models/load", new { modelPath = path });
+            if (response.IsSuccessStatusCode) { Notification.ShowSuccess("Model loaded"); await LoadDataAsync(); }
+            else Notification.ShowError("Failed to load model");
+        }
+        catch (Exception ex) { Notification.ShowError($"Load failed: {ex.Message}"); }
+    }
+
+    private async Task UnloadModelAsync(string id)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Unload Model",
+            $"Unload model '{id}'?", yesText: "Unload", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try { await Http.DeleteAsync($"/api/ml/models/{id}"); await LoadDataAsync(); }
+            catch (Exception ex) { Notification.ShowError($"Unload failed: {ex.Message}"); }
+        }
+    }
+
+    private async Task OpenLoadModelDialog()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<LoadOnnxModelDialog>("Load ONNX Model", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Model loaded"); await LoadDataAsync(); }
+    }
+
+    private async Task OpenScoreDialog(OnnxModelInfoDto model)
+    {
+        var parameters = new DialogParameters<ScoreOnnxModelDialog> { { x => x.ModelId, model.Id }, { x => x.Inputs, model.Inputs } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ScoreOnnxModelDialog>("Test Score", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: not null })
+        {
+            _scoreResult = result.Data;
+            StateHasChanged();
+        }
+    }
+
+    private sealed class OnnxModelInfoDto
+    {
+        public string Id { get; set; } = "";
+        public string FilePath { get; set; } = "";
+        public List<TensorInfo> Inputs { get; set; } = [];
+        public List<TensorInfo> Outputs { get; set; } = [];
+    }
+
+    public sealed class TensorInfo
+    {
+        public string Name { get; set; } = "";
+        public List<long> Shape { get; set; } = [];
+    }
+}

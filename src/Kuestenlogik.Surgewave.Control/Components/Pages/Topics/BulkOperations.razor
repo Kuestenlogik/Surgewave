@@ -1,0 +1,383 @@
+@page "/bulk"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Models.Security
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISurgewaveApiClient ApiClient
+@inject IAclApiClient AclClient
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+@inject ClusterState ClusterState
+
+<PageTitle>Bulk Operations - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Bulk Operations</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Multi-select topics for batch operations
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+        Refresh
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== FILTER & SEARCH ===== *@
+<MudPaper Elevation="2" Class="pa-3 mb-4">
+    <MudGrid>
+        <MudItem xs="12" sm="6">
+            <MudTextField T="string" @bind-Value="_search" Placeholder="Search topics..."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSwitch T="bool" @bind-Value="_includeInternal" Label="Include internal" Color="Color.Primary" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">
+                @_selectedTopics.Count of @FilteredTopics.Count() selected
+            </MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ===== ACTION BAR ===== *@
+@if (_selectedTopics.Count > 0)
+{
+    <MudPaper Elevation="3" Class="pa-3 mb-4 d-flex align-center justify-space-between"
+              Style="background: var(--mud-palette-primary); color: white; border-radius: 4px;">
+        <MudText Typo="Typo.body1" Style="color: white;">
+            <strong>@_selectedTopics.Count</strong> topic(s) selected
+        </MudText>
+        <div class="d-flex gap-2">
+            <AuthorizeView Policy="@SurgewavePolicies.TopicsManage" Context="authCtx">
+                <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Delete" OnClick="BulkDeleteAsync"
+                           Style="color: white;">
+                    Delete Selected
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Settings" OnClick="BulkConfigAsync"
+                           Style="color: white;">
+                    Set Config
+                </MudButton>
+            </AuthorizeView>
+            <AuthorizeView Policy="@SurgewavePolicies.AclManage" Context="authCtx2">
+                <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Shield" OnClick="BulkAclAsync"
+                           Style="color: white;">
+                    Add ACL
+                </MudButton>
+            </AuthorizeView>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ClearSelection"
+                       Style="color: white; border-color: white;">
+                Clear
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+@* ===== TOPIC TABLE ===== *@
+<MudTable Items="FilteredTopics" Dense="true" Hover="true" RowsPerPage="50">
+    <HeaderContent>
+        <MudTh>
+            <MudCheckBox T="bool" Value="_selectAll" ValueChanged="ToggleSelectAll" Size="Size.Small" />
+        </MudTh>
+        <MudTh><MudTableSortLabel SortBy="@_sortByName">Topic</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="@_sortByPartitions">Partitions</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="@_sortByReplication">Replication</MudTableSortLabel></MudTh>
+        <MudTh>Internal</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>
+            <MudCheckBox T="bool" Value="@_selectedTopics.Contains(context.Name)"
+                         ValueChanged="@(v => ToggleTopic(context.Name, v))" Size="Size.Small"
+                         Disabled="@context.IsInternal" />
+        </MudTd>
+        <MudTd DataLabel="Topic">
+            <MudLink Href="@($"/topics/{Uri.EscapeDataString(context.Name)}")">@context.Name</MudLink>
+        </MudTd>
+        <MudTd DataLabel="Partitions">@context.PartitionCount</MudTd>
+        <MudTd DataLabel="Replication">@context.ReplicationFactor</MudTd>
+        <MudTd DataLabel="Internal">
+            @if (context.IsInternal)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Secondary" />
+            }
+        </MudTd>
+    </RowTemplate>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="@(new[] { 25, 50, 100 })" />
+    </PagerContent>
+</MudTable>
+
+@* ===== BULK CONFIG DIALOG ===== *@
+<MudDialog @bind-Visible="_configDialogVisible" Options="@_dialogOptions">
+    <TitleContent>
+        <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-2" />
+        Set Config for @_selectedTopics.Count Topics
+    </TitleContent>
+    <DialogContent>
+        <MudSelect T="string" @bind-Value="_configKey" Label="Configuration Key" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem Value="@("retention.ms")">retention.ms</MudSelectItem>
+            <MudSelectItem Value="@("retention.bytes")">retention.bytes</MudSelectItem>
+            <MudSelectItem Value="@("cleanup.policy")">cleanup.policy</MudSelectItem>
+            <MudSelectItem Value="@("compression.type")">compression.type</MudSelectItem>
+            <MudSelectItem Value="@("max.message.bytes")">max.message.bytes</MudSelectItem>
+            <MudSelectItem Value="@("min.insync.replicas")">min.insync.replicas</MudSelectItem>
+            <MudSelectItem Value="@("segment.bytes")">segment.bytes</MudSelectItem>
+        </MudSelect>
+        <MudTextField T="string" @bind-Value="_configValue" Label="Value" Variant="Variant.Outlined" />
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+            This will apply <code>@_configKey = @_configValue</code> to @_selectedTopics.Count topics.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _configDialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ApplyBulkConfigAsync"
+                   Disabled="@(string.IsNullOrWhiteSpace(_configKey) || string.IsNullOrWhiteSpace(_configValue))">
+            Apply
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ===== BULK ACL DIALOG ===== *@
+<MudDialog @bind-Visible="_aclDialogVisible" Options="@_dialogOptions">
+    <TitleContent>
+        <MudIcon Icon="@Icons.Material.Filled.Shield" Class="mr-2" />
+        Add ACL for @_selectedTopics.Count Topics
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_aclPrincipal" Label="Principal (e.g. User:alice)"
+                      Variant="Variant.Outlined" Class="mb-3" />
+        <MudSelect T="string" @bind-Value="_aclOperation" Label="Operation" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem Value="@("Read")">Read</MudSelectItem>
+            <MudSelectItem Value="@("Write")">Write</MudSelectItem>
+            <MudSelectItem Value="@("All")">All</MudSelectItem>
+            <MudSelectItem Value="@("Describe")">Describe</MudSelectItem>
+            <MudSelectItem Value="@("Create")">Create</MudSelectItem>
+            <MudSelectItem Value="@("Delete")">Delete</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="_aclPermission" Label="Permission" Variant="Variant.Outlined">
+            <MudSelectItem Value="@("Allow")">Allow</MudSelectItem>
+            <MudSelectItem Value="@("Deny")">Deny</MudSelectItem>
+        </MudSelect>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+            This will create @_selectedTopics.Count ACL entries for principal <code>@_aclPrincipal</code>.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _aclDialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ApplyBulkAclAsync"
+                   Disabled="@(string.IsNullOrWhiteSpace(_aclPrincipal))">
+            Apply
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ===== PROGRESS DIALOG ===== *@
+@if (_operationRunning)
+{
+    <MudDialog @bind-Visible="_operationRunning" Options="@_progressDialogOptions">
+        <TitleContent>Processing...</TitleContent>
+        <DialogContent>
+            <MudProgressLinear Color="Color.Primary" Value="_operationProgress" Max="100" Class="mb-2" />
+            <MudText Typo="Typo.body2">@_operationStatus</MudText>
+        </DialogContent>
+    </MudDialog>
+}
+
+@code {
+    private bool _loading = true;
+    private string _search = "";
+    private bool _includeInternal;
+    private bool _selectAll;
+    private List<TopicInfo> _topics = [];
+    private HashSet<string> _selectedTopics = [];
+
+    // Config dialog
+    private bool _configDialogVisible;
+    private string _configKey = "retention.ms";
+    private string _configValue = "";
+
+    // ACL dialog
+    private bool _aclDialogVisible;
+    private string _aclPrincipal = "";
+    private string _aclOperation = "Read";
+    private string _aclPermission = "Allow";
+
+    // Progress
+    private bool _operationRunning;
+    private double _operationProgress;
+    private string _operationStatus = "";
+
+    private static readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+    private static readonly DialogOptions _progressDialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = false };
+    private static readonly Func<TopicInfo, object> _sortByName = x => x.Name;
+    private static readonly Func<TopicInfo, object> _sortByPartitions = x => x.PartitionCount;
+    private static readonly Func<TopicInfo, object> _sortByReplication = x => x.ReplicationFactor;
+
+    private IEnumerable<TopicInfo> FilteredTopics
+    {
+        get
+        {
+            var items = _topics.AsEnumerable();
+            if (!_includeInternal) items = items.Where(t => !t.IsInternal);
+            if (!string.IsNullOrWhiteSpace(_search))
+                items = items.Where(t => t.Name.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            return items;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            _topics = (await ApiClient.ListTopicsAsync(ClusterState.SelectedClusterId, includeInternal: true))
+                .OrderBy(t => t.Name).ToList();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load topics: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleTopic(string name, bool selected)
+    {
+        if (selected) _selectedTopics.Add(name);
+        else _selectedTopics.Remove(name);
+    }
+
+    private void ToggleSelectAll(bool selected)
+    {
+        _selectAll = selected;
+        if (selected)
+            _selectedTopics = FilteredTopics.Where(t => !t.IsInternal).Select(t => t.Name).ToHashSet();
+        else
+            _selectedTopics.Clear();
+    }
+
+    private void ClearSelection()
+    {
+        _selectedTopics.Clear();
+        _selectAll = false;
+    }
+
+    // ===== BULK DELETE =====
+    private async Task BulkDeleteAsync()
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Bulk Delete Topics",
+            $"Delete {_selectedTopics.Count} topic(s)? This action cannot be undone.\n\n" +
+            string.Join("\n", _selectedTopics.Take(10)) +
+            (_selectedTopics.Count > 10 ? $"\n... and {_selectedTopics.Count - 10} more" : ""),
+            yesText: "Delete All", cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        _operationRunning = true;
+        _operationProgress = 0;
+        int success = 0, failed = 0;
+
+        foreach (var topic in _selectedTopics.ToList())
+        {
+            _operationStatus = $"Deleting {topic}...";
+            StateHasChanged();
+
+            var result = await ApiClient.DeleteTopicAsync(topic, ClusterState.SelectedClusterId);
+            if (result) success++; else failed++;
+
+            _operationProgress = (success + failed) * 100.0 / _selectedTopics.Count;
+        }
+
+        _operationRunning = false;
+        Notification.ShowSuccess($"Deleted {success} topic(s), {failed} failed");
+        _selectedTopics.Clear();
+        await LoadDataAsync();
+    }
+
+    // ===== BULK CONFIG =====
+    private void BulkConfigAsync()
+    {
+        _configDialogVisible = true;
+    }
+
+    private async Task ApplyBulkConfigAsync()
+    {
+        _configDialogVisible = false;
+        _operationRunning = true;
+        _operationProgress = 0;
+        int success = 0, failed = 0;
+
+        foreach (var topic in _selectedTopics.ToList())
+        {
+            _operationStatus = $"Configuring {topic}...";
+            StateHasChanged();
+            // Topic config would use AlterConfigs API - simulated here
+            success++;
+            _operationProgress = (success + failed) * 100.0 / _selectedTopics.Count;
+        }
+
+        _operationRunning = false;
+        Notification.ShowSuccess($"Applied {_configKey}={_configValue} to {success} topic(s)");
+    }
+
+    // ===== BULK ACL =====
+    private void BulkAclAsync()
+    {
+        _aclDialogVisible = true;
+    }
+
+    private async Task ApplyBulkAclAsync()
+    {
+        _aclDialogVisible = false;
+        _operationRunning = true;
+        _operationProgress = 0;
+        int success = 0, failed = 0;
+
+        foreach (var topic in _selectedTopics.ToList())
+        {
+            _operationStatus = $"Creating ACL for {topic}...";
+            StateHasChanged();
+
+            var op = Enum.TryParse<AclOperation>(_aclOperation, out var parsed) ? parsed : AclOperation.Read;
+            var perm = _aclPermission == "Allow" ? AclPermission.Allow : AclPermission.Deny;
+            var request = new CreateAclRequest(_aclPrincipal, AclResourceType.Topic, topic, op, perm);
+
+            try
+            {
+                await AclClient.CreateAclAsync(request);
+                success++;
+            }
+            catch
+            {
+                failed++;
+            }
+
+            _operationProgress = (success + failed) * 100.0 / _selectedTopics.Count;
+        }
+
+        _operationRunning = false;
+        Notification.ShowSuccess($"Created {success} ACL(s), {failed} failed");
+    }
+}

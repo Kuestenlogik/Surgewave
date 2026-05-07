@@ -1,0 +1,216 @@
+@page "/replication"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Geo-Replication - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Geo-Replication</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Remote clusters, replication rules, metrics, and conflicts</MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Remote Clusters</MudText>
+                        <MudText Typo="Typo.h5">@_clusters.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Rule" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Rules</MudText>
+                        <MudText Typo="Typo.h5">@_rules.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.SyncAlt" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Replicated</MudText>
+                        <MudText Typo="Typo.h5">@_metrics.TotalMessagesReplicated.ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="@(_metrics.TotalConflictsDetected > 0 ? Color.Error : Color.Success)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Conflicts</MudText>
+                        <MudText Typo="Typo.h5">@_metrics.TotalConflictsDetected</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+    @* Remote Clusters *@
+    <MudTabPanel Text="Remote Clusters" Icon="@Icons.Material.Filled.Cloud">
+        <MudTable Items="_clusters" Hover="true" Dense="true" Class="ma-4">
+            <ToolBarContent>
+                <MudText Typo="Typo.h6">Remote Clusters</MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           OnClick="OpenAddClusterDialog" StartIcon="@Icons.Material.Filled.Add">Add Cluster</MudButton>
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh>Cluster ID</MudTh>
+                <MudTh>Display Name</MudTh>
+                <MudTh>Bootstrap Servers</MudTh>
+                <MudTh>Region</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Cluster ID"><code>@context.ClusterId</code></MudTd>
+                <MudTd DataLabel="Display Name">@context.DisplayName</MudTd>
+                <MudTd DataLabel="Bootstrap Servers">@context.BootstrapServers</MudTd>
+                <MudTd DataLabel="Region">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">@context.Region</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Actions">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="() => DeleteClusterAsync(context.ClusterId)" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No remote clusters configured.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* Replication Rules *@
+    <MudTabPanel Text="Rules" Icon="@Icons.Material.Filled.Rule">
+        <MudTable Items="_rules" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Topic Pattern</MudTh>
+                <MudTh>Direction</MudTh>
+                <MudTh>Remote Cluster</MudTh>
+                <MudTh>Rename Pattern</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Topic Pattern"><code>@context.TopicPattern</code></MudTd>
+                <MudTd DataLabel="Direction">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.Direction</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Remote Cluster">@context.RemoteClusterId</MudTd>
+                <MudTd DataLabel="Rename Pattern">@(context.TopicRenamePattern ?? "-")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No replication rules configured.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* Conflicts *@
+    <MudTabPanel Text="Conflicts" Icon="@Icons.Material.Filled.Warning">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Conflict Resolution: @_metrics.ConflictStrategy</MudText>
+            <MudText Typo="Typo.body2" Class="mb-4">Total conflicts detected: @_metrics.TotalConflictsDetected</MudText>
+            @if (_metrics.LastReplicationAt != null)
+            {
+                <MudText Typo="Typo.body2">Last replication: @_metrics.LastReplicationAt?.ToString("yyyy-MM-dd HH:mm:ss")</MudText>
+            }
+        </MudPaper>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private List<RemoteClusterInfo> _clusters = [];
+    private List<ReplicationRuleInfo> _rules = [];
+    private ReplicationMetricsInfo _metrics = new();
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _clusters = await Http.GetFromJsonAsync<List<RemoteClusterInfo>>("/api/replication/clusters") ?? [];
+            _rules = await Http.GetFromJsonAsync<List<ReplicationRuleInfo>>("/api/replication/rules") ?? [];
+            _metrics = await Http.GetFromJsonAsync<ReplicationMetricsInfo>("/api/replication/metrics") ?? new();
+        }
+        catch (Exception ex) { _error = $"Failed to load replication data: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OpenAddClusterDialog()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<AddRemoteClusterDialog>("Add Remote Cluster", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Cluster added"); await LoadDataAsync(); }
+    }
+
+    private async Task DeleteClusterAsync(string clusterId)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Remove Cluster",
+            $"Remove remote cluster '{clusterId}'?", yesText: "Remove", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try { await Http.DeleteAsync($"/api/replication/clusters/{clusterId}"); await LoadDataAsync(); }
+            catch (Exception ex) { Notification.ShowError($"Remove failed: {ex.Message}"); }
+        }
+    }
+
+    private sealed class RemoteClusterInfo
+    {
+        public string ClusterId { get; set; } = "";
+        public string BootstrapServers { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string Region { get; set; } = "";
+    }
+
+    private sealed class ReplicationRuleInfo
+    {
+        public string TopicPattern { get; set; } = "";
+        public string Direction { get; set; } = "";
+        public string RemoteClusterId { get; set; } = "";
+        public string? TopicRenamePattern { get; set; }
+    }
+
+    private sealed class ReplicationMetricsInfo
+    {
+        public long TotalMessagesReplicated { get; set; }
+        public long TotalConflictsDetected { get; set; }
+        public DateTimeOffset? LastReplicationAt { get; set; }
+        public string ConflictStrategy { get; set; } = "Unknown";
+    }
+}

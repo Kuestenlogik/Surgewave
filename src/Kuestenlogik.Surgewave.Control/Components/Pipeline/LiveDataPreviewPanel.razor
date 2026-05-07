@@ -1,0 +1,281 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+@inject SchemaPreviewService SchemaPreview
+
+<MudPaper Elevation="1" Class="pa-3 mt-2">
+    <div class="d-flex align-center justify-space-between mb-2">
+        <MudText Typo="Typo.subtitle2">Live Data Preview</MudText>
+        <div class="d-flex align-center gap-2">
+            @if (_isEnabled && _schemaFields != null)
+            {
+                <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                    Schema
+                </MudChip>
+            }
+            <MudSwitch T="bool" @bind-Value="_provenanceEnabled" Color="Color.Tertiary"
+                       Label="Lineage" />
+            <MudSwitch T="bool" @bind-Value="_isEnabled" Color="Color.Primary"
+                       Label="@(_isEnabled ? "ON" : "OFF")" />
+        </div>
+    </div>
+
+    @if (_isEnabled)
+    {
+        @if (_isLoading)
+        {
+            <div class="d-flex align-center justify-center pa-4">
+                <MudProgressCircular Indeterminate="true" Size="MudBlazor.Size.Small" />
+                <MudText Class="ml-2">Loading...</MudText>
+            </div>
+        }
+        else if (_error != null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+        }
+        else if (SelectedNodeId == null)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">Select a node to see data preview</MudAlert>
+        }
+        else if (_nodeExecution == null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">No execution data available</MudAlert>
+        }
+        else
+        {
+            <div class="data-preview-content">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Records In: @_nodeExecution.RecordsIn | Out: @_nodeExecution.RecordsOut
+                </MudText>
+
+                @if (_nodeExecution.SampleInputs?.Count > 0)
+                {
+                    <MudExpansionPanels Dense="true" Class="mt-2">
+                        <MudExpansionPanel Text="@($"Sample Inputs ({_nodeExecution.SampleInputs.Count})")">
+                            @foreach (var sample in _nodeExecution.SampleInputs.Take(5))
+                            {
+                                <div class="sample-record">
+                                    @if (!string.IsNullOrEmpty(sample.Key))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Primary">Key: @sample.Key</MudText>
+                                    }
+                                    <SchemaAwareDataView RawValue="@sample.Value" Schema="@_schemaFields" />
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @sample.Timestamp.ToString("HH:mm:ss.fff")
+                                        @if (sample.Truncated) { <span>(truncated)</span> }
+                                    </MudText>
+                                    @if (_provenanceEnabled && sample.Headers?.ContainsKey("_provenance_path") == true)
+                                    {
+                                        <MudButton Variant="Variant.Text" Size="MudBlazor.Size.Small"
+                                                   StartIcon="@Icons.Material.Filled.Timeline" Color="Color.Tertiary"
+                                                   OnClick="@(() => OnLineageClicked.InvokeAsync(sample.Headers["_provenance_path"]))">
+                                            Lineage
+                                        </MudButton>
+                                    }
+                                </div>
+                            }
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                }
+
+                @if (_nodeExecution.SampleOutputs?.Count > 0)
+                {
+                    <MudExpansionPanels Dense="true" Class="mt-2">
+                        <MudExpansionPanel Text="@($"Sample Outputs ({_nodeExecution.SampleOutputs.Count})")">
+                            @foreach (var sample in _nodeExecution.SampleOutputs.Take(5))
+                            {
+                                <div class="sample-record">
+                                    @if (!string.IsNullOrEmpty(sample.Key))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Primary">Key: @sample.Key</MudText>
+                                    }
+                                    <SchemaAwareDataView RawValue="@sample.Value" Schema="@_schemaFields" />
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @sample.Timestamp.ToString("HH:mm:ss.fff")
+                                        @if (sample.Truncated) { <span>(truncated)</span> }
+                                    </MudText>
+                                    @if (_provenanceEnabled && sample.Headers?.ContainsKey("_provenance_path") == true)
+                                    {
+                                        <MudButton Variant="Variant.Text" Size="MudBlazor.Size.Small"
+                                                   StartIcon="@Icons.Material.Filled.Timeline" Color="Color.Tertiary"
+                                                   OnClick="@(() => OnLineageClicked.InvokeAsync(sample.Headers["_provenance_path"]))">
+                                            Lineage
+                                        </MudButton>
+                                    }
+                                </div>
+                            }
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Enable to see live data from running pipeline
+        </MudText>
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public string? PipelineId { get; set; }
+
+    [Parameter]
+    public string? SelectedNodeId { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnLineageClicked { get; set; }
+
+    private bool _isEnabled;
+    private bool _isLoading;
+    private string? _error;
+    private System.Threading.Timer? _pollingTimer;
+    private NodeExecutionRecord? _nodeExecution;
+    private SchemaFieldInfo[]? _schemaFields;
+    private bool _provenanceEnabled;
+    private string? _lastTopicForSchema;
+
+    private const int PollingIntervalMs = 2000;
+
+    protected override void OnParametersSet()
+    {
+        if (_isEnabled && !string.IsNullOrEmpty(PipelineId))
+        {
+            _ = FetchDataAsync();
+        }
+    }
+
+    private void OnEnabledChanged(bool enabled)
+    {
+        _isEnabled = enabled;
+
+        if (enabled)
+        {
+            StartPolling();
+        }
+        else
+        {
+            StopPolling();
+        }
+    }
+
+    private void StartPolling()
+    {
+        _pollingTimer?.Dispose();
+        _pollingTimer = new System.Threading.Timer(
+            async _ => await FetchDataAsync(),
+            null,
+            0,
+            PollingIntervalMs);
+    }
+
+    private void StopPolling()
+    {
+        _pollingTimer?.Dispose();
+        _pollingTimer = null;
+    }
+
+    private async Task FetchDataAsync()
+    {
+        if (string.IsNullOrEmpty(PipelineId)) return;
+
+        _isLoading = true;
+        _error = null;
+
+        try
+        {
+            // Get latest execution
+            var executions = await ApiClient.ListExecutionsAsync(PipelineId, limit: 1);
+            var execution = executions.Executions.FirstOrDefault();
+
+            if (execution != null && !string.IsNullOrEmpty(SelectedNodeId))
+            {
+                _nodeExecution = execution.Nodes.FirstOrDefault(n => n.NodeId == SelectedNodeId);
+
+                // Try to load schema for the selected node's topic
+                if (_nodeExecution != null)
+                {
+                    var topic = _nodeExecution.NodeId; // Use node ID as topic approximation
+                    if (topic != _lastTopicForSchema)
+                    {
+                        _lastTopicForSchema = topic;
+                        try
+                        {
+                            _schemaFields = await SchemaPreview.GetSchemaForTopicAsync(topic);
+                        }
+                        catch
+                        {
+                            _schemaFields = null;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                _nodeExecution = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string FormatValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "(empty)";
+
+        // Try to format as JSON
+        try
+        {
+            var obj = System.Text.Json.JsonSerializer.Deserialize<object>(value);
+            return System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+        }
+        catch
+        {
+            return value;
+        }
+    }
+
+    public void Dispose()
+    {
+        _pollingTimer?.Dispose();
+    }
+}
+
+<style>
+    .data-preview-content {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .sample-record {
+        padding: 8px;
+        margin-bottom: 8px;
+        background: var(--mud-palette-background);
+        border-radius: 4px;
+        border-left: 3px solid var(--mud-palette-primary);
+    }
+
+    .sample-value {
+        font-size: 11px;
+        font-family: monospace;
+        background: var(--mud-palette-surface);
+        padding: 8px;
+        border-radius: 4px;
+        overflow-x: auto;
+        margin: 4px 0;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+</style>

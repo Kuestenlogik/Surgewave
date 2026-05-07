@@ -1,0 +1,36 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_sourceTopic" Label="Source Topic" Variant="Variant.Outlined"
+                      Required="true" Class="mb-3" />
+        <MudTextField @bind-Value="_localTopicName" Label="Local Topic Name (optional)" Variant="Variant.Outlined"
+                      HelperText="Defaults to source topic name if empty" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_sourceTopic))">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string LinkId { get; set; } = "";
+    private string _sourceTopic = "";
+    private string _localTopicName = "";
+
+    private async Task Submit()
+    {
+        var payload = new
+        {
+            sourceTopic = _sourceTopic,
+            localTopicName = string.IsNullOrWhiteSpace(_localTopicName) ? null : _localTopicName
+        };
+        var response = await Http.PostAsJsonAsync($"/api/cluster-links/{LinkId}/mirrors", payload);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

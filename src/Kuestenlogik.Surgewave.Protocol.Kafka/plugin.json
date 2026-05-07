@@ -1,0 +1,9 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.protocol.kafka",
+  "name": "Kafka Protocol",
+  "version": "0.1.0",
+  "description": "Apache Kafka protocol support for Surgewave broker — lets Kafka producers and consumers connect directly.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Protocol.Kafka.dll" ],
+  "tags": [ "protocol", "kafka", "community" ]
+}

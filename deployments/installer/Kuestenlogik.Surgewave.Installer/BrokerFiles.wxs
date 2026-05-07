@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Broker runtime files (harvested from publish output) -->
+    <!-- The BrokerExe and config files are defined in BrokerService.wxs -->
+    <!-- This component group captures all remaining DLLs and dependencies -->
+    <ComponentGroup Id="BrokerFiles" Directory="BrokerDir">
+      <Files Include="$(var.BrokerPublishDir)\**"
+             Exclude="$(var.BrokerPublishDir)\Kuestenlogik.Storm.Broker.exe;$(var.BrokerPublishDir)\appsettings.json;$(var.BrokerPublishDir)\appsettings.Production.json" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

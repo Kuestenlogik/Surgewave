@@ -1,0 +1,142 @@
+@page "/topics/{TopicName}/config"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+
+<PageTitle>@TopicName Configuration - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+<MudText Typo="Typo.h4" Class="mb-4">@TopicName - Configuration</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadTopicAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else if (_topic != null)
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_searchText" Label="Search configuration" Variant="Variant.Outlined"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudCard Elevation="2">
+        <MudCardContent>
+            @if (FilteredConfigs.Any())
+            {
+                <MudTable Items="@FilteredConfigs" Dense="true" Hover="true" Striped="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<KeyValuePair<string, string>, object>(x => x.Key)">Key</MudTableSortLabel></MudTh>
+                        <MudTh>Value</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Key">
+                            <MudText Typo="Typo.body2" Style="font-family: monospace;">@context.Key</MudText>
+                        </MudTd>
+                        <MudTd DataLabel="Value">
+                            <MudText Typo="Typo.body2" Style="font-family: monospace;">@context.Value</MudText>
+                        </MudTd>
+                    </RowTemplate>
+                    <PagerContent>
+                        <MudTablePager PageSizeOptions="new int[] { 25, 50, 100 }" />
+                    </PagerContent>
+                </MudTable>
+            }
+            else
+            {
+                <MudText Color="Color.Secondary">No configuration found</MudText>
+            }
+        </MudCardContent>
+    </MudCard>
+
+    <MudPaper Elevation="0" Class="pa-4 mt-4">
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Href="@($"/topics/{TopicName}")">
+            Back to Topic
+        </MudButton>
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public string TopicName { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+    private string _searchText = "";
+    private TopicDescription? _topic;
+
+    private IEnumerable<KeyValuePair<string, string>> FilteredConfigs
+    {
+        get
+        {
+            if (_topic?.Configs == null)
+                return Enumerable.Empty<KeyValuePair<string, string>>();
+
+            if (string.IsNullOrWhiteSpace(_searchText))
+                return _topic.Configs;
+
+            return _topic.Configs.Where(c =>
+                c.Key.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                c.Value.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Topics", "/topics"),
+            new(TopicName, $"/topics/{TopicName}"),
+            new("Configuration", null, true)
+        ];
+
+        ClusterState.OnChange += async () =>
+        {
+            await LoadTopicAsync();
+            StateHasChanged();
+        };
+        await LoadTopicAsync();
+    }
+
+    private async Task LoadTopicAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            _topic = await ApiClient.DescribeTopicAsync(TopicName, clusterId);
+            if (_topic == null)
+            {
+                _error = $"Topic '{TopicName}' not found";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+}

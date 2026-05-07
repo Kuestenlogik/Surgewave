@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="MessagePack" />
+    <PackageReference Include="MemoryPack" />
+    <PackageReference Include="Hyperion" />
+    <PackageReference Include="Dahomey.Cbor" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage\Kuestenlogik.Surgewave.Storage.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine\Kuestenlogik.Surgewave.Storage.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
+  </ItemGroup>
+
+</Project>

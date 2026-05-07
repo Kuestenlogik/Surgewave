@@ -1,0 +1,495 @@
+@page "/performance-advisor"
+@inject ISurgewaveApiClient ApiClient
+@inject IMetricsClient MetricsClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject ILocalStorageService LocalStorage
+
+<PageTitle>Performance Advisor - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-2">Performance Advisor</MudText>
+<MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mb-4">
+    Automatic analysis and recommendations for your Surgewave cluster
+</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <div class="d-flex align-center gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                   OnClick="RunAnalysisAsync" Disabled="@_analyzing" Size="Size.Large">
+            @if (_analyzing)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                <span>Analyzing...</span>
+            }
+            else
+            {
+                <span>Run Analysis</span>
+            }
+        </MudButton>
+        @if (_lastAnalysis != null)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Last analysis: @_lastAnalysis.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            </MudText>
+        }
+        <MudSpacer />
+        @if (_recommendations.Count > 0)
+        {
+            <MudChip T="string" Color="Color.Error" Size="Size.Small">
+                @_recommendations.Count(r => r.Severity == RecommendationSeverity.Critical && !r.IsDismissed) Critical
+            </MudChip>
+            <MudChip T="string" Color="Color.Warning" Size="Size.Small">
+                @_recommendations.Count(r => r.Severity == RecommendationSeverity.Warning && !r.IsDismissed) Warnings
+            </MudChip>
+            <MudChip T="string" Color="Color.Info" Size="Size.Small">
+                @_recommendations.Count(r => r.Severity == RecommendationSeverity.Info && !r.IsDismissed) Info
+            </MudChip>
+        }
+    </div>
+</MudPaper>
+
+@if (_analyzing)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-4">
+        Analyzing cluster topology, consumer groups, partition distribution, and performance metrics...
+    </MudText>
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+else if (_recommendations.Count == 0 && _lastAnalysis != null)
+{
+    <MudAlert Severity="Severity.Success" Icon="@Icons.Material.Filled.CheckCircle" Class="mb-4">
+        No issues found. Your cluster is performing well.
+    </MudAlert>
+}
+else if (_recommendations.Count > 0)
+{
+    @* Score Card *@
+    <MudCard Elevation="2" Class="mb-4">
+        <MudCardContent>
+            <div class="d-flex align-center justify-center gap-4">
+                <div style="text-align: center;">
+                    <MudText Typo="Typo.h2" Color="@GetScoreColor(_healthScore)">@_healthScore</MudText>
+                    <MudText Typo="Typo.subtitle1" Color="Color.Secondary">Health Score</MudText>
+                </div>
+                <MudDivider Vertical="true" FlexItem="true" />
+                <div>
+                    <MudText Typo="Typo.body1">
+                        @(_healthScore >= 90 ? "Excellent" : _healthScore >= 70 ? "Good" : _healthScore >= 50 ? "Needs Attention" : "Critical") cluster health.
+                        @_recommendations.Count(r => !r.IsDismissed) recommendation(s) available.
+                    </MudText>
+                </div>
+            </div>
+        </MudCardContent>
+    </MudCard>
+
+    @* Recommendations by Severity *@
+    @foreach (var severity in new[] { RecommendationSeverity.Critical, RecommendationSeverity.Warning, RecommendationSeverity.Info })
+    {
+        var items = _recommendations.Where(r => r.Severity == severity && !r.IsDismissed).ToList();
+        if (items.Count == 0) continue;
+
+        <MudText Typo="Typo.h6" Class="mb-2 mt-4">
+            <MudIcon Icon="@GetRecommendationIcon(severity)" Color="@GetRecommendationColor(severity)" Class="mr-1" />
+            @severity (@items.Count)
+        </MudText>
+
+        @foreach (var rec in items)
+        {
+            <MudCard Elevation="1" Class="mb-2" Style="@($"border-left: 4px solid {GetRecommendationBorderColor(severity)};")">
+                <MudCardContent Class="pa-3">
+                    <div class="d-flex align-start gap-3">
+                        <MudIcon Icon="@GetTypeIcon(rec.Type)" Color="@GetRecommendationColor(rec.Severity)" Size="Size.Medium" />
+                        <div style="flex: 1;">
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.subtitle2">@rec.Title</MudText>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">@rec.Type</MudChip>
+                                @if (rec.AffectedResource != null)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                                        @rec.AffectedResource
+                                    </MudChip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.body2" Class="mt-1">@rec.Description</MudText>
+                            @if (rec.ActionableAdvice != null)
+                            {
+                                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2" NoIcon="true">
+                                    <MudText Typo="Typo.body2">
+                                        <strong>Recommendation:</strong> @rec.ActionableAdvice
+                                    </MudText>
+                                </MudAlert>
+                            }
+                            @if (rec.CurrentValue != null && rec.RecommendedValue != null)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                                    Current: @rec.CurrentValue.Value.ToString("N1") | Recommended: @rec.RecommendedValue.Value.ToString("N1")
+                                </MudText>
+                            }
+                        </div>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                       OnClick="@(() => DismissRecommendation(rec))" />
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        }
+    }
+
+    @* Dismissed recommendations *@
+    @if (_recommendations.Any(r => r.IsDismissed))
+    {
+        <MudExpansionPanels Class="mt-4" Elevation="0">
+            <MudExpansionPanel Text="@($"Dismissed ({_recommendations.Count(r => r.IsDismissed)})")" Dense="true">
+                @foreach (var rec in _recommendations.Where(r => r.IsDismissed))
+                {
+                    <div class="d-flex align-center gap-2 pa-2">
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Style="text-decoration: line-through;">
+                            @rec.Title
+                        </MudText>
+                        <MudSpacer />
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => rec.IsDismissed = false)">
+                            Restore
+                        </MudButton>
+                    </div>
+                }
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    }
+}
+
+@code {
+    private bool _analyzing;
+    private string? _error;
+    private DateTime? _lastAnalysis;
+    private int _healthScore = 100;
+    private List<PerformanceRecommendation> _recommendations = [];
+
+    private async Task RunAnalysisAsync()
+    {
+        _analyzing = true;
+        _error = null;
+        _recommendations = [];
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+
+            // Gather data
+            var topics = await ApiClient.ListTopicsAsync(clusterId, true);
+            var consumerGroups = await ApiClient.ListConsumerGroupsAsync(clusterId);
+            var metrics = await MetricsClient.GetMetricsAsync();
+            var lags = await ApiClient.GetAllConsumerLagsAsync(clusterId);
+
+            // Analyze topics for partition issues
+            foreach (var topic in topics.Where(t => !t.IsInternal))
+            {
+                var description = await ApiClient.DescribeTopicAsync(topic.Name, clusterId);
+                if (description == null) continue;
+
+                AnalyzeTopicPartitions(description);
+            }
+
+            // Analyze consumer groups
+            AnalyzeConsumerGroups(consumerGroups, lags);
+
+            // Analyze performance metrics
+            AnalyzeMetrics(metrics);
+
+            // Calculate health score
+            _healthScore = CalculateHealthScore();
+            _lastAnalysis = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Analysis failed: {ex.Message}";
+        }
+        finally
+        {
+            _analyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void AnalyzeTopicPartitions(TopicDescription topic)
+    {
+        // Check for under-replicated partitions
+        foreach (var partition in topic.Partitions)
+        {
+            if (partition.Isr.Count < partition.Replicas.Count)
+            {
+                _recommendations.Add(new PerformanceRecommendation
+                {
+                    Type = RecommendationType.UnderReplicatedPartition,
+                    Severity = RecommendationSeverity.Critical,
+                    Title = $"Under-replicated partition: {topic.Name}[{partition.PartitionId}]",
+                    Description = $"Partition has {partition.Isr.Count}/{partition.Replicas.Count} in-sync replicas. " +
+                                  $"ISR: [{string.Join(", ", partition.Isr)}], Replicas: [{string.Join(", ", partition.Replicas)}]",
+                    ActionableAdvice = "Check broker health and network connectivity. Investigate if any brokers are down or overloaded.",
+                    AffectedResource = topic.Name,
+                    CurrentValue = partition.Isr.Count,
+                    RecommendedValue = partition.Replicas.Count
+                });
+            }
+        }
+
+        // Check for hot partitions (message skew)
+        if (topic.Partitions.Count > 1)
+        {
+            var messageCounts = topic.Partitions
+                .Select(p => p.HighWatermark - p.LogStartOffset)
+                .ToList();
+            var avg = messageCounts.Average();
+            var maxCount = messageCounts.Max();
+            var minCount = messageCounts.Min();
+
+            if (avg > 0 && maxCount > avg * 3)
+            {
+                var hotPartition = topic.Partitions.OrderByDescending(p => p.HighWatermark - p.LogStartOffset).First();
+                _recommendations.Add(new PerformanceRecommendation
+                {
+                    Type = RecommendationType.HotPartition,
+                    Severity = RecommendationSeverity.Warning,
+                    Title = $"Hot partition detected: {topic.Name}[{hotPartition.PartitionId}]",
+                    Description = $"Partition {hotPartition.PartitionId} has {hotPartition.HighWatermark - hotPartition.LogStartOffset:N0} messages " +
+                                  $"while average is {avg:N0}. This indicates uneven key distribution.",
+                    ActionableAdvice = "Review your partitioning strategy. Consider using a different partition key or adding more partitions. " +
+                                      "If using key-based partitioning, ensure keys are well-distributed.",
+                    AffectedResource = topic.Name,
+                    CurrentValue = maxCount,
+                    RecommendedValue = avg
+                });
+            }
+
+            // Check partition skew
+            if (avg > 0)
+            {
+                var skewRatio = maxCount / Math.Max(1, minCount);
+                if (skewRatio > 5 && messageCounts.Count > 2)
+                {
+                    _recommendations.Add(new PerformanceRecommendation
+                    {
+                        Type = RecommendationType.PartitionSkew,
+                        Severity = RecommendationSeverity.Warning,
+                        Title = $"Partition skew on topic: {topic.Name}",
+                        Description = $"Message distribution across {topic.Partitions.Count} partitions is uneven. " +
+                                      $"Max: {maxCount:N0}, Min: {minCount:N0}, Ratio: {skewRatio:N1}x",
+                        ActionableAdvice = "Consider re-keying your messages or using round-robin partitioning for better distribution.",
+                        AffectedResource = topic.Name,
+                        CurrentValue = skewRatio,
+                        RecommendedValue = 1.5
+                    });
+                }
+            }
+
+            // Check for over-provisioned topics (many empty partitions)
+            var emptyPartitions = topic.Partitions.Count(p => p.HighWatermark == p.LogStartOffset);
+            if (emptyPartitions > topic.Partitions.Count / 2 && topic.Partitions.Count > 4)
+            {
+                _recommendations.Add(new PerformanceRecommendation
+                {
+                    Type = RecommendationType.TopicOverProvisioned,
+                    Severity = RecommendationSeverity.Info,
+                    Title = $"Over-provisioned topic: {topic.Name}",
+                    Description = $"{emptyPartitions}/{topic.Partitions.Count} partitions are empty. " +
+                                  "Too many partitions increases metadata overhead without benefit.",
+                    ActionableAdvice = "Consider reducing partition count if the topic doesn't need this level of parallelism.",
+                    AffectedResource = topic.Name,
+                    CurrentValue = topic.Partitions.Count,
+                    RecommendedValue = topic.Partitions.Count - emptyPartitions
+                });
+            }
+        }
+    }
+
+    private void AnalyzeConsumerGroups(IReadOnlyList<ConsumerGroupInfo> groups, IReadOnlyList<ConsumerGroupLag> lags)
+    {
+        // Check for high consumer lag
+        foreach (var lag in lags.Where(l => l.TotalLag > 10000))
+        {
+            _recommendations.Add(new PerformanceRecommendation
+            {
+                Type = RecommendationType.ConsumerLag,
+                Severity = lag.TotalLag > 100000 ? RecommendationSeverity.Critical : RecommendationSeverity.Warning,
+                Title = $"High consumer lag: {lag.GroupId}",
+                Description = $"Consumer group has total lag of {lag.TotalLag:N0} across {lag.Partitions.Count} partitions.",
+                ActionableAdvice = "Scale up consumers, increase fetch batch size, or investigate slow processing. " +
+                                  "Check if consumer processing time exceeds poll interval.",
+                AffectedResource = lag.GroupId,
+                CurrentValue = lag.TotalLag,
+                RecommendedValue = 0
+            });
+        }
+
+        // Check for unbalanced consumer groups
+        foreach (var lag in lags.Where(l => l.Partitions.Count > 1))
+        {
+            var consumerIds = lag.Partitions.Where(p => p.ConsumerId != null).Select(p => p.ConsumerId!).Distinct().ToList();
+            if (consumerIds.Count > 1)
+            {
+                var partitionsPerConsumer = lag.Partitions
+                    .Where(p => p.ConsumerId != null)
+                    .GroupBy(p => p.ConsumerId)
+                    .Select(g => g.Count())
+                    .ToList();
+
+                if (partitionsPerConsumer.Count > 0)
+                {
+                    var maxAssigned = partitionsPerConsumer.Max();
+                    var minAssigned = partitionsPerConsumer.Min();
+                    if (maxAssigned > minAssigned * 2 && maxAssigned > 2)
+                    {
+                        _recommendations.Add(new PerformanceRecommendation
+                        {
+                            Type = RecommendationType.UnbalancedConsumerGroup,
+                            Severity = RecommendationSeverity.Info,
+                            Title = $"Unbalanced consumer group: {lag.GroupId}",
+                            Description = $"Partition assignment is uneven: max {maxAssigned}, min {minAssigned} partitions per consumer across {consumerIds.Count} consumers.",
+                            ActionableAdvice = "Consider using a cooperative sticky assignor or rebalancing manually.",
+                            AffectedResource = lag.GroupId
+                        });
+                    }
+                }
+            }
+
+            // Unassigned partitions
+            var unassigned = lag.Partitions.Count(p => p.ConsumerId == null);
+            if (unassigned > 0 && lag.State == "Stable")
+            {
+                _recommendations.Add(new PerformanceRecommendation
+                {
+                    Type = RecommendationType.UnbalancedConsumerGroup,
+                    Severity = RecommendationSeverity.Warning,
+                    Title = $"Unassigned partitions in: {lag.GroupId}",
+                    Description = $"{unassigned}/{lag.Partitions.Count} partitions have no assigned consumer.",
+                    ActionableAdvice = "Add more consumers to the group or check if existing consumers are healthy.",
+                    AffectedResource = lag.GroupId,
+                    CurrentValue = unassigned,
+                    RecommendedValue = 0
+                });
+            }
+        }
+
+        // Check for inactive consumer groups
+        foreach (var group in groups.Where(g => g.State is "Empty" or "Dead"))
+        {
+            _recommendations.Add(new PerformanceRecommendation
+            {
+                Type = RecommendationType.InactiveConsumerGroup,
+                Severity = RecommendationSeverity.Info,
+                Title = $"Inactive consumer group: {group.GroupId}",
+                Description = $"Consumer group is in '{group.State}' state with {group.MemberCount} members.",
+                ActionableAdvice = "Consider deleting this consumer group if it's no longer needed to reduce metadata overhead.",
+                AffectedResource = group.GroupId
+            });
+        }
+    }
+
+    private void AnalyzeMetrics(MetricsSnapshot metrics)
+    {
+        // High P99 latency
+        if (metrics.ProduceLatencyP99 > 100)
+        {
+            _recommendations.Add(new PerformanceRecommendation
+            {
+                Type = RecommendationType.HighLatency,
+                Severity = metrics.ProduceLatencyP99 > 500 ? RecommendationSeverity.Critical : RecommendationSeverity.Warning,
+                Title = "High produce latency",
+                Description = $"P99 produce latency is {metrics.ProduceLatencyP99:N1}ms. P50: {metrics.ProduceLatencyP50:N1}ms, P90: {metrics.ProduceLatencyP90:N1}ms.",
+                ActionableAdvice = "Check disk I/O, network latency, and broker load. Consider enabling batching or compression on producers.",
+                CurrentValue = metrics.ProduceLatencyP99,
+                RecommendedValue = 50
+            });
+        }
+
+        // Throughput bottleneck (high error rate)
+        if (metrics.ErrorsTotal + metrics.ProduceErrorsTotal > 0)
+        {
+            var totalErrors = metrics.ErrorsTotal + metrics.ProduceErrorsTotal;
+            _recommendations.Add(new PerformanceRecommendation
+            {
+                Type = RecommendationType.ThroughputBottleneck,
+                Severity = totalErrors > 100 ? RecommendationSeverity.Critical : RecommendationSeverity.Warning,
+                Title = "Error rate detected",
+                Description = $"Total errors: {totalErrors:N0} (Produce errors: {metrics.ProduceErrorsTotal:N0}, Throttled: {metrics.ThrottledRequestsTotal:N0}).",
+                ActionableAdvice = "Investigate error causes. Common issues: quota limits, authorization failures, topic not found, invalid messages.",
+                CurrentValue = totalErrors,
+                RecommendedValue = 0
+            });
+        }
+    }
+
+    private int CalculateHealthScore()
+    {
+        var score = 100;
+        foreach (var rec in _recommendations.Where(r => !r.IsDismissed))
+        {
+            score -= rec.Severity switch
+            {
+                RecommendationSeverity.Critical => 20,
+                RecommendationSeverity.Warning => 10,
+                RecommendationSeverity.Info => 2,
+                _ => 0
+            };
+        }
+        return Math.Max(0, Math.Min(100, score));
+    }
+
+    private void DismissRecommendation(PerformanceRecommendation rec)
+    {
+        rec.IsDismissed = true;
+        _healthScore = CalculateHealthScore();
+    }
+
+    // --- UI Helpers ---
+
+    private static Color GetScoreColor(int score) => score switch
+    {
+        >= 90 => Color.Success,
+        >= 70 => Color.Info,
+        >= 50 => Color.Warning,
+        _ => Color.Error
+    };
+
+    private static Color GetRecommendationColor(RecommendationSeverity severity) => severity switch
+    {
+        RecommendationSeverity.Critical => Color.Error,
+        RecommendationSeverity.Warning => Color.Warning,
+        RecommendationSeverity.Info => Color.Info,
+        _ => Color.Default
+    };
+
+    private static string GetRecommendationBorderColor(RecommendationSeverity severity) => severity switch
+    {
+        RecommendationSeverity.Critical => "#f44336",
+        RecommendationSeverity.Warning => "#ff9800",
+        RecommendationSeverity.Info => "#2196f3",
+        _ => "#9e9e9e"
+    };
+
+    private static string GetRecommendationIcon(RecommendationSeverity severity) => severity switch
+    {
+        RecommendationSeverity.Critical => Icons.Material.Filled.Error,
+        RecommendationSeverity.Warning => Icons.Material.Filled.Warning,
+        RecommendationSeverity.Info => Icons.Material.Filled.Lightbulb,
+        _ => Icons.Material.Filled.Info
+    };
+
+    private static string GetTypeIcon(RecommendationType type) => type switch
+    {
+        RecommendationType.HotPartition => Icons.Material.Filled.Whatshot,
+        RecommendationType.UnderReplicatedPartition => Icons.Material.Filled.BrokenImage,
+        RecommendationType.PartitionSkew => Icons.Material.Filled.BarChart,
+        RecommendationType.ThroughputBottleneck => Icons.Material.Filled.Speed,
+        RecommendationType.HighLatency => Icons.Material.Filled.Timer,
+        RecommendationType.ConsumerLag => Icons.Material.Filled.TrendingDown,
+        RecommendationType.UnbalancedConsumerGroup => Icons.Material.Filled.Balance,
+        RecommendationType.InactiveConsumerGroup => Icons.Material.Filled.PauseCircle,
+        RecommendationType.TopicOverProvisioned => Icons.Material.Filled.ExpandMore,
+        RecommendationType.TopicUnderProvisioned => Icons.Material.Filled.ExpandLess,
+        _ => Icons.Material.Filled.Info
+    };
+}

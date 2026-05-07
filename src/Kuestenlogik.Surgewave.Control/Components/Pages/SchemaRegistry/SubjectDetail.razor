@@ -1,0 +1,853 @@
+@page "/schemas/{Subject}"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using System.Text.Json
+@inject ISchemaRegistryClient SchemaClient
+@inject NotificationState Notification
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+
+<PageTitle>@Subject - Schema Registry - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <MudText Typo="Typo.h4">@Subject</MudText>
+    <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+        <div class="d-flex gap-2">
+            <MudButton Variant="Variant.Outlined" OnClick="ShowRegisterDialogAsync"
+                       StartIcon="@Icons.Material.Filled.Add">
+                New Version
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteSubjectAsync"
+                       StartIcon="@Icons.Material.Filled.Delete">
+                Delete Subject
+            </MudButton>
+        </div>
+    </AuthorizeView>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+<MudGrid>
+    <MudItem xs="12" md="3">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">Configuration</MudText>
+
+            <MudText Typo="Typo.body2" Class="mb-2">Compatibility Level:</MudText>
+            <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+                <Authorized>
+                    <MudSelect T="string" Value="_compatibility" ValueChanged="SetCompatibilityAsync"
+                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@((string?)null)">Use global default</MudSelectItem>
+                        @foreach (var level in _compatibilityLevels)
+                        {
+                            <MudSelectItem Value="@level">@level</MudSelectItem>
+                        }
+                    </MudSelect>
+                </Authorized>
+                <NotAuthorized>
+                    <MudText Typo="Typo.body1">@(_compatibility ?? "Global default")</MudText>
+                </NotAuthorized>
+            </AuthorizeView>
+
+            <MudDivider Class="my-4" />
+
+            <MudText Typo="Typo.h6" Class="mb-2">Versions (@_versions.Count)</MudText>
+            <MudList T="int" Dense="true">
+                @foreach (var version in _versions.OrderByDescending(v => v))
+                {
+                    <MudListItem OnClick="@(async () => await SelectVersionAsync(version))">
+                        <div class="d-flex align-center justify-space-between" style="width: 100%">
+                            <MudText>
+                                @if (_selectedVersion == version)
+                                {
+                                    <strong>Version @version @(version == _versions.Max() ? "(latest)" : "")</strong>
+                                }
+                                else
+                                {
+                                    <span>Version @version @(version == _versions.Max() ? "(latest)" : "")</span>
+                                }
+                            </MudText>
+                            <span @onclick:stopPropagation="true">
+                                <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                                   OnClick="@(async () => await DeleteVersionAsync(version))" />
+                                </AuthorizeView>
+                            </span>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="9">
+        @if (_selectedSchema != null)
+        {
+            <MudPaper Elevation="2" Class="pa-4">
+                <div class="d-flex align-center justify-space-between mb-4">
+                    <div>
+                        <MudText Typo="Typo.h6">Version @_selectedSchema.Version</MudText>
+                        <MudText Typo="Typo.caption">
+                            Schema ID: @_selectedSchema.Id |
+                            Type: <MudChip T="string" Size="Size.Small">@_selectedSchema.SchemaType</MudChip>
+                        </MudText>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="CopySchemaAsync"
+                                   StartIcon="@Icons.Material.Filled.ContentCopy">
+                            Copy
+                        </MudButton>
+                        @if (_versions.Count > 1)
+                        {
+                            <MudSelect T="int?" Value="_compareVersion" ValueChanged="CompareVersionAsync"
+                                       Label="Compare with..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                                       Clearable="true" Style="min-width: 180px;">
+                                @foreach (var version in _versions.Where(v => v != _selectedVersion).OrderByDescending(v => v))
+                                {
+                                    <MudSelectItem Value="@((int?)version)">Version @version</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                    </div>
+                </div>
+
+                @if (_compareSchema != null && _diffResult != null)
+                {
+                    @* ===== DIFF VIEW ===== *@
+                    <MudAlert Severity="@(_diffResult.HasBreakingChanges ? Severity.Error : Severity.Success)" Class="mb-3">
+                        @if (_diffResult.HasBreakingChanges)
+                        {
+                            <span>Breaking changes detected between v@(_diffResult.OldVersion) and v@(_diffResult.NewVersion)</span>
+                        }
+                        else
+                        {
+                            <span>No breaking changes between v@(_diffResult.OldVersion) and v@(_diffResult.NewVersion)</span>
+                        }
+                        <span class="ml-4">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">+@_diffResult.AddedCount added</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error">-@_diffResult.RemovedCount removed</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">~@_diffResult.ModifiedCount modified</MudChip>
+                        </span>
+                    </MudAlert>
+
+                    @if (_diffResult.Entries.Any(e => e.ChangeType != DiffChangeType.Unchanged))
+                    {
+                        <MudSimpleTable Dense="true" Hover="true" Class="mb-4">
+                            <thead>
+                                <tr>
+                                    <th>Change</th>
+                                    <th>Path</th>
+                                    <th>v@(_diffResult.OldVersion)</th>
+                                    <th>v@(_diffResult.NewVersion)</th>
+                                    <th>Breaking</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var entry in _diffResult.Entries.Where(e => e.ChangeType != DiffChangeType.Unchanged))
+                                {
+                                    <tr style="@GetDiffRowStyle(entry)">
+                                        <td>
+                                            <MudChip T="string" Size="Size.Small" Color="@GetDiffColor(entry)">
+                                                @GetDiffLabel(entry)
+                                            </MudChip>
+                                        </td>
+                                        <td><code>@entry.Path</code></td>
+                                        <td style="font-family: monospace; font-size: 12px;">@(entry.OldValue ?? "—")</td>
+                                        <td style="font-family: monospace; font-size: 12px;">@(entry.NewValue ?? "—")</td>
+                                        <td>
+                                            @if (entry.IsBreaking)
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+
+                    @* Side-by-side raw view *@
+                    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-2">
+                        <MudTabPanel Text="Side-by-Side">
+                            <MudGrid>
+                                <MudItem xs="6">
+                                    <MudText Typo="Typo.subtitle2" Class="mb-1">
+                                        Version @_diffResult.OldVersion
+                                    </MudText>
+                                    <pre style="@_preStyle background: var(--mud-palette-background-grey); padding: 12px; border-radius: 4px; overflow: auto; max-height: 500px;">@FormatSchema(_compareSchema.Schema)</pre>
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudText Typo="Typo.subtitle2" Class="mb-1">
+                                        Version @_diffResult.NewVersion
+                                    </MudText>
+                                    <pre style="@_preStyle background: var(--mud-palette-background-grey); padding: 12px; border-radius: 4px; overflow: auto; max-height: 500px;">@FormatSchema(_selectedSchema.Schema)</pre>
+                                </MudItem>
+                            </MudGrid>
+                        </MudTabPanel>
+                        <MudTabPanel Text="Unified Diff">
+                            <pre style="@_preStyle background: var(--mud-palette-background-grey); padding: 12px; border-radius: 4px; overflow: auto; max-height: 600px;">@_unifiedDiff</pre>
+                        </MudTabPanel>
+                    </MudTabs>
+                }
+                else
+                {
+                    @* ===== SINGLE SCHEMA VIEW ===== *@
+                    @* Field overview *@
+                    @if (_schemaFields.Count > 0)
+                    {
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">Fields (@_schemaFields.Count)</MudText>
+                        <MudSimpleTable Dense="true" Hover="true" Class="mb-4">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Required</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var field in _schemaFields)
+                                {
+                                    <tr>
+                                        <td><code>@field.Name</code></td>
+                                        <td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@field.Type</MudChip></td>
+                                        <td>
+                                            @if (field.IsRequired)
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success" />
+                                            }
+                                        </td>
+                                        <td>@(field.Description ?? "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Schema Definition</MudText>
+                    <pre style="@_preStyle background: var(--mud-palette-background-grey); padding: 12px; border-radius: 4px; overflow: auto; max-height: 500px;">@FormatSchema(_selectedSchema.Schema)</pre>
+                }
+
+                @if (_selectedSchema.References?.Count > 0)
+                {
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">References</MudText>
+                    <MudSimpleTable Dense="true">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Subject</th>
+                                <th>Version</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var reference in _selectedSchema.References)
+                            {
+                                <tr>
+                                    <td>@reference.Name</td>
+                                    <td>
+                                        <MudLink Href="@($"/schemas/{Uri.EscapeDataString(reference.Subject)}")">
+                                            @reference.Subject
+                                        </MudLink>
+                                    </td>
+                                    <td>@reference.Version</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        }
+        else if (!_loading)
+        {
+            <MudAlert Severity="Severity.Info">Select a version to view its schema</MudAlert>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter]
+    public string Subject { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+    private string? _compatibility;
+    private List<int> _versions = [];
+    private int? _selectedVersion;
+    private SchemaModel? _selectedSchema;
+    private int? _compareVersion;
+    private SchemaModel? _compareSchema;
+    private SchemaDiffResult? _diffResult;
+    private string _unifiedDiff = "";
+    private List<SchemaFieldInfo> _schemaFields = [];
+
+    private const string _preStyle = "font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 0;";
+
+    private static readonly string[] _compatibilityLevels =
+        ["NONE", "BACKWARD", "BACKWARD_TRANSITIVE", "FORWARD", "FORWARD_TRANSITIVE", "FULL", "FULL_TRANSITIVE"];
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    // Schema field info for field table
+    private sealed record SchemaFieldInfo(string Name, string Type, string? Description, bool IsRequired);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Schema Registry", "/schemas"),
+            new(Subject, null, true)
+        ];
+
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            _versions = (await SchemaClient.GetVersionsAsync(Subject)).ToList();
+            _compatibility = await SchemaClient.GetSubjectCompatibilityAsync(Subject);
+
+            if (_versions.Count > 0)
+            {
+                _selectedVersion = _versions.Max();
+                await SelectVersionAsync(_selectedVersion.Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load data: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectVersionAsync(int version)
+    {
+        _selectedVersion = version;
+        _selectedSchema = await SchemaClient.GetSchemaAsync(Subject, version);
+        _compareVersion = null;
+        _compareSchema = null;
+        _diffResult = null;
+        _unifiedDiff = "";
+        _schemaFields = _selectedSchema != null ? ExtractFields(_selectedSchema.Schema, _selectedSchema.SchemaType) : [];
+        StateHasChanged();
+    }
+
+    private async Task CompareVersionAsync(int? version)
+    {
+        _compareVersion = version;
+        if (version.HasValue && _selectedSchema != null)
+        {
+            _compareSchema = await SchemaClient.GetSchemaAsync(Subject, version.Value);
+            if (_compareSchema != null)
+            {
+                var oldVer = Math.Min(version.Value, _selectedSchema.Version);
+                var newVer = Math.Max(version.Value, _selectedSchema.Version);
+                var oldSchema = oldVer == _selectedSchema.Version ? _selectedSchema : _compareSchema;
+                var newSchema = newVer == _selectedSchema.Version ? _selectedSchema : _compareSchema;
+
+                _diffResult = ComputeDiff(oldSchema, newSchema, oldVer, newVer);
+                _unifiedDiff = BuildUnifiedDiff(oldSchema.Schema, newSchema.Schema, oldVer, newVer);
+            }
+        }
+        else
+        {
+            _compareSchema = null;
+            _diffResult = null;
+            _unifiedDiff = "";
+        }
+        StateHasChanged();
+    }
+
+    // ========== DIFF ENGINE ==========
+
+    private static SchemaDiffResult ComputeDiff(SchemaModel oldSchema, SchemaModel newSchema, int oldVer, int newVer)
+    {
+        var result = new SchemaDiffResult { OldVersion = oldVer, NewVersion = newVer };
+
+        try
+        {
+            var oldDoc = JsonDocument.Parse(oldSchema.Schema);
+            var newDoc = JsonDocument.Parse(newSchema.Schema);
+
+            CompareElements(oldDoc.RootElement, newDoc.RootElement, "", result.Entries, oldSchema.SchemaType);
+        }
+        catch
+        {
+            // Fallback: simple text comparison
+            if (oldSchema.Schema != newSchema.Schema)
+            {
+                result.Entries.Add(new SchemaDiffEntry
+                {
+                    Path = "(raw schema)",
+                    ChangeType = DiffChangeType.Modified,
+                    OldValue = TruncateValue(oldSchema.Schema),
+                    NewValue = TruncateValue(newSchema.Schema)
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private static void CompareElements(JsonElement oldEl, JsonElement newEl, string path, List<SchemaDiffEntry> entries, string schemaType)
+    {
+        if (oldEl.ValueKind != newEl.ValueKind)
+        {
+            entries.Add(new SchemaDiffEntry
+            {
+                Path = path,
+                ChangeType = DiffChangeType.Modified,
+                OldValue = oldEl.ToString(),
+                NewValue = newEl.ToString(),
+                IsBreaking = IsBreakingChange(path, DiffChangeType.Modified, schemaType)
+            });
+            return;
+        }
+
+        switch (oldEl.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var oldProps = new HashSet<string>();
+                foreach (var prop in oldEl.EnumerateObject())
+                    oldProps.Add(prop.Name);
+
+                var newProps = new HashSet<string>();
+                foreach (var prop in newEl.EnumerateObject())
+                    newProps.Add(prop.Name);
+
+                foreach (var prop in oldProps.Except(newProps))
+                {
+                    entries.Add(new SchemaDiffEntry
+                    {
+                        Path = $"{path}.{prop}".TrimStart('.'),
+                        ChangeType = DiffChangeType.Removed,
+                        OldValue = FormatJsonValue(oldEl.GetProperty(prop)),
+                        IsBreaking = IsBreakingChange($"{path}.{prop}", DiffChangeType.Removed, schemaType),
+                        Description = "Property removed"
+                    });
+                }
+
+                foreach (var prop in newProps.Except(oldProps))
+                {
+                    entries.Add(new SchemaDiffEntry
+                    {
+                        Path = $"{path}.{prop}".TrimStart('.'),
+                        ChangeType = DiffChangeType.Added,
+                        NewValue = FormatJsonValue(newEl.GetProperty(prop)),
+                        IsBreaking = IsBreakingChange($"{path}.{prop}", DiffChangeType.Added, schemaType),
+                        Description = "Property added"
+                    });
+                }
+
+                foreach (var prop in oldProps.Intersect(newProps))
+                {
+                    CompareElements(oldEl.GetProperty(prop), newEl.GetProperty(prop), $"{path}.{prop}".TrimStart('.'), entries, schemaType);
+                }
+                break;
+
+            case JsonValueKind.Array:
+                // Special handling for "fields" arrays in Avro schemas
+                if (path.EndsWith("fields", StringComparison.OrdinalIgnoreCase) && schemaType.Equals("AVRO", StringComparison.OrdinalIgnoreCase))
+                {
+                    CompareAvroFields(oldEl, newEl, path, entries);
+                    return;
+                }
+
+                var oldItems = oldEl.EnumerateArray().ToList();
+                var newItems = newEl.EnumerateArray().ToList();
+
+                for (int i = 0; i < Math.Max(oldItems.Count, newItems.Count); i++)
+                {
+                    if (i >= oldItems.Count)
+                    {
+                        entries.Add(new SchemaDiffEntry
+                        {
+                            Path = $"{path}[{i}]",
+                            ChangeType = DiffChangeType.Added,
+                            NewValue = FormatJsonValue(newItems[i])
+                        });
+                    }
+                    else if (i >= newItems.Count)
+                    {
+                        entries.Add(new SchemaDiffEntry
+                        {
+                            Path = $"{path}[{i}]",
+                            ChangeType = DiffChangeType.Removed,
+                            OldValue = FormatJsonValue(oldItems[i])
+                        });
+                    }
+                    else
+                    {
+                        CompareElements(oldItems[i], newItems[i], $"{path}[{i}]", entries, schemaType);
+                    }
+                }
+                break;
+
+            default:
+                if (oldEl.ToString() != newEl.ToString())
+                {
+                    entries.Add(new SchemaDiffEntry
+                    {
+                        Path = path,
+                        ChangeType = DiffChangeType.Modified,
+                        OldValue = oldEl.ToString(),
+                        NewValue = newEl.ToString(),
+                        IsBreaking = IsBreakingChange(path, DiffChangeType.Modified, schemaType)
+                    });
+                }
+                break;
+        }
+    }
+
+    private static void CompareAvroFields(JsonElement oldFields, JsonElement newFields, string path, List<SchemaDiffEntry> entries)
+    {
+        var oldByName = new Dictionary<string, JsonElement>();
+        foreach (var f in oldFields.EnumerateArray())
+        {
+            if (f.TryGetProperty("name", out var name))
+                oldByName[name.GetString()!] = f;
+        }
+
+        var newByName = new Dictionary<string, JsonElement>();
+        foreach (var f in newFields.EnumerateArray())
+        {
+            if (f.TryGetProperty("name", out var name))
+                newByName[name.GetString()!] = f;
+        }
+
+        // Removed fields
+        foreach (var name in oldByName.Keys.Except(newByName.Keys))
+        {
+            var fieldType = GetAvroFieldType(oldByName[name]);
+            entries.Add(new SchemaDiffEntry
+            {
+                Path = $"{path}.{name}",
+                ChangeType = DiffChangeType.Removed,
+                OldValue = fieldType,
+                IsBreaking = !IsNullableAvroField(oldByName[name]),
+                Description = IsNullableAvroField(oldByName[name]) ? "Optional field removed" : "Required field removed — BREAKING"
+            });
+        }
+
+        // Added fields
+        foreach (var name in newByName.Keys.Except(oldByName.Keys))
+        {
+            var fieldType = GetAvroFieldType(newByName[name]);
+            var hasDefault = newByName[name].TryGetProperty("default", out _);
+            entries.Add(new SchemaDiffEntry
+            {
+                Path = $"{path}.{name}",
+                ChangeType = DiffChangeType.Added,
+                NewValue = fieldType,
+                IsBreaking = !hasDefault && !IsNullableAvroField(newByName[name]),
+                Description = hasDefault || IsNullableAvroField(newByName[name])
+                    ? "New field with default/nullable — compatible"
+                    : "New required field without default — BREAKING"
+            });
+        }
+
+        // Modified fields
+        foreach (var name in oldByName.Keys.Intersect(newByName.Keys))
+        {
+            var oldType = GetAvroFieldType(oldByName[name]);
+            var newType = GetAvroFieldType(newByName[name]);
+            if (oldType != newType)
+            {
+                entries.Add(new SchemaDiffEntry
+                {
+                    Path = $"{path}.{name}",
+                    ChangeType = DiffChangeType.Modified,
+                    OldValue = oldType,
+                    NewValue = newType,
+                    IsBreaking = true,
+                    Description = "Field type changed — BREAKING"
+                });
+            }
+        }
+    }
+
+    private static string GetAvroFieldType(JsonElement field)
+    {
+        if (!field.TryGetProperty("type", out var type)) return "unknown";
+        return type.ValueKind == JsonValueKind.Array
+            ? string.Join(" | ", type.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString() : t.ToString()))
+            : type.ValueKind == JsonValueKind.String ? type.GetString()! : type.ToString();
+    }
+
+    private static bool IsNullableAvroField(JsonElement field)
+    {
+        if (!field.TryGetProperty("type", out var type)) return false;
+        if (type.ValueKind == JsonValueKind.Array)
+            return type.EnumerateArray().Any(t => t.ValueKind == JsonValueKind.String && t.GetString() == "null");
+        return type.ValueKind == JsonValueKind.String && type.GetString() == "null";
+    }
+
+    private static bool IsBreakingChange(string path, DiffChangeType changeType, string schemaType)
+    {
+        // Field removal is always breaking in BACKWARD compatibility
+        if (changeType == DiffChangeType.Removed && path.Contains("fields"))
+            return true;
+        // Type changes are always breaking
+        if (changeType == DiffChangeType.Modified && (path.EndsWith(".type") || path.Contains(".type.")))
+            return true;
+        // Namespace/name changes are breaking
+        if (changeType == DiffChangeType.Modified && (path == "name" || path == "namespace"))
+            return true;
+        return false;
+    }
+
+    private static string FormatJsonValue(JsonElement el)
+    {
+        if (el.ValueKind == JsonValueKind.String) return el.GetString()!;
+        var text = el.ToString();
+        return text.Length > 100 ? text[..97] + "..." : text;
+    }
+
+    private static string TruncateValue(string value)
+    {
+        return value.Length > 200 ? value[..197] + "..." : value;
+    }
+
+    private static string BuildUnifiedDiff(string oldSchema, string newSchema, int oldVer, int newVer)
+    {
+        var oldLines = FormatSchema(oldSchema).Split('\n');
+        var newLines = FormatSchema(newSchema).Split('\n');
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"--- Version {oldVer}");
+        sb.AppendLine($"+++ Version {newVer}");
+        sb.AppendLine($"@@ -1,{oldLines.Length} +1,{newLines.Length} @@");
+
+        // Simple LCS-based diff
+        var oldSet = new HashSet<string>(oldLines);
+        var newSet = new HashSet<string>(newLines);
+
+        int oi = 0, ni = 0;
+        while (oi < oldLines.Length || ni < newLines.Length)
+        {
+            if (oi < oldLines.Length && ni < newLines.Length && oldLines[oi].Trim() == newLines[ni].Trim())
+            {
+                sb.AppendLine($"  {oldLines[oi]}");
+                oi++; ni++;
+            }
+            else if (oi < oldLines.Length && !newSet.Contains(oldLines[oi].Trim()))
+            {
+                sb.AppendLine($"- {oldLines[oi]}");
+                oi++;
+            }
+            else if (ni < newLines.Length && !oldSet.Contains(newLines[ni].Trim()))
+            {
+                sb.AppendLine($"+ {newLines[ni]}");
+                ni++;
+            }
+            else if (oi < oldLines.Length)
+            {
+                sb.AppendLine($"- {oldLines[oi]}");
+                oi++;
+            }
+            else
+            {
+                sb.AppendLine($"+ {newLines[ni]}");
+                ni++;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static Color GetDiffColor(SchemaDiffEntry entry) => entry.ChangeType switch
+    {
+        DiffChangeType.Added => Color.Success,
+        DiffChangeType.Removed => Color.Error,
+        DiffChangeType.Modified => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string GetDiffLabel(SchemaDiffEntry entry) => entry.ChangeType switch
+    {
+        DiffChangeType.Added => "+ Added",
+        DiffChangeType.Removed => "- Removed",
+        DiffChangeType.Modified => "~ Modified",
+        _ => "Unchanged"
+    };
+
+    private static string GetDiffRowStyle(SchemaDiffEntry entry) => entry.ChangeType switch
+    {
+        DiffChangeType.Added => "background: rgba(76, 175, 80, 0.08);",
+        DiffChangeType.Removed => "background: rgba(244, 67, 54, 0.08);",
+        DiffChangeType.Modified => "background: rgba(255, 152, 0, 0.08);",
+        _ => ""
+    };
+
+    // ========== FIELD EXTRACTION ==========
+
+    private static List<SchemaFieldInfo> ExtractFields(string schema, string schemaType)
+    {
+        var fields = new List<SchemaFieldInfo>();
+        try
+        {
+            var doc = JsonDocument.Parse(schema);
+            if (schemaType.Equals("AVRO", StringComparison.OrdinalIgnoreCase))
+                ExtractAvroFields(doc.RootElement, fields);
+            else if (schemaType.Equals("JSON", StringComparison.OrdinalIgnoreCase))
+                ExtractJsonSchemaFields(doc.RootElement, fields);
+        }
+        catch { /* ignore parse errors */ }
+        return fields;
+    }
+
+    private static void ExtractAvroFields(JsonElement root, List<SchemaFieldInfo> fields)
+    {
+        if (!root.TryGetProperty("fields", out var fieldsEl)) return;
+        foreach (var field in fieldsEl.EnumerateArray())
+        {
+            var name = field.TryGetProperty("name", out var n) ? n.GetString()! : "?";
+            var type = GetAvroFieldType(field);
+            var doc = field.TryGetProperty("doc", out var d) ? d.GetString() : null;
+            var isRequired = !IsNullableAvroField(field) && !field.TryGetProperty("default", out _);
+            fields.Add(new SchemaFieldInfo(name, type, doc, isRequired));
+        }
+    }
+
+    private static void ExtractJsonSchemaFields(JsonElement root, List<SchemaFieldInfo> fields)
+    {
+        if (!root.TryGetProperty("properties", out var props)) return;
+        var required = new HashSet<string>();
+        if (root.TryGetProperty("required", out var reqArr))
+        {
+            foreach (var r in reqArr.EnumerateArray())
+                if (r.GetString() is { } s) required.Add(s);
+        }
+
+        foreach (var prop in props.EnumerateObject())
+        {
+            var type = prop.Value.TryGetProperty("type", out var t) ? t.GetString()! : "object";
+            var desc = prop.Value.TryGetProperty("description", out var d) ? d.GetString() : null;
+            fields.Add(new SchemaFieldInfo(prop.Name, type, desc, required.Contains(prop.Name)));
+        }
+    }
+
+    // ========== EXISTING OPERATIONS ==========
+
+    private async Task SetCompatibilityAsync(string? compatibility)
+    {
+        if (compatibility == null)
+        {
+            _compatibility = null;
+            Notification.ShowInfo("Using global compatibility default");
+        }
+        else
+        {
+            var success = await SchemaClient.SetSubjectCompatibilityAsync(Subject, compatibility);
+            if (success)
+            {
+                _compatibility = compatibility;
+                Notification.ShowSuccess($"Compatibility set to {compatibility}");
+            }
+            else
+            {
+                Notification.ShowError("Failed to update compatibility");
+            }
+        }
+    }
+
+    private async Task ShowRegisterDialogAsync()
+    {
+        var parameters = new DialogParameters<SchemaRegisterDialog>
+        {
+            { x => x.PrefilledSubject, Subject }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<SchemaRegisterDialog>("Register New Version", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await LoadDataAsync();
+            Notification.ShowSuccess("New version registered");
+        }
+    }
+
+    private async Task DeleteSubjectAsync()
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Subject",
+            $"Are you sure you want to delete subject '{Subject}' and all its versions?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var result = await SchemaClient.DeleteSubjectAsync(Subject);
+            if (result != null)
+            {
+                Notification.ShowSuccess($"Deleted subject with {result.Count} version(s)");
+                Navigation.NavigateTo("/schemas");
+            }
+            else
+            {
+                Notification.ShowError("Failed to delete subject");
+            }
+        }
+    }
+
+    private async Task DeleteVersionAsync(int version)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Version",
+            $"Are you sure you want to delete version {version} of '{Subject}'?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var result = await SchemaClient.DeleteVersionAsync(Subject, version);
+            if (result != null)
+            {
+                Notification.ShowSuccess($"Deleted version {version}");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to delete version");
+            }
+        }
+    }
+
+    private async Task CopySchemaAsync()
+    {
+        Notification.ShowInfo("Schema copied to clipboard");
+    }
+
+    private static string FormatSchema(string schema)
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(schema);
+            return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return schema;
+        }
+    }
+}

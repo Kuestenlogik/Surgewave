@@ -1,0 +1,13 @@
+{
+  "Surgewave": {
+    "Quic": {
+      "Enabled": false,
+      "Port": 9094,
+      "MaxConnections": 1000,
+      "MaxStreamsPerConnection": 256,
+      "IdleTimeoutSeconds": 60,
+      "CertificatePath": "",
+      "CertificatePassword": ""
+    }
+  }
+}

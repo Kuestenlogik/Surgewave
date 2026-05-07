@@ -1,0 +1,1780 @@
+/* Surgewave marketing site stylesheet.
+ * Design tokens: surgewave-cyan primary, violet accent, lightning-yellow, slate neutrals.
+ * Theme: data-theme="auto|light|dark" stores preference; data-theme-resolved="light|dark"
+ * carries the resolved choice (auto resolves via prefers-color-scheme).
+ *
+ * Token naming follows the Bowire convention (centralised, unprefixed) so the same
+ * mental model works across both sister sites; values diverge so Surgewave and Bowire
+ * stay visually distinct.
+ */
+
+:root,
+:root[data-theme-resolved="light"] {
+  /* Surfaces — alt-sections (--bg-elevated) sit slightly grayer than
+     the off-white base, matching Bowire's zigzag convention. White
+     stays reserved for cards (--surface) so the cards lift visually
+     against both base and elevated section backgrounds. */
+  --bg: #fafaff;
+  --bg-elevated: #f4f4fa;
+  --bg-footer: color-mix(in srgb, #fafaff 97%, black);
+  --surface: #ffffff;
+  --border: #e2e8f0;
+
+  /* Text */
+  --text: #0f172a;
+  --text-secondary: #475569;
+
+  /* Brand */
+  --accent: #0ea5e9;          /* Surgewave cyan (sky-500) */
+  --accent-strong: #0369a1;   /* darker cyan for primary-button hover */
+  --accent-hover: #38bdf8;    /* sky-400 for ghost-button border hover */
+  --accent-light: #7dd3fc;    /* sky-300 for text links on dark surfaces */
+  --accent-secondary: #a78bfa;/* Surgewave violet for gradient + dark-mode eyebrow */
+  --lightning: #facc15;       /* Surgewave yellow accent (amber-300) */
+
+  /* Status */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+
+  /* Code */
+  --code-bg: #0f172a;
+  --code-text: #e2e8f0;
+
+  /* Typography & geometry */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-sm: 8px;
+}
+
+:root[data-theme-resolved="dark"] {
+  --bg: #0b1020;
+  --bg-elevated: #0f172a;
+  --bg-footer: color-mix(in srgb, #0b1020 70%, black);
+  --surface: #0f172a;
+  --border: #1e293b;
+  --text: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --code-bg: #020617;
+  --code-text: #f1f5f9;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+code, pre {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.container {
+  /* Aligned to the docs surgewave-theme container (1120px) so the header
+     logo and content rails sit at the same horizontal position when
+     navigating between site (Jekyll) and docs (DocFX). The earlier
+     1160-px value was a 40-px drift that shifted everything 20px
+     left/right on transition. */
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+.container.narrow { max-width: 780px; }
+
+/* Header — transparent by default so the dark hero canvas behind reads
+ * cleanly; gets a translucent backdrop only after the user has scrolled
+ * past the hero. The .scrolled class is toggled by site/_layouts/default.html
+ * when window.scrollY exceeds 20px (mirrors the Bowire pattern). */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid transparent;
+  transition: background 220ms ease, backdrop-filter 220ms ease, border-color 220ms ease;
+}
+.site-header.scrolled {
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  border-bottom-color: var(--border);
+}
+/* While the dark hero is in view (hero-fg present on body via JS toggle),
+ * keep the header text light so the logo + nav read against the dark canvas. */
+body.has-dark-hero:not(.scrolled-past-hero) .site-header {
+  color: #e6ecf5;
+}
+body.has-dark-hero:not(.scrolled-past-hero) .logo,
+body.has-dark-hero:not(.scrolled-past-hero) .header-nav a {
+  color: #e6ecf5;
+}
+/* Hover on the brand logo while the dark hero is in view — same
+ * defeating-specificity dance as the action buttons further down,
+ * white reads better than the cyan accent against the dark canvas. */
+body.has-dark-hero:not(.scrolled-past-hero) .logo:hover {
+  color: #ffffff;
+}
+body.has-dark-hero:not(.scrolled-past-hero) .header-nav a:hover {
+  color: #ffffff;
+}
+body.has-dark-hero:not(.scrolled-past-hero) .theme-toggle,
+body.has-dark-hero:not(.scrolled-past-hero) .nav-github,
+body.has-dark-hero:not(.scrolled-past-hero) .nav-home,
+body.has-dark-hero:not(.scrolled-past-hero) .surgewave-search-trigger {
+  color: rgba(230, 236, 245, 0.85);
+}
+/* Restore the hover transition on the dark hero — without this, the
+ * fixed rgba colour above wins over .theme-toggle:hover { color: accent }
+ * because of the extra body-class specificity, leaving the buttons
+ * "dead" to hover until the hero scrolls past. White on the dark canvas
+ * stays high-contrast where the cyan accent washes out. */
+body.has-dark-hero:not(.scrolled-past-hero) .theme-toggle:hover,
+body.has-dark-hero:not(.scrolled-past-hero) .nav-github:hover,
+body.has-dark-hero:not(.scrolled-past-hero) .nav-home:hover,
+body.has-dark-hero:not(.scrolled-past-hero) .surgewave-search-trigger:hover {
+  color: #ffffff;
+}
+.header-inner {
+  /* 3-column grid (1fr | auto | 1fr) keeps the nav perfectly centred on
+     the page regardless of how wide the logo block on the left or the
+     actions cluster on the right grow. flex+space-between would only
+     centre the nav when the side blocks happen to be equally wide,
+     which they aren't (search-trigger + theme-toggle + GH icon on the
+     right outweighs mark + "Surgewave" on the left). */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 24px;
+  height: 64px;
+}
+.header-inner > .logo { justify-self: start; }
+.header-inner > .header-nav { justify-self: center; }
+.header-inner > .header-actions { justify-self: end; }
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 1.1rem;
+  transition: color 0.15s;
+  color: var(--text);
+}
+.logo:hover {
+  /* Brand wordmark tints to accent on hover, mirroring the docs
+     surgewave-theme .surgewave-docs-logo:hover behaviour. text-decoration:none
+     keeps the link-underline off when the wordmark inherits link
+     colour. */
+  text-decoration: none;
+  color: var(--accent);
+}
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+}
+
+/* Inlined surgewave-mark — used in the site header via {% include surgewave-mark.svg %}.
+ * Lives next to the wordmark; sizing matches .logo-icon for consistency.
+ * Class-only fills so the surrounding stylesheet drives the colours (the
+ * Surgewave site's manual theme toggle sets data-theme-resolved on <html>;
+ * <img>-loaded SVGs cannot see that, so we inline). */
+.surgewave-mark {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: block;
+}
+.surgewave-wave { fill: #33bcff; }
+.surgewave-ink  { fill: #003e60; }
+:root[data-theme-resolved="dark"] .surgewave-wave { fill: #66cfff; }
+:root[data-theme-resolved="dark"] .surgewave-ink  { fill: #ffffff; }
+/* On the dark hero canvas (before the user has scrolled past it) the
+ * HEADER mark is forced to the dark palette so it stays legible — but
+ * scoped to .site-header only so the page-wide theme toggle still
+ * controls everything else (including the marks in the footer / docs). */
+body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-wave { fill: #66cfff; }
+body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill: #ffffff; }
+/* The hero centre lockup always renders on the dark canvas, so it
+ * always uses the dark-mode tones regardless of theme state. The
+ * Surgewave wordmark text inherits the same treatment via .surgewave-text-bold. */
+.hero-fg-logo-slot .surgewave-wave { fill: #66cfff; }
+.hero-fg-logo-slot .surgewave-ink  { fill: #ffffff; }
+.hero-fg-logo-slot .surgewave-text-bold { fill: #ffffff; }
+.header-nav {
+  display: flex;
+  gap: 28px;
+  font-size: 0.95rem;
+}
+.header-nav a {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.header-nav a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* Header action buttons — borderless icon-only chips, Bowire pattern.
+ * Square 32-px hit-area, no border, no background, just a colour
+ * transition on hover (text-secondary → accent). The icon inherits via
+ * currentColor. Transition matches the docs surgewave-theme's 0.15s. */
+.theme-toggle,
+.nav-github,
+.nav-home,
+.surgewave-search-trigger {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+.theme-toggle:hover,
+.nav-github:hover,
+.nav-home:hover,
+.surgewave-search-trigger:hover {
+  color: var(--accent);
+}
+.theme-toggle:focus-visible,
+.nav-github:focus-visible,
+.nav-home:focus-visible,
+.surgewave-search-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Hero */
+.hero {
+  padding: 96px 0 64px;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    var(--bg);
+}
+.hero-eyebrow {
+  display: inline-block;
+  padding: 4px 12px;
+  margin-bottom: 24px;
+  font-size: 0.85rem;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 999px;
+  font-weight: 600;
+}
+:root[data-theme-resolved="dark"] .hero-eyebrow {
+  color: var(--accent-secondary);
+}
+.hero-title {
+  font-size: clamp(2rem, 4vw + 1rem, 3.5rem);
+  line-height: 1.1;
+  font-weight: 800;
+  margin: 0 0 20px;
+  letter-spacing: -0.02em;
+}
+.hero-accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-lede {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  max-width: 680px;
+  margin: 0 0 32px;
+}
+.hero-cta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 48px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.btn:hover { text-decoration: none; transform: translateY(-1px); }
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.btn-primary:hover {
+  background: var(--accent-strong);
+  box-shadow: 0 10px 24px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Hero terminal */
+.hero-terminal {
+  max-width: 680px;
+  background: var(--code-bg);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 30px 60px -30px rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+.terminal-chrome {
+  display: flex;
+  gap: 6px;
+  padding: 12px 14px;
+  background: #1e293b;
+}
+.terminal-chrome span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #334155;
+}
+.terminal-chrome span:nth-child(1) { background: #ef4444; }
+.terminal-chrome span:nth-child(2) { background: #f59e0b; }
+.terminal-chrome span:nth-child(3) { background: #10b981; }
+.hero-terminal pre {
+  margin: 0;
+  padding: 18px 20px;
+  color: var(--code-text);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+.hero-terminal .prompt { color: var(--accent-secondary); margin-right: 8px; }
+.hero-terminal .muted { color: #64748b; display: block; margin-top: 8px; }
+
+/* Sections */
+.features, .cta {
+  padding: 80px 0;
+}
+.section-title {
+  font-size: clamp(1.8rem, 2vw + 1rem, 2.4rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-align: center;
+  margin: 0 0 16px;
+}
+.section-lede {
+  text-align: center;
+  color: var(--text-secondary);
+  max-width: 640px;
+  margin: 0 auto 48px;
+  font-size: 1.05rem;
+}
+
+/* Metrics-strip — hard numbers between hero and features. Visually
+ * distinct from the feature cards (no border, no hover lift, denser
+ * grid, mono numerals) so the page rhythm stays Hero → Numbers → Cards
+ * rather than blurring all three modes together. */
+.metrics-strip {
+  padding: 56px 0 32px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.metrics-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 32px 24px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.metric-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.metric-value {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: clamp(2.2rem, 3.4vw + 0.6rem, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  line-height: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+}
+.metric-unit {
+  font-size: 0.5em;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0;
+}
+.metric-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 6px;
+}
+.metric-note {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+.metrics-strip-footnote {
+  margin: 28px 0 0;
+  font-size: 0.9rem;
+  text-align: center;
+}
+.metrics-strip-footnote a {
+  color: var(--accent);
+  font-weight: 500;
+}
+/* a11y helper for the visually-hidden section heading */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Feature grid */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+}
+.feature-card {
+  padding: 28px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+.feature-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  transform: translateY(-2px);
+}
+.feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  color: #fff;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+}
+.feature-card h3 {
+  font-size: 1.1rem;
+  margin: 0 0 10px;
+}
+.feature-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* CTA */
+.cta {
+  background:
+    radial-gradient(ellipse 50% 30% at 50% 100%, color-mix(in srgb, var(--accent-secondary) 16%, transparent), transparent 70%),
+    var(--bg);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.cta h2 {
+  font-size: clamp(1.8rem, 2vw + 1rem, 2.4rem);
+  margin: 0 0 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.cta p {
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 0 auto 32px;
+  font-size: 1.05rem;
+}
+.cta-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Page hero + body (for features.html, legal, privacy etc.) */
+.page-hero {
+  padding: 80px 0 32px;
+  border-bottom: 1px solid var(--border);
+}
+.page-hero h1 {
+  font-size: clamp(1.8rem, 2vw + 1rem, 2.6rem);
+  margin: 0 0 12px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.page-hero .lede {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  margin: 0;
+}
+.page-body {
+  padding: 48px 0 80px;
+}
+.page-body h2 {
+  margin: 40px 0 16px;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.page-body ul {
+  padding-left: 24px;
+}
+.page-body li {
+  margin: 8px 0;
+}
+.page-body code {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--accent-strong);
+}
+:root[data-theme-resolved="dark"] .page-body code {
+  color: var(--accent-secondary);
+}
+
+/* Footer */
+.site-footer {
+  padding: 64px 0 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-footer);
+}
+.footer-inner {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 40px;
+}
+.footer-col h4 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+}
+.footer-col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.footer-col li { margin: 6px 0; }
+.footer-col a {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+.footer-col a:hover { color: var(--accent); }
+.footer-brand {
+  font-weight: 800;
+  font-size: 1.1rem;
+  margin-bottom: 6px;
+}
+.footer-tag {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  max-width: 280px;
+  margin: 0;
+}
+.footer-bottom {
+  padding-top: 24px;
+  margin-top: 32px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* ============================================================
+ * Pagefind search — ported wholesale from Bowire's site/style.css
+ * (lines 5180-5740) with `bowire-` → `surgewave-` class rename. The
+ * widget rules use Pagefind's documented CSS custom properties and
+ * BEM-style internal classes; both are identical between Bowire and
+ * Surgewave so no further adaptation is needed beyond the wrapper rename.
+ * ============================================================ */
+
+/* Pagefind overlay — dimmed backdrop, centred panel containing the
+   PagefindUI widget. Shared visual between marketing site and docs. */
+.surgewave-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(12vh, 120px);
+  background: rgba(15, 15, 23, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+:root[data-theme-resolved="light"] .surgewave-search-overlay,
+:root[data-theme="light"] .surgewave-search-overlay {
+  background: rgba(200, 200, 220, 0.55);
+}
+.surgewave-search-overlay.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.surgewave-search-overlay-panel {
+  width: min(680px, calc(100% - 48px));
+  max-height: 80vh;
+  /* Flex column so <form> and hint stay fixed while only the results
+     drawer scrolls — the scroll thumb then tracks the results
+     length, not the (form + count + drawer + hint) total. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  padding: 0;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  transform: translateY(-8px);
+  transition: transform 0.2s ease;
+}
+.surgewave-search-overlay.is-open .surgewave-search-overlay-panel {
+  transform: translateY(0);
+}
+
+/* Hint row under the input — centred text on a subtle tertiary tint,
+   kbd glyphs styled as physical keys (sans-serif + 2-px bottom border
+   for depth). */
+.surgewave-search-hint {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-align: center;
+}
+.surgewave-search-hint kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 5px;
+  margin: 0 2px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Theme the Pagefind UI widget to the Surgewave palette via its
+   documented CSS custom properties. Bound to both dark and light theme
+   attributes so the widget switches synchronously with the rest of the
+   site when the user toggles the theme. Attribute selectors (0,2,0)
+   beat Pagefind's default :root (0,1,0). */
+html[data-theme-resolved="dark"],
+html[data-theme="dark"],
+html[data-theme-resolved="light"],
+html[data-theme="light"] {
+  --pagefind-ui-scale: 1;
+  --pagefind-ui-primary: var(--accent);
+  --pagefind-ui-text: var(--text);
+  --pagefind-ui-background: var(--bg-elevated);
+  --pagefind-ui-border: var(--border);
+  --pagefind-ui-tag: var(--surface);
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 10px;
+  --pagefind-ui-image-border-radius: 6px;
+  --pagefind-ui-image-box-ratio: 3 / 2;
+  --pagefind-ui-font: inherit;
+}
+
+/* Form/drawer flex split — the form (input + magnifier ::before icon
+   + count) stays fixed at the top, only the results drawer scrolls. */
+.surgewave-search-overlay .pagefind-ui__form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px;
+}
+.surgewave-search-overlay .pagefind-ui__search-input {
+  flex: 0 0 auto;
+}
+.surgewave-search-overlay .pagefind-ui__drawer {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 16px -20px -20px;
+  padding: 16px 20px 20px;
+}
+.surgewave-search-overlay .pagefind-ui__drawer::-webkit-scrollbar { width: 10px; }
+.surgewave-search-overlay .pagefind-ui__drawer::-webkit-scrollbar-track { background: transparent; }
+.surgewave-search-overlay .pagefind-ui__drawer::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* PagefindUI internal tweaks — applied at the global scope so the
+   dedicated /search.html and the overlay both pick them up. */
+.pagefind-ui {
+  padding-top: 0 !important;
+}
+.pagefind-ui__drawer {
+  gap: 24px !important;
+}
+.pagefind-ui__results-area {
+  margin-top: 8px !important;
+}
+.pagefind-ui__message {
+  color: var(--text-secondary) !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  padding: 8px 0 0 !important;
+  margin: 0 !important;
+  height: auto !important;
+}
+.pagefind-ui__result {
+  /* Pagefind's Svelte build uses flex (not grid) and reserves a
+     30 %-wide thumbnail column on every result via .pagefind-ui__
+     result-thumb. Surgewave results never carry images, so the column
+     leaves a phantom indent that pushes the title + excerpt right
+     by ~30 %. Hide the thumb and let .result-inner take the row. */
+  padding: 18px 0 20px !important;
+  border-top: 1px solid var(--border) !important;
+  cursor: pointer;
+}
+.pagefind-ui__result .pagefind-ui__result-thumb {
+  display: none !important;
+}
+.pagefind-ui__result .pagefind-ui__result-inner {
+  flex: 1 !important;
+  margin-top: 0 !important;
+  width: 100% !important;
+}
+.pagefind-ui__result:first-child {
+  border-top: none !important;
+  padding-top: 0 !important;
+}
+.pagefind-ui__result-title {
+  font-size: 1.0625rem !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+  margin-bottom: 4px !important;
+}
+.pagefind-ui__result-excerpt {
+  font-size: 0.9375rem !important;
+  color: var(--text-secondary) !important;
+  line-height: 1.55 !important;
+}
+.pagefind-ui__result-tags {
+  margin-top: 10px !important;
+}
+.pagefind-ui__result-tag {
+  font-size: 0.75rem !important;
+  padding: 3px 8px !important;
+  color: var(--text-secondary) !important;
+}
+
+/* Input typography + the asymmetric padding that leaves room for
+   Pagefind's ::before magnifier glyph (left) and clear button
+   (right). Without these the input renders cramped and the magnifier
+   sits at the wrong spot. */
+.pagefind-ui__search-input {
+  color: var(--text) !important;
+  font-weight: 500 !important;
+  font-size: 0.9375rem !important;
+  padding: 0 52px 0 44px !important;
+  height: 52px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  line-height: 1 !important;
+}
+/* Pagefind draws the magnifier as a ::before mask on the <form>. The
+   exact centring depends on the form's padding + input height, which
+   differ between the overlay (20 px padding, 52 px input) and the
+   dedicated search page. Scope each. */
+.surgewave-search-overlay .pagefind-ui__form::before {
+  top: 38px !important;
+  left: 34px !important;
+  width: 16px !important;
+  height: 16px !important;
+}
+#search-page-results .pagefind-ui__form::before {
+  top: 18px !important;
+  left: 20px !important;
+  width: 16px !important;
+  height: 16px !important;
+}
+.pagefind-ui__search-input::placeholder {
+  color: var(--text-secondary) !important;
+  opacity: 0.6 !important;
+  font-weight: 400 !important;
+}
+.pagefind-ui__search-input:focus-visible {
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent) !important;
+}
+.surgewave-search-overlay-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.surgewave-search-overlay-panel::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.surgewave-search-overlay-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.surgewave-search-overlay-panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.surgewave-search-overlay-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+  background-clip: padding-box;
+}
+
+/* Dedicated /search.html */
+.search-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+.search-page-title {
+  font-size: clamp(1.8rem, 2vw + 1rem, 2.5rem);
+  font-weight: 800;
+  margin: 0 0 8px;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.search-page-subtitle {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  margin: 0 0 32px;
+}
+
+/* Protocols section */
+.protocols, .use-cases, .comparison, .install, .launch {
+  padding: 80px 0;
+}
+/* "We wrote the framework" services section — Petabridge-style
+ * positioning. Sits between launch and cta on the index page; same
+ * markup powers the standalone /services.html. Visual treatment is
+ * a calm card grid with accent icon-glyphs, no card hover lift so the
+ * tone reads "credibility" rather than "buy now". */
+.services {
+  padding: 96px 0;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  margin-top: 40px;
+}
+.service-card {
+  padding: 28px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.service-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.service-icon svg { width: 22px; height: 22px; }
+.service-card h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+.service-card p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.services-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin: 48px 0 0;
+}
+
+/* Standalone /services.html — long-form "how an engagement works"
+ * carries the same surface as the include above so the page reads
+ * as a continuous block, not two stitched sections. */
+.services-detail {
+  padding: 64px 0 96px;
+  background: var(--bg);
+}
+.services-detail h2 {
+  font-size: 1.75rem;
+  margin: 48px 0 16px;
+}
+.services-detail h2:first-child { margin-top: 0; }
+.services-detail h3 {
+  font-size: 1.05rem;
+  margin: 24px 0 8px;
+}
+.services-detail p {
+  margin: 0 0 16px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.services-detail hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 56px 0;
+}
+
+/* Sections alternate between --bg and --bg-elevated for a calm visual
+ * rhythm down the page. Order under the hero:
+ *   metrics-strip (alt) → features (base) → protocols (alt) →
+ *   use-cases (base) → comparison (alt) → install (base) →
+ *   launch (alt) → cta (base)
+ * Decorative gradients on install / cta layer over their --bg base
+ * so the gradient still reads against the lighter alt sections too. */
+.protocols  { background: var(--bg-elevated); }
+.use-cases  { background: color-mix(in srgb, var(--bg) 96%, var(--accent-secondary)); }
+.comparison { background: var(--bg-elevated); }
+.install {
+  background:
+    radial-gradient(ellipse 50% 30% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    var(--bg);
+}
+.launch { background: var(--bg-elevated); }
+
+.protocol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 32px;
+}
+.protocol-card {
+  display: block;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+.protocol-card:hover {
+  text-decoration: none;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -16px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.protocol-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.protocol-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 999px;
+  color: var(--accent-strong);
+}
+:root[data-theme-resolved="dark"] .protocol-badge {
+  color: var(--accent-light);
+}
+.protocol-badge-strong {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.protocol-badge-accent {
+  background: color-mix(in srgb, var(--lightning) 18%, transparent);
+  border-color: color-mix(in srgb, var(--lightning) 40%, transparent);
+  color: #92400e;
+}
+:root[data-theme-resolved="dark"] .protocol-badge-accent {
+  color: var(--lightning);
+}
+.protocol-card h3 {
+  font-size: 1.05rem;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+.protocol-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+/* Use-cases section */
+.use-case-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 32px;
+}
+.use-case-card {
+  display: block;
+  padding: 28px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+.use-case-card:hover {
+  text-decoration: none;
+  border-color: color-mix(in srgb, var(--accent-secondary) 50%, var(--border));
+  transform: translateY(-2px);
+}
+.use-case-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  color: #fff;
+  border-radius: var(--radius-sm);
+}
+.use-case-icon svg { width: 22px; height: 22px; }
+.use-case-card h3 {
+  font-size: 1.1rem;
+  margin: 0 0 6px;
+  font-weight: 700;
+}
+.use-case-tag {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+.use-case-card p {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.use-case-card p:last-child { margin-bottom: 0; }
+/* Pain → fix → go-next narrative inside each card. The pain leads with
+ * a muted strong-tag, the fix follows with a dense neutral paragraph,
+ * the "go" line is a one-line accent CTA-style link affordance so the
+ * card feels resolved instead of trailing off. */
+.use-case-pain strong,
+.use-case-fix strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.use-case-go {
+  margin-top: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.use-case-card:hover .use-case-go {
+  text-decoration: underline;
+}
+
+/* ============================================================
+ * Use-case pair layout — replaces the .use-case-grid card grid for
+ * the index page. Each pair has a full-width header (icon + title)
+ * above a 2-column body: pain (red-tinted) on the left, Surgewave fix
+ * (cyan-tinted) on the right. Even pairs flip the inner direction
+ * so the eye zigzags down the page rather than scanning a column.
+ * Mobile collapses to a single column (pain above fix).
+ * ============================================================ */
+.use-case-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  margin-top: 40px;
+}
+.use-case-pair {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.use-case-pair-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.use-case-pair-icon {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  color: #fff;
+  border-radius: var(--radius-sm);
+}
+.use-case-pair-icon svg { width: 22px; height: 22px; }
+.use-case-pair-head h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.use-case-pair-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.use-case-pair:nth-child(even) .use-case-pair-body {
+  /* Flip column order on even pairs so pain ↔ fix sides alternate
+     down the page. The DOM order stays pain-then-fix for sensible
+     screen-reader narration; only the visual ordering swaps. */
+  direction: rtl;
+}
+.use-case-pair:nth-child(even) .use-case-pair-pain,
+.use-case-pair:nth-child(even) .use-case-pair-fix {
+  direction: ltr;
+}
+.use-case-pair-pain,
+.use-case-pair-fix {
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.use-case-pair-pain {
+  background: color-mix(in srgb, var(--danger, #ef4444) 7%, transparent);
+  border-right: 1px solid var(--border);
+}
+.use-case-pair-fix {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.use-case-pair-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.use-case-pair-pain .use-case-pair-label {
+  color: var(--danger, #ef4444);
+}
+.use-case-pair-fix .use-case-pair-label {
+  color: var(--accent);
+}
+.use-case-pair-pain p,
+.use-case-pair-fix p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+.use-case-pair-go {
+  margin-top: 8px;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.92rem;
+  align-self: flex-start;
+}
+.use-case-pair-go:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .use-case-pair-body,
+  .use-case-pair:nth-child(even) .use-case-pair-body {
+    grid-template-columns: 1fr;
+    direction: ltr;
+  }
+  .use-case-pair-pain {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .use-case-pair-head {
+    padding: 16px 20px;
+  }
+  .use-case-pair-pain,
+  .use-case-pair-fix {
+    padding: 20px;
+  }
+}
+
+/* Comparison table */
+.comparison-table-wrap {
+  margin-top: 32px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+.comparison-table th, .comparison-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.comparison-table thead th {
+  background: var(--bg);
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 2px solid var(--border);
+}
+.comparison-table tbody th {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.comparison-col-self {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.comparison-cell-self {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  font-weight: 500;
+  color: var(--text);
+}
+.comparison-table tbody tr:last-child th,
+.comparison-table tbody tr:last-child td { border-bottom: none; }
+.comparison-footnote {
+  margin: 24px auto 0;
+  max-width: 820px;
+  text-align: center;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Install grid */
+/* Tabbed install block — single chrome with a tab strip on top and
+ * one visible code panel below. Replaces the previous .install-grid
+ * of 4 parallel cards. JS toggles .is-active between tabs/panels. */
+.install-tabbed {
+  margin: 32px auto 0;
+  max-width: 720px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.install-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0 4px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.install-tab {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.install-tab:hover {
+  color: var(--text);
+}
+.install-tab.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.install-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.install-panels {
+  position: relative;
+}
+.install-panel {
+  margin: 0;
+  padding: 20px 22px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+.install-panel[hidden] { display: none; }
+.install-panel code {
+  font-family: var(--font-mono);
+  white-space: pre;
+}
+.install-comment { color: #64748b; }
+.install-footnote {
+  margin: 24px auto 0;
+  max-width: 720px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+.install-footnote code {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--accent-strong);
+}
+:root[data-theme-resolved="dark"] .install-footnote code {
+  color: var(--accent-light);
+}
+
+/* Launch steps */
+/* Vertical numbered timeline — big accent circles on a continuous
+ * dashed guideline, content sits to the right of each circle. The
+ * circle column is fixed-width; the body column flexes to fill the
+ * remainder. The connecting line is drawn as a ::before on the
+ * timeline element so a single dash strip spans all steps and never
+ * extends past the last circle. */
+.launch-timeline {
+  position: relative;
+  list-style: none;
+  margin: 40px auto 0;
+  padding: 0;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.launch-timeline::before {
+  content: "";
+  position: absolute;
+  left: 23px;
+  top: 24px;
+  bottom: 24px;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--accent), var(--accent-secondary));
+  opacity: 0.35;
+  border-radius: 2px;
+}
+.launch-tl-step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+.launch-tl-num {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  color: #fff;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1.05rem;
+  z-index: 1;
+}
+.launch-tl-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 8px;
+}
+.launch-tl-body h3 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.launch-tl-body pre {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Finish step — checkered-flag icon instead of a number, reversed
+ * gradient + a soft accent glow on the circle so it reads as "goal
+ * reached" rather than "step 4". The body summarises what the
+ * reader now has running and links to the next stops. */
+.launch-tl-finish .launch-tl-num {
+  background: linear-gradient(135deg, var(--accent-secondary), var(--accent));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.launch-tl-finish .launch-tl-body p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+.launch-tl-finish .launch-tl-body p code {
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+/* Old grid still referenced by older markup (kept for compatibility
+ * with any external embed) — unused on index.html since launch.html
+ * now ships the timeline. Remove after a release cycle. */
+.launch-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-top: 32px;
+}
+.launch-step {
+  position: relative;
+  padding: 28px 24px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.launch-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  color: #fff;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  border-radius: 50%;
+}
+.launch-step h3 {
+  font-size: 1.05rem;
+  margin: 0 0 12px;
+  font-weight: 700;
+}
+.launch-step .install-snippet {
+  font-size: 0.82rem;
+  padding: 12px 14px;
+}
+.launch-footnote {
+  margin: 24px auto 0;
+  max-width: 600px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* ============================================================
+ * Force-graph hero — full-bleed dark canvas with a live physics
+ * simulation rendered via SVG. Markup + script live in
+ * site/_includes/hero.html. Keep the styles centralised here so the
+ * cascade resolves predictably with the rest of the site.
+ *
+ * Forced-dark on purpose — the cluster glow + reticle palette were
+ * tuned for a near-black backdrop; light mode would defeat them.
+ * Sections below the hero remain theme-aware.
+ * ============================================================ */
+.hero-fg {
+  position: relative;
+  height: 100vh;
+  min-height: 720px;
+  overflow: hidden;
+  padding: 0;
+  margin-top: -64px; /* pull under the sticky header so canvas runs to the top edge */
+  background:
+    /* Halo anchors at the eye-dot position (33% / 50%) plus the same
+       translate offset that the canvas SVG carries (translate(-17px,
+       -39px) on .hero-fg-canvas). Without the offset, the halo
+       stays at the un-translated section centre and drifts away from
+       the now-shifted force-graph cluster. Mobile recentres in the
+       breakpoint below where layout collapses to one column. */
+    radial-gradient(circle at calc(33% - 19px) calc(50% - 38px), rgba(56, 189, 248, 0.10) 0%, transparent 45%),
+    #080d1a;
+  color: #e6ecf5;
+}
+@media (max-width: 720px) {
+  .hero-fg {
+    background:
+      radial-gradient(circle at 50% 35%, rgba(56, 189, 248, 0.10) 0%, transparent 45%),
+      #080d1a;
+  }
+}
+.hero-fg-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Fine visual nudge so the cluster centre and the lockup centre
+     stay aligned after the lockup's grid placement (left column).
+     Mobile resets this in the breakpoint below since lockup recenters. */
+  transform: translate(-19px, -38px);
+}
+@media (max-width: 720px) {
+  .hero-fg-canvas { transform: none; }
+}
+.hero-fg-canvas svg { width: 100%; height: 100%; }
+
+/* Eye glow — driven by SVG content + a CSS keyframe pulse. The transform
+   anchors on its own bounding box so the breathing effect doesn't shift
+   the eye position. */
+.hero-fg-eye {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: hero-fg-eye 6s ease-in-out infinite;
+}
+@keyframes hero-fg-eye {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50%      { opacity: 1.0;  transform: scale(1.06); }
+}
+
+/* Data-flow on the force-graph edges. The dashes are short relative
+ * to the typical edge length so each line carries 6-12 visible
+ * "packets" at once; stroke-dashoffset animates one full
+ * dash+gap cycle (8 px) per period, producing a steady left-to-right
+ * crawl that reads as data flowing toward the surgewave-eye. Eyelinks
+ * (feature → eye) get a faster cycle so the central feeds feel
+ * higher-bandwidth than the inter-node mesh. */
+.hero-fg-edge {
+  stroke-dasharray: 3 5;
+  animation: hero-fg-flow 1.6s linear infinite;
+}
+.hero-fg-eyelink {
+  stroke-dasharray: 2 4;
+  animation: hero-fg-flow 0.9s linear infinite;
+}
+@keyframes hero-fg-flow {
+  to { stroke-dashoffset: -8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-fg-edge,
+  .hero-fg-eyelink {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+/* Sun layers — three independent breathing animations stacked at the
+ * eye centre. Periods (3.7s / 5.1s / 7.3s) are deliberately co-prime
+ * so the corona, disc, and core never re-sync; the eye reads as
+ * organically alive instead of a single keyframe pulse. */
+.hero-fg-sun-corona,
+.hero-fg-sun-disc,
+.hero-fg-sun-core {
+  transform-origin: center;
+  transform-box: fill-box;
+}
+.hero-fg-sun-corona { animation: hero-fg-sun-corona 7.3s ease-in-out infinite; }
+.hero-fg-sun-disc   { animation: hero-fg-sun-disc   5.1s ease-in-out infinite; }
+.hero-fg-sun-core   { animation: hero-fg-sun-core   3.7s ease-in-out infinite; }
+@keyframes hero-fg-sun-corona {
+  0%, 100% { transform: scale(1);    opacity: 0.85; }
+  50%      { transform: scale(1.18); opacity: 0.55; }
+}
+@keyframes hero-fg-sun-disc {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  50%      { transform: scale(0.94); opacity: 0.92; }
+}
+@keyframes hero-fg-sun-core {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  35%      { transform: scale(1.10); opacity: 0.95; }
+  70%      { transform: scale(0.95); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-fg-eye,
+  .hero-fg-sun-corona,
+  .hero-fg-sun-disc,
+  .hero-fg-sun-core { animation: none; }
+}
+
+.hero-fg-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: rgba(230, 236, 245, 0.78);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+/* Two-column hero layout — Petabridge-style: lockup on the left
+ * over the canvas eye-dot (which the JS positions at viewBox x=528
+ * = ~33% of width), headline / lede / CTAs stack on the right. The
+ * grid collapses to a single column under 720 px so phones get the
+ * stacked centred layout instead of a squeezed two-column. */
+.hero-fg-content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 0 clamp(24px, 5vw, 80px);
+  display: grid;
+  grid-template-columns: minmax(280px, 40%) 1fr;
+  align-items: center;
+  gap: clamp(40px, 6vw, 96px);
+  color: #e6ecf5;
+}
+
+/* Logo slot — vertical lockup as the first grid child, vertically
+ * centred in its column over the canvas eye-dot. No more absolute
+ * positioning; the grid does the placement. */
+.hero-fg-logo-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: clamp(280px, 44vh, 460px);
+  margin: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.hero-fg-logo-slot img,
+.hero-fg-logo-slot svg { height: 100%; width: auto; }
+
+/* Mobile — collapse to single centred column, lockup on top, text
+ * stack below. Same shape the previous centred layout had. */
+@media (max-width: 720px) {
+  .hero-fg-content {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    padding: 0 24px;
+    text-align: center;
+  }
+  .hero-fg-logo-slot {
+    height: clamp(220px, 32vh, 320px);
+  }
+}
+
+/* Hero text overrides — light typography against the dark canvas. */
+.hero-fg-content .hero-eyebrow {
+  color: rgba(230, 236, 245, 0.85);
+  background: rgba(56, 189, 248, 0.06);
+  border-color: rgba(230, 236, 245, 0.18);
+  margin-bottom: 18px;
+}
+.hero-fg-content .hero-title {
+  color: #f6f9ff;
+  max-width: 720px;
+  /* In the two-column layout the headline can scale up — there's no
+     longer a horizontal column constraint from the centred-stack
+     layout. Allow it to wrap naturally over 2 lines on the right
+     column; text-wrap:balance keeps the lines roughly equal length. */
+  font-size: clamp(1.8rem, 2.8vw + 0.8rem, 3.2rem);
+  text-wrap: balance;
+  line-height: 1.15;
+  text-shadow: 0 2px 28px rgba(8, 13, 26, 0.85);
+  margin: 0 0 20px;
+}
+@media (max-width: 720px) {
+  .hero-fg-content .hero-title {
+    font-size: clamp(1.4rem, 5.2vw, 2rem);
+  }
+}
+.hero-fg-content .hero-accent {
+  /* Hold the accent line at the previous H1 size so only "Your Stream."
+     grows when the headline cap is bumped. The accent reads as the
+     supporting punchline, kept proportionally smaller than the lead. */
+  font-size: clamp(1.5rem, 2.2vw + 0.6rem, 2.6rem);
+  background: linear-gradient(135deg, #7dd3fc, #c4b5fd);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-fg-content .hero-lede {
+  color: rgba(230, 236, 245, 0.78);
+  /* Holds the lede under ~80 chars/line in the right column. text-wrap:
+     balance distributes words evenly inside each <br>-bounded segment
+     so neither the bullet line nor the Kafka closer widow. */
+  max-width: 640px;
+  font-size: 1rem;
+  text-wrap: balance;
+  margin: 0 0 32px;
+}
+.hero-fg-content .hero-cta { justify-content: flex-start; margin-bottom: 0; }
+@media (max-width: 720px) {
+  .hero-fg-content .hero-cta { justify-content: center; }
+}
+.hero-fg-content .btn-ghost {
+  color: rgba(230, 236, 245, 0.92);
+  border-color: rgba(230, 236, 245, 0.30);
+}
+.hero-fg-content .btn-ghost:hover {
+  border-color: #7dd3fc;
+  color: #7dd3fc;
+}
+
+@media (max-width: 720px) {
+  .header-nav { display: none; }
+  .footer-inner { grid-template-columns: 1fr 1fr; }
+  .protocols, .use-cases, .comparison, .install, .launch {
+    padding: 64px 0;
+  }
+  .hero-fg { min-height: 100vh; }
+  .hero-fg-content { padding-top: 100px; }
+}

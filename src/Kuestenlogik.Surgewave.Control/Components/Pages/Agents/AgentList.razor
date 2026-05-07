@@ -1,0 +1,183 @@
+@page "/agents"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IAgentConfigService AgentService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>AI Agents - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">AI Agents</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="8">
+            <MudTextField @bind-Value="_searchText" Label="Search agents" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" DebounceInterval="300" />
+        </MudItem>
+        <MudItem xs="12" md="4" Class="d-flex align-center justify-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Href="/agents/builder">
+                Create Agent
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_agents.Count == 0)
+{
+    <MudPaper Elevation="2" Class="pa-8 d-flex flex-column align-center justify-center">
+        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
+        <MudText Typo="Typo.h5" Class="mb-2">No AI Agents Yet</MudText>
+        <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-4">
+            Create your first AI agent to start building intelligent pipeline nodes.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   Href="/agents/builder">
+            Create Agent
+        </MudButton>
+    </MudPaper>
+}
+else
+{
+    <MudGrid>
+        @foreach (var agent in FilteredAgents)
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="2" Class="h-100">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            <MudAvatar Color="@(agent.IsDeployed ? Color.Success : Color.Primary)" Variant="Variant.Outlined">
+                                <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
+                            </MudAvatar>
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@agent.Name</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                @agent.Provider / @agent.Model
+                            </MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudChip T="string" Size="Size.Small"
+                                     Color="@(agent.IsDeployed ? Color.Success : Color.Default)"
+                                     Variant="Variant.Outlined">
+                                @(agent.IsDeployed ? "Deployed" : "Draft")
+                            </MudChip>
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (!string.IsNullOrEmpty(agent.Description))
+                        {
+                            <MudText Typo="Typo.body2" Class="mb-2">@agent.Description</MudText>
+                        }
+                        <MudStack Row="true" Spacing="2" Class="mt-2">
+                            @if (agent.MemoryEnabled)
+                            {
+                                <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Memory"
+                                         Variant="Variant.Text" Color="Color.Info">Memory</MudChip>
+                            }
+                            @if (agent.Tools.Count > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Build"
+                                         Variant="Variant.Text" Color="Color.Warning">
+                                    @agent.Tools.Count tool(s)
+                                </MudChip>
+                            }
+                            <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Thermostat"
+                                     Variant="Variant.Text">
+                                T=@agent.Temperature.ToString("F1")
+                            </MudChip>
+                        </MudStack>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                            Created @agent.CreatedAt.LocalDateTime.ToString("g")
+                        </MudText>
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton Size="Size.Small" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Edit"
+                                   Href="@($"/agents/builder?id={agent.Id}")">
+                            Edit
+                        </MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Success"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow"
+                                   OnClick="@(() => DeployAgent(agent))"
+                                   Disabled="agent.IsDeployed">
+                            Deploy
+                        </MudButton>
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                       Color="Color.Error" Size="Size.Small"
+                                       OnClick="@(() => DeleteAgent(agent))" />
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private List<AgentConfig> _agents = [];
+    private string _searchText = "";
+    private bool _loading = true;
+
+    private IEnumerable<AgentConfig> FilteredAgents => string.IsNullOrWhiteSpace(_searchText)
+        ? _agents
+        : _agents.Where(a =>
+            a.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+            (a.Description?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            a.Model.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAgents();
+    }
+
+    private async Task LoadAgents()
+    {
+        _loading = true;
+        try
+        {
+            _agents = (await AgentService.ListAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load agents: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task DeployAgent(AgentConfig agent)
+    {
+        agent.IsDeployed = true;
+        agent.PipelineId = $"agent-{agent.Id}";
+        await AgentService.SaveAsync(agent);
+        Snackbar.Add($"Agent '{agent.Name}' deployed as pipeline node", Severity.Success);
+        await LoadAgents();
+    }
+
+    private async Task DeleteAgent(AgentConfig agent)
+    {
+        var result = await DialogService.ShowMessageBox(
+            "Delete Agent",
+            $"Are you sure you want to delete agent '{agent.Name}'?",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (result == true)
+        {
+            await AgentService.DeleteAsync(agent.Id);
+            Snackbar.Add($"Agent '{agent.Name}' deleted", Severity.Info);
+            await LoadAgents();
+        }
+    }
+}

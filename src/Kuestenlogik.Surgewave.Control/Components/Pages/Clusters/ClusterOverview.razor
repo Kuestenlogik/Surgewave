@@ -1,0 +1,262 @@
+@page "/clusters"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISurgewaveApiClient ApiClient
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+@inject ClusterState ClusterState
+
+<PageTitle>Cluster Overview - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Cluster Overview</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            All clusters at a glance — health, metrics, and quick-switch
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+        Refresh
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== GLOBAL SUMMARY ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Clusters</MudText>
+                        <MudText Typo="Typo.h5">@_clusters.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Dns"
+                             Color="@(_clusters.All(c => c.Status == "Healthy") ? Color.Success : Color.Warning)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Brokers</MudText>
+                        <MudText Typo="Typo.h5">@_clusters.Sum(c => c.BrokerCount)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Topics</MudText>
+                        <MudText Typo="Typo.h5">@_clusters.Sum(c => c.TopicCount)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Throughput</MudText>
+                        <MudText Typo="Typo.h5">@_clusters.Sum(c => c.ThroughputMessagesPerSec).ToString("F0") msg/s</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== CLUSTER CARDS ===== *@
+@if (_clusters.Count == 0 && !_loading)
+{
+    <MudAlert Severity="Severity.Info">
+        No clusters configured. The default cluster will appear once connected.
+    </MudAlert>
+}
+
+<MudGrid>
+    @foreach (var cluster in _clusters)
+    {
+        var isSelected = cluster.ClusterId == ClusterState.SelectedClusterId ||
+                         (ClusterState.SelectedClusterId == null && cluster == _clusters.First());
+        <MudItem xs="12" md="6" lg="4">
+            <MudCard Elevation="@(isSelected ? 4 : 2)" Class="@(isSelected ? "border-primary" : "")"
+                     Style="@(isSelected ? "border: 2px solid var(--mud-palette-primary);" : "cursor: pointer;")"
+                     @onclick="@(() => SwitchCluster(cluster))">
+                <MudCardHeader>
+                    <CardHeaderAvatar>
+                        <MudAvatar Color="@GetHealthColor(cluster.Status)" Size="Size.Medium">
+                            <MudIcon Icon="@Icons.Material.Filled.Cloud" />
+                        </MudAvatar>
+                    </CardHeaderAvatar>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">@cluster.DisplayName</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@cluster.ClusterId</MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        @if (isSelected)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Active</MudChip>
+                        }
+                        <MudChip T="string" Size="Size.Small" Color="@GetHealthColor(cluster.Status)">
+                            @cluster.Status
+                        </MudChip>
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudGrid>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Brokers</MudText>
+                            <MudText Typo="Typo.body1"><strong>@cluster.BrokerCount</strong></MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Topics</MudText>
+                            <MudText Typo="Typo.body1"><strong>@cluster.TopicCount</strong></MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Partitions</MudText>
+                            <MudText Typo="Typo.body1">@cluster.PartitionCount</MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Consumer Groups</MudText>
+                            <MudText Typo="Typo.body1">@cluster.ConsumerGroupCount</MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Controller</MudText>
+                            <MudText Typo="Typo.body1">Broker @cluster.ControllerId</MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Throughput</MudText>
+                            <MudText Typo="Typo.body1">@cluster.ThroughputMessagesPerSec.ToString("F0") msg/s</MudText>
+                        </MudItem>
+                    </MudGrid>
+
+                    @if (cluster.RaftEnabled)
+                    {
+                        <MudDivider Class="my-2" />
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.HowToVote" Size="Size.Small" Color="Color.Secondary" />
+                            <MudText Typo="Typo.caption">
+                                Raft: @(cluster.RaftState ?? "Unknown") | Leader: Broker @(cluster.ControllerId)
+                            </MudText>
+                        </div>
+                    }
+
+                    <MudDivider Class="my-2" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Last checked: @cluster.LastChecked.ToString("HH:mm:ss")
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
+                               OnClick="@(() => Navigation.NavigateTo("/brokers"))"
+                               StartIcon="@Icons.Material.Filled.Dns">
+                        Brokers
+                    </MudButton>
+                    <MudButton Size="Size.Small" Color="Color.Default" Variant="Variant.Text"
+                               OnClick="@(() => Navigation.NavigateTo("/health"))"
+                               StartIcon="@Icons.Material.Filled.MonitorHeart">
+                        Health
+                    </MudButton>
+                    <MudButton Size="Size.Small" Color="Color.Default" Variant="Variant.Text"
+                               OnClick="@(() => Navigation.NavigateTo("/topics"))"
+                               StartIcon="@Icons.Material.Filled.Topic">
+                        Topics
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    private bool _loading = true;
+    private List<ClusterOverviewInfo> _clusters = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            // Load the default/current cluster
+            var clusterInfo = await ApiClient.GetClusterInfoAsync();
+            var healthDetails = await ApiClient.GetHealthDetailsAsync();
+
+            if (clusterInfo != null)
+            {
+                var groups = await ApiClient.ListConsumerGroupsAsync();
+
+                var overview = new ClusterOverviewInfo
+                {
+                    ClusterId = clusterInfo.ClusterId,
+                    DisplayName = $"Cluster {clusterInfo.ClusterId[..Math.Min(8, clusterInfo.ClusterId.Length)]}",
+                    Status = healthDetails?.Status ?? "Unknown",
+                    BrokerCount = clusterInfo.BrokerCount,
+                    TopicCount = clusterInfo.TopicCount,
+                    PartitionCount = clusterInfo.PartitionCount,
+                    ConsumerGroupCount = groups.Count,
+                    ControllerId = clusterInfo.ControllerId,
+                    RaftEnabled = healthDetails?.RaftEnabled ?? false,
+                    RaftState = healthDetails?.RaftState,
+                    ThroughputMessagesPerSec = SimThroughput(clusterInfo.ClusterId),
+                    LastChecked = DateTimeOffset.UtcNow
+                };
+
+                _clusters = [overview];
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load clusters: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SwitchCluster(ClusterOverviewInfo cluster)
+    {
+        ClusterState.SelectedClusterId = cluster.ClusterId;
+        Notification.ShowSuccess($"Switched to cluster '{cluster.DisplayName}'");
+    }
+
+    private static double SimThroughput(string clusterId)
+    {
+        return Math.Abs(clusterId.GetHashCode() % 10000) + 500.0;
+    }
+
+    private static Color GetHealthColor(string status) => status switch
+    {
+        "Healthy" => Color.Success,
+        "Degraded" => Color.Warning,
+        "Unhealthy" => Color.Error,
+        _ => Color.Default
+    };
+}

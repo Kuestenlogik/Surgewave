@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: surgewave
+  labels:
+    app: surgewave
+    app.kubernetes.io/name: surgewave
+    app.kubernetes.io/component: broker
+spec:
+  serviceName: surgewave-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: surgewave
+  template:
+    metadata:
+      labels:
+        app: surgewave
+        app.kubernetes.io/name: surgewave
+        app.kubernetes.io/component: broker
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: surgewave
+          image: surgewave:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: kafka
+              containerPort: 9092
+              protocol: TCP
+            - name: grpc
+              containerPort: 9093
+              protocol: TCP
+            - name: replication
+              containerPort: 10092
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: Surgewave_BROKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: Surgewave__BrokerId
+              value: "$(POD_NAME)"
+            - name: Surgewave__Host
+              value: "0.0.0.0"
+            - name: Surgewave__Port
+              value: "9092"
+            - name: Surgewave__GrpcPort
+              value: "9093"
+            - name: Surgewave__DataDirectory
+              value: "/data"
+            - name: Surgewave__UseRaftConsensus
+              value: "true"
+            - name: Surgewave__ClusterNodes
+              value: "surgewave-0:surgewave-0.surgewave-headless:10092,surgewave-1:surgewave-1.surgewave-headless:10092,surgewave-2:surgewave-2.surgewave-headless:10092"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: grpc
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /app/appsettings.json
+              subPath: appsettings.json
+      volumes:
+        - name: config
+          configMap:
+            name: surgewave-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi

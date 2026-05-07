@@ -1,0 +1,140 @@
+# Surgewave container images are built via .NET's native container support.
+# Easiest path — use the publish script (builds all services + loads into Docker):
+#   .\scripts\publish.ps1                     (default: executables + containers)
+#   .\scripts\publish.ps1 -Mode Container     (containers only)
+#
+# Produces:
+#   * Images registered in the local Docker daemon (surgewave/surgewave-*:0.1.0)
+#   * Portable .tar archives under artifacts/pub/containers/
+#     → loadable on any host via: docker load -i <file>.tar
+#
+# Manual per-project build:
+#   dotnet publish src/Kuestenlogik.Surgewave.Broker         -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Gateway        -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Control        -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Marketplace    -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Connect.Worker -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Cli            -c Release /t:PublishContainer
+#
+# Run: docker compose up -d
+# CLI (on-demand, not auto-started): docker compose run --rm surgewave-cli --help
+
+services:
+  surgewave-broker:
+    image: surgewave/surgewave-broker:0.1.0
+    container_name: surgewave-broker
+    user: "0:0"
+    ports:
+      - "9092:9092"   # Kafka protocol
+      - "9093:9093"   # gRPC
+      - "1883:1883"   # MQTT
+    volumes:
+      - surgewave-data:/app/data
+      - surgewave-logs:/app/logs
+      # Shared plugin volume. Plugins installed via 'surgewave plugin install' land here
+      # along with their pluginsettings.json defaults. The broker layers these defaults
+      # into IConfiguration at startup (lowest priority — appsettings.json wins).
+      - surgewave-plugins:/app/plugins
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - Surgewave__Broker__AdvertisedListeners=PLAINTEXT://surgewave-broker:9092
+      - Surgewave__PluginsDirectory=/app/plugins
+    restart: unless-stopped
+    networks:
+      - surgewave-network
+
+  surgewave-gateway:
+    image: surgewave/surgewave-gateway:0.1.0
+    container_name: surgewave-gateway
+    ports:
+      - "8082:8082"   # Gateway HTTP
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - ASPNETCORE_URLS=http://+:8082
+      - Surgewave__Broker__BootstrapServers=surgewave-broker:9092
+    depends_on:
+      - surgewave-broker
+    restart: unless-stopped
+    networks:
+      - surgewave-network
+
+  surgewave-connect:
+    image: surgewave/surgewave-connect:0.1.0
+    container_name: surgewave-connect
+    user: "0:0"
+    ports:
+      - "8083:8083"   # Connect REST API
+    volumes:
+      # Shared plugin volume — same as broker. Connectors installed as .swpkg packages
+      # land here with their pluginsettings.json defaults.
+      - surgewave-plugins:/app/plugins
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - Surgewave__Connect__BootstrapServers=surgewave-broker:9092
+      - Surgewave__PluginsDirectory=/app/plugins
+    depends_on:
+      - surgewave-broker
+    restart: unless-stopped
+    networks:
+      - surgewave-network
+
+  surgewave-control:
+    image: surgewave/surgewave-control:0.1.0
+    container_name: surgewave-control
+    ports:
+      - "5050:5050"   # Control UI
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - ASPNETCORE_URLS=http://+:5050
+      - Surgewave__Broker__BootstrapServers=surgewave-broker:9092
+    depends_on:
+      - surgewave-broker
+    restart: unless-stopped
+    networks:
+      - surgewave-network
+
+  surgewave-marketplace:
+    image: surgewave/surgewave-marketplace:0.1.0
+    container_name: surgewave-marketplace
+    user: "0:0"
+    ports:
+      - "5060:5060"   # Marketplace (API + UI)
+    volumes:
+      - marketplace-data:/app/data
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - ASPNETCORE_URLS=http://+:5060
+      - Surgewave__Marketplace__DataDirectory=/app/data
+    restart: unless-stopped
+    networks:
+      - surgewave-network
+
+  # On-demand CLI. Not started by `docker compose up` — use `docker compose run`:
+  #   docker compose run --rm surgewave-cli --help
+  #   docker compose run --rm surgewave-cli topics list --brokers surgewave-broker:9092
+  # The `cli` profile keeps this service out of the default up/down lifecycle.
+  surgewave-cli:
+    image: surgewave/surgewave-cli:0.1.0
+    profiles: ["cli"]
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+    networks:
+      - surgewave-network
+
+volumes:
+  surgewave-data:
+    driver: local
+  surgewave-logs:
+    driver: local
+  # Shared between broker + connect worker. Holds installed .swpkg plugins and
+  # their bundled pluginsettings.json defaults. The volume persists plugin
+  # state across container restarts — the broker and connect worker both read
+  # pluginsettings.json on startup to layer default configuration.
+  surgewave-plugins:
+    driver: local
+  marketplace-data:
+    driver: local
+
+networks:
+  surgewave-network:
+    driver: bridge

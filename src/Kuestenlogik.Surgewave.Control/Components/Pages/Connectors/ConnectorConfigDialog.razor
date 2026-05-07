@@ -1,0 +1,57 @@
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6" Class="mb-4">@ConnectorName</MudText>
+
+        @if (Config.Any())
+        {
+            <MudSimpleTable Dense="true" Striped="true" Hover="true" Style="overflow-x: auto;">
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in Config.OrderBy(e => e.Key))
+                    {
+                        <tr>
+                            <td><code>@entry.Key</code></td>
+                            <td>
+                                @if (IsSensitiveKey(entry.Key))
+                                {
+                                    <MudText Color="Color.Secondary">********</MudText>
+                                }
+                                else
+                                {
+                                    @entry.Value
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info">No configuration entries</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string ConnectorName { get; set; } = "";
+    [Parameter] public Dictionary<string, string> Config { get; set; } = new();
+
+    private void Close() => MudDialog.Close();
+
+    private static bool IsSensitiveKey(string key) =>
+        key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+        key.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+        key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+        key.Contains("key", StringComparison.OrdinalIgnoreCase) && key.Contains("api", StringComparison.OrdinalIgnoreCase);
+}

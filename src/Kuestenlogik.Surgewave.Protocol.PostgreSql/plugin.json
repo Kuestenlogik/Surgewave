@@ -1,0 +1,10 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.protocol.postgresql",
+  "name": "PostgreSQL Protocol",
+  "version": "0.1.0",
+  "description": "PostgreSQL wire protocol support for Surgewave broker — lets psql and any PostgreSQL client query topics using SQL.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Protocol.PostgreSql.dll" ],
+  "pluginSettings": "pluginsettings.json",
+  "tags": [ "protocol", "postgresql", "sql", "community" ]
+}

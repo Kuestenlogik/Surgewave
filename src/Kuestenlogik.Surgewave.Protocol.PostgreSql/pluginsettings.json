@@ -1,0 +1,11 @@
+{
+  "Surgewave": {
+    "PostgreSql": {
+      "Enabled": false,
+      "Port": 5432,
+      "RequirePassword": false,
+      "MaxConnections": 100,
+      "ServerVersion": "16.0"
+    }
+  }
+}

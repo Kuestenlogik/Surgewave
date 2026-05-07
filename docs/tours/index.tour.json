@@ -1,0 +1,31 @@
+{
+    "id": "docs-welcome",
+    "title": "Welcome to Surgewave Documentation",
+    "triggerMode": "auto-first-visit",
+    "steps": [
+        {
+            "id": "welcome",
+            "title": "Welcome to Surgewave Docs",
+            "text": "This is the official documentation for Kuestenlogik.Surgewave, a high-performance Kafka replacement built with .NET 10. Let's take a quick tour!",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "nav",
+            "title": "Navigation",
+            "text": "Use the sidebar to navigate between sections: Features, Clients, AI Integration, Storage, and more.",
+            "attachTo": { "element": "#toc", "on": "right" }
+        },
+        {
+            "id": "search",
+            "title": "Search",
+            "text": "Use the search bar to quickly find topics across all documentation.",
+            "attachTo": { "element": "#search", "on": "bottom" }
+        },
+        {
+            "id": "next-steps",
+            "title": "Get Started",
+            "text": "Head to the Quickstart guide to set up your first Surgewave broker, or explore the Client documentation to start coding.",
+            "attachTo": { "element": "article", "on": "top" }
+        }
+    ]
+}

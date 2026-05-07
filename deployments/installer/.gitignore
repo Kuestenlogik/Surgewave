@@ -1,0 +1,10 @@
+# Build output
+publish/
+*.msi
+*.wixpdb
+*.wixobj
+bin/
+obj/
+
+# Generated icon (regenerate from icon.png)
+Kuestenlogik.Surgewave.Installer/surgewave.ico

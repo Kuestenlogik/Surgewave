@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Gateway</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>surgewave-gateway</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Container Publishing: dotnet publish src/Kuestenlogik.Surgewave.Gateway -c Release /t:PublishContainer -->
+  <PropertyGroup>
+    <ContainerRepository>surgewave/surgewave-gateway</ContainerRepository>
+    <ContainerImageTag>0.1.0</ContainerImageTag>
+    <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Grpc.JsonTranscoding" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
+    <PackageReference Include="Kuestenlogik.Bowire" />
+    <PackageReference Include="Google.Api.CommonProtos" />
+    <!-- OpenTelemetry -->
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.Grpc\Kuestenlogik.Surgewave.Api.Grpc.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Publish-specific settings for optimized/trimmed builds -->
+  <!-- No trimming — Gateway uses Reflection (gRPC, JSON transcoding) -->
+  <!-- Use: dotnet publish -c Release -p:Optimized=true -r win-x64 -->
+  <PropertyGroup Condition="'$(Optimized)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <ReadyToRun>true</ReadyToRun>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+  </PropertyGroup>
+
+</Project>

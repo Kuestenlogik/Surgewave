@@ -1,0 +1,26 @@
+- name: Tutorials
+  href: index.md
+
+- name: Getting Started
+  href: 01-getting-started.md
+
+- name: Producers & Consumers
+  href: 02-producers-consumers.md
+
+- name: Consumer Groups
+  href: 03-consumer-groups.md
+
+- name: Kafka Connect
+  href: 04-kafka-connect.md
+
+- name: Kafka Streams
+  href: 05-kafka-streams.md
+
+- name: Schema Registry
+  href: 06-schema-registry.md
+
+- name: Clustering
+  href: 07-clustering.md
+
+- name: AI Agents
+  href: 08-ai-agents.md

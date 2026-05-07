@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- CLI runtime files (harvested from publish output) -->
+    <ComponentGroup Id="CliFiles" Directory="CliDir">
+      <Files Include="$(var.CliPublishDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

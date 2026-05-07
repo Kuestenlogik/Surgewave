@@ -1,0 +1,186 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [
+            "artifacts/bin/Kuestenlogik.Surgewave.Core/Release/Kuestenlogik.Surgewave.Core.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Protocol/Release/Kuestenlogik.Surgewave.Protocol.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Protocol.Kafka/Release/Kuestenlogik.Surgewave.Protocol.Kafka.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Protocol.Native/Release/Kuestenlogik.Surgewave.Protocol.Native.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Client/Release/Kuestenlogik.Surgewave.Client.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Broker/Release/Kuestenlogik.Surgewave.Broker.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Runtime/Release/Kuestenlogik.Surgewave.Runtime.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Hosting/Release/Kuestenlogik.Surgewave.Hosting.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Clustering/Release/Kuestenlogik.Surgewave.Clustering.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Abstractions/Release/Kuestenlogik.Surgewave.Storage.Abstractions.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Memory/Release/Kuestenlogik.Surgewave.Storage.Memory.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.FileSystem/Release/Kuestenlogik.Surgewave.Storage.FileSystem.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Arrow/Release/Kuestenlogik.Surgewave.Storage.Arrow.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Tiering/Release/Kuestenlogik.Surgewave.Storage.Tiering.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Streams/Release/Kuestenlogik.Surgewave.Streams.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect/Release/Kuestenlogik.Surgewave.Connect.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect.FileStream/Release/Kuestenlogik.Surgewave.Connect.FileStream.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect.Http/Release/Kuestenlogik.Surgewave.Connect.Http.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect.Database/Release/Kuestenlogik.Surgewave.Connect.Database.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect.S3/Release/Kuestenlogik.Surgewave.Connect.S3.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect.Mirror/Release/Kuestenlogik.Surgewave.Connect.Mirror.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Schema.Registry/Release/Kuestenlogik.Surgewave.Schema.Registry.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Schema.Registry.Abstractions/Release/Kuestenlogik.Surgewave.Schema.Registry.Abstractions.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Grpc/Release/Kuestenlogik.Surgewave.Grpc.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Transport/Release/Kuestenlogik.Surgewave.Transport.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Transport.Tcp/Release/Kuestenlogik.Surgewave.Transport.Tcp.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Transport.SharedMemory/Release/Kuestenlogik.Surgewave.Transport.SharedMemory.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Cli/Release/Kuestenlogik.Surgewave.Cli.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Operator/Release/Kuestenlogik.Surgewave.Operator.dll"
+          ],
+          "src": ".."
+        }
+      ],
+      "dest": "../artifacts/docs/api",
+      "disableGitFeatures": false,
+      "includePrivateMembers": false,
+      "namespaceLayout": "flattened"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [
+          "**.yml"
+        ],
+        "src": "../artifacts/docs/api",
+        "dest": "api"
+      },
+      {
+        "files": [
+          "*.md"
+        ],
+        "src": "api",
+        "dest": "api"
+      },
+      {
+        "files": [
+          "quickstart/**.md",
+          "quickstart/**/toc.yml",
+          "setup/**.md",
+          "setup/**/toc.yml",
+          "storage/**.md",
+          "storage/**/toc.yml",
+          "transport/**.md",
+          "transport/**/toc.yml",
+          "clients/**.md",
+          "clients/**/toc.yml",
+          "features/**.md",
+          "features/**/toc.yml",
+          "clustering/**.md",
+          "clustering/**/toc.yml",
+          "security/**.md",
+          "security/**/toc.yml",
+          "deployment/**.md",
+          "deployment/**/toc.yml",
+          "tools/**.md",
+          "tools/**/toc.yml",
+          "performance/**.md",
+          "performance/**/toc.yml",
+          "monitoring/**.md",
+          "monitoring/**/toc.yml",
+          "samples/**.md",
+          "samples/**/toc.yml",
+          "operations/**.md",
+          "operations/**/toc.yml",
+          "architecture/**.md",
+          "architecture/**/toc.yml",
+          "connectors/**.md",
+          "connectors/**/toc.yml",
+          "ai/**.md",
+          "ai/**/toc.yml",
+          "testing/**.md",
+          "testing/**/toc.yml",
+          "migration/**.md",
+          "migration/**/toc.yml",
+          "tutorials/**.md",
+          "tutorials/**/toc.yml",
+          "api/*.md",
+          "toc.yml",
+          "*.md"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": [
+          "images/**",
+          "logo.svg",
+          "favicon.ico",
+          "tours/**"
+        ]
+      }
+    ],
+    "dest": "../artifacts/docs",
+    "template": [
+      "default",
+      "modern",
+      "templates/material",
+      "templates/mermaid",
+      "templates/shepherd",
+      "templates/surgewave-theme"
+    ],
+    "globalMetadata": {
+      "_appTitle": "Surgewave Documentation",
+      "_appName": "Surgewave",
+      "_appLogoPath": "logo.svg",
+      "_appFaviconPath": "favicon.ico",
+      "_enableSearch": false,
+      "_enableNewTab": true,
+      "_disableContribution": false,
+      "_gitContribute": {
+        "repo": "https://github.com/Kuestenlogik/Surgewave",
+        "branch": "main"
+      },
+      "_gitUrlPattern": "github",
+      "pdf": false
+    },
+    "postProcessors": ["ExtractSearchIndex"],
+    "keepFileLink": false,
+    "disableGitFeatures": false
+  },
+  "pdf": {
+    "content": [
+      {
+        "files": [
+          "quickstart/**.md",
+          "setup/**.md",
+          "features/**.md",
+          "clients/**.md",
+          "storage/**.md",
+          "clustering/**.md",
+          "security/**.md",
+          "deployment/**.md",
+          "operations/**.md",
+          "connectors/**.md",
+          "ai/**.md",
+          "testing/**.md",
+          "migration/**.md",
+          "tutorials/**.md",
+          "toc.yml",
+          "*.md"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": [
+          "images/**",
+          "logo.svg"
+        ]
+      }
+    ],
+    "dest": "../artifacts/docs-pdf",
+    "cover": "_pdfcover/cover.html",
+    "generatesAppendices": false,
+    "keepRawFiles": false,
+    "name": "Surgewave Reference Handbook",
+    "generatesExternalLink": false
+  }
+}

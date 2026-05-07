@@ -1,0 +1,298 @@
+@page "/pipelines/{PipelineId}/executions/{ExecutionId}"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+
+<PageTitle>Execution Details - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_execution == null)
+{
+    <MudAlert Severity="Severity.Error">Execution not found</MudAlert>
+}
+else
+{
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="8">
+            <MudText Typo="Typo.h4" Class="mb-2">Execution Details</MudText>
+            <MudText Typo="Typo.subtitle1" Color="Color.Secondary">@_execution.PipelineName</MudText>
+        </MudItem>
+        <MudItem xs="12" md="4" Class="d-flex align-center justify-end">
+            <MudChip T="string" Size="Size.Large" Color="@GetStatusColor(_execution.Status)">
+                @_execution.Status
+            </MudChip>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="3">
+            <MudPaper Elevation="2" Class="pa-4">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Started</MudText>
+                <MudText Typo="Typo.h6">@_execution.StartedAt.LocalDateTime.ToString("g")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudPaper Elevation="2" Class="pa-4">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Duration</MudText>
+                <MudText Typo="Typo.h6">
+                    @if (_execution.DurationMs.HasValue)
+                    {
+                        @FormatDuration(_execution.DurationMs.Value)
+                    }
+                    else
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                    }
+                </MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudPaper Elevation="2" Class="pa-4">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Records Processed</MudText>
+                <MudText Typo="Typo.h6">@_execution.RecordsProcessed.ToString("N0")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudPaper Elevation="2" Class="pa-4">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Failed Records</MudText>
+                <MudText Typo="Typo.h6" Color="@(_execution.RecordsFailed > 0 ? Color.Error : Color.Default)">
+                    @_execution.RecordsFailed.ToString("N0")
+                </MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    @if (!string.IsNullOrEmpty(_execution.Error))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">
+            <MudText Typo="Typo.subtitle1">Error</MudText>
+            <MudText>@_execution.Error</MudText>
+            @if (!string.IsNullOrEmpty(_execution.StackTrace))
+            {
+                <MudExpansionPanels Class="mt-2">
+                    <MudExpansionPanel Text="Stack Trace">
+                        <pre style="white-space: pre-wrap; font-size: 12px;">@_execution.StackTrace</pre>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            }
+        </MudAlert>
+    }
+
+    <MudText Typo="Typo.h5" Class="mb-4">Node Execution</MudText>
+
+    <MudTable Items="@_execution.Nodes" Dense="true" Hover="true" Striped="true" Elevation="2">
+        <HeaderContent>
+            <MudTh>Node</MudTh>
+            <MudTh Style="width: 100px">Status</MudTh>
+            <MudTh Style="width: 100px">Records In</MudTh>
+            <MudTh Style="width: 100px">Records Out</MudTh>
+            <MudTh Style="width: 100px">Failed</MudTh>
+            <MudTh Style="width: 100px">Duration</MudTh>
+            <MudTh Style="width: 80px">Samples</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Node">
+                <MudText Typo="Typo.body2">@(context.NodeLabel ?? context.NodeId)</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@GetConnectorDisplayName(context.ConnectorType)</MudText>
+                @if (!string.IsNullOrEmpty(context.Error))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error">@context.Error</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                    @context.Status
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Records In">@context.RecordsIn.ToString("N0")</MudTd>
+            <MudTd DataLabel="Records Out">@context.RecordsOut.ToString("N0")</MudTd>
+            <MudTd DataLabel="Failed">
+                <MudText Color="@(context.RecordsFailed > 0 ? Color.Error : Color.Default)">
+                    @context.RecordsFailed.ToString("N0")
+                </MudText>
+            </MudTd>
+            <MudTd DataLabel="Duration">@FormatDuration(context.DurationMs)</MudTd>
+            <MudTd DataLabel="Samples">
+                @if (context.SampleInputs?.Count > 0 || context.SampleOutputs?.Count > 0)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Preview" Size="Size.Small"
+                                   OnClick="@(() => ShowSamples(context))" />
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudDialog @bind-Visible="_showSamplesDialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Sample Records - @_selectedNode?.NodeLabel</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_selectedNode != null)
+        {
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+                <MudTabPanel Text="Input Samples" Disabled="@(_selectedNode.SampleInputs?.Count == 0)">
+                    @if (_selectedNode.SampleInputs?.Count > 0)
+                    {
+                        <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sample in _selectedNode.SampleInputs)
+                                {
+                                    <tr>
+                                        <td>@sample.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff")</td>
+                                        <td><code>@(sample.Key ?? "(null)")</code></td>
+                                        <td>
+                                            <code style="white-space: pre-wrap; max-width: 400px; display: block; overflow: auto;">@sample.Value</code>
+                                            @if (sample.Truncated)
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Warning">(truncated)</MudText>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                    else
+                    {
+                        <MudText>No input samples available</MudText>
+                    }
+                </MudTabPanel>
+                <MudTabPanel Text="Output Samples" Disabled="@(_selectedNode.SampleOutputs?.Count == 0)">
+                    @if (_selectedNode.SampleOutputs?.Count > 0)
+                    {
+                        <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sample in _selectedNode.SampleOutputs)
+                                {
+                                    <tr>
+                                        <td>@sample.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff")</td>
+                                        <td><code>@(sample.Key ?? "(null)")</code></td>
+                                        <td>
+                                            <code style="white-space: pre-wrap; max-width: 400px; display: block; overflow: auto;">@sample.Value</code>
+                                            @if (sample.Truncated)
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Warning">(truncated)</MudText>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                    else
+                    {
+                        <MudText>No output samples available</MudText>
+                    }
+                </MudTabPanel>
+            </MudTabs>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showSamplesDialog = false)">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter]
+    public string PipelineId { get; set; } = "";
+
+    [Parameter]
+    public string ExecutionId { get; set; } = "";
+
+    private bool _loading = true;
+    private ExecutionRecord? _execution;
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    private bool _showSamplesDialog;
+    private NodeExecutionRecord? _selectedNode;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Pipelines", "/pipelines"),
+            new("Edit", $"/pipelines/{PipelineId}/edit"),
+            new("History", $"/pipelines/{PipelineId}/history"),
+            new("Execution", null, disabled: true)
+        ];
+
+        await LoadExecutionAsync();
+    }
+
+    private async Task LoadExecutionAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            _execution = await ApiClient.GetExecutionAsync(PipelineId, ExecutionId);
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load execution: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowSamples(NodeExecutionRecord node)
+    {
+        _selectedNode = node;
+        _showSamplesDialog = true;
+    }
+
+    private static Color GetStatusColor(ExecutionStatus status) => status switch
+    {
+        ExecutionStatus.Completed => Color.Success,
+        ExecutionStatus.Failed => Color.Error,
+        ExecutionStatus.Running => Color.Info,
+        ExecutionStatus.Cancelled => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string FormatDuration(long ms)
+    {
+        if (ms < 1000) return $"{ms}ms";
+        if (ms < 60000) return $"{ms / 1000.0:F1}s";
+        if (ms < 3600000) return $"{ms / 60000.0:F1}m";
+        return $"{ms / 3600000.0:F1}h";
+    }
+
+    private static string GetConnectorDisplayName(string className)
+    {
+        var lastDot = className.LastIndexOf('.');
+        var name = lastDot >= 0 ? className[(lastDot + 1)..] : className;
+        if (name.EndsWith("Connector", StringComparison.OrdinalIgnoreCase))
+        {
+            name = name[..^9];
+        }
+        return name;
+    }
+}

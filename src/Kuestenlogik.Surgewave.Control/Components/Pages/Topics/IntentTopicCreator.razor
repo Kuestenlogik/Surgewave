@@ -1,0 +1,383 @@
+@page "/topics/intent"
+@attribute [Authorize(Policy = SurgewavePolicies.TopicsManage)]
+@inject HttpClient Http
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject NavigationManager Navigation
+
+<PageTitle>Intent Topic Creator - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+<MudText Typo="Typo.h4" Class="mb-2">Intent Topic Creator</MudText>
+<MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-4">
+    Describe what you need and Surgewave will figure out the optimal configuration.
+</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="8">
+        <MudCard Elevation="2" Class="pa-4">
+            <MudForm @ref="_form">
+                <MudTextField @bind-Value="_description" Label="Describe what you need this topic for..."
+                              Variant="Variant.Outlined" Lines="2" Required="true"
+                              Placeholder="e.g., high-availability payment processing, IoT sensor data, GDPR-compliant user events"
+                              HelperText="Use keywords like: high-availability, GDPR, IoT, payment, low-latency, analytics, logging" />
+
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-3 mb-2">Quick Intents:</MudText>
+                <div class="d-flex flex-wrap gap-2 mb-4">
+                    @foreach (var chip in _quickIntents)
+                    {
+                        <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined"
+                                 OnClick="@(() => SetDescription(chip))">
+                            @chip
+                        </MudChip>
+                    }
+                </div>
+
+                <MudExpansionPanels Class="mb-4">
+                    <MudExpansionPanel Text="Advanced Context (optional)">
+                        <MudGrid>
+                            <MudItem xs="12" md="6">
+                                <MudTextField @bind-Value="_topicName" Label="Topic Name (optional)"
+                                              Variant="Variant.Outlined"
+                                              HelperText="Leave empty to auto-generate from intent" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect @bind-Value="_environment" Label="Environment"
+                                           Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@("")">Not specified</MudSelectItem>
+                                    <MudSelectItem Value="@("dev")">Development</MudSelectItem>
+                                    <MudSelectItem Value="@("staging")">Staging</MudSelectItem>
+                                    <MudSelectItem Value="@("production")">Production</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudNumericField @bind-Value="_expectedDeviceCount" Label="Expected Device Count"
+                                                 Variant="Variant.Outlined" Min="0"
+                                                 HelperText="Number of producers/devices" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudNumericField @bind-Value="_expectedMessagesPerSec" Label="Expected Messages/sec"
+                                                 Variant="Variant.Outlined" Min="0"
+                                                 HelperText="Expected throughput" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect @bind-Value="_dataClassification" Label="Data Classification"
+                                           Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@("")">Not specified</MudSelectItem>
+                                    <MudSelectItem Value="@("public")">Public</MudSelectItem>
+                                    <MudSelectItem Value="@("internal")">Internal</MudSelectItem>
+                                    <MudSelectItem Value="@("confidential")">Confidential</MudSelectItem>
+                                    <MudSelectItem Value="@("pii")">PII (Personal Data)</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudNumericField @bind-Value="_brokerCount" Label="Broker Count"
+                                                 Variant="Variant.Outlined" Min="0"
+                                                 HelperText="Number of brokers in cluster (0 = unknown)" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+
+                <div class="d-flex justify-end gap-2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                               OnClick="ResolveAsync" Disabled="@(string.IsNullOrWhiteSpace(_description) || _resolving)">
+                        @if (_resolving)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        }
+                        Preview Configuration
+                    </MudButton>
+                </div>
+            </MudForm>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="4">
+        <MudCard Elevation="1" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">How It Works</MudText>
+            <MudList T="string" Dense="true">
+                <MudListItem Icon="@Icons.Material.Filled.Description">
+                    Describe your use case in natural language
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.AutoFixHigh">
+                    Surgewave matches keywords to built-in rules
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.MergeType">
+                    Multiple rules stack for combined configs
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.Tune">
+                    Context (env, device count) refines settings
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.CheckCircle">
+                    Preview, adjust, then create with one click
+                </MudListItem>
+            </MudList>
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Supports English and German keywords. Works without LLM.
+            </MudText>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@if (_result is not null)
+{
+    <MudCard Elevation="3" Class="pa-4 mt-4">
+        <MudText Typo="Typo.h5" Class="mb-3">Resolved Configuration</MudText>
+
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudField Label="Topic Name" Variant="Variant.Outlined">@_result.TopicName</MudField>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudField Label="Partitions" Variant="Variant.Outlined">@_result.Partitions</MudField>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudField Label="Replication Factor" Variant="Variant.Outlined">@_result.ReplicationFactor</MudField>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudField Label="Confidence" Variant="Variant.Outlined">
+                    <MudProgressLinear Color="@GetConfidenceColor(_result.Confidence)"
+                                       Value="@(_result.Confidence * 100)" Class="my-1" />
+                    @($"{_result.Confidence:P0}")
+                </MudField>
+            </MudItem>
+        </MudGrid>
+
+        @if (_result.TopicConfig.Count > 0)
+        {
+            <MudText Typo="Typo.h6" Class="mt-4 mb-2">Topic Configuration</MudText>
+            <MudSimpleTable Dense="true" Bordered="true" Striped="true">
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var kvp in _result.TopicConfig)
+                    {
+                        <tr>
+                            <td><code>@kvp.Key</code></td>
+                            <td>@kvp.Value</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+
+        @if (_result.AppliedRules.Count > 0)
+        {
+            <MudText Typo="Typo.h6" Class="mt-4 mb-2">Applied Rules</MudText>
+            <MudSimpleTable Dense="true" Bordered="true" Striped="true">
+                <thead>
+                    <tr>
+                        <th>Rule</th>
+                        <th>Description</th>
+                        <th>Config Key</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var rule in _result.AppliedRules)
+                    {
+                        <tr>
+                            <td><MudChip T="string" Size="Size.Small" Color="Color.Info">@rule.RuleName</MudChip></td>
+                            <td>@rule.Description</td>
+                            <td><code>@rule.ConfigKey</code></td>
+                            <td>@rule.Value</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+
+        @if (_result.Warnings.Count > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mt-4">
+                @foreach (var warning in _result.Warnings)
+                {
+                    <div>@warning</div>
+                }
+            </MudAlert>
+        }
+
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-3">
+            @_result.Explanation
+        </MudText>
+
+        <div class="d-flex justify-end gap-2 mt-4">
+            <MudButton Variant="Variant.Text" Color="Color.Default"
+                       Href="@($"/topics/create")">
+                Adjust Manually
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       OnClick="CreateTopicAsync" Disabled="@_creating">
+                @if (_creating)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Create Topic
+            </MudButton>
+        </div>
+    </MudCard>
+}
+
+@code {
+    private MudForm _form = null!;
+    private bool _resolving;
+    private bool _creating;
+
+    // Intent input
+    private string _description = "";
+    private string _topicName = "";
+    private string _environment = "";
+    private string _dataClassification = "";
+    private int _expectedDeviceCount;
+    private int _expectedMessagesPerSec;
+    private int _brokerCount;
+
+    // Result
+    private IntentResultDto? _result;
+
+    private readonly string[] _quickIntents =
+    [
+        "High Availability",
+        "IoT Sensors",
+        "GDPR Compliance",
+        "Analytics / Data Lake",
+        "Payment Processing",
+        "Low Latency / Realtime",
+        "Event Sourcing",
+        "Logging",
+        "Temporary / Test",
+        "Machine Learning"
+    ];
+
+    private readonly List<BreadcrumbItem> _breadcrumbs =
+    [
+        new("Topics", "/topics"),
+        new("Intent Creator", null, true)
+    ];
+
+    private void SetDescription(string intent)
+    {
+        _description = intent;
+        StateHasChanged();
+    }
+
+    private async Task ResolveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_description)) return;
+
+        _resolving = true;
+        _result = null;
+        StateHasChanged();
+
+        try
+        {
+            var request = BuildRequest();
+            var response = await Http.PostAsJsonAsync("/api/intent/resolve", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _result = await response.Content.ReadFromJsonAsync<IntentResultDto>();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                Notification.ShowError($"Failed to resolve intent: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _resolving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CreateTopicAsync()
+    {
+        if (_result is null) return;
+
+        _creating = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = BuildRequest();
+            var response = await Http.PostAsJsonAsync("/api/intent/create", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Notification.ShowSuccess($"Topic '{_result.TopicName}' created successfully");
+                Navigation.NavigateTo($"/topics/{_result.TopicName}");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                Notification.ShowError($"Failed to create topic: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error creating topic: {ex.Message}");
+        }
+        finally
+        {
+            _creating = false;
+            StateHasChanged();
+        }
+    }
+
+    private object BuildRequest()
+    {
+        var context = new Dictionary<string, object?>();
+        if (_expectedDeviceCount > 0) context["expectedDeviceCount"] = _expectedDeviceCount;
+        if (_expectedMessagesPerSec > 0) context["expectedMessagesPerSec"] = _expectedMessagesPerSec;
+        if (!string.IsNullOrEmpty(_dataClassification)) context["dataClassification"] = _dataClassification;
+        if (!string.IsNullOrEmpty(_environment)) context["environment"] = _environment;
+        if (_brokerCount > 0) context["brokerCount"] = _brokerCount;
+
+        return new
+        {
+            description = _description,
+            topicName = string.IsNullOrWhiteSpace(_topicName) ? (string?)null : _topicName,
+            context
+        };
+    }
+
+    private static Color GetConfidenceColor(double confidence) => confidence switch
+    {
+        >= 0.8 => Color.Success,
+        >= 0.5 => Color.Warning,
+        _ => Color.Error
+    };
+
+    // DTOs for JSON deserialization from the broker API
+    private sealed class IntentResultDto
+    {
+        public string TopicName { get; set; } = "";
+        public Dictionary<string, string> TopicConfig { get; set; } = [];
+        public int Partitions { get; set; }
+        public int ReplicationFactor { get; set; }
+        public string Explanation { get; set; } = "";
+        public List<IntentRuleMatchDto> AppliedRules { get; set; } = [];
+        public double Confidence { get; set; }
+        public List<string> Warnings { get; set; } = [];
+    }
+
+    private sealed class IntentRuleMatchDto
+    {
+        public string RuleName { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string ConfigKey { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "example.sensor-source",
+  "name": "Simulated Sensor Source",
+  "version": "1.0.0",
+  "type": "Source",
+  "description": "Generates simulated IoT sensor readings (temperature, humidity, pressure) at a configurable interval",
+  "author": "Surgewave Examples",
+  "outputTopic": "sensor-readings",
+  "config": {
+    "interval.ms": "1000",
+    "sensor.id": "sensor-001",
+    "temp.min": "18.0",
+    "temp.max": "28.0",
+    "humidity.min": "30.0",
+    "humidity.max": "80.0"
+  }
+}

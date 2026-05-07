@@ -1,0 +1,36 @@
+- name: Overview
+  href: index.md
+
+- name: Cloud Storage
+  items:
+    - name: AWS S3
+      href: s3.md
+    - name: Azure Blob Storage
+      href: azure-blob.md
+    - name: Google Cloud Storage
+      href: gcs.md
+
+- name: Databases
+  items:
+    - name: PostgreSQL CDC
+      href: postgresql.md
+    - name: MongoDB
+      href: mongodb.md
+    - name: Elasticsearch
+      href: elasticsearch.md
+    - name: Generic Database
+      href: database.md
+
+- name: Messaging
+  items:
+    - name: MQTT
+      href: mqtt.md
+    - name: Redis
+      href: redis.md
+    - name: HTTP Webhook
+      href: http.md
+
+- name: Development
+  items:
+    - name: Custom Connectors
+      href: custom-connectors.md

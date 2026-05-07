@@ -1,0 +1,65 @@
+---
+# Headless service for StatefulSet DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: surgewave-headless
+  labels:
+    app: surgewave
+    app.kubernetes.io/name: surgewave
+spec:
+  clusterIP: None
+  selector:
+    app: surgewave
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: grpc
+      port: 9093
+      targetPort: grpc
+    - name: replication
+      port: 10092
+      targetPort: replication
+
+---
+# Client-facing service (LoadBalancer or ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: surgewave
+  labels:
+    app: surgewave
+    app.kubernetes.io/name: surgewave
+spec:
+  type: ClusterIP
+  selector:
+    app: surgewave
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: grpc
+      port: 9093
+      targetPort: grpc
+
+---
+# External LoadBalancer (optional)
+apiVersion: v1
+kind: Service
+metadata:
+  name: surgewave-external
+  labels:
+    app: surgewave
+    app.kubernetes.io/name: surgewave
+spec:
+  type: LoadBalancer
+  selector:
+    app: surgewave
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: grpc
+      port: 9093
+      targetPort: grpc

@@ -1,0 +1,22 @@
+<Project Sdk="WixToolset.Sdk/5.0.1">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- Suppress WiX from appearing in solution builds; build via build-installer.ps1 -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Pass publish directories as MSBuild properties from the build script -->
+  <PropertyGroup>
+    <BrokerPublishDir Condition="'$(BrokerPublishDir)' == ''">..\..\publish\broker</BrokerPublishDir>
+    <CliPublishDir Condition="'$(CliPublishDir)' == ''">..\..\publish\cli</CliPublishDir>
+    <ControlPublishDir Condition="'$(ControlPublishDir)' == ''">..\..\publish\control</ControlPublishDir>
+  </PropertyGroup>
+
+  <!-- WiX extension for UI dialogs -->
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.1" />
+  </ItemGroup>
+
+</Project>

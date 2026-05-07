@@ -1,0 +1,39 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Select a broker to decommission. All partitions will be moved to remaining brokers.
+        </MudText>
+        <MudSelect T="int" @bind-Value="_selectedBrokerId" Label="Broker ID" Variant="Variant.Outlined" Required="true">
+            @foreach (var id in BrokerIds)
+            {
+                <MudSelectItem Value="id">Broker @id</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit">Decommission</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public List<int> BrokerIds { get; set; } = [];
+    private int _selectedBrokerId;
+
+    protected override void OnInitialized()
+    {
+        if (BrokerIds.Count > 0) _selectedBrokerId = BrokerIds[0];
+    }
+
+    private async Task Submit()
+    {
+        var response = await Http.PostAsync($"/api/partitions/decommission/{_selectedBrokerId}", null);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

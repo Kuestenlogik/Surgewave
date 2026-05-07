@@ -22,21 +22,8 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
-
-[Dd]ebug/x64/
-[Dd]ebugPublic/x64/
-[Rr]elease/x64/
-[Rr]eleases/x64/
-bin/x64/
-obj/x64/
-
-[Dd]ebug/x86/
-[Dd]ebugPublic/x86/
-[Rr]elease/x86/
-[Rr]eleases/x86/
-bin/x86/
-obj/x86/
-
+x64/
+x86/
 [Ww][Ii][Nn]32/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
@@ -86,7 +73,17 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
-.artifacts/
+BenchmarkDotNet.Artifacts/
+/plugins/
+
+# Local site preview output (built by scripts/build-site.ps1)
+/_combined/
+/site/_site/
+
+# Surgewave broker runtime data
+data/
+/logs/
+!/src/**/Logs/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -286,6 +283,8 @@ Generated_Code/
 # because we have git ;-)
 _UpgradeReport_Files/
 Backup*/
+# But allow Backup directories in src/ (our backup feature code)
+!src/**/Backup/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/
@@ -323,6 +322,9 @@ node_modules/
 
 # Visual Studio 6 auto-generated workspace file (contains which files were open etc.)
 *.vbw
+
+# Visual Studio 6 auto-generated project file (contains which files were open etc.)
+*.vbp
 
 # Visual Studio 6 workspace and project file (working project files containing files to include in project)
 *.dsw
@@ -427,3 +429,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# dev>null temorary file
+nul

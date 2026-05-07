@@ -1,0 +1,33 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_sourceClusterId" Label="Source Cluster ID" Variant="Variant.Outlined"
+                      Required="true" Class="mb-3" />
+        <MudTextField @bind-Value="_bootstrapServers" Label="Bootstrap Servers" Variant="Variant.Outlined"
+                      Required="true" HelperText="e.g., remote-broker:9092" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_sourceClusterId) || string.IsNullOrWhiteSpace(_bootstrapServers))">
+            Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _sourceClusterId = "";
+    private string _bootstrapServers = "";
+
+    private async Task Submit()
+    {
+        var payload = new { sourceClusterId = _sourceClusterId, bootstrapServers = _bootstrapServers };
+        var response = await Http.PostAsJsonAsync("/api/cluster-links", payload);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

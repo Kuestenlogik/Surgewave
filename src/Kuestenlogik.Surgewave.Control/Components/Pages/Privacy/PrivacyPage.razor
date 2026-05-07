@@ -1,0 +1,308 @@
+@page "/privacy"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Privacy (GDPR) - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Privacy (GDPR)</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Privacy policies, PII scanning, erasure requests, and audit</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreatePolicyDialog"
+                   StartIcon="@Icons.Material.Filled.Add">Add Policy</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Policy" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Policies</MudText>
+                        <MudText Typo="Typo.h5">@_policies.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">PII Scanning</MudText>
+                        <MudText Typo="Typo.h5">@_statuses.Count(s => s.PiiScanEnabled)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Encrypted</MudText>
+                        <MudText Typo="Typo.h5">@_statuses.Count(s => s.EncryptionEnabled)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.History" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Audit Events</MudText>
+                        <MudText Typo="Typo.h5">@_auditEvents.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
+    @* Policies Tab *@
+    <MudTabPanel Text="Policies" Icon="@Icons.Material.Filled.Policy">
+        <MudTable Items="_policies" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>#</MudTh>
+                <MudTh>Topic Pattern</MudTh>
+                <MudTh>Classification</MudTh>
+                <MudTh>PII Handling</MudTh>
+                <MudTh>Encryption</MudTh>
+                <MudTh>Erasure</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="#">@(_policies.IndexOf(context))</MudTd>
+                <MudTd DataLabel="Topic Pattern"><code>@context.TopicPattern</code></MudTd>
+                <MudTd DataLabel="Classification">
+                    <MudChip T="string" Size="Size.Small" Color="GetClassificationColor(context.DataClassification)">
+                        @context.DataClassification
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="PII Handling">@(context.PiiScanEnabled ? "Scan Enabled" : "Disabled")</MudTd>
+                <MudTd DataLabel="Encryption">@(context.EncryptionRequired ? "Required" : "Optional")</MudTd>
+                <MudTd DataLabel="Erasure">@(context.ErasureEnabled ? "Enabled" : "Disabled")</MudTd>
+                <MudTd DataLabel="Actions">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="() => DeletePolicyAsync(_policies.IndexOf(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No privacy policies configured.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* PII Scan Tab *@
+    <MudTabPanel Text="PII Scan" Icon="@Icons.Material.Filled.Search">
+        <MudPaper Class="pa-4">
+            <div class="d-flex gap-2 mb-4">
+                <MudTextField @bind-Value="_scanTopic" Label="Topic to Scan" Variant="Variant.Outlined"
+                              Placeholder="my-topic" Style="flex:1;" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ScanTopicAsync"
+                           StartIcon="@Icons.Material.Filled.Search" Disabled="@(string.IsNullOrWhiteSpace(_scanTopic) || _scanning)">
+                    @(_scanning ? "Scanning..." : "Scan")
+                </MudButton>
+            </div>
+            @if (_scanResult != null)
+            {
+                <MudAlert Severity="@(_scanResult.MessagesWithPii > 0 ? Severity.Warning : Severity.Success)" Class="mb-3">
+                    Sampled @_scanResult.MessagesSampled messages, found PII in @_scanResult.MessagesWithPii
+                </MudAlert>
+            }
+        </MudPaper>
+    </MudTabPanel>
+
+    @* Erasure Tab *@
+    <MudTabPanel Text="Erasure" Icon="@Icons.Material.Filled.PersonRemove">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-3">Submit Right-to-Erasure Request</MudText>
+            <div class="d-flex gap-2 mb-4">
+                <MudTextField @bind-Value="_erasureSubjectId" Label="Subject ID (e.g., user email)"
+                              Variant="Variant.Outlined" Style="flex:1;" />
+                <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="SubmitErasureAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever"
+                           Disabled="@(string.IsNullOrWhiteSpace(_erasureSubjectId))">
+                    Submit Erasure
+                </MudButton>
+            </div>
+            @if (_erasureResult != null)
+            {
+                <MudAlert Severity="Severity.Info">
+                    Erasure processed: @_erasureResult.TopicsAffected topics affected, @_erasureResult.RecordsErased records erased
+                </MudAlert>
+            }
+        </MudPaper>
+    </MudTabPanel>
+
+    @* Audit Tab *@
+    <MudTabPanel Text="Audit Log" Icon="@Icons.Material.Filled.History">
+        <MudTable Items="_auditEvents" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Timestamp</MudTh>
+                <MudTh>Event Type</MudTh>
+                <MudTh>Topic</MudTh>
+                <MudTh>Subject</MudTh>
+                <MudTh>Details</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Timestamp">@context.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Event Type">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@context.EventType</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Topic">@context.Topic</MudTd>
+                <MudTd DataLabel="Subject">@context.SubjectId</MudTd>
+                <MudTd DataLabel="Details">@context.Details</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No audit events.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private List<PrivacyPolicyInfo> _policies = [];
+    private List<PrivacyStatusInfo> _statuses = [];
+    private List<PrivacyAuditEventInfo> _auditEvents = [];
+    private bool _loading = true;
+    private string? _error;
+
+    // PII Scan
+    private string _scanTopic = "";
+    private bool _scanning;
+    private ScanResultInfo? _scanResult;
+
+    // Erasure
+    private string _erasureSubjectId = "";
+    private ErasureResultInfo? _erasureResult;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _policies = await Http.GetFromJsonAsync<List<PrivacyPolicyInfo>>("/api/privacy/policies") ?? [];
+            _statuses = await Http.GetFromJsonAsync<List<PrivacyStatusInfo>>("/api/privacy/status") ?? [];
+            _auditEvents = await Http.GetFromJsonAsync<List<PrivacyAuditEventInfo>>("/api/privacy/audit") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load privacy data: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OpenCreatePolicyDialog()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreatePrivacyPolicyDialog>("Create Privacy Policy", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Policy created"); await LoadDataAsync(); }
+    }
+
+    private async Task DeletePolicyAsync(int index)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Delete Policy",
+            "Delete this privacy policy?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try { await Http.DeleteAsync($"/api/privacy/policies/{index}"); await LoadDataAsync(); }
+            catch (Exception ex) { Notification.ShowError($"Delete failed: {ex.Message}"); }
+        }
+    }
+
+    private async Task ScanTopicAsync()
+    {
+        _scanning = true;
+        StateHasChanged();
+        try
+        {
+            _scanResult = await Http.PostAsJsonAsync($"/api/privacy/scan/{_scanTopic}", new { })
+                .ContinueWith(async t => await (await t).Content.ReadFromJsonAsync<ScanResultInfo>()).Unwrap();
+        }
+        catch (Exception ex) { Notification.ShowError($"Scan failed: {ex.Message}"); }
+        finally { _scanning = false; StateHasChanged(); }
+    }
+
+    private async Task SubmitErasureAsync()
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync("/api/privacy/erasure", new { subjectId = _erasureSubjectId });
+            _erasureResult = await response.Content.ReadFromJsonAsync<ErasureResultInfo>();
+            Notification.ShowSuccess("Erasure request processed");
+        }
+        catch (Exception ex) { Notification.ShowError($"Erasure failed: {ex.Message}"); }
+    }
+
+    private static Color GetClassificationColor(string classification) => classification switch
+    {
+        "Public" => Color.Success,
+        "Internal" => Color.Info,
+        "Confidential" => Color.Warning,
+        "Restricted" => Color.Error,
+        _ => Color.Default
+    };
+
+    private sealed class PrivacyPolicyInfo
+    {
+        public string TopicPattern { get; set; } = "";
+        public string DataClassification { get; set; } = "";
+        public bool PiiScanEnabled { get; set; }
+        public bool EncryptionRequired { get; set; }
+        public bool ErasureEnabled { get; set; }
+    }
+
+    private sealed class PrivacyStatusInfo
+    {
+        public string Topic { get; set; } = "";
+        public bool PiiScanEnabled { get; set; }
+        public bool EncryptionEnabled { get; set; }
+        public bool ErasureEnabled { get; set; }
+    }
+
+    private sealed class PrivacyAuditEventInfo
+    {
+        public DateTimeOffset Timestamp { get; set; }
+        public string EventType { get; set; } = "";
+        public string Topic { get; set; } = "";
+        public string SubjectId { get; set; } = "";
+        public string Details { get; set; } = "";
+    }
+
+    private sealed class ScanResultInfo
+    {
+        public string Topic { get; set; } = "";
+        public int MessagesSampled { get; set; }
+        public int MessagesWithPii { get; set; }
+    }
+
+    private sealed class ErasureResultInfo
+    {
+        public int TopicsAffected { get; set; }
+        public int RecordsErased { get; set; }
+    }
+}

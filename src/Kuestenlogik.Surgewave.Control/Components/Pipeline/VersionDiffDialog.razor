@@ -1,0 +1,153 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+
+<MudDialog>
+    <DialogContent>
+        @if (_isLoading)
+        {
+            <div class="d-flex align-center justify-center pa-8">
+                <MudProgressCircular Indeterminate="true" />
+            </div>
+        }
+        else if (_error != null)
+        {
+            <MudAlert Severity="Severity.Error">@_error</MudAlert>
+        }
+        else if (_diff != null)
+        {
+            <MudText Typo="Typo.subtitle1" Class="mb-4">
+                Comparing v@(_diff.FromVersionNumber) to v@(_diff.ToVersionNumber)
+            </MudText>
+
+            @if (_diff.NodeChanges.Count == 0 && _diff.ConnectionChanges.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info">No differences found between these versions.</MudAlert>
+            }
+            else
+            {
+                @if (_diff.NodeChanges.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Node Changes (@(_diff.NodeChanges.Count))</MudText>
+                    <MudTable Items="@_diff.NodeChanges" Dense="true" Hover="true" Class="mb-4">
+                        <HeaderContent>
+                            <MudTh>Change</MudTh>
+                            <MudTh>Node</MudTh>
+                            <MudTh>Details</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <MudChip T="string" Size="MudBlazor.Size.Small" Color="@GetChangeColor(context.Type)"
+                                         Variant="Variant.Filled">
+                                    @context.Type
+                                </MudChip>
+                            </MudTd>
+                            <MudTd>
+                                @(context.NewNode?.Label ?? context.OldNode?.Label ?? context.NodeId)
+                            </MudTd>
+                            <MudTd>
+                                @if (context.Type == DiffType.Modified)
+                                {
+                                    <span>Changed: @string.Join(", ", context.ChangedProperties)</span>
+                                }
+                                else
+                                {
+                                    <span>@(context.NewNode?.ConnectorType ?? context.OldNode?.ConnectorType)</span>
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+
+                @if (_diff.ConnectionChanges.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Connection Changes (@(_diff.ConnectionChanges.Count))</MudText>
+                    <MudTable Items="@_diff.ConnectionChanges" Dense="true" Hover="true">
+                        <HeaderContent>
+                            <MudTh>Change</MudTh>
+                            <MudTh>Connection</MudTh>
+                            <MudTh>Details</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <MudChip T="string" Size="MudBlazor.Size.Small" Color="@GetChangeColor(context.Type)"
+                                         Variant="Variant.Filled">
+                                    @context.Type
+                                </MudChip>
+                            </MudTd>
+                            <MudTd>
+                                @context.ConnectionId
+                            </MudTd>
+                            <MudTd>
+                                @{
+                                    var conn = context.NewConnection ?? context.OldConnection;
+                                }
+                                @conn?.SourceNodeId -> @conn?.TargetNodeId
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string? PipelineId { get; set; }
+
+    [Parameter]
+    public string? FromVersionId { get; set; }
+
+    [Parameter]
+    public string? ToVersionId { get; set; }
+
+    private PipelineVersionDiff? _diff;
+    private bool _isLoading;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDiffAsync();
+    }
+
+    private async Task LoadDiffAsync()
+    {
+        if (string.IsNullOrEmpty(PipelineId) || string.IsNullOrEmpty(FromVersionId) || string.IsNullOrEmpty(ToVersionId))
+        {
+            _error = "Missing parameters";
+            return;
+        }
+
+        _isLoading = true;
+
+        try
+        {
+            _diff = await ApiClient.CompareVersionsAsync(PipelineId, FromVersionId, ToVersionId);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private static Color GetChangeColor(DiffType type) => type switch
+    {
+        DiffType.Added => Color.Success,
+        DiffType.Removed => Color.Error,
+        DiffType.Modified => Color.Warning,
+        _ => Color.Default
+    };
+
+    private void Close() => MudDialog.Close();
+}

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Native Protocol definitions and utilities for high-performance binary communication</Description>
+    <PackageTags>surgewave;kafka;protocol;native;binary</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="K4os.Compression.LZ4" />
+  </ItemGroup>
+
+</Project>

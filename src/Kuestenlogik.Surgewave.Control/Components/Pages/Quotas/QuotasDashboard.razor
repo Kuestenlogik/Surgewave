@@ -1,0 +1,352 @@
+@page "/quotas"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IQuotaApiClient QuotaApiClient
+@inject NotificationState Notification
+
+<PageTitle>Quota Management - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Quota Management</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+<MudGrid>
+    <MudItem xs="12" lg="6">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-2" />
+                Global Configuration
+            </MudText>
+
+            @if (_config != null)
+            {
+                <MudForm @ref="_configForm">
+                    <MudSwitch @bind-Value="_editConfig.Enabled" Label="Quotas Enabled" Color="Color.Primary" />
+
+                    <MudDivider Class="my-4" />
+
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">Producer Limits</MudText>
+                    <MudGrid>
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_editConfig.ProducerBytesPerSecond"
+                                           Label="Bytes/Second" Variant="Variant.Outlined"
+                                           HelperText="-1 for unlimited"
+                                           Adornment="Adornment.End" AdornmentText="B/s" />
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_editConfig.ProducerBurstBytes"
+                                           Label="Burst Bytes" Variant="Variant.Outlined"
+                                           Adornment="Adornment.End" AdornmentText="B" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudText Typo="Typo.subtitle1" Class="mb-2 mt-4">Consumer Limits</MudText>
+                    <MudGrid>
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_editConfig.ConsumerBytesPerSecond"
+                                           Label="Bytes/Second" Variant="Variant.Outlined"
+                                           HelperText="-1 for unlimited"
+                                           Adornment="Adornment.End" AdornmentText="B/s" />
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_editConfig.ConsumerBurstBytes"
+                                           Label="Burst Bytes" Variant="Variant.Outlined"
+                                           Adornment="Adornment.End" AdornmentText="B" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudDivider Class="my-4" />
+
+                    <MudGrid>
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_editConfig.MaxThrottleTimeMs"
+                                           Label="Max Throttle Time" Variant="Variant.Outlined"
+                                           Adornment="Adornment.End" AdornmentText="ms" />
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_editConfig.ClientInactivityTimeoutMinutes"
+                                           Label="Client Timeout" Variant="Variant.Outlined"
+                                           Adornment="Adornment.End" AdornmentText="min" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <AuthorizeView Policy="@SurgewavePolicies.QuotasManage">
+                        <div class="d-flex justify-end mt-4 gap-2">
+                            <MudButton Variant="Variant.Outlined" OnClick="ResetConfig">Reset</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveConfigAsync"
+                                       Disabled="@_saving">
+                                @if (_saving)
+                                {
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                }
+                                Save Configuration
+                            </MudButton>
+                        </div>
+                    </AuthorizeView>
+                </MudForm>
+            }
+            else if (!_loading)
+            {
+                <MudText Color="Color.Error">Failed to load configuration</MudText>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" lg="6">
+        <MudPaper Elevation="2" Class="pa-4">
+            <div class="d-flex align-center justify-space-between mb-4">
+                <MudText Typo="Typo.h6">
+                    <MudIcon Icon="@Icons.Material.Filled.People" Class="mr-2" />
+                    Client Statistics
+                </MudText>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="LoadClientStatsAsync"
+                           StartIcon="@Icons.Material.Filled.Refresh">
+                    Refresh
+                </MudButton>
+            </div>
+
+            @if (_clientStats.Count == 0 && !_loading)
+            {
+                <MudAlert Severity="Severity.Info">No active clients</MudAlert>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Hover="true" Style="max-height: 400px; overflow-y: auto;">
+                    <thead>
+                        <tr>
+                            <th>Client ID</th>
+                            <th>Produced</th>
+                            <th>Fetched</th>
+                            <th>Throttled</th>
+                            <th>Last Activity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var client in _clientStats)
+                        {
+                            <tr>
+                                <td>
+                                    <MudTooltip Text="@client.ClientId">
+                                        <code>@TruncateClientId(client.ClientId)</code>
+                                    </MudTooltip>
+                                </td>
+                                <td>@FormatBytes(client.TotalProducedBytes)</td>
+                                <td>@FormatBytes(client.TotalFetchedBytes)</td>
+                                <td>
+                                    @if (client.ProduceThrottleCount + client.FetchThrottleCount > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                                            @(client.ProduceThrottleCount + client.FetchThrottleCount)x
+                                        </MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudText Color="Color.Success">-</MudText>
+                                    }
+                                </td>
+                                <td>@FormatTimeAgo(client.LastActivity)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudPaper>
+
+        @if (_config is { Enabled: true })
+        {
+            <MudPaper Elevation="2" Class="pa-4 mt-4">
+                <MudText Typo="Typo.h6" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Analytics" Class="mr-2" />
+                    Token Bucket Status
+                </MudText>
+
+                <MudGrid>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.subtitle2">Producer Rate</MudText>
+                        <MudText Typo="Typo.h5">
+                            @if (_config.ProducerBytesPerSecond < 0)
+                            {
+                                <span>Unlimited</span>
+                            }
+                            else
+                            {
+                                @FormatBytes(_config.ProducerBytesPerSecond)@("/s")
+                            }
+                        </MudText>
+                        <MudText Typo="Typo.caption">Burst: @FormatBytes(_config.ProducerBurstBytes)</MudText>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.subtitle2">Consumer Rate</MudText>
+                        <MudText Typo="Typo.h5">
+                            @if (_config.ConsumerBytesPerSecond < 0)
+                            {
+                                <span>Unlimited</span>
+                            }
+                            else
+                            {
+                                @FormatBytes(_config.ConsumerBytesPerSecond)@("/s")
+                            }
+                        </MudText>
+                        <MudText Typo="Typo.caption">Burst: @FormatBytes(_config.ConsumerBurstBytes)</MudText>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private MudForm _configForm = null!;
+
+    private QuotaConfigModel? _config;
+    private EditableQuotaConfig _editConfig = new();
+    private List<ClientQuotaStatsModel> _clientStats = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            await Task.WhenAll(
+                LoadConfigAsync(),
+                LoadClientStatsAsync());
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load data: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadConfigAsync()
+    {
+        _config = await QuotaApiClient.GetConfigAsync();
+        if (_config != null)
+        {
+            _editConfig = new EditableQuotaConfig
+            {
+                Enabled = _config.Enabled,
+                ProducerBytesPerSecond = _config.ProducerBytesPerSecond,
+                ProducerBurstBytes = _config.ProducerBurstBytes,
+                ConsumerBytesPerSecond = _config.ConsumerBytesPerSecond,
+                ConsumerBurstBytes = _config.ConsumerBurstBytes,
+                MaxThrottleTimeMs = _config.MaxThrottleTimeMs,
+                ClientInactivityTimeoutMinutes = _config.ClientInactivityTimeoutMinutes
+            };
+        }
+    }
+
+    private async Task LoadClientStatsAsync()
+    {
+        _clientStats = (await QuotaApiClient.ListClientStatsAsync()).ToList();
+        StateHasChanged();
+    }
+
+    private void ResetConfig()
+    {
+        if (_config != null)
+        {
+            _editConfig = new EditableQuotaConfig
+            {
+                Enabled = _config.Enabled,
+                ProducerBytesPerSecond = _config.ProducerBytesPerSecond,
+                ProducerBurstBytes = _config.ProducerBurstBytes,
+                ConsumerBytesPerSecond = _config.ConsumerBytesPerSecond,
+                ConsumerBurstBytes = _config.ConsumerBurstBytes,
+                MaxThrottleTimeMs = _config.MaxThrottleTimeMs,
+                ClientInactivityTimeoutMinutes = _config.ClientInactivityTimeoutMinutes
+            };
+        }
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new UpdateQuotaConfigRequest(
+                Enabled: _editConfig.Enabled,
+                ProducerBytesPerSecond: _editConfig.ProducerBytesPerSecond,
+                ProducerBurstBytes: _editConfig.ProducerBurstBytes,
+                ConsumerBytesPerSecond: _editConfig.ConsumerBytesPerSecond,
+                ConsumerBurstBytes: _editConfig.ConsumerBurstBytes,
+                MaxThrottleTimeMs: _editConfig.MaxThrottleTimeMs,
+                ClientInactivityTimeoutMinutes: _editConfig.ClientInactivityTimeoutMinutes);
+
+            var result = await QuotaApiClient.UpdateConfigAsync(request);
+            if (result != null)
+            {
+                _config = result;
+                Notification.ShowSuccess("Quota configuration saved");
+            }
+            else
+            {
+                Notification.ShowError("Failed to save configuration");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to save configuration: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 0) return "Unlimited";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private static string TruncateClientId(string clientId) =>
+        clientId.Length > 20 ? clientId[..17] + "..." : clientId;
+
+    private static string FormatTimeAgo(DateTime time)
+    {
+        var diff = DateTime.UtcNow - time;
+        if (diff.TotalSeconds < 60) return $"{(int)diff.TotalSeconds}s ago";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        return $"{(int)diff.TotalDays}d ago";
+    }
+
+    private class EditableQuotaConfig
+    {
+        public bool Enabled { get; set; }
+        public long ProducerBytesPerSecond { get; set; }
+        public long ProducerBurstBytes { get; set; }
+        public long ConsumerBytesPerSecond { get; set; }
+        public long ConsumerBurstBytes { get; set; }
+        public int MaxThrottleTimeMs { get; set; }
+        public int ClientInactivityTimeoutMinutes { get; set; }
+    }
+}

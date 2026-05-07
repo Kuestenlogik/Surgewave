@@ -1,0 +1,14 @@
+- name: Installation
+  href: index.md
+- name: Standalone Broker
+  href: standalone.md
+- name: Embedded Broker
+  href: embedded.md
+- name: Configuration Reference
+  href: configuration.md
+- name: Building from Source
+  href: building.md
+- name: Architecture
+  href: architecture.md
+- name: Testing
+  href: testing.md

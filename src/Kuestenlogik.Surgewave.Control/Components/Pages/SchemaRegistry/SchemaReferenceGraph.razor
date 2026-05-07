@@ -1,0 +1,380 @@
+@page "/schemas/graph"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISchemaRegistryClient SchemaClient
+@inject ISurgewaveApiClient SurgewaveClient
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+
+<PageTitle>Schema Reference Graph - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Schema Reference Graph</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Schema-to-Topic mapping, usage statistics, and orphaned schema detection
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudTextField T="string" @bind-Value="_search" Placeholder="Search schemas or topics..."
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true"
+                      Style="min-width: 280px;" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+            Refresh
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== SUMMARY CARDS ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Schema" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Schemas</MudText>
+                        <MudText Typo="Typo.h5">@_usages.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topics with Schema</MudText>
+                        <MudText Typo="Typo.h5">@_topicsWithSchema</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Orphaned Schemas</MudText>
+                        <MudText Typo="Typo.h5">@_usages.Count(u => u.IsOrphaned)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Versions</MudText>
+                        <MudText Typo="Typo.h5">@_usages.Sum(u => u.VersionCount)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== FILTER TABS ===== *@
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
+    <MudTabPanel Text="All Schemas" Icon="@Icons.Material.Filled.List" />
+    <MudTabPanel Text="Orphaned" Icon="@Icons.Material.Filled.LinkOff"
+                 BadgeData="@_usages.Count(u => u.IsOrphaned)" BadgeColor="Color.Warning" />
+    <MudTabPanel Text="Graph View" Icon="@Icons.Material.Filled.AccountTree" />
+</MudTabs>
+
+@if (_activeTab == 0 || _activeTab == 1)
+{
+    @* ===== TABLE VIEW ===== *@
+    <MudTable Items="FilteredUsages" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
+              RowsPerPage="25" SortLabel="Sort by">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<SchemaUsageInfo, object>(x => x.Subject)">Subject</MudTableSortLabel></MudTh>
+            <MudTh>Type</MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<SchemaUsageInfo, object>(x => x.VersionCount)">Versions</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<SchemaUsageInfo, object>(x => x.FieldCount)">Fields</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<SchemaUsageInfo, object>(x => x.Topics.Count)">Topics</MudTableSortLabel></MudTh>
+            <MudTh>Compatibility</MudTh>
+            <MudTh>Status</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Subject">
+                <MudLink Href="@($"/schemas/{Uri.EscapeDataString(context.Subject)}")">
+                    <strong>@context.Subject</strong>
+                </MudLink>
+            </MudTd>
+            <MudTd DataLabel="Type">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@GetTypeColor(context.SchemaType)">
+                    @context.SchemaType
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Versions">@context.VersionCount</MudTd>
+            <MudTd DataLabel="Fields">@context.FieldCount</MudTd>
+            <MudTd DataLabel="Topics">
+                @if (context.Topics.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-1">
+                        @foreach (var topic in context.Topics.Take(3))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info"
+                                     OnClick="@(() => Navigation.NavigateTo($"/topics/{Uri.EscapeDataString(topic)}"))">
+                                @topic
+                            </MudChip>
+                        }
+                        @if (context.Topics.Count > 3)
+                        {
+                            <MudTooltip Text="@string.Join(", ", context.Topics.Skip(3))">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                    +@(context.Topics.Count - 3) more
+                                </MudChip>
+                            </MudTooltip>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Compatibility">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                    @(context.CompatibilityLevel ?? "default")
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Status">
+                @if (context.IsOrphaned)
+                {
+                    <MudTooltip Text="No topics are using this schema">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Orphaned</MudChip>
+                    </MudTooltip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">In Use</MudChip>
+                }
+            </MudTd>
+        </RowTemplate>
+        <PagerContent>
+            <MudTablePager />
+        </PagerContent>
+    </MudTable>
+}
+else
+{
+    @* ===== VISUAL GRAPH VIEW ===== *@
+    <MudPaper Elevation="2" Class="pa-4">
+        <MudText Typo="Typo.h6" Class="mb-4">Schema → Topic Mapping</MudText>
+
+        @if (FilteredUsages.Any())
+        {
+            @foreach (var usage in FilteredUsages.Where(u => u.Topics.Count > 0))
+            {
+                <MudPaper Elevation="0" Outlined="true" Class="pa-3 mb-3">
+                    <div class="d-flex align-start">
+                        @* Schema node *@
+                        <MudPaper Elevation="1" Class="pa-3 mr-4" Style="min-width: 220px; border-left: 4px solid var(--mud-palette-primary);">
+                            <div class="d-flex align-center mb-1">
+                                <MudIcon Icon="@Icons.Material.Filled.Schema" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
+                                <MudLink Href="@($"/schemas/{Uri.EscapeDataString(usage.Subject)}")" Typo="Typo.subtitle2">
+                                    @usage.Subject
+                                </MudLink>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @usage.SchemaType | @usage.VersionCount versions | @usage.FieldCount fields
+                            </MudText>
+                        </MudPaper>
+
+                        @* Arrow *@
+                        <div class="d-flex align-center" style="padding-top: 16px; color: var(--mud-palette-text-secondary);">
+                            <span style="font-size: 20px;">→</span>
+                        </div>
+
+                        @* Topic nodes *@
+                        <div class="d-flex flex-wrap gap-2 ml-4" style="flex: 1;">
+                            @foreach (var topic in usage.Topics)
+                            {
+                                <MudPaper Elevation="1" Class="pa-2" Style="border-left: 4px solid var(--mud-palette-info);">
+                                    <div class="d-flex align-center">
+                                        <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Info" Size="Size.Small" Class="mr-1" />
+                                        <MudLink Href="@($"/topics/{Uri.EscapeDataString(topic)}")" Typo="Typo.body2">
+                                            @topic
+                                        </MudLink>
+                                    </div>
+                                </MudPaper>
+                            }
+                        </div>
+                    </div>
+                </MudPaper>
+            }
+
+            @* Orphaned schemas section *@
+            @if (FilteredUsages.Any(u => u.IsOrphaned))
+            {
+                <MudDivider Class="my-4" />
+                <MudText Typo="Typo.subtitle1" Class="mb-3" Color="Color.Warning">
+                    <MudIcon Icon="@Icons.Material.Filled.LinkOff" Size="Size.Small" Class="mr-1" />
+                    Orphaned Schemas (not referenced by any topic)
+                </MudText>
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var usage in FilteredUsages.Where(u => u.IsOrphaned))
+                    {
+                        <MudPaper Elevation="1" Class="pa-2" Style="border-left: 4px solid var(--mud-palette-warning); opacity: 0.8;">
+                            <div class="d-flex align-center">
+                                <MudIcon Icon="@Icons.Material.Filled.Schema" Color="Color.Warning" Size="Size.Small" Class="mr-1" />
+                                <MudLink Href="@($"/schemas/{Uri.EscapeDataString(usage.Subject)}")" Typo="Typo.body2">
+                                    @usage.Subject
+                                </MudLink>
+                                <MudText Typo="Typo.caption" Class="ml-2">v@(usage.LatestVersion)</MudText>
+                            </div>
+                        </MudPaper>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info">No schema-topic mappings found</MudAlert>
+        }
+    </MudPaper>
+}
+
+@code {
+    private bool _loading = true;
+    private string _search = "";
+    private int _activeTab;
+    private List<SchemaUsageInfo> _usages = [];
+    private int _topicsWithSchema;
+
+    private IEnumerable<SchemaUsageInfo> FilteredUsages
+    {
+        get
+        {
+            var items = _activeTab == 1 ? _usages.Where(u => u.IsOrphaned) : _usages;
+
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                items = items.Where(u =>
+                    u.Subject.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    u.Topics.Any(t => t.Contains(_search, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            return items.OrderByDescending(u => u.Topics.Count).ThenBy(u => u.Subject);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            // Load subjects and topics in parallel
+            var subjectsTask = SchemaClient.GetSubjectsAsync();
+            var topicsTask = SurgewaveClient.ListTopicsAsync(includeInternal: false);
+
+            await Task.WhenAll(subjectsTask, topicsTask);
+
+            var subjects = await subjectsTask;
+            var topics = (await topicsTask).Select(t => t.Name).ToList();
+
+            // Build schema usage info for each subject
+            var usages = new List<SchemaUsageInfo>();
+            var tasks = subjects.Select(async subject =>
+            {
+                var usage = new SchemaUsageInfo { Subject = subject };
+
+                try
+                {
+                    var versions = await SchemaClient.GetVersionsAsync(subject);
+                    usage.VersionCount = versions.Count;
+                    usage.LatestVersion = versions.Count > 0 ? versions.Max() : 0;
+
+                    if (usage.LatestVersion > 0)
+                    {
+                        var schema = await SchemaClient.GetLatestSchemaAsync(subject);
+                        if (schema != null)
+                        {
+                            usage.SchemaType = schema.SchemaType;
+                            usage.FieldCount = CountFields(schema.Schema, schema.SchemaType);
+                        }
+                    }
+
+                    usage.CompatibilityLevel = await SchemaClient.GetSubjectCompatibilityAsync(subject);
+
+                    // Map topics: convention is "{topicName}-key" or "{topicName}-value"
+                    foreach (var topic in topics)
+                    {
+                        if (subject.Equals($"{topic}-value", StringComparison.OrdinalIgnoreCase) ||
+                            subject.Equals($"{topic}-key", StringComparison.OrdinalIgnoreCase) ||
+                            subject.Equals(topic, StringComparison.OrdinalIgnoreCase))
+                        {
+                            usage.Topics.Add(topic);
+                        }
+                    }
+                }
+                catch { /* ignore individual errors */ }
+
+                return usage;
+            });
+
+            _usages = (await Task.WhenAll(tasks)).ToList();
+            _topicsWithSchema = topics.Count(t =>
+                _usages.Any(u => u.Topics.Contains(t)));
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load data: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static int CountFields(string schema, string schemaType)
+    {
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(schema);
+            if (schemaType.Equals("AVRO", StringComparison.OrdinalIgnoreCase))
+            {
+                return doc.RootElement.TryGetProperty("fields", out var f) ? f.GetArrayLength() : 0;
+            }
+            if (schemaType.Equals("JSON", StringComparison.OrdinalIgnoreCase))
+            {
+                return doc.RootElement.TryGetProperty("properties", out var p) ? p.EnumerateObject().Count() : 0;
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    private static Color GetTypeColor(string schemaType) => schemaType.ToUpperInvariant() switch
+    {
+        "AVRO" => Color.Primary,
+        "JSON" => Color.Info,
+        "PROTOBUF" => Color.Tertiary,
+        _ => Color.Default
+    };
+}

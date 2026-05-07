@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "surgewave.fullname" . }}-config
+  labels:
+    {{- include "surgewave.labels" . | nindent 4 }}
+data:
+  # Core broker settings
+  Surgewave__Host: "0.0.0.0"
+  Surgewave__Port: {{ .Values.broker.ports.kafka | quote }}
+  Surgewave__GrpcPort: {{ .Values.broker.ports.grpc | quote }}
+  Surgewave__DataDirectory: "/data"
+  Surgewave__LogDirectory: "/data/logs"
+
+  # Cluster settings
+  Surgewave__UseRaftConsensus: {{ .Values.broker.config.useRaft | quote }}
+  Surgewave__MinInsyncReplicas: {{ .Values.broker.config.minInsyncReplicas | quote }}
+
+  # Topic defaults
+  Surgewave__AutoCreateTopics: {{ .Values.broker.config.autoTopicCreation | quote }}
+  Surgewave__DefaultNumPartitions: {{ .Values.broker.config.defaultPartitions | quote }}
+  Surgewave__DefaultReplicationFactor: {{ .Values.broker.config.defaultReplicationFactor | quote }}
+
+  # Retention settings
+  Surgewave__LogRetentionHours: {{ .Values.broker.config.logRetentionHours | quote }}
+  Surgewave__LogRetentionBytes: {{ .Values.broker.config.logRetentionBytes | quote }}
+  Surgewave__LogSegmentBytes: {{ .Values.broker.config.logSegmentBytes | quote }}
+
+  # Network settings
+  Surgewave__MaxConnectionsPerIp: {{ .Values.broker.config.maxConnectionsPerIp | quote }}
+  Surgewave__MaxRequestSize: {{ .Values.broker.config.maxRequestSize | quote }}
+
+  # Schema Registry
+  Surgewave__SchemaRegistry__Enabled: {{ .Values.schemaRegistry.enabled | quote }}
+
+  # Connect
+  Surgewave__Connect__Enabled: {{ .Values.connect.enabled | quote }}
+  {{- if .Values.connect.enabled }}
+  Surgewave__Connect__GroupId: {{ .Values.connect.groupId | quote }}
+  Surgewave__Connect__ConfigTopic: {{ .Values.connect.configTopic | quote }}
+  Surgewave__Connect__OffsetsTopic: {{ .Values.connect.offsetsTopic | quote }}
+  Surgewave__Connect__StatusTopic: {{ .Values.connect.statusTopic | quote }}
+  {{- end }}
+
+  # Feature toggles
+  Surgewave__Mqtt__Enabled: {{ .Values.features.mqtt.enabled | quote }}
+  {{- if .Values.features.mqtt.enabled }}
+  Surgewave__Mqtt__Port: {{ .Values.broker.ports.mqtt | quote }}
+  {{- end }}
+  Surgewave__GraphQL__Enabled: {{ .Values.features.graphql.enabled | quote }}
+  Surgewave__DataMesh__Enabled: {{ .Values.features.dataMesh.enabled | quote }}
+  Surgewave__Privacy__Enabled: {{ .Values.features.privacy.enabled | quote }}
+  Surgewave__MultiTenancy__Enabled: {{ .Values.features.multiTenancy.enabled | quote }}
+  Surgewave__CruiseControl__Enabled: {{ .Values.features.cruiseControl.enabled | quote }}
+
+  # Tiered Storage
+  Surgewave__TieredStorage__Enabled: {{ .Values.tieredStorage.enabled | quote }}
+  {{- if .Values.tieredStorage.enabled }}
+  Surgewave__TieredStorage__Provider: {{ .Values.tieredStorage.provider | quote }}
+  {{- if eq .Values.tieredStorage.provider "s3" }}
+  Surgewave__TieredStorage__S3__Bucket: {{ .Values.tieredStorage.s3.bucket | quote }}
+  Surgewave__TieredStorage__S3__Region: {{ .Values.tieredStorage.s3.region | quote }}
+  {{- end }}
+  {{- if eq .Values.tieredStorage.provider "azure" }}
+  Surgewave__TieredStorage__Azure__Container: {{ .Values.tieredStorage.azure.container | quote }}
+  {{- end }}
+  {{- if eq .Values.tieredStorage.provider "gcp" }}
+  Surgewave__TieredStorage__Gcp__Bucket: {{ .Values.tieredStorage.gcp.bucket | quote }}
+  Surgewave__TieredStorage__Gcp__ProjectId: {{ .Values.tieredStorage.gcp.projectId | quote }}
+  {{- end }}
+  {{- end }}
+
+  # Security
+  Surgewave__Security__SaslEnabled: {{ .Values.security.sasl.enabled | quote }}
+  Surgewave__Security__AclEnabled: {{ .Values.security.acl.enabled | quote }}
+  Surgewave__Security__TlsEnabled: {{ .Values.security.tls.enabled | quote }}

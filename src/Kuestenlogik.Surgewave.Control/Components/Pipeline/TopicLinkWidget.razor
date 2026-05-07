@@ -1,0 +1,74 @@
+@using Blazor.Diagrams.Core.Geometry
+
+<g class="topic-link @(Link.IsActive ? "active" : "")">
+    @if (Link.PathGeneratorResult?.FullPath != null)
+    {
+        <path d="@Link.PathGeneratorResult.FullPath.ToString()"
+              class="topic-link-path"
+              stroke="@(Link.IsActive ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)")"
+              stroke-width="2"
+              fill="none" />
+    }
+
+    @* Topic label at midpoint *@
+    @if (!string.IsNullOrEmpty(Link.TopicName))
+    {
+        <g transform="translate(@LabelPosition.X.ToString(System.Globalization.CultureInfo.InvariantCulture), @LabelPosition.Y.ToString(System.Globalization.CultureInfo.InvariantCulture))">
+            <rect x="-50" y="-10" width="100" height="20" rx="4"
+                  class="topic-label-bg" />
+            <text x="0" y="4" text-anchor="middle" class="topic-label-text">
+                @TruncateTopicName(Link.TopicName)
+            </text>
+        </g>
+    }
+</g>
+
+@code {
+    [Parameter]
+    public TopicLink Link { get; set; } = null!;
+
+    private Point LabelPosition
+    {
+        get
+        {
+            var source = Link.Source?.GetPosition(Link);
+            var target = Link.Target?.GetPosition(Link);
+
+            if (source == null || target == null)
+                return new Point(0, 0);
+
+            return new Point(
+                (source.X + target.X) / 2,
+                (source.Y + target.Y) / 2
+            );
+        }
+    }
+
+    private static string TruncateTopicName(string name)
+    {
+        return name.Length > 15 ? name[..12] + "..." : name;
+    }
+}
+
+<style>
+    .topic-link-path {
+        transition: stroke 0.2s ease;
+    }
+
+    .topic-link.active .topic-link-path {
+        stroke: var(--mud-palette-primary);
+        stroke-width: 3;
+    }
+
+    .topic-label-bg {
+        fill: var(--mud-palette-surface);
+        stroke: var(--mud-palette-lines-default);
+        stroke-width: 1;
+    }
+
+    .topic-label-text {
+        fill: var(--mud-palette-text-primary);
+        font-size: 10px;
+        font-family: monospace;
+    }
+</style>

@@ -1,0 +1,8 @@
+- name: Monitoring Overview
+  href: index.md
+- name: Prometheus Metrics
+  href: metrics.md
+- name: OpenTelemetry
+  href: tracing.md
+- name: Dashboard
+  href: dashboard.md

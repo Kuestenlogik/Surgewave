@@ -1,0 +1,195 @@
+@inherits LayoutComponentBase
+@inject ClusterState ClusterState
+@inject AssistantState AssistantState
+@inject ShepherdService ShepherdService
+@inject ISurgewaveApiClient ApiClient
+@inject NavigationManager Navigation
+@using Kuestenlogik.Surgewave.Control.Security
+@using Kuestenlogik.Surgewave.Control.Components.Assistant
+@inject Microsoft.Extensions.Options.IOptions<SurgewaveAuthConfig> AuthConfig
+@inject IJSRuntime JS
+
+<MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@ToggleDrawer" />
+        <MudText Typo="Typo.h5" Class="ml-3">Surgewave Control</MudText>
+        <MudSpacer />
+
+        @* Guided Tour Button *@
+        <MudTooltip Text="Start guided tour" data-tour-id="tour-button">
+            <MudIconButton Icon="@Icons.Material.Filled.Tour" Color="Color.Inherit" OnClick="StartPageTour"
+                           data-tour-id="tour-button" />
+        </MudTooltip>
+
+        @* Surgewave Assistant Badge *@
+        <AnomalyBadge OnClick="ToggleAssistantDrawer" />
+
+        @* Dark/Light Mode Toggle *@
+        <MudTooltip Text="@(_isDarkMode ? "Light Mode" : "Dark Mode")">
+            <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                           Color="Color.Inherit" OnClick="ToggleDarkMode"
+                           data-tour-id="dark-mode-toggle" />
+        </MudTooltip>
+
+        @* User Menu *@
+        <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <div class="px-4 py-2">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Signed in as</MudText>
+                @if (AuthConfig.Value.Enabled)
+                {
+                    <AuthorizeView>
+                        <Authorized>
+                            <MudText Typo="Typo.body1" Class="mb-2">@context.User.Identity?.Name</MudText>
+                        </Authorized>
+                        <NotAuthorized>
+                            <MudText Typo="Typo.body1" Class="mb-2">Not signed in</MudText>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body1" Class="mb-2">Admin</MudText>
+                }
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Cluster</MudText>
+                <MudSelect T="string" Value="@ClusterState.SelectedClusterId" ValueChanged="OnClusterChanged"
+                           Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Class="mt-1" Style="min-width: 180px;">
+                    @foreach (var cluster in _clusters)
+                    {
+                        <MudSelectItem Value="@cluster">@cluster</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudDivider Class="my-2" />
+                @if (AuthConfig.Value.Enabled)
+                {
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Logout" Color="Color.Default"
+                               FullWidth="true" Class="justify-start" OnClick="SignOut">
+                        Sign out
+                    </MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Logout" Color="Color.Default"
+                               FullWidth="true" Class="justify-start" Disabled="true">
+                        Sign out
+                    </MudButton>
+                }
+            </div>
+        </MudMenu>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+        <NavMenu />
+    </MudDrawer>
+
+    <MudMainContent Class="pt-16 px-4" Style="height: 100vh; overflow: hidden;">
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-2" Style="height: calc(100vh - 64px); overflow: auto;">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+
+    <AssistantDrawer @bind-IsOpen="_assistantDrawerOpen" />
+</MudLayout>
+
+@code {
+    private const string ThemeStorageKey = "surgewave_theme_dark_mode";
+
+    private bool _drawerOpen = true;
+    private bool _isDarkMode = true;
+    private bool _assistantDrawerOpen;
+    private List<string> _clusters = ["surgewave-cluster"];
+
+    private MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1976D2",
+            Secondary = "#424242",
+            AppbarBackground = "#1976D2"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#90CAF9",
+            Secondary = "#B0BEC5",
+            Surface = "#1E1E1E",
+            Background = "#121212",
+            AppbarBackground = "#1E1E1E"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var clusterInfo = await ApiClient.GetClusterInfoAsync();
+            if (clusterInfo != null)
+            {
+                ClusterState.SelectedClusterId = clusterInfo.ClusterId;
+                _clusters = [clusterInfo.ClusterId];
+            }
+        }
+        catch
+        {
+            // Gateway not available, use default
+            ClusterState.SelectedClusterId = "surgewave-cluster";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
+            if (stored is not null)
+            {
+                _isDarkMode = stored == "true";
+            }
+            else
+            {
+                _isDarkMode = await JS.InvokeAsync<bool>("eval", "window.matchMedia('(prefers-color-scheme: dark)').matches");
+            }
+
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void ToggleAssistantDrawer() => _assistantDrawerOpen = !_assistantDrawerOpen;
+
+    private async Task ToggleDarkMode()
+    {
+        _isDarkMode = !_isDarkMode;
+        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, _isDarkMode ? "true" : "false");
+    }
+
+    private void OnClusterChanged(string clusterId)
+    {
+        ClusterState.SelectedClusterId = clusterId;
+    }
+
+    private async Task StartPageTour()
+    {
+        var currentPath = new Uri(Navigation.Uri).AbsolutePath;
+        var tour = ShepherdTourDefinitions.GetByPage(currentPath);
+        if (tour is not null)
+        {
+            await ShepherdService.StartTourAsync(tour);
+        }
+        else
+        {
+            // Default to welcome tour if no page-specific tour
+            await ShepherdService.StartTourAsync(ShepherdTourDefinitions.Welcome);
+        }
+    }
+
+    private void SignOut()
+    {
+        Navigation.NavigateTo("Account/Logout", forceLoad: true);
+    }
+}

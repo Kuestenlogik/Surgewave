@@ -1,0 +1,280 @@
+@page "/pipelines/lineage"
+@rendermode InteractiveServer
+@using Blazor.Diagrams
+@using Blazor.Diagrams.Options
+@using Blazor.Diagrams.Core.PathGenerators
+@using Blazor.Diagrams.Core.Routers
+@using Blazor.Diagrams.Core.Geometry
+@using Blazor.Diagrams.Core.Models
+@using Kuestenlogik.Surgewave.Control.Components.Pipeline
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+@inject PipelineLineageService LineageService
+@inject NavigationManager Navigation
+
+<PageTitle>Pipeline Lineage - Surgewave Control</PageTitle>
+
+<MudPaper Elevation="2" Class="pa-3 mb-3">
+    <div class="d-flex align-center gap-2">
+        <MudIcon Icon="@Icons.Material.Filled.DeviceHub" />
+        <MudText Typo="Typo.h6">Pipeline Lineage</MudText>
+        <MudSpacer />
+        <MudButtonGroup Variant="Variant.Outlined" Size="MudBlazor.Size.Small">
+            <MudButton OnClick="RefreshAsync" StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="@_loading">Refresh</MudButton>
+            <MudButton OnClick="AutoLayout" StartIcon="@Icons.Material.Filled.AutoFixHigh"
+                       Disabled="@(_loading || _diagram.Nodes.Count == 0)">Auto Layout</MudButton>
+        </MudButtonGroup>
+        <MudSelect T="string" @bind-Value="_statusFilter" Label="Status" Variant="Variant.Outlined"
+                   Margin="Margin.Dense" Dense="true" Style="max-width: 140px;">
+            <MudSelectItem T="string" Value="@("all")">All</MudSelectItem>
+            <MudSelectItem T="string" Value="@("running")">Running</MudSelectItem>
+            <MudSelectItem T="string" Value="@("stopped")">Stopped</MudSelectItem>
+        </MudSelect>
+        <MudIconButton Icon="@Icons.Material.Filled.ZoomIn" OnClick="ZoomIn" Size="MudBlazor.Size.Small" />
+        <MudIconButton Icon="@Icons.Material.Filled.ZoomOut" OnClick="ZoomOut" Size="MudBlazor.Size.Small" />
+        <MudIconButton Icon="@Icons.Material.Filled.FitScreen" OnClick="FitToView" Size="MudBlazor.Size.Small" />
+        <MudButton Variant="Variant.Outlined" Href="/pipelines"
+                   StartIcon="@Icons.Material.Filled.ArrowBack" Size="MudBlazor.Size.Small">
+            Back to List
+        </MudButton>
+    </div>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+
+<div class="lineage-canvas-container">
+    <CascadingValue Value="_diagram">
+        <Blazor.Diagrams.Components.DiagramCanvas />
+    </CascadingValue>
+</div>
+
+@if (_graph != null)
+{
+    <MudPaper Elevation="1" Class="pa-2 mt-2">
+        <div class="d-flex align-center gap-3">
+            <MudText Typo="Typo.caption">
+                @_graph.Pipelines.Count pipelines | @_graph.Connections.Count topic connections
+            </MudText>
+            <MudSpacer />
+            <div class="d-flex align-center gap-2">
+                <span style="width:12px;height:12px;background:var(--mud-palette-success);border-radius:50%;display:inline-block;"></span>
+                <MudText Typo="Typo.caption">Running</MudText>
+                <span style="width:12px;height:12px;background:var(--mud-palette-error);border-radius:50%;display:inline-block;margin-left:8px;"></span>
+                <MudText Typo="Typo.caption">Failed</MudText>
+                <span style="width:12px;height:12px;background:var(--mud-palette-lines-default);border-radius:50%;display:inline-block;margin-left:8px;"></span>
+                <MudText Typo="Typo.caption">Stopped/Draft</MudText>
+            </div>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    private BlazorDiagram _diagram = null!;
+    private bool _loading;
+    private string _statusFilter = "all";
+    private PipelineLineageGraph? _graph;
+
+    protected override void OnInitialized()
+    {
+        var options = new BlazorDiagramOptions
+        {
+            AllowMultiSelection = false,
+            Zoom = { Enabled = true, Inverse = false },
+            Links = { DefaultPathGenerator = new SmoothPathGenerator() }
+        };
+
+        _diagram = new BlazorDiagram(options);
+        _diagram.RegisterComponent<PipelineLineageNode, PipelineLineageNodeWidget>();
+        _diagram.RegisterComponent<TopicLink, TopicLinkWidget>();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await RefreshAsync();
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var pipelines = await ApiClient.ListPipelinesAsync();
+            var definitions = new List<PipelineDefinition>();
+
+            foreach (var summary in pipelines)
+            {
+                try
+                {
+                    var definition = await ApiClient.GetPipelineAsync(summary.Id);
+                    if (definition != null)
+                        definitions.Add(definition);
+                }
+                catch
+                {
+                    // Skip pipelines that can't be loaded
+                }
+            }
+
+            _graph = LineageService.BuildGraph(definitions);
+            RebuildDiagram();
+        }
+        catch
+        {
+            // Error loading pipelines
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void RebuildDiagram()
+    {
+        _diagram.Nodes.Clear();
+        _diagram.Links.Clear();
+
+        if (_graph == null) return;
+
+        var filteredPipelines = _graph.Pipelines
+            .Where(p => _statusFilter == "all" ||
+                        (_statusFilter == "running" && p.Status == PipelineStatus.Running) ||
+                        (_statusFilter == "stopped" && p.Status != PipelineStatus.Running))
+            .ToList();
+
+        var nodeMap = new Dictionary<string, PipelineLineageNode>();
+        var xOffset = 50.0;
+        var yOffset = 50.0;
+        var col = 0;
+
+        foreach (var entry in filteredPipelines)
+        {
+            var x = xOffset + (col % 4) * 320;
+            var y = yOffset + (col / 4) * 250;
+
+            var node = new PipelineLineageNode(new Point(x, y))
+            {
+                PipelineId = entry.PipelineId,
+                Name = entry.Name,
+                Status = entry.Status,
+                NodeCount = entry.NodeCount,
+                SourceTopics = entry.SourceTopics,
+                SinkTopics = entry.SinkTopics
+            };
+
+            // Add ports: left for input, right for output
+            node.AddPort(PortAlignment.Left);
+            node.AddPort(PortAlignment.Right);
+
+            _diagram.Nodes.Add(node);
+            nodeMap[entry.PipelineId] = node;
+            col++;
+        }
+
+        // Add topic connections
+        foreach (var conn in _graph.Connections)
+        {
+            if (!nodeMap.TryGetValue(conn.ProducerPipelineId, out var producer) ||
+                !nodeMap.TryGetValue(conn.ConsumerPipelineId, out var consumer))
+                continue;
+
+            var sourcePort = producer.Ports.FirstOrDefault(p => p.Alignment == PortAlignment.Right)
+                             ?? producer.Ports.First();
+            var targetPort = consumer.Ports.FirstOrDefault(p => p.Alignment == PortAlignment.Left)
+                             ?? consumer.Ports.First();
+
+            var link = new TopicLink(sourcePort, targetPort)
+            {
+                TopicName = conn.TopicName,
+                IsActive = producer.Status == PipelineStatus.Running &&
+                           consumer.Status == PipelineStatus.Running
+            };
+
+            _diagram.Links.Add(link);
+        }
+
+        // Double-click to navigate to pipeline editor
+        _diagram.PointerDoubleClick += (model, _) =>
+        {
+            if (model is PipelineLineageNode lineageNode)
+            {
+                Navigation.NavigateTo($"/pipelines/{lineageNode.PipelineId}/edit");
+            }
+        };
+    }
+
+    private void AutoLayout()
+    {
+        if (_diagram.Nodes.Count == 0) return;
+
+        var layoutService = new PipelineLayoutService();
+        var connectorNodes = new List<ConnectorNode>();
+        var nodeLookup = new Dictionary<string, PipelineLineageNode>();
+
+        // Create temporary ConnectorNodes for layout computation
+        foreach (var node in _diagram.Nodes.OfType<PipelineLineageNode>())
+        {
+            var temp = new ConnectorNode(node.Position ?? new Point(0, 0))
+            {
+                NodeId = node.PipelineId,
+                ConnectorType = "pipeline",
+                Label = node.Name
+            };
+            connectorNodes.Add(temp);
+            nodeLookup[node.PipelineId] = node;
+        }
+
+        var links = _diagram.Links.OfType<TopicLink>()
+            .Select(l =>
+            {
+                var source = _diagram.Nodes.OfType<PipelineLineageNode>()
+                    .FirstOrDefault(n => n.Ports.Any(p => p == l.Source?.Model));
+                var target = _diagram.Nodes.OfType<PipelineLineageNode>()
+                    .FirstOrDefault(n => n.Ports.Any(p => p == l.Target?.Model));
+                return (source?.PipelineId ?? "", target?.PipelineId ?? "");
+            })
+            .Where(l => !string.IsNullOrEmpty(l.Item1) && !string.IsNullOrEmpty(l.Item2))
+            .ToList();
+
+        var result = layoutService.ComputeLayout(connectorNodes, links, LayoutDirection.LeftToRight);
+
+        foreach (var (nodeId, (x, y)) in result.Positions)
+        {
+            if (nodeLookup.TryGetValue(nodeId, out var node))
+            {
+                node.SetPosition(x, y);
+            }
+        }
+
+        _diagram.Refresh();
+    }
+
+    private void ZoomIn() => _diagram.SetZoom(_diagram.Zoom + 0.1);
+    private void ZoomOut() => _diagram.SetZoom(Math.Max(0.1, _diagram.Zoom - 0.1));
+
+    private void FitToView()
+    {
+        if (_diagram.Nodes.Count == 0) return;
+        _diagram.ZoomToFit();
+    }
+}
+
+<style>
+    .lineage-canvas-container {
+        height: calc(100vh - 250px);
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 8px;
+        background: var(--mud-palette-background);
+        overflow: hidden;
+    }
+</style>

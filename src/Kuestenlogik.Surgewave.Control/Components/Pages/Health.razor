@@ -1,0 +1,258 @@
+@page "/health"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+
+<PageTitle>Health - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Cluster Health</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        Failed to load health details: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadDataAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else if (_healthDetails != null)
+{
+    <MudGrid>
+        @* Status Card *@
+        <MudItem xs="12" md="6" lg="4">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center mb-4">
+                        <MudIcon Icon="@(_isHealthy ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                 Color="@(_isHealthy ? Color.Success : Color.Error)"
+                                 Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.h4">@_healthDetails.Status</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Last checked: @_healthDetails.Timestamp.ToLocalTime().ToString("HH:mm:ss")
+                            </MudText>
+                        </div>
+                    </div>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadDataAsync"
+                               StartIcon="@Icons.Material.Filled.Refresh" FullWidth="true">
+                        Refresh
+                    </MudButton>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Broker Details *@
+        <MudItem xs="12" md="6" lg="4">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Broker Details</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <tbody>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Broker ID</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_healthDetails.BrokerId</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Host</MudText></td>
+                                <td><MudText Typo="Typo.body1">@(_healthDetails.Host.Length > 0 ? _healthDetails.Host : "localhost")</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Kafka Port</MudText></td>
+                                <td><MudText Typo="Typo.body1">@(_healthDetails.Port > 0 ? _healthDetails.Port : 9092)</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">gRPC Port</MudText></td>
+                                <td><MudText Typo="Typo.body1">@(_healthDetails.GrpcPort > 0 ? _healthDetails.GrpcPort : 9093)</MudText></td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Cluster Details *@
+        <MudItem xs="12" md="6" lg="4">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Cluster Details</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <tbody>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Controller</MudText></td>
+                                <td><MudText Typo="Typo.body1">Broker @_healthDetails.ControllerId</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Brokers</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_healthDetails.BrokersCount</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Topics</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_healthDetails.TopicsCount</MudText></td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Raft Details (if enabled) *@
+        @if (_healthDetails.RaftEnabled)
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Raft Consensus</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudSimpleTable Dense="true" Hover="true">
+                            <tbody>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">State</MudText></td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="@GetRaftStateColor(_healthDetails.RaftState)">
+                                            @_healthDetails.RaftState
+                                        </MudChip>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Leader</MudText></td>
+                                    <td><MudText Typo="Typo.body1">Broker @(_healthDetails.RaftLeaderId ?? -1)</MudText></td>
+                                </tr>
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+
+        @* Health Checks Summary *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Health Checks</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Check</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><MudText Typo="Typo.body1">Broker</MudText></td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetCheckColor(_healthDetails.Checks?.Broker)">
+                                        @(_healthDetails.Checks?.Broker ?? (_isHealthy ? "Healthy" : "Unhealthy"))
+                                    </MudChip>
+                                </td>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Kafka protocol listener</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body1">gRPC API</MudText></td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetCheckColor(_healthDetails.Checks?.Grpc)">
+                                        @(_healthDetails.Checks?.Grpc ?? "Healthy")
+                                    </MudChip>
+                                </td>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">REST/gRPC endpoints</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body1">Storage</MudText></td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetCheckColor(_healthDetails.Checks?.Storage)">
+                                        @(_healthDetails.Checks?.Storage ?? "Unknown")
+                                    </MudChip>
+                                </td>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Log segments accessible</MudText></td>
+                            </tr>
+                            @if (_healthDetails.RaftEnabled)
+                            {
+                                <tr>
+                                    <td><MudText Typo="Typo.body1">Raft Consensus</MudText></td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small"
+                                                 Color="@(_healthDetails.RaftState == "Leader" || _healthDetails.RaftState == "Follower" ? Color.Success : Color.Warning)">
+                                            @(_healthDetails.RaftState == "Candidate" ? "Election in progress" : "Healthy")
+                                        </MudChip>
+                                    </td>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Cluster replication</MudText></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private bool _isHealthy;
+    private HealthDetails? _healthDetails;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            _healthDetails = await ApiClient.GetHealthDetailsAsync();
+            _isHealthy = _healthDetails?.Status == "Healthy";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _isHealthy = false;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static Color GetRaftStateColor(string? state) => state switch
+    {
+        "Leader" => Color.Success,
+        "Follower" => Color.Info,
+        "Candidate" => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static Color GetCheckColor(string? status) => status switch
+    {
+        "Healthy" => Color.Success,
+        "Unhealthy" => Color.Error,
+        "Degraded" => Color.Warning,
+        "Unknown" => Color.Default,
+        _ => Color.Default
+    };
+}

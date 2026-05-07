@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- CS0618: benchmarks intentionally test deprecated APIs; CA rules in .editorconfig -->
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+    <!-- Server GC for accurate latency benchmarks -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <!-- Reference all benchmark category projects -->
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Unit\Kuestenlogik.Surgewave.Benchmarks.Unit.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Storage\Kuestenlogik.Surgewave.Benchmarks.Storage.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Integration\Kuestenlogik.Surgewave.Benchmarks.Integration.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Comparison\Kuestenlogik.Surgewave.Benchmarks.Comparison.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Latency\Kuestenlogik.Surgewave.Benchmarks.Latency.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Streams\Kuestenlogik.Surgewave.Benchmarks.Streams.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Transport\Kuestenlogik.Surgewave.Benchmarks.Transport.csproj" />
+  </ItemGroup>
+
+</Project>

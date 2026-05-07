@@ -1,0 +1,421 @@
+@page "/help"
+@using Kuestenlogik.Surgewave.Control.Services
+@inject NavigationManager Navigation
+@inject ShepherdService ShepherdService
+
+<PageTitle>Help Center - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-2">Help Center</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Documentation, guides, and keyboard shortcuts for Surgewave Control
+</MudText>
+
+@* ===== SEARCH ===== *@
+<MudTextField T="string" @bind-Value="_search" Placeholder="Search help topics..."
+              Variant="Variant.Outlined" Immediate="true" Class="mb-4"
+              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+
+@* ===== INTERACTIVE TOURS ===== *@
+<MudText Typo="Typo.h5" Class="mb-3">Interactive Tours</MudText>
+<MudPaper Elevation="2" Class="pa-4 mb-6">
+    <MudText Typo="Typo.body2" Class="mb-3">
+        Start an interactive guided tour to learn about Surgewave Control features. Tours highlight UI elements and walk you through key workflows.
+    </MudText>
+    <MudGrid>
+        @foreach (var tour in ShepherdTourDefinitions.All)
+        {
+            <MudItem xs="12" sm="6" md="4" lg="3">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Tour"
+                           OnClick="@(() => StartTourAsync(tour))">
+                    @tour.Title
+                </MudButton>
+            </MudItem>
+        }
+    </MudGrid>
+    <MudDivider Class="my-3" />
+    <MudButton Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RestartAlt"
+               OnClick="ResetTourProgressAsync">
+        Reset Tour Progress
+    </MudButton>
+</MudPaper>
+
+@* ===== QUICK START GUIDES ===== *@
+<MudText Typo="Typo.h5" Class="mb-3">Quick Start Guides</MudText>
+<MudGrid Class="mb-6">
+    @foreach (var guide in FilteredGuides)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Elevation="2" Class="cursor-pointer" Style="height: 100%;"
+                     @onclick="@(() => _expandedGuide = _expandedGuide == guide.Id ? null : guide.Id)">
+                <MudCardHeader>
+                    <CardHeaderAvatar>
+                        <MudAvatar Color="@guide.Color"><MudIcon Icon="@guide.Icon" /></MudAvatar>
+                    </CardHeaderAvatar>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">@guide.Title</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@guide.Subtitle</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                @if (_expandedGuide == guide.Id)
+                {
+                    <MudCardContent>
+                        <MudList T="string" Dense="true">
+                            @foreach (var step in guide.Steps)
+                            {
+                                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircleOutline" IconColor="Color.Success">
+                                    @step
+                                </MudListItem>
+                            }
+                        </MudList>
+                        @if (guide.Link != null)
+                        {
+                            <div class="d-flex gap-2 mt-2">
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="@guide.Link"
+                                           EndIcon="@Icons.Material.Filled.ArrowForward">
+                                    Go to @guide.Title
+                                </MudButton>
+                                @{
+                                    var tourDef = ShepherdTourDefinitions.GetById(guide.Id);
+                                }
+                                @if (tourDef is not null)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Secondary"
+                                               StartIcon="@Icons.Material.Filled.Tour"
+                                               OnClick="@(() => StartTourAsync(tourDef))">
+                                        Start Tour
+                                    </MudButton>
+                                }
+                            </div>
+                        }
+                    </MudCardContent>
+                }
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@* ===== KEYBOARD SHORTCUTS ===== *@
+<MudText Typo="Typo.h5" Class="mb-3">Keyboard Shortcuts</MudText>
+<MudPaper Elevation="2" Class="pa-4 mb-6">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2"><strong>Navigation</strong></MudText>
+            <MudSimpleTable Dense="true" Style="font-size: 13px;">
+                <tbody>
+                    <tr><td style="width:120px;"><kbd>?</kbd></td><td>Show keyboard shortcuts</td></tr>
+                    <tr><td><kbd>Ctrl+K</kbd></td><td>Quick search / command palette</td></tr>
+                    <tr><td><kbd>G</kbd> then <kbd>D</kbd></td><td>Go to Dashboard</td></tr>
+                    <tr><td><kbd>G</kbd> then <kbd>T</kbd></td><td>Go to Topics</td></tr>
+                    <tr><td><kbd>G</kbd> then <kbd>C</kbd></td><td>Go to Consumer Groups</td></tr>
+                    <tr><td><kbd>G</kbd> then <kbd>S</kbd></td><td>Go to SQL Query</td></tr>
+                    <tr><td><kbd>G</kbd> then <kbd>B</kbd></td><td>Go to Brokers</td></tr>
+                    <tr><td><kbd>G</kbd> then <kbd>H</kbd></td><td>Go to Help</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2"><strong>Actions</strong></MudText>
+            <MudSimpleTable Dense="true" Style="font-size: 13px;">
+                <tbody>
+                    <tr><td style="width:120px;"><kbd>R</kbd></td><td>Refresh current page</td></tr>
+                    <tr><td><kbd>N</kbd></td><td>Create new (topic, connector, etc.)</td></tr>
+                    <tr><td><kbd>Esc</kbd></td><td>Close dialog / cancel</td></tr>
+                    <tr><td><kbd>Enter</kbd></td><td>Confirm dialog</td></tr>
+                    <tr><td><kbd>/</kbd></td><td>Focus search field</td></tr>
+                    <tr><td><kbd>Ctrl+S</kbd></td><td>Save current form</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2"><strong>Tables &amp; Lists</strong></MudText>
+            <MudSimpleTable Dense="true" Style="font-size: 13px;">
+                <tbody>
+                    <tr><td style="width:120px;"><kbd>J</kbd> / <kbd>K</kbd></td><td>Move down / up</td></tr>
+                    <tr><td><kbd>Space</kbd></td><td>Select / deselect row</td></tr>
+                    <tr><td><kbd>Shift+A</kbd></td><td>Select all</td></tr>
+                    <tr><td><kbd>Ctrl+A</kbd></td><td>Select all on page</td></tr>
+                    <tr><td><kbd>&lt;</kbd> / <kbd>&gt;</kbd></td><td>Previous / next page</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ===== FEATURE OVERVIEW ===== *@
+<MudText Typo="Typo.h5" Class="mb-3">Feature Overview</MudText>
+<MudExpansionPanels MultiExpansion="true" Elevation="2" Class="mb-6">
+    @foreach (var item in FilteredSections)
+    {
+        <MudExpansionPanel Text="@item.Title" Icon="@item.Icon">
+            <MudText Typo="Typo.body2" Class="mb-3">@item.Description</MudText>
+            <MudSimpleTable Dense="true">
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Description</th>
+                        <th>Page</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var feature in item.Features)
+                    {
+                        <tr>
+                            <td><strong>@feature.Name</strong></td>
+                            <td>@feature.Description</td>
+                            <td>
+                                @if (feature.Link != null)
+                                {
+                                    <MudLink Href="@feature.Link">Open</MudLink>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
+
+@* ===== FAQ ===== *@
+<MudText Typo="Typo.h5" Class="mb-3">Frequently Asked Questions</MudText>
+<MudExpansionPanels MultiExpansion="true" Elevation="2" Class="mb-6">
+    @foreach (var faq in FilteredFaqs)
+    {
+        <MudExpansionPanel Text="@faq.Question">
+            <MudText Typo="Typo.body2">@faq.Answer</MudText>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
+
+@* ===== API REFERENCE ===== *@
+<MudText Typo="Typo.h5" Class="mb-3">API Reference</MudText>
+<MudPaper Elevation="2" Class="pa-4 mb-6">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="0" Outlined="true">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">REST API</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText Typo="Typo.body2" Class="mb-2">
+                        Confluent v3 compatible REST endpoints for producing, consuming, and managing topics.
+                    </MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Base URL: <code>/v3/clusters/{{clusterId}}</code>
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="0" Outlined="true">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">gRPC API</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText Typo="Typo.body2" Class="mb-2">
+                        11 gRPC services with 75 methods for high-performance client integration.
+                    </MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Proto files in <code>protos/</code> directory
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="0" Outlined="true">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">WebSocket API</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText Typo="Typo.body2" Class="mb-2">
+                        Real-time streaming with bidirectional consumer/producer support.
+                    </MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Endpoint: <code>/ws</code> or <code>/ws/clusters/{{clusterId}}</code>
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ===== ABOUT ===== *@
+<MudPaper Elevation="2" Class="pa-4">
+    <div class="d-flex align-center gap-3 mb-3">
+        <MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Primary" />
+        <MudText Typo="Typo.h6">About Surgewave Control</MudText>
+    </div>
+    <MudText Typo="Typo.body2" Class="mb-2">
+        Surgewave is a high-performance, drop-in Kafka replacement built with .NET 10. Surgewave Control is the
+        web-based management UI providing full administrative capabilities for topics, consumer groups,
+        brokers, connectors, pipelines, ACLs, quotas, and more.
+    </MudText>
+    <MudDivider Class="my-3" />
+    <MudGrid>
+        <MudItem xs="6" sm="3">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
+            <MudText Typo="Typo.body2"><strong>1.0.0</strong></MudText>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Framework</MudText>
+            <MudText Typo="Typo.body2"><strong>.NET 10 / Blazor</strong></MudText>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">UI Library</MudText>
+            <MudText Typo="Typo.body2"><strong>MudBlazor v8</strong></MudText>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Kafka API</MudText>
+            <MudText Typo="Typo.body2"><strong>4.0 Compatible</strong></MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+    private string _search = "";
+    private string? _expandedGuide;
+
+    private bool MatchesSearch(string text) =>
+        string.IsNullOrWhiteSpace(_search) ||
+        text.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    // ===== GUIDES =====
+    private static readonly List<GuideInfo> _guides =
+    [
+        new("topics", "Topic Management", "Create, configure, and monitor topics", Icons.Material.Filled.Topic, Color.Primary,
+            ["Navigate to Topics from the sidebar", "Click 'Create Topic' to add a new topic", "Set partitions, replication factor, and configs", "Use the message browser to inspect data", "Configure retention and cleanup policies"],
+            "/topics"),
+        new("consumers", "Consumer Groups", "Monitor consumer lag and group health", Icons.Material.Filled.Group, Color.Info,
+            ["Go to Consumer Groups page", "View active members and partition assignments", "Check consumer lag in the Lag Dashboard", "Reset offsets when needed (requires admin)", "Set up lag alerts for production monitoring"],
+            "/consumer-groups"),
+        new("connectors", "Kafka Connect", "Deploy and manage connectors", Icons.Material.Filled.Cable, Color.Warning,
+            ["Browse available connectors in the Marketplace", "Deploy a connector with JSON configuration", "Monitor connector health and task status", "Check logs for troubleshooting", "Configure auto-restart for resilience"],
+            "/connectors"),
+        new("pipelines", "Pipeline Editor", "Build data pipelines visually", Icons.Material.Filled.AccountTree, Color.Success,
+            ["Open the Pipeline Editor page", "Drag source, processor, and sink nodes", "Connect nodes to define data flow", "Configure each node's properties", "Deploy and monitor pipeline execution"],
+            "/pipelines"),
+        new("security", "Security & ACLs", "Manage access control and roles", Icons.Material.Filled.Security, Color.Error,
+            ["Navigate to Security > ACLs", "Create ACL rules for users/groups", "Assign principals to resource patterns", "Use Role Management for RBAC", "Review the Audit Log for compliance"],
+            "/acls"),
+        new("sql", "SQL Query", "Query topic data with SQL syntax", Icons.Material.Filled.Code, Color.Tertiary,
+            ["Open the SQL Query page", "Write a SELECT statement with topic name", "Use WHERE clauses to filter messages", "Enable continuous mode for live results", "Export results as JSON or CSV"],
+            "/sql")
+    ];
+
+    private IEnumerable<GuideInfo> FilteredGuides =>
+        _guides.Where(g => MatchesSearch(g.Title) || MatchesSearch(g.Subtitle) || g.Steps.Any(s => MatchesSearch(s)));
+
+    // ===== FEATURE SECTIONS =====
+    private static readonly List<FeatureSection> _sections =
+    [
+        new("Data Management", Icons.Material.Filled.Storage, "Core data management features for topics, messages, and consumer groups.",
+        [
+            new("Topic List & Detail", "Browse, search, create, and delete topics with full configuration", "/topics"),
+            new("Message Browser", "Inspect messages with key/value/header display, JSON formatting", "/topics"),
+            new("Message Producer", "Produce messages with key/value editor, headers, partition selection", "/topics"),
+            new("Consumer Groups", "View group members, assignments, lag per partition", "/consumer-groups"),
+            new("Consumer Lag Dashboard", "Time-series lag charts, heatmaps, offset reset", "/consumer-lag"),
+            new("Bulk Operations", "Multi-select topics for batch delete, config, and ACL operations", "/bulk"),
+            new("SQL Query Engine", "SQL-like queries on topic data with filtering and export", "/sql")
+        ]),
+        new("Integration", Icons.Material.Filled.Extension, "Connect external systems with connectors, pipelines, and schemas.",
+        [
+            new("Connectors", "Deploy, configure, and manage Kafka Connect connectors", "/connectors"),
+            new("Connector Health", "Monitor connector/task health, metrics, auto-restart", "/connectors/health"),
+            new("Pipeline Editor", "Visual drag-and-drop pipeline builder with NiFi-level features", "/pipelines"),
+            new("Pipeline Lineage", "Data lineage graph showing topic-to-topic data flow", "/pipelines/lineage"),
+            new("Schema Registry", "Manage Avro, Protobuf, and JSON schemas", "/schemas"),
+            new("Schema Diff Viewer", "Side-by-side schema version comparison with breaking change detection", "/schemas"),
+            new("Schema Reference Graph", "Visualize schema-to-topic relationships", "/schemas/graph"),
+            new("Plugins", "Manage installed connector plugins", "/plugins")
+        ]),
+        new("Governance & Security", Icons.Material.Filled.Policy, "Data governance, access control, and compliance features.",
+        [
+            new("Data Catalog", "Tag topics with metadata, owners, PII classification", "/catalog"),
+            new("Dead Letter Queues", "DLQ detection, error grouping, message replay", "/dlq"),
+            new("ACL Management", "Fine-grained access control for topics, groups, and clusters", "/acls"),
+            new("Quota Management", "Rate limiting for producers and consumers", "/quotas"),
+            new("Role Management", "RBAC with built-in and custom roles", "/roles"),
+            new("Audit Logs", "Track all administrative actions for compliance", "/audit")
+        ]),
+        new("Monitoring & Ops", Icons.Material.Filled.Insights, "Cluster monitoring, alerting, and performance tools.",
+        [
+            new("Cluster Overview", "Multi-cluster dashboard with health, broker, and topic counts", "/clusters"),
+            new("Broker Management", "View broker details, configuration, and performance", "/brokers"),
+            new("Metrics Dashboard", "Real-time cluster metrics with time-series charts", "/metrics"),
+            new("Alerting System", "Configure alert rules, notification channels, and templates", "/alerts"),
+            new("Performance Advisor", "Automatic recommendations for hot partitions, skew, bottlenecks", "/performance-advisor"),
+            new("Health Checks", "Cluster health status with component-level details", "/health")
+        ])
+    ];
+
+    private IEnumerable<FeatureSection> FilteredSections => string.IsNullOrWhiteSpace(_search)
+        ? _sections
+        : _sections.Where(s => MatchesSearch(s.Title) || MatchesSearch(s.Description) ||
+                                s.Features.Any(f => MatchesSearch(f.Name) || MatchesSearch(f.Description)));
+
+    // ===== FAQ =====
+    private static readonly List<FaqItem> _faqs =
+    [
+        new("How do I connect Surgewave Control to my cluster?",
+            "Surgewave Control connects to the Surgewave Broker via the Gateway API. Configure the broker URL in the application settings (appsettings.json) under the 'SurgewaveApi:BaseUrl' section. For multi-cluster support, add cluster configurations under 'SurgewaveApi:Clusters'."),
+        new("Can I use Surgewave Control with Apache Kafka?",
+            "Surgewave is designed as a drop-in Kafka replacement with 100% Kafka 4.0 API compatibility. Surgewave Control connects via Surgewave's Gateway API, which provides Confluent v3 compatible REST endpoints. If you have an existing Kafka cluster, point the Gateway at your Kafka brokers."),
+        new("How do I reset consumer group offsets?",
+            "Navigate to the Consumer Lag Dashboard (/consumer-lag), select the consumer group, and use the 'Reset Offsets' feature. You can reset to: earliest, latest, a specific timestamp, or a specific offset. A dry-run mode shows what would change before applying."),
+        new("What authentication methods are supported?",
+            "Surgewave Control supports OAuth2/OIDC (with any IdP like Entra ID, Keycloak, Okta), LDAP/AD Bind, mutual TLS (mTLS), and delegation tokens. Configure your preferred method in the security settings."),
+        new("How do I set up alerts?",
+            "Go to Monitoring > Alerts, click 'Create Rule', select a metric (consumer lag, error rate, broker health, etc.), set thresholds, and configure notification channels (Slack, Email, PagerDuty, Teams). You can also use predefined alert templates."),
+        new("How do I produce test messages?",
+            "Open any topic's detail page and switch to the 'Produce' tab. You can compose messages with key/value (JSON or plain text), headers, and target partition. Use templates for frequently sent message formats."),
+        new("How do I manage schemas?",
+            "Navigate to Integration > Schema Registry to browse subjects and versions. The Schema Diff Viewer shows version-to-version changes with breaking change detection. The Schema Graph visualizes which topics use which schemas."),
+        new("What is the Data Catalog?",
+            "The Data Catalog (Governance > Data Catalog) is a metadata management system for your topics. You can tag topics with labels, assign owners/teams, classify PII fields, and set data quality tiers. This helps with data discovery and compliance."),
+        new("How do I manage Dead Letter Queues?",
+            "Go to Governance > Dead Letter Queues. Surgewave auto-detects DLQ topics by naming conventions (*.DLQ, *.dead-letter, etc.). You can browse error messages, group by error type, and replay messages back to the source topic.")
+    ];
+
+    private IEnumerable<FaqItem> FilteredFaqs => _faqs.Where(f => MatchesSearch(f.Question) || MatchesSearch(f.Answer));
+
+    // ===== TOURS =====
+    private async Task StartTourAsync(ShepherdTourDefinition tour)
+    {
+        // Navigate to the relevant page before starting the tour
+        var pageMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["welcome"] = "/",
+            ["topics"] = "/topics",
+            ["consumers"] = "/consumer-groups",
+            ["connectors"] = "/connectors",
+            ["pipelines"] = "/pipelines",
+            ["security"] = "/acls",
+            ["monitoring"] = "/metrics"
+        };
+
+        if (pageMap.TryGetValue(tour.Id, out var page))
+        {
+            Navigation.NavigateTo(page);
+        }
+        await ShepherdService.StartTourAsync(tour);
+    }
+
+    private async Task ResetTourProgressAsync()
+    {
+        await ShepherdService.ResetTourProgressAsync();
+    }
+
+    // ===== MODELS =====
+    private sealed record GuideInfo(string Id, string Title, string Subtitle, string Icon, Color Color, List<string> Steps, string? Link);
+    private sealed record FeatureSection(string Title, string Icon, string Description, List<FeatureItem> Features);
+    private sealed record FeatureItem(string Name, string Description, string? Link);
+    private sealed record FaqItem(string Question, string Answer);
+}

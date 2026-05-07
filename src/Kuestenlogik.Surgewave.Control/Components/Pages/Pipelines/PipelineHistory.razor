@@ -1,0 +1,271 @@
+@page "/pipelines/{Id}/history"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+
+<PageTitle>Execution History - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+<MudText Typo="Typo.h4" Class="mb-2">Execution History</MudText>
+<MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mb-4">@_pipelineName</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadExecutionsAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" md="3">
+                <MudSelect T="string" @bind-Value="_statusFilter" Label="Status" Variant="Variant.Outlined"
+                           Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">All</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Completed")">Completed</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Failed")">Failed</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Running")">Running</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect T="string" @bind-Value="_triggerFilter" Label="Trigger" Variant="Variant.Outlined"
+                           Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">All</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("manual")">Manual</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("schedule")">Scheduled</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("webhook")">Webhook</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6" Class="d-flex align-center justify-end">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="LoadExecutionsAsync">
+                    Refresh
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudTable T="ExecutionRecord" Items="@FilteredExecutions" Dense="true" Hover="true" Striped="true" Elevation="2"
+              OnRowClick="@(e => ViewExecution(e.Item!))">
+        <HeaderContent>
+            <MudTh Style="width: 180px">Started</MudTh>
+            <MudTh Style="width: 100px">Status</MudTh>
+            <MudTh Style="width: 100px">Duration</MudTh>
+            <MudTh Style="width: 120px">Records</MudTh>
+            <MudTh Style="width: 100px">Trigger</MudTh>
+            <MudTh>Details</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Started">
+                <MudText Typo="Typo.body2">@context.StartedAt.LocalDateTime.ToString("g")</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatRelativeTime(context.StartedAt)</MudText>
+            </MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                    @context.Status
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Duration">
+                @if (context.DurationMs.HasValue)
+                {
+                    <MudText Typo="Typo.body2">@FormatDuration(context.DurationMs.Value)</MudText>
+                }
+                else
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                }
+            </MudTd>
+            <MudTd DataLabel="Records">
+                <MudText Typo="Typo.body2">
+                    @context.RecordsProcessed.ToString("N0")
+                    @if (context.RecordsFailed > 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">
+                            (@context.RecordsFailed failed)
+                        </MudText>
+                    }
+                </MudText>
+            </MudTd>
+            <MudTd DataLabel="Trigger">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                    @GetTriggerIcon(context.TriggerType)
+                    @context.TriggerType
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Details">
+                @if (!string.IsNullOrEmpty(context.Error))
+                {
+                    <MudTooltip Text="@context.Error">
+                        <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                    </MudTooltip>
+                }
+                <MudText Typo="Typo.caption">@context.Nodes.Count nodes</MudText>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No executions found. Run the pipeline to see execution history.</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <div class="d-flex align-center justify-end pa-4">
+                @if (_hasMore)
+                {
+                    <MudButton Variant="Variant.Outlined" OnClick="LoadMoreAsync" Disabled="@_loadingMore">
+                        @if (_loadingMore)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        }
+                        Load More
+                    </MudButton>
+                }
+                <MudText Typo="Typo.caption" Class="ml-4">
+                    Showing @_executions.Count of @_totalCount
+                </MudText>
+            </div>
+        </PagerContent>
+    </MudTable>
+}
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = "";
+
+    private bool _loading = true;
+    private bool _loadingMore;
+    private string? _error;
+    private string _pipelineName = "";
+    private string _statusFilter = "";
+    private string _triggerFilter = "";
+
+    private List<ExecutionRecord> _executions = [];
+    private int _totalCount;
+    private bool _hasMore;
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    private IEnumerable<ExecutionRecord> FilteredExecutions => _executions
+        .Where(e => string.IsNullOrEmpty(_statusFilter) || e.Status.ToString() == _statusFilter)
+        .Where(e => string.IsNullOrEmpty(_triggerFilter) || e.TriggerType == _triggerFilter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Pipelines", "/pipelines"),
+            new("Edit", $"/pipelines/{Id}/edit"),
+            new("History", null, disabled: true)
+        ];
+
+        await LoadPipelineAsync();
+        await LoadExecutionsAsync();
+    }
+
+    private async Task LoadPipelineAsync()
+    {
+        try
+        {
+            var pipeline = await ApiClient.GetPipelineAsync(Id);
+            _pipelineName = pipeline?.Name ?? "Unknown Pipeline";
+        }
+        catch
+        {
+            _pipelineName = "Unknown Pipeline";
+        }
+    }
+
+    private async Task LoadExecutionsAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ApiClient.ListExecutionsAsync(Id, 50, 0);
+            _executions = result.Executions;
+            _totalCount = result.TotalCount;
+            _hasMore = result.HasMore;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        _loadingMore = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ApiClient.ListExecutionsAsync(Id, 50, _executions.Count);
+            _executions.AddRange(result.Executions);
+            _hasMore = result.HasMore;
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load more: {ex.Message}");
+        }
+        finally
+        {
+            _loadingMore = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ViewExecution(ExecutionRecord execution)
+    {
+        Navigation.NavigateTo($"/pipelines/{Id}/executions/{execution.Id}");
+    }
+
+    private static Color GetStatusColor(ExecutionStatus status) => status switch
+    {
+        ExecutionStatus.Completed => Color.Success,
+        ExecutionStatus.Failed => Color.Error,
+        ExecutionStatus.Running => Color.Info,
+        ExecutionStatus.Cancelled => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string GetTriggerIcon(string triggerType) => triggerType switch
+    {
+        "schedule" => "schedule",
+        "webhook" => "webhook",
+        _ => "play_arrow"
+    };
+
+    private static string FormatDuration(long ms)
+    {
+        if (ms < 1000) return $"{ms}ms";
+        if (ms < 60000) return $"{ms / 1000.0:F1}s";
+        if (ms < 3600000) return $"{ms / 60000.0:F1}m";
+        return $"{ms / 3600000.0:F1}h";
+    }
+
+    private static string FormatRelativeTime(DateTimeOffset time)
+    {
+        var diff = DateTimeOffset.UtcNow - time;
+        if (diff.TotalMinutes < 1) return "just now";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
+        return time.ToString("MMM dd");
+    }
+}

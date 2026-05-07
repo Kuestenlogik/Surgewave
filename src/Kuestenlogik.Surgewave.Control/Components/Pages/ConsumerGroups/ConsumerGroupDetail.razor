@@ -1,0 +1,349 @@
+@page "/consumer-groups/{GroupId}"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+
+<PageTitle>@GroupId - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadGroupAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else if (_group != null)
+{
+    <MudGrid>
+        @* Group Header *@
+        <MudItem xs="12">
+            <MudPaper Elevation="2" Class="pa-4">
+                <div class="d-flex justify-space-between align-center">
+                    <div>
+                        <MudText Typo="Typo.h4">@_group.GroupId</MudText>
+                        <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
+                            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_group.State)" Class="mr-2">@_group.State</MudChip>
+                            @_group.Members.Count members | Coordinator: Broker @_group.CoordinatorId
+                        </MudText>
+                    </div>
+                    <div>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                   OnClick="ConfirmDeleteAsync"
+                                   Disabled="@(_group.State != "Empty" && _group.State != "Dead")">
+                            Delete
+                        </MudButton>
+                    </div>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        @* Group Info *@
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="2" Style="height: 100%">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Group Information</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudSimpleTable Dense="true">
+                        <tbody>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">State</MudText></td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_group.State)">@_group.State</MudChip>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Protocol Type</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_group.ProtocolType</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Protocol</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_group.Protocol</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Coordinator</MudText></td>
+                                <td><MudText Typo="Typo.body1">Broker @_group.CoordinatorId</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Members</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_group.Members.Count</MudText></td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Members *@
+        <MudItem xs="12" md="8">
+            <MudCard Elevation="2" Style="height: 100%">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Members (@_group.Members.Count)</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Style="max-height: 400px; overflow-y: auto;">
+                    @if (_group.Members.Count == 0)
+                    {
+                        <MudText Color="Color.Secondary">No active members</MudText>
+                    }
+                    else
+                    {
+                        <MudExpansionPanels MultiExpansion="true">
+                            @foreach (var member in _group.Members)
+                            {
+                                <MudExpansionPanel Text="@member.ClientId">
+                                    <TitleContent>
+                                        <div class="d-flex align-center">
+                                            <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2" />
+                                            <MudText>@member.ClientId</MudText>
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">
+                                                @member.Assignments.Sum(a => a.Partitions.Count) partitions
+                                            </MudChip>
+                                        </div>
+                                    </TitleContent>
+                                    <ChildContent>
+                                        <MudSimpleTable Dense="true" Class="mb-3">
+                                            <tbody>
+                                                <tr>
+                                                    <td style="width: 120px"><MudText Typo="Typo.body2" Color="Color.Secondary">Member ID</MudText></td>
+                                                    <td><MudText Typo="Typo.body2" Style="word-break: break-all;">@member.MemberId</MudText></td>
+                                                </tr>
+                                                <tr>
+                                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Client Host</MudText></td>
+                                                    <td><MudText Typo="Typo.body2">@member.ClientHost</MudText></td>
+                                                </tr>
+                                            </tbody>
+                                        </MudSimpleTable>
+
+                                        @if (member.Assignments.Count > 0)
+                                        {
+                                            <MudText Typo="Typo.subtitle2" Class="mb-2">Topic Assignments</MudText>
+                                            <MudSimpleTable Dense="true" Hover="true">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Topic</th>
+                                                        <th>Partitions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var assignment in member.Assignments)
+                                                    {
+                                                        <tr>
+                                                            <td>
+                                                                <MudLink Href="@($"/topics/{assignment.Topic}")">@assignment.Topic</MudLink>
+                                                            </td>
+                                                            <td>
+                                                                @foreach (var partition in assignment.Partitions)
+                                                                {
+                                                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="mr-1 mb-1">@partition</MudChip>
+                                                                }
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </MudSimpleTable>
+                                        }
+                                        else
+                                        {
+                                            <MudText Color="Color.Secondary" Typo="Typo.body2">No partition assignments</MudText>
+                                        }
+                                    </ChildContent>
+                                </MudExpansionPanel>
+                            }
+                        </MudExpansionPanels>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Assignments Summary *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Partition Assignments by Topic</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @{
+                        var topicAssignments = GetTopicAssignmentsSummary();
+                    }
+                    @if (topicAssignments.Count == 0)
+                    {
+                        <MudText Color="Color.Secondary">No partition assignments</MudText>
+                    }
+                    else
+                    {
+                        <MudSimpleTable Dense="true" Hover="true">
+                            <thead>
+                                <tr>
+                                    <th>Topic</th>
+                                    <th>Assigned Partitions</th>
+                                    <th>Members</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var topic in topicAssignments.OrderBy(t => t.Key))
+                                {
+                                    <tr>
+                                        <td>
+                                            <MudLink Href="@($"/topics/{topic.Key}")">@topic.Key</MudLink>
+                                        </td>
+                                        <td>@topic.Value.TotalPartitions</td>
+                                        <td>@topic.Value.MemberCount</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter]
+    public string GroupId { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+    private ConsumerGroupDescription? _group;
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Consumer Groups", "/consumer-groups"),
+            new(Uri.UnescapeDataString(GroupId), null, true)
+        ];
+
+        ClusterState.OnChange += async () =>
+        {
+            await LoadGroupAsync();
+            StateHasChanged();
+        };
+        await LoadGroupAsync();
+    }
+
+    private async Task LoadGroupAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            var decodedGroupId = Uri.UnescapeDataString(GroupId);
+            _group = await ApiClient.DescribeConsumerGroupAsync(decodedGroupId, clusterId);
+            if (_group == null)
+            {
+                _error = $"Consumer group '{decodedGroupId}' not found";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private Dictionary<string, TopicAssignmentSummary> GetTopicAssignmentsSummary()
+    {
+        var summary = new Dictionary<string, TopicAssignmentSummary>();
+
+        if (_group == null) return summary;
+
+        foreach (var member in _group.Members)
+        {
+            foreach (var assignment in member.Assignments)
+            {
+                if (!summary.TryGetValue(assignment.Topic, out var topicSummary))
+                {
+                    topicSummary = new TopicAssignmentSummary();
+                    summary[assignment.Topic] = topicSummary;
+                }
+                topicSummary.TotalPartitions += assignment.Partitions.Count;
+                topicSummary.MemberCount++;
+            }
+        }
+
+        return summary;
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Stable" => Color.Success,
+        "PreparingRebalance" or "CompletingRebalance" => Color.Warning,
+        "Empty" => Color.Default,
+        "Dead" => Color.Error,
+        _ => Color.Default
+    };
+
+    private async Task ConfirmDeleteAsync()
+    {
+        var decodedGroupId = Uri.UnescapeDataString(GroupId);
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.ContentText, $"Are you sure you want to delete consumer group '{decodedGroupId}'?" },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Color, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Consumer Group", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await DeleteGroupAsync();
+        }
+    }
+
+    private async Task DeleteGroupAsync()
+    {
+        var decodedGroupId = Uri.UnescapeDataString(GroupId);
+        try
+        {
+            var success = await ApiClient.DeleteConsumerGroupAsync(decodedGroupId, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Consumer group '{decodedGroupId}' deleted successfully");
+                Navigation.NavigateTo("/consumer-groups");
+            }
+            else
+            {
+                Notification.ShowError($"Failed to delete consumer group '{decodedGroupId}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error deleting group: {ex.Message}");
+        }
+    }
+
+    private class TopicAssignmentSummary
+    {
+        public int TotalPartitions { get; set; }
+        public int MemberCount { get; set; }
+    }
+}

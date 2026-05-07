@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+
+service AdminService {
+  rpc ElectLeader(ElectLeaderRequest) returns (ElectLeaderResponse);
+  rpc DescribeBrokerConfig(DescribeBrokerConfigRequest) returns (DescribeBrokerConfigResponse);
+  rpc AlterBrokerConfig(AlterBrokerConfigRequest) returns (AlterBrokerConfigResponse);
+  rpc GetBrokerInfo(GetBrokerInfoRequest) returns (GetBrokerInfoResponse);
+  rpc GetPartitionInfo(GetPartitionInfoRequest) returns (GetPartitionInfoResponse);
+}
+
+enum ElectionType {
+  PREFERRED = 0;
+  UNCLEAN = 1;
+}
+
+message ElectLeaderRequest {
+  ElectionType election_type = 1;
+  repeated TopicPartition partitions = 2;
+  int32 timeout_ms = 3;
+}
+
+message ElectLeaderResponse {
+  repeated ElectionResult results = 1;
+}
+
+message ElectionResult {
+  string topic = 1;
+  int32 partition = 2;
+  ResponseStatus status = 3;
+}
+
+message DescribeBrokerConfigRequest {
+  int32 broker_id = 1;
+  repeated string config_keys = 2;
+}
+
+message DescribeBrokerConfigResponse {
+  repeated ConfigEntryDetail configs = 1;
+  ResponseStatus status = 2;
+}
+
+message AlterBrokerConfigRequest {
+  int32 broker_id = 1;
+  repeated ConfigEntry configs = 2;
+}
+
+message AlterBrokerConfigResponse {
+  ResponseStatus status = 1;
+}
+
+message GetBrokerInfoRequest {}
+
+message GetBrokerInfoResponse {
+  int32 broker_id = 1;
+  string host = 2;
+  int32 kafka_port = 3;
+  int32 grpc_port = 4;
+  string version = 5;
+  int64 start_time = 6;
+}
+
+message GetPartitionInfoRequest {
+  string topic = 1;
+  int32 partition = 2;
+}
+
+message GetPartitionInfoResponse {
+  PartitionInfo partition_info = 1;
+  ResponseStatus status = 2;
+}

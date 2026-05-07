@@ -1,0 +1,236 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service ConsumerGroupService {
+  rpc JoinGroup(JoinGroupRequest) returns (JoinGroupResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{group_id}/join"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{group_id}/join"
+        body: "*"
+      }
+    };
+  }
+  rpc SyncGroup(SyncGroupRequest) returns (SyncGroupResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{group_id}/sync"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{group_id}/sync"
+        body: "*"
+      }
+    };
+  }
+  rpc LeaveGroup(LeaveGroupRequest) returns (LeaveGroupResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{group_id}/leave"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{group_id}/leave"
+        body: "*"
+      }
+    };
+  }
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{group_id}/heartbeat"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{group_id}/heartbeat"
+        body: "*"
+      }
+    };
+  }
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/consumer-groups"
+      additional_bindings {
+        get: "/v3/consumer-groups"
+      }
+    };
+  }
+  rpc DescribeGroup(DescribeGroupRequest) returns (DescribeGroupResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/consumer-groups/{group_id}"
+      additional_bindings {
+        get: "/v3/consumer-groups/{group_id}"
+      }
+    };
+  }
+  rpc DeleteGroup(DeleteGroupRequest) returns (DeleteGroupResponse) {
+    option (google.api.http) = {
+      delete: "/v3/clusters/{cluster_id}/consumer-groups/{group_id}"
+      additional_bindings {
+        delete: "/v3/consumer-groups/{group_id}"
+      }
+    };
+  }
+  rpc FindCoordinator(FindCoordinatorRequest) returns (FindCoordinatorResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/coordinators/{key}"
+      additional_bindings {
+        get: "/v3/coordinators/{key}"
+      }
+    };
+  }
+}
+
+message JoinGroupRequest {
+  string cluster_id = 1;
+  string group_id = 2;
+  string member_id = 3;
+  string group_instance_id = 4;
+  string protocol_type = 5;
+  repeated GroupProtocol protocols = 6;
+  int32 session_timeout_ms = 7;
+  int32 rebalance_timeout_ms = 8;
+}
+
+message GroupProtocol {
+  string name = 1;
+  bytes metadata = 2;
+}
+
+message JoinGroupResponse {
+  int32 generation_id = 1;
+  string protocol_name = 2;
+  string leader = 3;
+  string member_id = 4;
+  repeated GroupMember members = 5;
+  ResponseStatus status = 6;
+}
+
+message GroupMember {
+  string member_id = 1;
+  string group_instance_id = 2;
+  string client_id = 3;
+  string client_host = 4;
+  bytes metadata = 5;
+}
+
+message SyncGroupRequest {
+  string cluster_id = 1;
+  string group_id = 2;
+  int32 generation_id = 3;
+  string member_id = 4;
+  string group_instance_id = 5;
+  repeated MemberAssignment assignments = 6;
+}
+
+message MemberAssignment {
+  string member_id = 1;
+  bytes assignment = 2;
+}
+
+message SyncGroupResponse {
+  bytes assignment = 1;
+  ResponseStatus status = 2;
+}
+
+message LeaveGroupRequest {
+  string cluster_id = 1;
+  string group_id = 2;
+  string member_id = 3;
+  string group_instance_id = 4;
+}
+
+message LeaveGroupResponse {
+  ResponseStatus status = 1;
+}
+
+message HeartbeatRequest {
+  string cluster_id = 1;
+  string group_id = 2;
+  int32 generation_id = 3;
+  string member_id = 4;
+  string group_instance_id = 5;
+}
+
+message HeartbeatResponse {
+  ResponseStatus status = 1;
+}
+
+message ListGroupsRequest {
+  string cluster_id = 1;
+  repeated string states_filter = 2;
+}
+
+message ListGroupsResponse {
+  repeated GroupListing groups = 1;
+  ResponseStatus status = 2;
+}
+
+message GroupListing {
+  string group_id = 1;
+  string protocol_type = 2;
+  string state = 3;
+}
+
+message DescribeGroupRequest {
+  string cluster_id = 1;
+  string group_id = 2;
+  repeated string group_ids = 3;
+}
+
+message DescribeGroupResponse {
+  repeated GroupDescription groups = 1;
+}
+
+message GroupDescription {
+  string group_id = 1;
+  string state = 2;
+  string protocol_type = 3;
+  string protocol_name = 4;
+  int32 generation_id = 5;
+  repeated MemberDescription members = 6;
+  ResponseStatus status = 7;
+}
+
+message MemberDescription {
+  string member_id = 1;
+  string group_instance_id = 2;
+  string client_id = 3;
+  string client_host = 4;
+  bytes member_metadata = 5;
+  bytes member_assignment = 6;
+}
+
+message DeleteGroupRequest {
+  string cluster_id = 1;
+  string group_id = 2;
+  repeated string group_ids = 3;
+}
+
+message DeleteGroupResponse {
+  repeated DeleteGroupResult results = 1;
+}
+
+message DeleteGroupResult {
+  string group_id = 1;
+  ResponseStatus status = 2;
+}
+
+message FindCoordinatorRequest {
+  string cluster_id = 1;
+  string key = 2;
+  CoordinatorType key_type = 3;
+}
+
+enum CoordinatorType {
+  GROUP = 0;
+  TRANSACTION = 1;
+}
+
+message FindCoordinatorResponse {
+  int32 node_id = 1;
+  string host = 2;
+  int32 port = 3;
+  ResponseStatus status = 4;
+}

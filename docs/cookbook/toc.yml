@@ -1,0 +1,20 @@
+- name: Overview
+  href: index.md
+- name: Produce & Consume
+  href: produce-consume.md
+- name: Schema Registry
+  href: schema-registry.md
+- name: Streams Topology
+  href: streams-topology.md
+- name: Connect Pipeline
+  href: connect-pipeline.md
+- name: QueueView
+  href: queue-view.md
+- name: Monitoring
+  href: monitoring.md
+- name: IoT & edge ingestion
+  href: iot.md
+- name: Real-time fraud detection
+  href: fraud-detection.md
+- name: Event sourcing & CQRS
+  href: event-sourcing.md

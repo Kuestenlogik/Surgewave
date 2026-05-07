@@ -1,0 +1,283 @@
+@page "/upgrades"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Rolling Upgrades - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Rolling Upgrades</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Cluster version info, compatibility checks, and graceful shutdown</MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Version Info *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="4">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Upgrade" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Local Version</MudText>
+                        <MudText Typo="Typo.h5">@_versionInfo.LocalVersion</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="4">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Local Broker ID</MudText>
+                        <MudText Typo="Typo.h5">@_versionInfo.LocalBrokerId</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="4">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Brokers</MudText>
+                        <MudText Typo="Typo.h5">@_versionInfo.Brokers.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Broker Versions Table *@
+<MudText Typo="Typo.h6" Class="mb-2">Cluster Broker Versions</MudText>
+<MudTable Items="_versionInfo.Brokers" Hover="true" Dense="true" Elevation="2" Class="mb-4">
+    <HeaderContent>
+        <MudTh>Broker ID</MudTh>
+        <MudTh>Host</MudTh>
+        <MudTh>Port</MudTh>
+        <MudTh>Version</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Broker ID">@context.BrokerId</MudTd>
+        <MudTd DataLabel="Host">@context.Host</MudTd>
+        <MudTd DataLabel="Port">@context.Port</MudTd>
+        <MudTd DataLabel="Version">
+            <MudChip T="string" Size="Size.Small"
+                     Color="@(context.Version == _versionInfo.LocalVersion ? Color.Success : Color.Warning)">
+                @context.Version
+            </MudChip>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@* Compatibility Check *@
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudText Typo="Typo.h6" Class="mb-3">Pre-Upgrade Compatibility Check</MudText>
+    <div class="d-flex gap-2 mb-3">
+        <MudTextField @bind-Value="_targetVersion" Label="Target Version" Variant="Variant.Outlined"
+                      Placeholder="e.g., 1.2.0" Style="max-width:300px;" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CheckCompatibilityAsync"
+                   StartIcon="@Icons.Material.Filled.VerifiedUser"
+                   Disabled="@(string.IsNullOrWhiteSpace(_targetVersion) || _checking)">
+            @(_checking ? "Checking..." : "Check")
+        </MudButton>
+    </div>
+    @if (_compatResult != null)
+    {
+        <MudAlert Severity="@(_compatResult.IsCompatible ? Severity.Success : Severity.Error)" Class="mb-2">
+            @(_compatResult.IsCompatible ? "Compatible" : "Incompatible"): @_compatResult.CurrentVersion -> @_compatResult.TargetVersion
+            @if (_compatResult.Reason != null)
+            {
+                <span> - @_compatResult.Reason</span>
+            }
+        </MudAlert>
+        @foreach (var warning in _compatResult.Warnings)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-1">@warning</MudAlert>
+        }
+    }
+</MudPaper>
+
+@* Pre-flight and Shutdown *@
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">Pre-Flight Checks</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Info" OnClick="RunPreFlightAsync"
+                       StartIcon="@Icons.Material.Filled.Checklist" FullWidth="true" Disabled="_checkingPreflight">
+                @(_checkingPreflight ? "Running..." : "Run Pre-Flight Checks")
+            </MudButton>
+            @if (_preflightResult != null)
+            {
+                <MudList T="string" Dense="true" Class="mt-3">
+                    @foreach (var check in _preflightResult.Checks)
+                    {
+                        <MudListItem T="string"
+                                     Icon="@(check.Passed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                     IconColor="@(check.Passed ? Color.Success : Color.Error)">
+                            <strong>@check.Name:</strong> @check.Message
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">Graceful Shutdown</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="InitiateShutdownAsync"
+                       StartIcon="@Icons.Material.Filled.PowerSettingsNew" FullWidth="true"
+                       Disabled="_shuttingDown">
+                @(_shuttingDown ? "Shutting Down..." : "Initiate Graceful Shutdown")
+            </MudButton>
+            @if (_shutdownStatus != null)
+            {
+                <MudAlert Severity="@(_shutdownStatus.InProgress ? Severity.Warning : Severity.Info)" Class="mt-3">
+                    Phase: @_shutdownStatus.Phase - @_shutdownStatus.Message
+                </MudAlert>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private ClusterVersionInfo _versionInfo = new();
+    private bool _loading = true;
+    private string? _error;
+
+    // Compatibility
+    private string _targetVersion = "";
+    private bool _checking;
+    private CompatibilityResultInfo? _compatResult;
+
+    // Pre-flight
+    private bool _checkingPreflight;
+    private PreFlightResultInfo? _preflightResult;
+
+    // Shutdown
+    private bool _shuttingDown;
+    private ShutdownStatusInfo? _shutdownStatus;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _versionInfo = await Http.GetFromJsonAsync<ClusterVersionInfo>("/api/cluster/version") ?? new();
+        }
+        catch (Exception ex) { _error = $"Failed to load version info: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task CheckCompatibilityAsync()
+    {
+        _checking = true;
+        _compatResult = null;
+        StateHasChanged();
+        try
+        {
+            var response = await Http.PostAsJsonAsync("/api/cluster/upgrade/check", new { targetVersion = _targetVersion });
+            _compatResult = await response.Content.ReadFromJsonAsync<CompatibilityResultInfo>();
+        }
+        catch (Exception ex) { Notification.ShowError($"Check failed: {ex.Message}"); }
+        finally { _checking = false; StateHasChanged(); }
+    }
+
+    private async Task RunPreFlightAsync()
+    {
+        _checkingPreflight = true;
+        _preflightResult = null;
+        StateHasChanged();
+        try
+        {
+            var response = await Http.PostAsync("/api/cluster/upgrade/prepare", null);
+            _preflightResult = await response.Content.ReadFromJsonAsync<PreFlightResultInfo>();
+        }
+        catch (Exception ex) { Notification.ShowError($"Pre-flight failed: {ex.Message}"); }
+        finally { _checkingPreflight = false; StateHasChanged(); }
+    }
+
+    private async Task InitiateShutdownAsync()
+    {
+        var confirmed = await DialogService.ShowMessageBox("Graceful Shutdown",
+            "Initiate graceful shutdown with leadership transfer? This will stop this broker.",
+            yesText: "Shut Down", cancelText: "Cancel");
+        if (confirmed != true) return;
+        _shuttingDown = true;
+        StateHasChanged();
+        try
+        {
+            var response = await Http.PostAsync("/api/cluster/broker/shutdown/graceful", null);
+            _shutdownStatus = await response.Content.ReadFromJsonAsync<ShutdownStatusInfo>();
+        }
+        catch (Exception ex) { Notification.ShowError($"Shutdown failed: {ex.Message}"); }
+        finally { _shuttingDown = false; StateHasChanged(); }
+    }
+
+    private sealed class ClusterVersionInfo
+    {
+        public string LocalVersion { get; set; } = "Unknown";
+        public int LocalBrokerId { get; set; }
+        public List<BrokerVersionInfoDto> Brokers { get; set; } = [];
+    }
+
+    private sealed class BrokerVersionInfoDto
+    {
+        public int BrokerId { get; set; }
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string Version { get; set; } = "";
+    }
+
+    private sealed class CompatibilityResultInfo
+    {
+        public bool IsCompatible { get; set; }
+        public string TargetVersion { get; set; } = "";
+        public string CurrentVersion { get; set; } = "";
+        public string? Reason { get; set; }
+        public List<string> Warnings { get; set; } = [];
+    }
+
+    private sealed class PreFlightResultInfo
+    {
+        public bool Ready { get; set; }
+        public string CurrentVersion { get; set; } = "";
+        public List<PreFlightCheckInfo> Checks { get; set; } = [];
+    }
+
+    private sealed class PreFlightCheckInfo
+    {
+        public string Name { get; set; } = "";
+        public bool Passed { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    private sealed class ShutdownStatusInfo
+    {
+        public bool InProgress { get; set; }
+        public string Phase { get; set; } = "";
+        public string Message { get; set; } = "";
+    }
+}

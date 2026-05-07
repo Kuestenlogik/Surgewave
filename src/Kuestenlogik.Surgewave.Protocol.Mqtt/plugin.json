@@ -1,0 +1,10 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.protocol.mqtt",
+  "name": "MQTT Protocol",
+  "version": "0.1.0",
+  "description": "MQTT protocol support for Surgewave broker — IoT device connectivity via MQTTnet.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Protocol.Mqtt.dll" ],
+  "pluginSettings": "pluginsettings.json",
+  "tags": [ "protocol", "mqtt", "iot", "community" ]
+}

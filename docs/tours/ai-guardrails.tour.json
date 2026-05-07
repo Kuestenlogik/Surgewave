@@ -1,0 +1,31 @@
+{
+    "id": "docs-ai-guardrails",
+    "title": "AI Guardrails Documentation Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "overview",
+            "title": "AI Guardrails",
+            "text": "Surgewave AI Guardrails provide layered content safety for AI pipelines. Five guardrail types can be composed into a pipeline that evaluates, redacts, and blocks unsafe content.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "iguardrail",
+            "title": "The IGuardrail Interface",
+            "text": "Every guardrail implements IGuardrail with an EvaluateAsync method. Results include pass/fail status, a list of violations, sanitized content, severity level, and evaluation duration.",
+            "attachTo": { "element": "#iguardrail-interface", "on": "bottom" }
+        },
+        {
+            "id": "pii-and-toxicity",
+            "title": "PII Detection and Toxicity Filtering",
+            "text": "PiiDetector finds 6 PII types (email, phone, credit card, SSN, IP, IBAN) using compiled regex and replaces them with typed placeholders. ToxicityFilter blocks harmful terms using word-boundary matching.",
+            "attachTo": { "element": "#pii-detector", "on": "bottom" }
+        },
+        {
+            "id": "pipeline",
+            "title": "GuardrailPipeline",
+            "text": "Chain guardrails in sequence with GuardrailPipeline. Sanitized content flows from one guardrail to the next, producing a final result with total violation count, highest severity, and safe content ready for downstream use.",
+            "attachTo": { "element": "#guardrailpipeline", "on": "bottom" }
+        }
+    ]
+}

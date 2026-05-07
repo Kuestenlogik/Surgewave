@@ -1,0 +1,290 @@
+@using Kuestenlogik.Surgewave.Control.Models.Assistant
+@using Kuestenlogik.Surgewave.Control.Services.Assistant
+@inject INlToSqlTranslator NlToSql
+@inject ISurgewaveApiClient ApiClient
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    <div class="d-flex align-center gap-2 mb-3">
+        <MudIcon Icon="@Icons.Material.Filled.QuestionAnswer" Color="Color.Primary" />
+        <MudText Typo="Typo.h6">Ask in Natural Language</MudText>
+        @if (_lastResult?.Source == NlSqlSource.Llm)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                AI-powered
+            </MudChip>
+        }
+    </div>
+
+    <MudTextField @bind-Value="_question"
+                  Label="Ask a question about your data..."
+                  Placeholder="e.g., Show me the last 10 orders over 100 euros"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Send"
+                  OnAdornmentClick="TranslateQuery"
+                  OnKeyDown="OnKeyDown"
+                  Immediate="true"
+                  Disabled="@_isTranslating" />
+
+    @* Example question chips *@
+    <div class="d-flex flex-wrap gap-1 mt-2">
+        @foreach (var suggestion in _suggestions)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined"
+                     OnClick="@(() => UseSuggestion(suggestion))">
+                @suggestion
+            </MudChip>
+        }
+    </div>
+
+    @if (_isTranslating)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-2" />
+    }
+
+    @if (_lastResult is not null)
+    {
+        @if (!string.IsNullOrEmpty(_lastResult.Error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3" Dense="true">
+                @_lastResult.Error
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="@GetConfidenceSeverity(_lastResult.Confidence)"
+                      Class="mt-3" Dense="true">
+                @{
+                    var sourceLabel = _lastResult.Source switch
+                    {
+                        NlSqlSource.Pattern => "Pattern match",
+                        NlSqlSource.Llm => "AI generated",
+                        _ => "Fallback"
+                    };
+                }
+                @sourceLabel — confidence: @(_lastResult.Confidence.ToString("P0"))
+            </MudAlert>
+
+            <MudPaper Class="pa-3 mt-2" Elevation="0"
+                      Style="background: var(--mud-palette-background-grey); font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 13px; white-space: pre-wrap; border-radius: 4px;">
+                @_lastResult.GeneratedSql
+            </MudPaper>
+
+            <div class="d-flex gap-2 mt-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="ExecuteSql" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PlayArrow"
+                           Disabled="@(_isExecuting || string.IsNullOrWhiteSpace(_lastResult.GeneratedSql))">
+                    @(_isExecuting ? "Executing..." : "Execute")
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" OnClick="CopyToSqlEditor" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.OpenInNew">
+                    Open in SQL Editor
+                </MudButton>
+            </div>
+
+            @* Show results table if executed *@
+            @if (_queryError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3" Dense="true">
+                    @_queryError
+                </MudAlert>
+            }
+
+            @if (_resultColumns.Count > 0)
+            {
+                <div class="d-flex align-center gap-2 mt-3 mb-1">
+                    <MudText Typo="Typo.subtitle2">Results</MudText>
+                    @if (_executionTime.HasValue)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
+                            @_resultRows.Count rows in @_executionTime.Value.TotalMilliseconds.ToString("F0")ms
+                        </MudChip>
+                    }
+                </div>
+
+                <MudSimpleTable Dense="true" Hover="true" Style="max-height: 400px; overflow: auto;">
+                    <thead>
+                        <tr>
+                            @foreach (var col in _resultColumns)
+                            {
+                                <th style="position: sticky; top: 0; background: var(--mud-palette-surface); z-index: 1;">@col</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _resultRows.Take(100))
+                        {
+                            <tr>
+                                @foreach (var val in row)
+                                {
+                                    <td style="font-family: monospace; font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                        @FormatCellValue(val)
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_resultRows.Count > 100)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                        Showing 100 of @_resultRows.Count rows. Open in SQL Editor for full results.
+                    </MudText>
+                }
+            }
+            else if (!_isExecuting && _executionTime.HasValue)
+            {
+                <MudAlert Severity="Severity.Info" Class="mt-3" Dense="true">No results</MudAlert>
+            }
+        }
+    }
+</MudPaper>
+
+@code {
+    /// <summary>
+    /// Fired when the user clicks "Open in SQL Editor" with the generated SQL.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnCopyToEditor { get; set; }
+
+    private string _question = "";
+    private bool _isTranslating;
+    private bool _isExecuting;
+    private NlSqlResult? _lastResult;
+    private string? _queryError;
+    private TimeSpan? _executionTime;
+    private List<string> _resultColumns = [];
+    private List<List<object?>> _resultRows = [];
+
+    private readonly string[] _suggestions =
+    [
+        "Show the last 10 messages from orders",
+        "Count messages per topic",
+        "Average amount in orders",
+        "Find messages with status = error",
+        "Neueste 5 Nachrichten aus events"
+    ];
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await TranslateQuery();
+        }
+    }
+
+    private async Task UseSuggestion(string suggestion)
+    {
+        _question = suggestion;
+        await TranslateQuery();
+    }
+
+    private async Task TranslateQuery()
+    {
+        if (string.IsNullOrWhiteSpace(_question) || _isTranslating) return;
+
+        _isTranslating = true;
+        _lastResult = null;
+        _queryError = null;
+        _resultColumns = [];
+        _resultRows = [];
+        _executionTime = null;
+        StateHasChanged();
+
+        try
+        {
+            _lastResult = await NlToSql.TranslateAsync(_question);
+        }
+        catch (Exception ex)
+        {
+            _lastResult = new NlSqlResult
+            {
+                OriginalQuestion = _question,
+                GeneratedSql = "",
+                Confidence = 0,
+                Error = $"Translation failed: {ex.Message}"
+            };
+        }
+        finally
+        {
+            _isTranslating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExecuteSql()
+    {
+        if (_lastResult is null || string.IsNullOrWhiteSpace(_lastResult.GeneratedSql)) return;
+
+        _isExecuting = true;
+        _queryError = null;
+        _resultColumns = [];
+        _resultRows = [];
+        StateHasChanged();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            var result = await ApiClient.ExecuteSqlAsync(_lastResult.GeneratedSql);
+
+            if (result is null)
+            {
+                _queryError = "Failed to connect to broker SQL API";
+                return;
+            }
+
+            if (result.Error is not null)
+            {
+                _queryError = result.Error;
+                return;
+            }
+
+            _resultColumns = result.Columns ?? [];
+            _resultRows = result.Rows ?? [];
+        }
+        catch (Exception ex)
+        {
+            _queryError = $"Query failed: {ex.Message}";
+        }
+        finally
+        {
+            sw.Stop();
+            _executionTime = sw.Elapsed;
+            _isExecuting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyToSqlEditor()
+    {
+        if (_lastResult is not null && !string.IsNullOrWhiteSpace(_lastResult.GeneratedSql))
+        {
+            await OnCopyToEditor.InvokeAsync(_lastResult.GeneratedSql);
+        }
+    }
+
+    private static Severity GetConfidenceSeverity(double confidence) => confidence switch
+    {
+        > 0.7 => Severity.Success,
+        > 0.5 => Severity.Warning,
+        _ => Severity.Error
+    };
+
+    private static string FormatCellValue(object? val) => val switch
+    {
+        null => "(null)",
+        System.Text.Json.JsonElement je => je.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.String => je.GetString() ?? "(null)",
+            System.Text.Json.JsonValueKind.Number => je.GetRawText(),
+            System.Text.Json.JsonValueKind.True => "true",
+            System.Text.Json.JsonValueKind.False => "false",
+            System.Text.Json.JsonValueKind.Null => "(null)",
+            _ => je.GetRawText()
+        },
+        _ => val.ToString() ?? "(null)"
+    };
+}

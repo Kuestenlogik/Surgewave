@@ -1,0 +1,292 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service ConnectService {
+  rpc ListConnectors(ListConnectorsRequest) returns (ListConnectorsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/connectors"
+      additional_bindings {
+        get: "/v3/connectors"
+      }
+    };
+  }
+  rpc GetConnector(GetConnectorRequest) returns (GetConnectorResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/connectors/{name}"
+      additional_bindings {
+        get: "/v3/connectors/{name}"
+      }
+    };
+  }
+  rpc CreateConnector(CreateConnectorRequest) returns (CreateConnectorResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/connectors"
+      body: "*"
+      additional_bindings {
+        post: "/v3/connectors"
+        body: "*"
+      }
+    };
+  }
+  rpc DeleteConnector(DeleteConnectorRequest) returns (DeleteConnectorResponse) {
+    option (google.api.http) = {
+      delete: "/v3/clusters/{cluster_id}/connectors/{name}"
+      additional_bindings {
+        delete: "/v3/connectors/{name}"
+      }
+    };
+  }
+  rpc GetConnectorConfig(GetConnectorConfigRequest) returns (GetConnectorConfigResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/connectors/{name}/config"
+      additional_bindings {
+        get: "/v3/connectors/{name}/config"
+      }
+    };
+  }
+  rpc UpdateConnectorConfig(UpdateConnectorConfigRequest) returns (UpdateConnectorConfigResponse) {
+    option (google.api.http) = {
+      put: "/v3/clusters/{cluster_id}/connectors/{name}/config"
+      body: "*"
+      additional_bindings {
+        put: "/v3/connectors/{name}/config"
+        body: "*"
+      }
+    };
+  }
+  rpc GetConnectorStatus(GetConnectorStatusRequest) returns (GetConnectorStatusResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/connectors/{name}/status"
+      additional_bindings {
+        get: "/v3/connectors/{name}/status"
+      }
+    };
+  }
+  rpc RestartConnector(RestartConnectorRequest) returns (RestartConnectorResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/connectors/{name}/restart"
+      body: "*"
+      additional_bindings {
+        post: "/v3/connectors/{name}/restart"
+        body: "*"
+      }
+    };
+  }
+  rpc PauseConnector(PauseConnectorRequest) returns (PauseConnectorResponse) {
+    option (google.api.http) = {
+      put: "/v3/clusters/{cluster_id}/connectors/{name}/pause"
+      additional_bindings {
+        put: "/v3/connectors/{name}/pause"
+      }
+    };
+  }
+  rpc ResumeConnector(ResumeConnectorRequest) returns (ResumeConnectorResponse) {
+    option (google.api.http) = {
+      put: "/v3/clusters/{cluster_id}/connectors/{name}/resume"
+      additional_bindings {
+        put: "/v3/connectors/{name}/resume"
+      }
+    };
+  }
+  rpc GetConnectorTasks(GetConnectorTasksRequest) returns (GetConnectorTasksResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/connectors/{name}/tasks"
+      additional_bindings {
+        get: "/v3/connectors/{name}/tasks"
+      }
+    };
+  }
+  rpc RestartConnectorTask(RestartConnectorTaskRequest) returns (RestartConnectorTaskResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/connectors/{connector}/tasks/{task_id}/restart"
+      additional_bindings {
+        post: "/v3/connectors/{connector}/tasks/{task_id}/restart"
+      }
+    };
+  }
+  rpc ListConnectorPlugins(ListConnectorPluginsRequest) returns (ListConnectorPluginsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/connector-plugins"
+      additional_bindings {
+        get: "/v3/connector-plugins"
+      }
+    };
+  }
+}
+
+message TaskInfo {
+  string connector = 1;
+  int32 task_id = 2;
+}
+
+message ConnectorState {
+  string state = 1;
+  string worker_id = 2;
+  string trace = 3;
+}
+
+message TaskState {
+  int32 id = 1;
+  string state = 2;
+  string worker_id = 3;
+  string trace = 4;
+}
+
+message ListConnectorsRequest {
+  string cluster_id = 1;
+}
+
+message ListConnectorsResponse {
+  repeated string connectors = 1;
+  ResponseStatus status = 2;
+}
+
+message GetConnectorRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message GetConnectorResponse {
+  string name = 1;
+  map<string, string> config = 2;
+  repeated TaskInfo tasks = 3;
+  string type = 4;
+  ResponseStatus status = 5;
+}
+
+message CreateConnectorRequest {
+  string cluster_id = 1;
+  string name = 2;
+  map<string, string> config = 3;
+}
+
+message CreateConnectorResponse {
+  string name = 1;
+  map<string, string> config = 2;
+  repeated TaskInfo tasks = 3;
+  string type = 4;
+  ResponseStatus status = 5;
+}
+
+message DeleteConnectorRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message DeleteConnectorResponse {
+  ResponseStatus status = 1;
+}
+
+message GetConnectorConfigRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message GetConnectorConfigResponse {
+  map<string, string> config = 1;
+  ResponseStatus status = 2;
+}
+
+message UpdateConnectorConfigRequest {
+  string cluster_id = 1;
+  string name = 2;
+  map<string, string> config = 3;
+}
+
+message UpdateConnectorConfigResponse {
+  string name = 1;
+  map<string, string> config = 2;
+  repeated TaskInfo tasks = 3;
+  string type = 4;
+  ResponseStatus status = 5;
+}
+
+message GetConnectorStatusRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message GetConnectorStatusResponse {
+  string name = 1;
+  ConnectorState connector_state = 2;
+  repeated TaskState task_states = 3;
+  string type = 4;
+  ResponseStatus status = 5;
+}
+
+message RestartConnectorRequest {
+  string cluster_id = 1;
+  string name = 2;
+  bool include_tasks = 3;
+  bool only_failed = 4;
+}
+
+message RestartConnectorResponse {
+  ResponseStatus status = 1;
+}
+
+message PauseConnectorRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message PauseConnectorResponse {
+  ResponseStatus status = 1;
+}
+
+message ResumeConnectorRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message ResumeConnectorResponse {
+  ResponseStatus status = 1;
+}
+
+message GetConnectorTasksRequest {
+  string cluster_id = 1;
+  string name = 2;
+}
+
+message GetConnectorTasksResponse {
+  repeated ConnectorTask tasks = 1;
+  ResponseStatus status = 2;
+}
+
+message ConnectorTask {
+  TaskInfo id = 1;
+  map<string, string> config = 2;
+}
+
+message RestartConnectorTaskRequest {
+  string cluster_id = 1;
+  string connector = 2;
+  int32 task_id = 3;
+}
+
+message RestartConnectorTaskResponse {
+  ResponseStatus status = 1;
+}
+
+message ListConnectorPluginsRequest {
+  string cluster_id = 1;
+  bool include_sink = 2;
+  bool include_source = 3;
+}
+
+message ListConnectorPluginsResponse {
+  repeated ConnectorPlugin plugins = 1;
+  ResponseStatus status = 2;
+}
+
+message ConnectorPlugin {
+  string class_name = 1;
+  string type = 2;
+  string version = 3;
+}

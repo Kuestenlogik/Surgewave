@@ -1,0 +1,134 @@
+{
+  "surgewaveNativeProtocol": {
+    "embedded": {
+      "description": "EmbeddedSurgewave throughput (1000000 messages, 100 bytes, batch 1000, Memory storage)",
+      "consumer": {
+        "messagesPerSec": 2500000,
+        "mbPerSec": 238.4
+      },
+      "producer": {
+        "messagesPerSec": 1500000,
+        "mbPerSec": 143.1
+      },
+      "client": "SurgewaveNativeClient + SurgewaveBatchingProducer"
+    },
+    "description": "Surgewave Native Protocol (binary, optimized for Surgewave broker)"
+  },
+  "version": "3.0",
+  "kafkaProtocol": {
+    "embedded": {
+      "description": "EmbeddedSurgewave throughput (1000000 messages, 100 bytes, batch 1000)",
+      "consumer": {
+        "messagesPerSec": 2202643,
+        "mbPerSec": 210.1
+      },
+      "producer": {
+        "messagesPerSec": 1589825,
+        "mbPerSec": 151.6
+      },
+      "client": "Confluent.Kafka producer/consumer"
+    },
+    "description": "Kafka Wire Protocol (compatible with Apache Kafka clients)"
+  },
+  "transportComparison": {
+    "description": "TCP vs QUIC transport comparison (50000 messages, 100 bytes, direct loopback)",
+    "date": "2026-04-12",
+    "tcp": {
+      "direct": {
+        "messagesPerSec": 361000,
+        "description": "TCP direct (no proxy, 0% loss)"
+      }
+    },
+    "quic": {
+      "direct": {
+        "messagesPerSec": 341000,
+        "description": "QUIC direct (no proxy, 0% loss), ~5% slower than TCP"
+      },
+      "loss1pct": {
+        "messagesPerSec": 124000,
+        "description": "QUIC through LossyUdpProxy (1% packet loss, 0ms latency)"
+      }
+    },
+    "command": "dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.QuicVsTcp -- --messages 50000 --protocols tcp,quic"
+  },
+  "peerTransportOverhead": {
+    "description": "IPeerTransport abstraction layer overhead measurements",
+    "date": "2026-04-13",
+    "factoryCreateNs": 9.5,
+    "factoryIsRegisteredNs": 7.4,
+    "tcpConnectLoopbackUs": 383,
+    "tcpStreamLeaseRoundtripUs": 416,
+    "notes": "Factory lookup is ~9ns (ConcurrentDictionary). ConnectAsync dominated by TCP handshake, not abstraction overhead."
+  },
+  "tcpBaselineVerification": {
+    "description": "Post-IPeerTransport migration baseline verification (1000000 messages, 100 bytes, batch 1000, Memory storage)",
+    "date": "2026-04-13",
+    "producer": {
+      "messagesPerSec": 1451379,
+      "mbPerSec": 138.4,
+      "deltaVsBaseline": "-3.2%"
+    },
+    "consumer": {
+      "messagesPerSec": 2469136,
+      "mbPerSec": 235.5,
+      "deltaVsBaseline": "-1.2%"
+    },
+    "verdict": "No regression — both metrics within 10% tolerance"
+  },
+  "replication": {
+    "description": "2-broker embedded cluster with RF=2, TCP inter-broker (100000 messages, 100 bytes, batch 1000, Memory storage)",
+    "date": "2026-04-13",
+    "transport": "tcp",
+    "producer": {
+      "messagesPerSec": 448430,
+      "mbPerSec": 42.8
+    },
+    "consumer": {
+      "messagesPerSec": 584795,
+      "mbPerSec": 55.8
+    },
+    "command": "dotnet run -- replication 100000 100 1000"
+  },
+  "date": "2026-04-13",
+  "commands": {
+    "peerTransport": "dotnet run -- peer-transport",
+    "replication": "dotnet run -- replication 100000 100 1000",
+    "quicVsTcp": "dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.QuicVsTcp -- --messages 50000 --protocols tcp,quic",
+    "compression": "dotnet run -- --filter '*Compression*'",
+    "embeddedNative": "dotnet run -- embedded 1000000 100 1000",
+    "simd": "dotnet run -- --filter '*SimdBigEndian*'",
+    "embeddedCompare": "dotnet run -- embedded-compare 1000000 100 1000",
+    "threeWay": "dotnet run -- three-way 1000000 100 localhost:29092",
+    "serialization": "dotnet run -- --filter '*Serialization*'",
+    "fourWay": "dotnet run -- four-way 1000000 100 localhost:29092 localhost:19092"
+  },
+  "protocolComparison": {
+    "description": "Surgewave Native vs Kafka Wire Protocol on same embedded broker (1000000 messages, 100 bytes)",
+    "consumer": {
+      "nativeAdvantage": "+13.5%",
+      "kafkaMsgPerSec": 2202643,
+      "nativeMsgPerSec": 2500000
+    },
+    "producer": {
+      "nativeAdvantage": "-5.6%",
+      "kafkaMsgPerSec": 1589825,
+      "nativeMsgPerSec": 1500000
+    },
+    "command": "dotnet run -- embedded-compare 1000000 100 1000"
+  },
+  "environment": {
+    "runtime": ".NET 10",
+    "cpu": "Intel Core i7-1360P (13th Gen, 12 cores / 16 threads)",
+    "ram": "16 GB",
+    "os": "Windows 11"
+  },
+  "optimizations": {
+    "version": "2.2",
+    "changes": [
+      "MemoryLogSegment: Dictionary + List instead of SortedList for O(1) insertion",
+      "MemoryLogSegment: SpinLock instead of Monitor for reduced overhead",
+      "LogManager: Pooled completion sources using IValueTaskSource",
+      "RecordBatchSerializer: Added SerializeMessagesPooled API for zero-copy path"
+    ]
+  }
+}

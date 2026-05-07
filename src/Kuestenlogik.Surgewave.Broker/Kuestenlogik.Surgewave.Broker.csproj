@@ -1,0 +1,128 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>true</IsPackable>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
+    <AssemblyName>surgewave-broker</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Improve startup time - applies to all builds -->
+    <TieredCompilation>true</TieredCompilation>
+    <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
+
+    <!-- Enable invariant globalization for smaller deployments -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Server GC for lower latency under load -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+  </PropertyGroup>
+
+  <!-- Container Publishing (.NET Native) -->
+  <!-- Usage: dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer -->
+  <PropertyGroup>
+    <ContainerRepository>surgewave/surgewave-broker</ContainerRepository>
+    <ContainerImageTag>0.1.0</ContainerImageTag>
+    <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>
+    <ContainerFamily>jammy</ContainerFamily>
+  </PropertyGroup>
+
+  <ItemGroup Label="Container Ports">
+    <ContainerPort Include="9092" Type="tcp" />
+    <ContainerPort Include="9093" Type="tcp" />
+    <ContainerPort Include="9094" Type="tcp" />
+    <ContainerPort Include="9094" Type="udp" />
+    <ContainerPort Include="1883" Type="tcp" />
+  </ItemGroup>
+
+  <ItemGroup Label="Container Environment">
+    <ContainerEnvironmentVariable Include="DOTNET_RUNNING_IN_CONTAINER" Value="true" />
+    <ContainerEnvironmentVariable Include="Surgewave__Storage__DataDirectory" Value="/app/data" />
+    <ContainerEnvironmentVariable Include="Surgewave__Storage__LogDirectory" Value="/app/logs" />
+  </ItemGroup>
+
+  <!-- Publish-specific settings for optimized builds -->
+  <!-- Use: dotnet publish -c Release -p:Optimized=true -r win-x64 -->
+  <!-- Protocol DLLs are excluded from the single-file bundle via ExcludeFromSingleFile
+       so that BrokerPluginActivator.Discover<T> can find them via Directory.GetFiles()
+       in AppContext.BaseDirectory at runtime. Their transitive dependencies remain
+       bundled and are resolvable via the single-file extraction temp directory.
+       Kuestenlogik.Surgewave.Protocol.Native stays bundled as it is part of the broker core. -->
+  <PropertyGroup Condition="'$(Optimized)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <ReadyToRun>true</ReadyToRun>
+    <!-- Optimize for speed -->
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <!-- No trimming — Broker uses extensive Reflection (plugin loading, JSON, gRPC, dynamic config) -->
+  </PropertyGroup>
+
+
+  <!-- Native AOT - experimental, may not work with all dependencies -->
+  <!-- Use: dotnet publish -c Release -p:PublishAot=true -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <StripSymbols>true</StripSymbols>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- AOT-specific trimming -->
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
+    <PackageReference Include="Microsoft.AspNetCore.Grpc.JsonTranscoding" />
+    <PackageReference Include="Kuestenlogik.Bowire" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine\Kuestenlogik.Surgewave.Storage.Engine.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Tiering\Kuestenlogik.Surgewave.Storage.Tiering.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Quic\Kuestenlogik.Surgewave.Transport.Quic.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.Grpc.Server\Kuestenlogik.Surgewave.Api.Grpc.Server.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry\Kuestenlogik.Surgewave.Schema.Registry.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Hosting\Kuestenlogik.Surgewave.Schema.Registry.Hosting.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect\Kuestenlogik.Surgewave.Connect.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect.Hosting\Kuestenlogik.Surgewave.Connect.Hosting.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Repository\Kuestenlogik.Surgewave.Plugins.Repository.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Streams\Kuestenlogik.Surgewave.Streams.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Streams.InteractiveQueries\Kuestenlogik.Surgewave.Streams.InteractiveQueries.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Streams.InteractiveQueries.Hosting\Kuestenlogik.Surgewave.Streams.InteractiveQueries.Hosting.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.GraphQL\Kuestenlogik.Surgewave.Api.GraphQL.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Wasm\Kuestenlogik.Surgewave.Wasm.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Wasm.Hosting\Kuestenlogik.Surgewave.Wasm.Hosting.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,46 @@
+[Unit]
+Description=Storm Broker - High-performance event streaming platform
+Documentation=https://github.com/Kuestenlogik/Storm
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/opt/storm/broker/Kuestenlogik.Storm.Broker
+WorkingDirectory=/opt/storm
+
+# Environment
+Environment=DOTNET_RUNNING_IN_CONTAINER=false
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=Storm__DataDirectory=/var/lib/storm/data
+Environment=Storm__LogDirectory=/var/log/storm
+Environment=Storm__Connect__PluginsDirectory=/opt/storm/plugins
+Environment=Storm__Wasm__WasmDirectory=/opt/storm/wasm-plugins
+Environment=Storm__ML__ModelsDirectory=/opt/storm/models
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Security
+User=storm
+Group=storm
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/storm /var/log/storm /opt/storm/plugins /opt/storm/models /opt/storm/wasm-plugins
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+LimitMEMLOCK=infinity
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=storm-broker
+
+[Install]
+WantedBy=multi-user.target

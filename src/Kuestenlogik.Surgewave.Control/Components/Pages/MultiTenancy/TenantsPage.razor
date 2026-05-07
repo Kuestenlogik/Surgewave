@@ -1,0 +1,252 @@
+@page "/tenants"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Multi-Tenancy - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Multi-Tenancy</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Manage tenants, namespaces, and quota usage</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreateTenantDialog"
+                   StartIcon="@Icons.Material.Filled.Add">Create Tenant</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Tenants</MudText>
+                        <MudText Typo="Typo.h5">@_tenants.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Enabled</MudText>
+                        <MudText Typo="Typo.h5">@_tenants.Count(t => t.Enabled)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Namespaces</MudText>
+                        <MudText Typo="Typo.h5">@_tenants.Sum(t => t.NamespaceCount)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Tenant Table *@
+<MudTable Items="_tenants" Hover="true" Dense="true" Elevation="2" Loading="_loading">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>ID</MudTh>
+        <MudTh>Namespaces</MudTh>
+        <MudTh>Enabled</MudTh>
+        <MudTh>Admin Principals</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name"><MudText Typo="Typo.body2"><strong>@context.Name</strong></MudText></MudTd>
+        <MudTd DataLabel="ID"><code>@context.Id</code></MudTd>
+        <MudTd DataLabel="Namespaces">@context.NamespaceCount</MudTd>
+        <MudTd DataLabel="Enabled">
+            <MudChip T="string" Size="Size.Small" Color="@(context.Enabled ? Color.Success : Color.Default)">
+                @(context.Enabled ? "Yes" : "No")
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Admin Principals">
+            @foreach (var p in context.AdminPrincipals.Take(3))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default">@p</MudChip>
+            }
+            @if (context.AdminPrincipals.Count > 3)
+            {
+                <MudText Typo="Typo.caption">+@(context.AdminPrincipals.Count - 3) more</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Actions">
+            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                           OnClick="() => ShowNamespaces(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="() => DeleteTenantAsync(context.Id)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>No tenants found. Enable multi-tenancy to get started.</MudText></NoRecordsContent>
+</MudTable>
+
+@* Namespace Panel *@
+@if (_selectedTenant != null)
+{
+    <MudPaper Elevation="2" Class="pa-4 mt-4">
+        <div class="d-flex align-center justify-space-between mb-3">
+            <MudText Typo="Typo.h6">Namespaces for @_selectedTenant.Name</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       OnClick="OpenCreateNamespaceDialog" StartIcon="@Icons.Material.Filled.Add">
+                Create Namespace
+            </MudButton>
+        </div>
+        <MudTable Items="_namespaces" Hover="true" Dense="true">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Max Topics</MudTh>
+                <MudTh>Max Partitions</MudTh>
+                <MudTh>Retention</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name"><strong>@context.Name</strong></MudTd>
+                <MudTd DataLabel="Max Topics">@(context.Policy?.MaxTopics?.ToString() ?? "Unlimited")</MudTd>
+                <MudTd DataLabel="Max Partitions">@(context.Policy?.MaxPartitionsPerTopic?.ToString() ?? "Unlimited")</MudTd>
+                <MudTd DataLabel="Retention">@(context.Policy?.MaxRetentionHours != null ? $"{context.Policy.MaxRetentionHours}h" : "Default")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No namespaces in this tenant.</MudText></NoRecordsContent>
+        </MudTable>
+
+        @* Quota Usage *@
+        @if (_quotaUsage != null)
+        {
+            <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">Quota Usage</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@(_quotaUsage.Allowed ? Color.Success : Color.Error)">
+                @(_quotaUsage.Allowed ? "Within Quota" : "Quota Exceeded")
+            </MudChip>
+            @if (_quotaUsage.Reason != null)
+            {
+                <MudText Typo="Typo.body2" Class="mt-1">@_quotaUsage.Reason</MudText>
+            }
+        }
+    </MudPaper>
+}
+
+@code {
+    private List<TenantInfo> _tenants = [];
+    private List<NamespaceInfo> _namespaces = [];
+    private TenantInfo? _selectedTenant;
+    private QuotaUsageInfo? _quotaUsage;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _tenants = await Http.GetFromJsonAsync<List<TenantInfo>>("/api/tenants") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load tenants: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task ShowNamespaces(TenantInfo tenant)
+    {
+        _selectedTenant = tenant;
+        try
+        {
+            _namespaces = await Http.GetFromJsonAsync<List<NamespaceInfo>>($"/api/tenants/{tenant.Id}/namespaces") ?? [];
+            _quotaUsage = await Http.GetFromJsonAsync<QuotaUsageInfo>($"/api/tenants/{tenant.Id}/quota");
+        }
+        catch (Exception ex) { _error = $"Failed to load namespaces: {ex.Message}"; }
+        StateHasChanged();
+    }
+
+    private async Task OpenCreateTenantDialog()
+    {
+        var parameters = new DialogParameters<CreateTenantDialog>();
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreateTenantDialog>("Create Tenant", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Tenant created"); await LoadDataAsync(); }
+    }
+
+    private async Task OpenCreateNamespaceDialog()
+    {
+        if (_selectedTenant == null) return;
+        var parameters = new DialogParameters<CreateNamespaceDialog> { { x => x.TenantId, _selectedTenant.Id } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreateNamespaceDialog>("Create Namespace", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("Namespace created"); await ShowNamespaces(_selectedTenant); }
+    }
+
+    private async Task DeleteTenantAsync(string id)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Delete Tenant",
+            $"Delete tenant '{id}' and all its namespaces?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try
+            {
+                await Http.DeleteAsync($"/api/tenants/{id}");
+                Notification.ShowSuccess("Tenant deleted");
+                _selectedTenant = null;
+                await LoadDataAsync();
+            }
+            catch (Exception ex) { Notification.ShowError($"Delete failed: {ex.Message}"); }
+        }
+    }
+
+    private sealed class TenantInfo
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public bool Enabled { get; set; } = true;
+        public int NamespaceCount { get; set; }
+        public List<string> AdminPrincipals { get; set; } = [];
+    }
+
+    private sealed class NamespaceInfo
+    {
+        public string Name { get; set; } = "";
+        public NamespacePolicyInfo? Policy { get; set; }
+    }
+
+    private sealed class NamespacePolicyInfo
+    {
+        public int? MaxTopics { get; set; }
+        public int? MaxPartitionsPerTopic { get; set; }
+        public int? MaxRetentionHours { get; set; }
+    }
+
+    private sealed class QuotaUsageInfo
+    {
+        public bool Allowed { get; set; }
+        public string? Reason { get; set; }
+    }
+}

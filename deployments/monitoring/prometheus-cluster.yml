@@ -1,0 +1,33 @@
+# Prometheus configuration for Surgewave 3-node cluster
+# Used with: docker-compose -f docker-compose.cluster.yml --profile monitoring up
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Dynamic discovery using Surgewave's /sd-targets endpoint
+  # This allows automatic discovery of cluster nodes
+  - job_name: 'surgewave-cluster-http-sd'
+    http_sd_configs:
+      - url: 'http://surgewave-1:9095/sd-targets'
+        refresh_interval: 30s
+    metrics_path: '/metrics'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # Fallback static config (can be removed if HTTP SD works well)
+  - job_name: 'surgewave-cluster-static'
+    static_configs:
+      - targets:
+          - 'surgewave-1:9095'
+          - 'surgewave-2:9095'
+          - 'surgewave-3:9095'
+        labels:
+          cluster: 'surgewave-raft'
+    metrics_path: '/metrics'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

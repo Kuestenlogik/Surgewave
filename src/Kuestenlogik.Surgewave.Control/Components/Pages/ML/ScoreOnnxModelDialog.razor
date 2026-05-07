@@ -1,0 +1,50 @@
+@using System.Text.Json
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">Enter input tensor values (comma-separated floats per input).</MudText>
+        @foreach (var input in Inputs)
+        {
+            <MudTextField @bind-Value="_inputValues[input.Name]" Label="@($"{input.Name} [{string.Join("x", input.Shape)}]")"
+                          Variant="Variant.Outlined" HelperText="Comma-separated: 1.0, 2.0, 3.0" Class="mb-3" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit">Score</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string ModelId { get; set; } = "";
+    [Parameter] public List<OnnxModelsPage.TensorInfo> Inputs { get; set; } = [];
+
+    private readonly Dictionary<string, string> _inputValues = [];
+
+    protected override void OnInitialized()
+    {
+        foreach (var input in Inputs)
+            _inputValues.TryAdd(input.Name, "");
+    }
+
+    private async Task Submit()
+    {
+        var inputs = new Dictionary<string, float[]>();
+        foreach (var (name, csv) in _inputValues)
+        {
+            var values = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(v => float.TryParse(v, out var f) ? f : 0f).ToArray();
+            inputs[name] = values;
+        }
+        var response = await Http.PostAsJsonAsync($"/api/ml/models/{ModelId}/score", new { inputs });
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<object>();
+            MudDialog.Close(DialogResult.Ok(result));
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

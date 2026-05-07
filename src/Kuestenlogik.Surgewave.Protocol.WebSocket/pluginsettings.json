@@ -1,0 +1,11 @@
+{
+  "Surgewave": {
+    "WebSocket": {
+      "Enabled": false,
+      "Path": "/ws",
+      "MaxMessageSizeBytes": 1048576,
+      "PingInterval": "00:00:30",
+      "MaxConnections": 5000
+    }
+  }
+}

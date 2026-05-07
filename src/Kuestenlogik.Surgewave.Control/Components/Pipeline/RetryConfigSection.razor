@@ -1,0 +1,112 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+<MudPaper Elevation="0" Class="pa-3 mt-2" Style="border: 1px solid var(--mud-palette-lines-default); border-radius: 4px;">
+    <div class="d-flex align-center justify-space-between mb-2">
+        <MudText Typo="Typo.subtitle2">Retry Policy</MudText>
+        <MudSwitch T="bool" Value="@_enabled" ValueChanged="OnEnabledChanged" Color="Color.Primary" />
+    </div>
+
+    @if (_enabled)
+    {
+        <MudNumericField T="int" Value="@_maxRetries" ValueChanged="OnMaxRetriesChanged"
+                         Label="Max Retries" Variant="Variant.Outlined" Margin="Margin.Dense"
+                         Min="1" Max="100" Class="mb-2" />
+
+        <MudNumericField T="long" Value="@_backoffMs" ValueChanged="OnBackoffChanged"
+                         Label="Initial Backoff (ms)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                         Min="100" Max="300000" Class="mb-2" />
+
+        <MudNumericField T="double" Value="@_multiplier" ValueChanged="OnMultiplierChanged"
+                         Label="Backoff Multiplier" Variant="Variant.Outlined" Margin="Margin.Dense"
+                         Min="1.0" Max="10.0" Step="0.5" Class="mb-2" />
+
+        <MudNumericField T="long" Value="@_maxBackoffMs" ValueChanged="OnMaxBackoffChanged"
+                         Label="Max Backoff (ms)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                         Min="1000" Max="600000" Class="mb-2" />
+
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+            @GetBackoffPreview()
+        </MudText>
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public RetryPolicy? Policy { get; set; }
+
+    [Parameter]
+    public EventCallback<RetryPolicy?> PolicyChanged { get; set; }
+
+    private bool _enabled;
+    private int _maxRetries = 3;
+    private long _backoffMs = 1000;
+    private double _multiplier = 2.0;
+    private long _maxBackoffMs = 30000;
+
+    protected override void OnParametersSet()
+    {
+        if (Policy != null)
+        {
+            _enabled = Policy.Enabled;
+            _maxRetries = Policy.MaxRetries;
+            _backoffMs = Policy.BackoffMs;
+            _multiplier = Policy.BackoffMultiplier;
+            _maxBackoffMs = Policy.MaxBackoffMs;
+        }
+        else
+        {
+            _enabled = false;
+        }
+    }
+
+    private async Task OnEnabledChanged(bool value)
+    {
+        _enabled = value;
+        await EmitChange();
+    }
+
+    private async Task OnMaxRetriesChanged(int value)
+    {
+        _maxRetries = value;
+        await EmitChange();
+    }
+
+    private async Task OnBackoffChanged(long value)
+    {
+        _backoffMs = value;
+        await EmitChange();
+    }
+
+    private async Task OnMultiplierChanged(double value)
+    {
+        _multiplier = value;
+        await EmitChange();
+    }
+
+    private async Task OnMaxBackoffChanged(long value)
+    {
+        _maxBackoffMs = value;
+        await EmitChange();
+    }
+
+    private async Task EmitChange()
+    {
+        var policy = _enabled
+            ? new RetryPolicy(_maxRetries, _backoffMs, _multiplier, _maxBackoffMs, true)
+            : null;
+        await PolicyChanged.InvokeAsync(policy);
+    }
+
+    private string GetBackoffPreview()
+    {
+        var delays = new List<string>();
+        var currentBackoff = (double)_backoffMs;
+        for (var i = 1; i <= _maxRetries && i <= 5; i++)
+        {
+            var effectiveDelay = Math.Min(currentBackoff, _maxBackoffMs);
+            delays.Add($"Attempt {i}: {effectiveDelay:F0}ms");
+            currentBackoff *= _multiplier;
+        }
+        return string.Join(", ", delays);
+    }
+}

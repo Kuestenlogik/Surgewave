@@ -1,0 +1,36 @@
+---
+layout: page
+title: Features
+subtitle: Everything Surgewave ships with, at a glance.
+description: Surgewave features — Kafka wire compatibility, QUIC transport, plugin signing and SBOM, schema registry, Surgewave.Connect, Surgewave.Streams, Surgewave.Control, Surgewave.Fleet, embedded mode.
+---
+
+## Messaging core
+
+- **Kafka wire compatible** — Confluent.Kafka clients, `librdkafka`, Apache Kafka CLI all work unchanged.
+- **Surgewave Native Protocol** — richer, lower-overhead binary protocol for first-class Surgewave clients (.NET + planned Python).
+- **Multiple transports** — TCP by default, QUIC opt-in (client ↔ broker and inter-broker) with mTLS.
+
+## Operations
+
+- **Zero-friction single-node + clustered** — same binary, flip a config. Raft-based consensus, per-partition replication, geo-replication links.
+- **Embedded mode** — `Surgewave.Embedded` hosts a broker in-process; same API for tests, CI, and edge.
+- **Blazor control plane** — `Surgewave.Control` ships per-broker; `Surgewave.Fleet` runs a single cloud control plane across clusters.
+
+## Schema + serialization
+
+- **Schema Registry** — Confluent-compatible REST API at `:8081`, standalone or broker-bundled.
+- **11 formats** — Avro, Protobuf, JSON, FlatBuffers, Hyperion, MessagePack, CBOR, Bond, Thrift, MemoryPack, Cap'n Proto, Orleans.
+
+## Extensibility
+
+- **Plugin system** — broker, protocol, storage-engine, control-UI, and CLI plugins via `IBrokerPlugin` / `IProtocolPlugin` / `IControlPlugin`.
+- **Signed `.swpkg` packages** — ECDSA P-256 out of the box, CMS/PKCS#7 with X.509 + RFC-3161 timestamps via Surgewave.Licensing. CycloneDX SBOM in every package.
+- **Marketplace** — `surgewave-marketplace` service with optional signature enforcement on upload, "Verified" badge in the UI.
+
+## Ecosystem
+
+- **Surgewave.Connect** — 117 connectors (databases, cloud stores, SaaS APIs, IoT, messaging, AI).
+- **Surgewave.Streams** — Kafka-Streams-style DSL with stateful joins, windowing, interactive queries.
+- **Surgewave.AI** — AI pipeline nodes, documents/RAG, retrieval, agents, A2A, ONNX runtime.
+- **Surgewave.Samples / Surgewave.Bootcamp** — 28 sample apps, 34 bootcamp units.

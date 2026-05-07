@@ -1,0 +1,62 @@
+<section class="features">
+  <div class="container">
+    <h2 class="section-title">A complete platform, not just a broker.</h2>
+    <p class="section-lede">Surgewave ships the features teams usually bolt on: native fast transport, a typed schema registry, a signed plugin ecosystem, AI pipeline nodes, a Blazor control plane, a cloud control plane for many clusters &mdash; and full Kafka 4.x wire compatibility on top.</p>
+
+    <div class="feature-grid">
+      <article class="feature-card">
+        <div class="feature-icon">N</div>
+        <h3>Native low-latency transport</h3>
+        <p>Zero-copy framed protocol over TCP/QUIC for .NET clients. Designed for in-process and edge deployments where Kafka's TCP handshake overhead is too costly.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">S</div>
+        <h3>Signed plugins + SBOM</h3>
+        <p><code>.swpkg</code> packages signed with ECDSA or enterprise X.509/RFC-3161 timestamps. Every package ships a CycloneDX SBOM. Marketplace enforces on upload.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">A</div>
+        <h3>AI pipeline nodes</h3>
+        <p>Built-in OpenAI / Anthropic / Ollama / xAI / Vertex AI nodes, Qdrant + pgvector retrievers, agent memory, guardrails, ONNX scoring &mdash; all as composable pipeline steps.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">R</div>
+        <h3>Schema Registry</h3>
+        <p>Confluent-compatible REST API, 11 formats out of the box (Avro, Protobuf, JSON, FlatBuffers, MessagePack, CBOR, Hyperion, Bond, Thrift, MemoryPack, Cap'n Proto, Orleans).</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">C</div>
+        <h3>Surgewave.Connect</h3>
+        <p>117+ source and sink connectors for databases, cloud stores, SaaS APIs, IoT, and AI. Each shipped as a signed .swpkg. Build your own in an afternoon.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">T</div>
+        <h3>Streams + Interactive Queries</h3>
+        <p>Kafka-Streams-style DSL on top of Surgewave with stateful joins, windowing, and HTTP-queryable state stores. LINQ everywhere it makes sense.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">U</div>
+        <h3>Surgewave.Control + Fleet</h3>
+        <p>MudBlazor admin UI per broker, plus Surgewave.Fleet as a single cloud control plane for many clusters across DCs with QUIC-linked health, governance, and lifecycle.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">E</div>
+        <h3>Embedded mode</h3>
+        <p>Run Surgewave in-process for tests, CI, and edge deployments. Same API, same guarantees &mdash; no broker container required.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">K</div>
+        <h3>Kafka 4.x wire &mdash; migration path</h3>
+        <p>Drop-in compatible with Confluent.Kafka, librdkafka, kafka-go and friends. Point your existing producers and consumers at <code>:9092</code> and migrate gradually.</p>
+      </article>
+    </div>
+  </div>
+</section>

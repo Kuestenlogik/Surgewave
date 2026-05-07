@@ -1,0 +1,138 @@
+@using Kuestenlogik.Surgewave.Control.Models.Collaboration
+
+@* Presence Bar at top of canvas *@
+@if (Users.Count > 0)
+{
+    <div class="collab-presence-bar">
+        @foreach (var user in Users)
+        {
+            <MudTooltip Text="@($"{user.UserName}{(user.LockedNodeId != null ? $" (editing {user.LockedNodeId[..Math.Min(8, user.LockedNodeId.Length)]}...)" : "")}")">
+                <MudAvatar Size="MudBlazor.Size.Small" Style="@($"background-color: {user.Color}; color: white; font-size: 12px; cursor: default;")">
+                    @GetInitials(user.UserName)
+                </MudAvatar>
+            </MudTooltip>
+        }
+        <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Text" Color="Color.Default">
+            @Users.Count online
+        </MudChip>
+    </div>
+}
+
+@* Remote cursors *@
+@foreach (var user in Users)
+{
+    <div class="collab-cursor" style="left: @(user.CursorX)px; top: @(user.CursorY)px; --cursor-color: @user.Color;">
+        <svg width="16" height="20" viewBox="0 0 16 20" fill="@user.Color" xmlns="http://www.w3.org/2000/svg">
+            <path d="M0 0L16 12L8 12L4 20L0 0Z" />
+        </svg>
+        <span class="collab-cursor-label" style="background-color: @user.Color;">@user.UserName</span>
+    </div>
+}
+
+@* Node lock indicators *@
+@foreach (var (nodeId, ownerConnectionId) in NodeLocks)
+{
+    var owner = Users.FirstOrDefault(u => u.ConnectionId == ownerConnectionId);
+    if (owner != null)
+    {
+        <div class="collab-node-lock" data-node-id="@nodeId">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Size="MudBlazor.Size.Small"
+                     Style="@($"color: {owner.Color};")" />
+        </div>
+    }
+}
+
+@* Comment markers on nodes *@
+@foreach (var nodeGroup in Comments.Where(c => c.NodeId != null && !c.Resolved).GroupBy(c => c.NodeId))
+{
+    <div class="collab-comment-marker" data-node-id="@nodeGroup.Key">
+        <MudBadge Content="@nodeGroup.Count()" Color="Color.Warning" Overlap="true">
+            <MudIcon Icon="@Icons.Material.Filled.Comment" Size="MudBlazor.Size.Small" Color="Color.Warning" />
+        </MudBadge>
+    </div>
+}
+
+@* Approval badge *@
+@if (PendingApprovals > 0)
+{
+    <div class="collab-approval-badge">
+        <MudBadge Content="@PendingApprovals" Color="Color.Error" Overlap="true">
+            <MudIcon Icon="@Icons.Material.Filled.RateReview" Color="Color.Warning" />
+        </MudBadge>
+    </div>
+}
+
+<style>
+    .collab-presence-bar {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 1050;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--mud-palette-surface);
+        border-radius: 20px;
+        padding: 4px 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .collab-cursor {
+        position: absolute;
+        z-index: 1040;
+        pointer-events: none;
+        transition: left 0.1s linear, top 0.1s linear;
+    }
+
+    .collab-cursor-label {
+        position: absolute;
+        left: 16px;
+        top: 12px;
+        color: white;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        white-space: nowrap;
+        font-weight: 500;
+    }
+
+    .collab-node-lock {
+        position: absolute;
+        z-index: 1035;
+        pointer-events: none;
+    }
+
+    .collab-comment-marker {
+        position: absolute;
+        z-index: 1035;
+        cursor: pointer;
+    }
+
+    .collab-approval-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 1050;
+        background: var(--mud-palette-surface);
+        border-radius: 8px;
+        padding: 4px 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        cursor: pointer;
+    }
+</style>
+
+@code {
+    [Parameter] public IReadOnlyList<PresenceInfo> Users { get; set; } = [];
+    [Parameter] public IReadOnlyDictionary<string, string> NodeLocks { get; set; } = new Dictionary<string, string>();
+    [Parameter] public IReadOnlyList<PipelineComment> Comments { get; set; } = [];
+    [Parameter] public int PendingApprovals { get; set; }
+
+    private static string GetInitials(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{parts[0][0]}{parts[1][0]}".ToUpperInvariant()
+            : name[..Math.Min(2, name.Length)].ToUpperInvariant();
+    }
+}

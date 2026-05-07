@@ -1,0 +1,17 @@
+{
+  "id": "example.webhook-sink",
+  "name": "HTTP Webhook Sink",
+  "version": "1.0.0",
+  "type": "Sink",
+  "description": "Sends each consumed message as an HTTP POST to a configurable webhook URL",
+  "author": "Surgewave Examples",
+  "inputTopic": "alerts",
+  "config": {
+    "url": "https://hooks.example.com/surgewave",
+    "method": "POST",
+    "content.type": "application/json",
+    "headers": "Authorization:Bearer token123",
+    "retry.max": "3",
+    "retry.delay.ms": "1000"
+  }
+}

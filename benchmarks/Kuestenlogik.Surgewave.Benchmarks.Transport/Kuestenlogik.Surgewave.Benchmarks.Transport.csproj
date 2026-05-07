@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Streams\Kuestenlogik.Surgewave.Streams.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Mqtt\Kuestenlogik.Surgewave.Protocol.Mqtt.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Amqp\Kuestenlogik.Surgewave.Protocol.Amqp.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
+  </ItemGroup>
+
+</Project>

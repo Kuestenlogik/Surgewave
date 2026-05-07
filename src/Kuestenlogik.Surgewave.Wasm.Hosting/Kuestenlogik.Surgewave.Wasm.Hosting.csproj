@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Wasm — host integration: ASP.NET Core REST endpoints (MapSurgewaveWasm) and the SurgewaveWasmBrokerPlugin entry point that wires the WASM subsystem into the broker. Reference this from a host that runs Surgewave WASM plugins to expose its REST surface and broker integration.</Description>
+    <PackageTags>surgewave;wasm;hosting;rest;http;broker-plugin</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Wasm\Kuestenlogik.Surgewave.Wasm.csproj" />
+  </ItemGroup>
+
+</Project>

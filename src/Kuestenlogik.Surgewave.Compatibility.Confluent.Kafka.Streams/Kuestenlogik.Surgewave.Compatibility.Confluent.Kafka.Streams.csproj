@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
+    <Description>Kafka Streams API compatibility layer for Surgewave Streams. Provides type aliases (IKStream, IKTable, etc.) for migration from Kafka Streams.</Description>
+    <PackageId>Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Streams</PackageId>
+    <RootNamespace>Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Streams</RootNamespace>
+    <PackageTags>surgewave;kafka;streams;compatibility;migration</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Streams\Kuestenlogik.Surgewave.Streams.csproj" />
+  </ItemGroup>
+
+</Project>

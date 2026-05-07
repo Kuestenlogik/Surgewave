@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Control</RootNamespace>
+    <AssemblyName>surgewave-control</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Ensure static web assets work in Release builds -->
+    <StaticWebAssetsEnabled>true</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <!-- Publish-specific settings for optimized/trimmed builds -->
+  <!-- No trimming — Blazor requires Reflection -->
+  <!-- Use: dotnet publish -c Release -p:Optimized=true -r win-x64 -->
+  <PropertyGroup Condition="'$(Optimized)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <ReadyToRun>true</ReadyToRun>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+  </PropertyGroup>
+
+  <!-- Container Publishing (.NET Native) -->
+  <!-- Usage: dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer -->
+  <PropertyGroup>
+    <ContainerRepository>surgewave/surgewave-control</ContainerRepository>
+    <ContainerImageTag>0.1.0</ContainerImageTag>
+    <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>
+    <ContainerFamily>jammy-chiseled</ContainerFamily>
+  </PropertyGroup>
+
+  <ItemGroup Label="Container Ports">
+    <ContainerPort Include="5050" Type="tcp" />
+  </ItemGroup>
+
+  <ItemGroup Label="Container Environment">
+    <ContainerEnvironmentVariable Include="DOTNET_RUNNING_IN_CONTAINER" Value="true" />
+    <ContainerEnvironmentVariable Include="ASPNETCORE_URLS" Value="http://+:5050" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BlazorMonaco" />
+    <PackageReference Include="MessagePack" />
+    <PackageReference Include="MudBlazor" />
+    <PackageReference Include="Blazored.LocalStorage" />
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+    <PackageReference Include="ITfoxtec.Identity.Saml2" />
+    <PackageReference Include="ITfoxtec.Identity.Saml2.MvcCore" />
+    <PackageReference Include="System.DirectoryServices.Protocols" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Msagl" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Z.Blazor.Diagrams" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+  </ItemGroup>
+
+</Project>

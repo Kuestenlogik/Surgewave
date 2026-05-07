@@ -1,0 +1,190 @@
+@page "/brokers"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+
+<PageTitle>Brokers - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Brokers</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadBrokersAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudGrid>
+        @* Cluster Summary *@
+        <MudItem xs="12">
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <MudGrid>
+                    <MudItem xs="12" md="3">
+                        <div class="d-flex align-center">
+                            <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                            <div>
+                                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Brokers</MudText>
+                                <MudText Typo="Typo.h5">@_brokers.Count</MudText>
+                            </div>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <div class="d-flex align-center">
+                            <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                            <div>
+                                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Controller</MudText>
+                                <MudText Typo="Typo.h5">Broker @(_brokers.FirstOrDefault(b => b.IsController)?.BrokerId ?? -1)</MudText>
+                            </div>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <div class="d-flex align-center">
+                            <MudIcon Icon="@(_isHealthy ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                     Color="@(_isHealthy ? Color.Success : Color.Error)" Size="Size.Large" Class="mr-3" />
+                            <div>
+                                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
+                                <MudText Typo="Typo.h5">@(_isHealthy ? "Healthy" : "Unhealthy")</MudText>
+                            </div>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="12" md="3" Class="d-flex align-center justify-end">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                                   OnClick="LoadBrokersAsync">
+                            Refresh
+                        </MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        @* Broker Cards *@
+        @foreach (var broker in _brokers.OrderBy(b => b.BrokerId))
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            <MudAvatar Color="@(broker.IsController ? Color.Warning : Color.Primary)">
+                                @broker.BrokerId
+                            </MudAvatar>
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Broker @broker.BrokerId</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">@broker.Host:@broker.Port</MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            @if (broker.IsController)
+                            {
+                                <MudTooltip Text="Controller">
+                                    <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" />
+                                </MudTooltip>
+                            }
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudSimpleTable Dense="true">
+                            <tbody>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Host</MudText></td>
+                                    <td><MudText Typo="Typo.body2">@broker.Host</MudText></td>
+                                </tr>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Port</MudText></td>
+                                    <td><MudText Typo="Typo.body2">@broker.Port</MudText></td>
+                                </tr>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Rack</MudText></td>
+                                    <td><MudText Typo="Typo.body2">@(broker.Rack ?? "N/A")</MudText></td>
+                                </tr>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Peer Transport</MudText></td>
+                                    <td>
+                                        @if (string.Equals(broker.PeerTransport, "quic", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Icon="@Icons.Material.Filled.Bolt">QUIC</MudChip>
+                                        }
+                                        else
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">TCP</MudChip>
+                                        }
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Role</MudText></td>
+                                    <td>
+                                        @if (broker.IsController)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">Controller</MudChip>
+                                        }
+                                        else
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">Replica</MudChip>
+                                        }
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                   Href="@($"/brokers/{broker.BrokerId}")">
+                            View Details
+                        </MudButton>
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private List<BrokerInfo> _brokers = [];
+    private HealthDetails? _healthDetails;
+    private bool _isHealthy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClusterState.OnChange += async () =>
+        {
+            await LoadBrokersAsync();
+            StateHasChanged();
+        };
+        await LoadBrokersAsync();
+    }
+
+    private async Task LoadBrokersAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            _brokers = (await ApiClient.ListBrokersAsync(clusterId)).ToList();
+
+            // Load health details
+            _healthDetails = await ApiClient.GetHealthDetailsAsync();
+            _isHealthy = _healthDetails?.Status == "Healthy";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _isHealthy = false;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+}

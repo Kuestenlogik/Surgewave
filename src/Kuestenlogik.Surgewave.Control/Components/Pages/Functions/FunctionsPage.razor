@@ -1,0 +1,199 @@
+@page "/functions"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Functions - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Surgewave Functions</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Lightweight serverless functions processing Surgewave topics</MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Functions" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Functions</MudText>
+                        <MudText Typo="Typo.h5">@_functions.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.PlayCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Running</MudText>
+                        <MudText Typo="Typo.h5">@_functions.Count(f => f.State == "Running")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Message" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Processed</MudText>
+                        <MudText Typo="Typo.h5">@_functions.Sum(f => f.MessagesProcessed).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Error" Color="@(_functions.Sum(f => f.ErrorCount) > 0 ? Color.Error : Color.Success)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Errors</MudText>
+                        <MudText Typo="Typo.h5">@_functions.Sum(f => f.ErrorCount).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Functions Table *@
+<MudTable Items="_functions" Hover="true" Dense="true" Elevation="2">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>State</MudTh>
+        <MudTh>Input Topic</MudTh>
+        <MudTh>Output Topic</MudTh>
+        <MudTh>Processed</MudTh>
+        <MudTh>Errors</MudTh>
+        <MudTh>Avg Latency</MudTh>
+        <MudTh>Parallelism</MudTh>
+        <MudTh>Stateful</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name"><strong>@context.Name</strong></MudTd>
+        <MudTd DataLabel="State">
+            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)">@context.State</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Input Topic"><code>@context.InputTopic</code></MudTd>
+        <MudTd DataLabel="Output Topic"><code>@(context.OutputTopic ?? "-")</code></MudTd>
+        <MudTd DataLabel="Processed">@context.MessagesProcessed.ToString("N0")</MudTd>
+        <MudTd DataLabel="Errors">
+            <MudText Color="@(context.ErrorCount > 0 ? Color.Error : Color.Default)">@context.ErrorCount.ToString("N0")</MudText>
+        </MudTd>
+        <MudTd DataLabel="Avg Latency">@context.AvgLatencyMs.ToString("F1") ms</MudTd>
+        <MudTd DataLabel="Parallelism">@context.Parallelism</MudTd>
+        <MudTd DataLabel="Stateful">
+            @if (context.Stateful)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success" />
+            }
+        </MudTd>
+        <MudTd DataLabel="Actions">
+            <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small"
+                           OnClick="() => ShowFunctionDetail(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>No functions registered. Use the Functions API to register functions.</MudText></NoRecordsContent>
+</MudTable>
+
+@* Function Detail Panel *@
+@if (_selectedFunction != null)
+{
+    <MudPaper Elevation="2" Class="pa-4 mt-4">
+        <MudText Typo="Typo.h6" Class="mb-3">Function: @_selectedFunction.Name</MudText>
+        <MudGrid>
+            <MudItem xs="6" sm="3">
+                <MudText Typo="Typo.caption">Max Retries</MudText>
+                <MudText Typo="Typo.body1">@_selectedFunction.MaxRetries</MudText>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudText Typo="Typo.caption">Dead Letter Topic</MudText>
+                <MudText Typo="Typo.body1">@(_selectedFunction.DeadLetterTopic ?? "None")</MudText>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudText Typo="Typo.caption">Parallelism</MudText>
+                <MudText Typo="Typo.body1">@_selectedFunction.Parallelism</MudText>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudText Typo="Typo.caption">Stateful</MudText>
+                <MudText Typo="Typo.body1">@(_selectedFunction.Stateful ? "Yes" : "No")</MudText>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
+@code {
+    private List<FunctionInfo> _functions = [];
+    private FunctionInfo? _selectedFunction;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _functions = await Http.GetFromJsonAsync<List<FunctionInfo>>("/api/functions") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load functions: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private void ShowFunctionDetail(FunctionInfo fn)
+    {
+        _selectedFunction = _selectedFunction == fn ? null : fn;
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Running" => Color.Success,
+        "Stopped" => Color.Default,
+        "Failed" => Color.Error,
+        "Starting" => Color.Info,
+        _ => Color.Default
+    };
+
+    private sealed class FunctionInfo
+    {
+        public string Name { get; set; } = "";
+        public string InputTopic { get; set; } = "";
+        public string? OutputTopic { get; set; }
+        public string State { get; set; } = "";
+        public long MessagesProcessed { get; set; }
+        public long ErrorCount { get; set; }
+        public double AvgLatencyMs { get; set; }
+        public int Parallelism { get; set; }
+        public int MaxRetries { get; set; }
+        public string? DeadLetterTopic { get; set; }
+        public bool Stateful { get; set; }
+    }
+}

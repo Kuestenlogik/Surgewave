@@ -1,0 +1,35 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_clusterId" Label="Cluster ID" Variant="Variant.Outlined" Required="true" Class="mb-3" />
+        <MudTextField @bind-Value="_displayName" Label="Display Name" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_bootstrapServers" Label="Bootstrap Servers" Variant="Variant.Outlined"
+                      Required="true" HelperText="e.g., remote-broker:9092" Class="mb-3" />
+        <MudTextField @bind-Value="_region" Label="Region" Variant="Variant.Outlined"
+                      HelperText="e.g., eu-west-1" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_clusterId) || string.IsNullOrWhiteSpace(_bootstrapServers))">Add</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _clusterId = "";
+    private string _displayName = "";
+    private string _bootstrapServers = "";
+    private string _region = "";
+
+    private async Task Submit()
+    {
+        var payload = new { clusterId = _clusterId, displayName = _displayName, bootstrapServers = _bootstrapServers, region = _region };
+        var response = await Http.PostAsJsonAsync("/api/replication/clusters", payload);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

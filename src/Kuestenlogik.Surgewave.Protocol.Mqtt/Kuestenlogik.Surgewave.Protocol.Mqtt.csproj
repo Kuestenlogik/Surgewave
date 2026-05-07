@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave MQTT protocol adapter using MQTTnet server for IoT device connectivity</Description>
+    <PackageTags>surgewave;kafka;protocol;mqtt;iot;mqttnet</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="pluginsettings.json" Condition="Exists('pluginsettings.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- MSBuild task: surgewave plugins pack/install (Kuestenlogik.Surgewave.Build) -->
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Build\Kuestenlogik.Surgewave.Build.csproj" PrivateAssets="all" />
+  </ItemGroup>
+  <Import Project="..\Kuestenlogik.Surgewave.Build\build\Kuestenlogik.Surgewave.Build.targets" />
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Protocol.Mqtt.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" />
+    <PackageReference Include="MQTTnet.Server" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,237 @@
+@using Blazor.Diagrams.Core.Geometry
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+<g class="pipeline-link @GetLinkClass()">
+    @* Main link path - uses the pre-computed path from the diagram *@
+    @if (Link.PathGeneratorResult?.FullPath != null)
+    {
+        <path d="@GetPathString()"
+              class="link-path"
+              stroke="@GetStrokeColor()"
+              stroke-width="@GetStrokeWidth()"
+              stroke-dasharray="@GetDashArray()"
+              fill="none" />
+    }
+
+    @* Label at midpoint *@
+    @if (ShowLabel && !string.IsNullOrEmpty(GetLabelText()))
+    {
+        <g transform="translate(@LabelPosition.X.ToString(System.Globalization.CultureInfo.InvariantCulture), @LabelPosition.Y.ToString(System.Globalization.CultureInfo.InvariantCulture))">
+            <rect x="-40" y="-10" width="80" height="20" rx="4"
+                  class="link-label-bg" />
+            <text x="0" y="5" text-anchor="middle" class="link-label-text">
+                @GetLabelText()
+            </text>
+        </g>
+    }
+
+    @* Queue depth badge for back-pressure (Feature 2) *@
+    @if (Link.QueueDepth > 0 && Link.BackPressureLevel != BackPressureLevel.Normal)
+    {
+        <g transform="translate(@QueueBadgePosition.X.ToString(System.Globalization.CultureInfo.InvariantCulture), @QueueBadgePosition.Y.ToString(System.Globalization.CultureInfo.InvariantCulture))">
+            <rect x="-24" y="-9" width="48" height="18" rx="9"
+                  fill="@GetBackPressureBadgeColor()" />
+            <text x="0" y="4" text-anchor="middle" class="link-queue-badge"
+                  fill="white" font-size="10">
+                @FormatQueueDepth(Link.QueueDepth)
+            </text>
+        </g>
+    }
+</g>
+
+@code {
+    [Parameter]
+    public PipelineLink Link { get; set; } = null!;
+
+    [Parameter]
+    public bool ShowLabel { get; set; } = true;
+
+    [Parameter]
+    public LinkLabelMode LabelMode { get; set; } = LinkLabelMode.Topic;
+
+    private string GetPathString()
+    {
+        return Link.PathGeneratorResult?.FullPath?.ToString() ?? "";
+    }
+
+    private Point LabelPosition
+    {
+        get
+        {
+            var source = Link.Source?.GetPosition(Link);
+            var target = Link.Target?.GetPosition(Link);
+
+            if (source == null || target == null)
+                return new Point(0, 0);
+
+            return new Point(
+                (source.X + target.X) / 2,
+                (source.Y + target.Y) / 2
+            );
+        }
+    }
+
+    private Point QueueBadgePosition
+    {
+        get
+        {
+            var label = LabelPosition;
+            return new Point(label.X, label.Y - 18);
+        }
+    }
+
+    private string GetLabelText()
+    {
+        if (Link.IsErrorLink)
+            return "Error";
+
+        return LabelMode switch
+        {
+            LinkLabelMode.Topic => Link.InternalTopic ?? "",
+            LinkLabelMode.MessageCount => Link.MessageCount > 0 ? FormatCount(Link.MessageCount) : "",
+            LinkLabelMode.Throughput => Link.Throughput > 0 ? $"{Link.Throughput:F1}/s" : "",
+            _ => ""
+        };
+    }
+
+    private static string FormatCount(long count)
+    {
+        return count switch
+        {
+            >= 1_000_000_000 => $"{count / 1_000_000_000.0:F1}B",
+            >= 1_000_000 => $"{count / 1_000_000.0:F1}M",
+            >= 1_000 => $"{count / 1_000.0:F1}K",
+            _ => count.ToString()
+        };
+    }
+
+    private static string FormatQueueDepth(long depth)
+    {
+        return depth switch
+        {
+            >= 1_000_000 => $"{depth / 1_000_000.0:F1}M",
+            >= 1_000 => $"{depth / 1_000.0:F1}K",
+            _ => depth.ToString()
+        };
+    }
+
+    private string GetStrokeColor()
+    {
+        if (Link.IsLineageHighlighted)
+            return "#00BCD4";
+
+        if (Link.IsErrorLink)
+            return "var(--mud-palette-error)";
+
+        return Link.BackPressureLevel switch
+        {
+            BackPressureLevel.Critical => "#EF5350",
+            BackPressureLevel.Warning => "#FFA726",
+            _ => Link.Selected ? "var(--mud-palette-primary)" :
+                 Link.IsActive ? "var(--mud-palette-success)" :
+                 "var(--mud-palette-lines-default)"
+        };
+    }
+
+    private string GetStrokeWidth()
+    {
+        return Link.BackPressureLevel switch
+        {
+            BackPressureLevel.Critical => "4",
+            BackPressureLevel.Warning => "3",
+            _ => Link.Selected ? "3" : "2"
+        };
+    }
+
+    private string GetDashArray()
+    {
+        if (Link.IsErrorLink)
+            return "8,4";
+        if (Link.BackPressureLevel == BackPressureLevel.Critical)
+            return "12,4";
+        return "";
+    }
+
+    private string GetBackPressureBadgeColor()
+    {
+        return Link.BackPressureLevel switch
+        {
+            BackPressureLevel.Critical => "#EF5350",
+            BackPressureLevel.Warning => "#FFA726",
+            _ => "#9E9E9E"
+        };
+    }
+
+    private string GetLinkClass()
+    {
+        var classes = new List<string>();
+
+        if (Link.Selected)
+            classes.Add("selected");
+
+        if (Link.IsActive)
+            classes.Add("active");
+
+        if (Link.IsErrorLink)
+            classes.Add("error-link");
+
+        if (Link.IsLineageHighlighted)
+            classes.Add("link-lineage-highlighted");
+
+        if (Link.BackPressureLevel == BackPressureLevel.Warning)
+            classes.Add("link-backpressure-warning");
+        else if (Link.BackPressureLevel == BackPressureLevel.Critical)
+            classes.Add("link-backpressure-critical");
+
+        return string.Join(" ", classes);
+    }
+}
+
+<style>
+    .pipeline-link path {
+        stroke: var(--mud-palette-lines-default);
+        stroke-width: 2;
+        fill: none;
+        transition: stroke 0.2s ease;
+    }
+
+    .pipeline-link.selected path {
+        stroke: var(--mud-palette-primary);
+        stroke-width: 3;
+    }
+
+    .pipeline-link.active path {
+        stroke: var(--mud-palette-success);
+        animation: link-pulse 1s infinite;
+    }
+
+    .link-label-bg {
+        fill: var(--mud-palette-surface);
+        stroke: var(--mud-palette-lines-default);
+        stroke-width: 1;
+    }
+
+    .link-label-text {
+        fill: var(--mud-palette-text-primary);
+        font-size: 11px;
+        font-family: inherit;
+    }
+
+    .pipeline-link.selected .link-label-bg {
+        stroke: var(--mud-palette-primary);
+    }
+
+    .pipeline-link.error-link path {
+        stroke: var(--mud-palette-error);
+        stroke-dasharray: 8, 4;
+    }
+
+    .pipeline-link.error-link .link-label-text {
+        fill: var(--mud-palette-error);
+    }
+
+    .link-queue-badge {
+        font-weight: bold;
+        font-family: monospace;
+    }
+</style>

@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Create storm user and group
+if ! getent group storm >/dev/null 2>&1; then
+    groupadd -r storm
+fi
+if ! getent passwd storm >/dev/null 2>&1; then
+    useradd -r -g storm -d /var/lib/storm -s /bin/false storm
+fi
+
+# Create data directories
+mkdir -p /var/lib/storm/data
+mkdir -p /var/log/storm
+
+# Set ownership
+chown -R storm:storm /var/lib/storm /var/log/storm
+chown -R storm:storm /opt/storm
+
+# Make binaries executable
+chmod +x /opt/storm/broker/Kuestenlogik.Storm.Broker
+chmod +x /opt/storm/cli/storm 2>/dev/null || true
+chmod +x /opt/storm/control/Kuestenlogik.Storm.Control 2>/dev/null || true
+
+# Reload systemd and enable service
+systemctl daemon-reload
+systemctl enable storm-broker
+
+echo ""
+echo "Storm installed successfully!"
+echo ""
+echo "  Start broker:     sudo systemctl start storm-broker"
+echo "  Check status:     sudo systemctl status storm-broker"
+echo "  Enable Control:   sudo systemctl enable --now storm-control"
+echo "  Config:           /etc/storm/appsettings.json"
+echo "  Data:             /var/lib/storm/"
+echo "  Logs:             /var/log/storm/"
+echo ""

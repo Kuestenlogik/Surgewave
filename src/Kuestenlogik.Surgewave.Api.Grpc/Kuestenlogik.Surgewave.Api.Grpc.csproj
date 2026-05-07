@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Kuestenlogik.Surgewave.Api.Grpc</RootNamespace>
+    <Description>gRPC API contracts for Kuestenlogik.Surgewave - shared proto definitions</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Net.Common" />
+    <PackageReference Include="Google.Api.CommonProtos" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <GoogleApiProtos>$(PkgGoogle_Api_CommonProtos)\content\protos</GoogleApiProtos>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Shared types -->
+    <Protobuf Include="Protos\common.proto" GrpcServices="None" AdditionalImportDirs="$(GoogleApiProtos)" />
+
+    <!-- Core services with HTTP annotations -->
+    <Protobuf Include="Protos\producer.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\consumer.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\consumer_group.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\topic.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\cluster.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\transaction.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+
+    <!-- Schema and Connect services -->
+    <Protobuf Include="Protos\schema_registry.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\connect.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+
+    <!-- Admin services -->
+    <Protobuf Include="Protos\quota.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\security.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+    <Protobuf Include="Protos\admin.proto" GrpcServices="Both" AdditionalImportDirs="$(GoogleApiProtos)" />
+  </ItemGroup>
+
+</Project>

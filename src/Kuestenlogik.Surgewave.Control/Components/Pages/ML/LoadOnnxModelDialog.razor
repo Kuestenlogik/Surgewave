@@ -1,0 +1,27 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_modelPath" Label="Model File Path" Variant="Variant.Outlined"
+                      Required="true" HelperText="Full path to the .onnx model file" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_modelPath))">Load</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _modelPath = "";
+
+    private async Task Submit()
+    {
+        var response = await Http.PostAsJsonAsync("/api/ml/models/load", new { modelPath = _modelPath });
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,783 @@
+@using Blazor.Diagrams.Components.Renderers
+@using Blazor.Diagrams.Core.Geometry
+@using Blazor.Diagrams.Core.Models
+
+@if (Node.IsSqlTransform)
+{
+    <MudTooltip Text="SQL Transform — Streaming SQL query processor" Placement="Placement.Top">
+        <div class="connector-node sql-transform-node @GetNodeClass()">
+            @* Breakpoint indicator *@
+            @if (Node.HasBreakpoint)
+            {
+                <div class="breakpoint-dot"></div>
+            }
+
+            @* Queue depth badge *@
+            @if (Node.QueueDepth > 0)
+            {
+                <div class="queue-depth-badge">@Node.QueueDepth</div>
+            }
+
+            <div class="connector-node-header sql-header">
+                <MudIcon Icon="@Icons.Material.Filled.Code" Size="MudBlazor.Size.Small" Class="mr-2" Style="color: #CE93D8;" />
+                <span class="connector-node-title">@Node.DisplayName</span>
+                @if (Node.IsPaused)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Pause" Size="MudBlazor.Size.Small" Color="Color.Warning" Class="ml-1" />
+                }
+                @if (Node.IsDisabled)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Size="MudBlazor.Size.Small" Class="ml-auto" Style="opacity: 0.5;" />
+                }
+                @if (Node.ValidationState != NodeValidationState.Valid)
+                {
+                    <MudIcon Icon="@(Node.ValidationState == NodeValidationState.Error ? Icons.Material.Filled.Error : Icons.Material.Filled.Warning)"
+                             Size="MudBlazor.Size.Small"
+                             Color="@(Node.ValidationState == NodeValidationState.Error ? Color.Error : Color.Warning)"
+                             Class="ml-1" />
+                }
+            </div>
+
+            @* SQL query preview *@
+            @{
+                var sqlPreview = Node.Config.TryGetValue("sql.query", out var sql) ? sql : null;
+            }
+            @if (!string.IsNullOrEmpty(sqlPreview))
+            {
+                <div class="sql-preview">@TruncateSql(sqlPreview)</div>
+            }
+            else
+            {
+                <div class="connector-node-status">No SQL query defined</div>
+            }
+
+            @* Live metrics bar *@
+            @if (Node.IsRunning)
+            {
+                <div class="node-metrics-bar">
+                    <span class="metric-badge throughput">@FormatRate(Node.RecordsPerSec)</span>
+                    <span class="metric-badge latency">@FormatLatency(Node.P99LatencyMs)</span>
+                    @if (Node.TotalErrors > 0)
+                    {
+                        <span class="metric-badge errors">@Node.TotalErrors err</span>
+                    }
+                </div>
+            }
+
+            @* SQL result preview in debug mode *@
+            @if (Node.SqlResultColumns != null && Node.SqlResultPreview != null && Node.SqlResultPreview.Count > 0)
+            {
+                <div class="sql-result-preview">
+                    <table class="sql-result-table">
+                        <thead>
+                            <tr>
+                                @foreach (var col in Node.SqlResultColumns)
+                                {
+                                    <th>@col</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Node.SqlResultPreview.Take(3))
+                            {
+                                <tr>
+                                    @foreach (var cell in row)
+                                    {
+                                        <td>@cell</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (Node.SqlResultPreview.Count > 3)
+                    {
+                        <div class="sql-result-more">+@(Node.SqlResultPreview.Count - 3) more rows</div>
+                    }
+                </div>
+            }
+
+            @foreach (var port in Node.Ports)
+            {
+                <PortRenderer Port="port" Class="@GetPortClass(port)" />
+            }
+        </div>
+    </MudTooltip>
+}
+else if (Node.IsExceptionHandler)
+{
+    <MudTooltip Text="Exception Handler — Uncaught exception routing and recovery" Placement="Placement.Top">
+        <div class="connector-node exception-handler-node @GetNodeClass()">
+            @* Breakpoint indicator *@
+            @if (Node.HasBreakpoint)
+            {
+                <div class="breakpoint-dot"></div>
+            }
+
+            <div class="connector-node-header exception-header">
+                <MudIcon Icon="@Icons.Material.Filled.Shield" Size="MudBlazor.Size.Small" Class="mr-2" Style="color: #EF5350;" />
+                <span class="connector-node-title">@Node.DisplayName</span>
+                @if (Node.IsDisabled)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Size="MudBlazor.Size.Small" Class="ml-auto" Style="opacity: 0.5;" />
+                }
+                @if (Node.ValidationState != NodeValidationState.Valid)
+                {
+                    <MudIcon Icon="@(Node.ValidationState == NodeValidationState.Error ? Icons.Material.Filled.Error : Icons.Material.Filled.Warning)"
+                             Size="MudBlazor.Size.Small"
+                             Color="@(Node.ValidationState == NodeValidationState.Error ? Color.Error : Color.Warning)"
+                             Class="ml-1" />
+                }
+            </div>
+
+            @* Strategy display *@
+            @{
+                var strategy = Node.Config.TryGetValue("exception.strategy", out var s) ? s : "ReplaceThread";
+                var dlqTopic = Node.Config.TryGetValue("dlq.topic", out var d) ? d : null;
+            }
+            <div class="exception-strategy-bar">
+                <span class="strategy-badge @GetStrategyClass(strategy)">@strategy</span>
+                @if (!string.IsNullOrEmpty(dlqTopic))
+                {
+                    <span class="dlq-badge">DLQ</span>
+                }
+            </div>
+
+            @* Live metrics *@
+            @if (Node.IsRunning)
+            {
+                <div class="node-metrics-bar">
+                    @if (Node.ExceptionsCaught > 0)
+                    {
+                        <span class="metric-badge errors">@Node.ExceptionsCaught caught</span>
+                    }
+                    @if (Node.ThreadsReplaced > 0)
+                    {
+                        <span class="metric-badge throughput">@Node.ThreadsReplaced replaced</span>
+                    }
+                </div>
+            }
+
+            @* Last exception in debug mode *@
+            @if (!string.IsNullOrEmpty(Node.LastExceptionMessage))
+            {
+                <div class="last-exception-preview">@TruncateText(Node.LastExceptionMessage, 80)</div>
+            }
+
+            @foreach (var port in Node.Ports)
+            {
+                <PortRenderer Port="port" Class="@GetPortClass(port)" />
+            }
+        </div>
+    </MudTooltip>
+}
+else if (Node.IsComposite)
+{
+    <MudTooltip Text="@(Node.SubPipelineName ?? "Sub-Pipeline")" Placement="Placement.Top">
+        <div class="connector-node composite-node @GetNodeClass()">
+            <div class="connector-node-header">
+                <MudIcon Icon="@Icons.Material.Filled.AccountTree" Size="MudBlazor.Size.Small" Class="mr-2" Color="Color.Tertiary" />
+                <span class="connector-node-title">@Node.DisplayName</span>
+                @if (Node.IsDisabled)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Size="MudBlazor.Size.Small" Class="ml-auto" Style="opacity: 0.5;" />
+                }
+                @if (Node.ValidationState != NodeValidationState.Valid)
+                {
+                    <MudIcon Icon="@(Node.ValidationState == NodeValidationState.Error ? Icons.Material.Filled.Error : Icons.Material.Filled.Warning)"
+                             Size="MudBlazor.Size.Small"
+                             Color="@(Node.ValidationState == NodeValidationState.Error ? Color.Error : Color.Warning)"
+                             Class="ml-1" />
+                }
+            </div>
+            <div class="composite-node-body">
+                <span class="connector-node-status" style="padding: 0;">@(Node.SubPipelineName ?? "Sub-Pipeline")</span>
+                <MudIcon Icon="@Icons.Material.Filled.OpenInNew" Size="MudBlazor.Size.Small" Style="opacity: 0.5;" />
+            </div>
+            @if (Node.InputPortLabels.Count > 0 || Node.OutputPortLabels.Count > 0)
+            {
+                <div class="composite-port-labels">
+                    @if (Node.InputPortLabels.Count > 0)
+                    {
+                        <div class="port-label-group input-ports">
+                            @foreach (var label in Node.InputPortLabels)
+                            {
+                                <span class="port-label input-port-label">@label</span>
+                            }
+                        </div>
+                    }
+                    @if (Node.OutputPortLabels.Count > 0)
+                    {
+                        <div class="port-label-group output-ports">
+                            @foreach (var label in Node.OutputPortLabels)
+                            {
+                                <span class="port-label output-port-label">@label</span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            @foreach (var port in Node.Ports)
+            {
+                <PortRenderer Port="port" Class="@GetPortClass(port)" />
+            }
+        </div>
+    </MudTooltip>
+}
+else
+{
+    <MudTooltip Text="@GetTooltipText()" Disabled="@string.IsNullOrEmpty(GetTooltipText())">
+        <div class="connector-node @GetNodeClass()">
+            @* Breakpoint indicator *@
+            @if (Node.HasBreakpoint)
+            {
+                <div class="breakpoint-dot"></div>
+            }
+
+            @* Queue depth badge *@
+            @if (Node.QueueDepth > 0)
+            {
+                <div class="queue-depth-badge">@Node.QueueDepth</div>
+            }
+
+            <div class="connector-node-header">
+                <span class="connector-node-icon">@GetNodeIcon()</span>
+                <span class="connector-node-title">@Node.DisplayName</span>
+                @if (Node.IsPaused)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Pause" Size="MudBlazor.Size.Small" Color="Color.Warning" Class="ml-1" />
+                }
+                @if (Node.IsDisabled)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Size="MudBlazor.Size.Small" Class="ml-auto" Style="opacity: 0.5;" />
+                }
+                @if (Node.ValidationState != NodeValidationState.Valid)
+                {
+                    <MudIcon Icon="@(Node.ValidationState == NodeValidationState.Error ? Icons.Material.Filled.Error : Icons.Material.Filled.Warning)"
+                             Size="MudBlazor.Size.Small"
+                             Color="@(Node.ValidationState == NodeValidationState.Error ? Color.Error : Color.Warning)"
+                             Class="ml-1" />
+                }
+            </div>
+
+            @* Worker badge *@
+            @if (!string.IsNullOrEmpty(Node.WorkerId))
+            {
+                <div class="worker-badge-bar">
+                    <span class="worker-badge">@GetWorkerLabel(Node.WorkerId)</span>
+                </div>
+            }
+
+            @* Live metrics bar *@
+            @if (Node.IsRunning)
+            {
+                <div class="node-metrics-bar">
+                    <span class="metric-badge throughput">@FormatRate(Node.RecordsPerSec)</span>
+                    <span class="metric-badge latency">@FormatLatency(Node.P99LatencyMs)</span>
+                    @if (Node.TotalErrors > 0)
+                    {
+                        <span class="metric-badge errors">@Node.TotalErrors err</span>
+                    }
+                </div>
+            }
+            else if (!string.IsNullOrEmpty(Node.StatusMessage))
+            {
+                <div class="connector-node-status">@Node.StatusMessage</div>
+            }
+
+            @* Render ports *@
+            @foreach (var port in Node.Ports)
+            {
+                <PortRenderer Port="port" Class="@GetPortClass(port)" />
+            }
+        </div>
+    </MudTooltip>
+}
+
+@code {
+    [Parameter]
+    public ConnectorNode Node { get; set; } = null!;
+
+    private static string TruncateSql(string sql)
+    {
+        var singleLine = sql.Replace('\n', ' ').Replace('\r', ' ');
+        if (singleLine.Length > 60)
+            return singleLine[..57] + "...";
+        return singleLine;
+    }
+
+    private static string TruncateText(string text, int maxLength)
+    {
+        if (text.Length <= maxLength) return text;
+        return text[..(maxLength - 3)] + "...";
+    }
+
+    private static string GetStrategyClass(string strategy) => strategy switch
+    {
+        "ShutdownClient" => "strategy-warning",
+        "ShutdownApplication" => "strategy-critical",
+        _ => "strategy-normal"
+    };
+
+    private string GetNodeClass()
+    {
+        var classes = new List<string>();
+
+        if (Node.IsSqlTransform)
+            classes.Add("sql-transform-node");
+        else if (Node.IsExceptionHandler)
+            classes.Add("exception-handler-node");
+        else if (Node.IsAiNode)
+            classes.Add("ai-node");
+        else if (Node.IsWorkflowNode)
+            classes.Add("workflow-node");
+        else if (Node.IsSource)
+            classes.Add("source-node");
+        else if (Node.IsSink)
+            classes.Add("sink-node");
+        else
+            classes.Add("transform-node");
+
+        if (Node.Selected)
+            classes.Add("selected");
+
+        if (Node.IsDisabled)
+            classes.Add("disabled-node");
+
+        if (Node.IsPaused)
+            classes.Add("paused-node");
+
+        if (Node.IsLineageHighlighted)
+            classes.Add("lineage-highlighted");
+
+        if (Node.ValidationState == NodeValidationState.Error)
+            classes.Add("validation-error");
+        else if (Node.ValidationState == NodeValidationState.Warning)
+            classes.Add("validation-warning");
+
+        classes.Add($"status-{Node.StatusColor}");
+
+        return string.Join(" ", classes);
+    }
+
+    private string GetPortClass(Blazor.Diagrams.Core.Models.PortModel port)
+    {
+        if (port.Alignment == PortAlignment.Bottom && Node.HasErrorPort)
+            return "connector-node-port connector-node-port-error";
+        return "connector-node-port";
+    }
+
+    private string GetNodeIcon()
+    {
+        if (Node.IsAiNode) return "\uD83E\uDDE0"; // Brain
+        if (Node.IsWorkflowNode) return "\u2699"; // Gear
+        if (Node.IsSource) return "\u2B95"; // Right arrow
+        if (Node.IsSink) return "\u2B05"; // Left arrow
+        return "\u21C4"; // Left-right arrow
+    }
+
+    private string? GetTooltipText()
+    {
+        if (Node.IsDisabled)
+            return "Node is disabled";
+        if (!string.IsNullOrEmpty(Node.ValidationMessage))
+            return Node.ValidationMessage;
+        return null;
+    }
+
+    private static string GetWorkerLabel(string workerId)
+    {
+        // Show a shortened version of the worker ID for display
+        if (workerId.Length > 20)
+        {
+            var parts = workerId.Split('-');
+            if (parts.Length >= 2)
+                return $"{parts[0]}-{parts[^1][..Math.Min(6, parts[^1].Length)]}";
+        }
+        return workerId;
+    }
+
+    private static string FormatRate(double rate)
+    {
+        return rate switch
+        {
+            >= 1_000_000 => $"{rate / 1_000_000:F1}M/s",
+            >= 1_000 => $"{rate / 1_000:F1}k/s",
+            >= 1 => $"{rate:F0}/s",
+            > 0 => $"{rate:F1}/s",
+            _ => "0/s"
+        };
+    }
+
+    private static string FormatLatency(double ms)
+    {
+        return ms switch
+        {
+            >= 1000 => $"{ms / 1000:F1}s",
+            >= 1 => $"{ms:F0}ms",
+            > 0 => "<1ms",
+            _ => "0ms"
+        };
+    }
+}
+
+<style>
+    .connector-node {
+        min-width: 150px;
+        background: var(--mud-palette-surface);
+        border: 2px solid var(--mud-palette-lines-default);
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        font-family: inherit;
+        transition: all 0.2s ease;
+        position: relative;
+    }
+
+    .connector-node.selected {
+        border-color: var(--mud-palette-primary);
+        box-shadow: 0 0 0 3px rgba(var(--mud-palette-primary-rgb), 0.2);
+    }
+
+    .connector-node.paused-node {
+        border-color: var(--mud-palette-warning);
+        animation: pause-pulse 1.5s ease-in-out infinite;
+    }
+
+    @@keyframes pause-pulse {
+        0%, 100% { box-shadow: 0 0 0 2px rgba(var(--mud-palette-warning-rgb), 0.2); }
+        50% { box-shadow: 0 0 0 6px rgba(var(--mud-palette-warning-rgb), 0.4); }
+    }
+
+    .connector-node-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        background: var(--mud-palette-background-gray);
+        border-radius: 6px 6px 0 0;
+        border-bottom: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .connector-node-icon {
+        margin-right: 8px;
+        font-size: 14px;
+    }
+
+    .connector-node-title {
+        font-weight: 500;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .connector-node-status {
+        padding: 4px 12px 8px;
+        font-size: 11px;
+        color: var(--mud-palette-text-secondary);
+    }
+
+    .source-node {
+        border-left: 4px solid var(--mud-palette-success);
+    }
+
+    .sink-node {
+        border-left: 4px solid var(--mud-palette-info);
+    }
+
+    .transform-node {
+        border-left: 4px solid var(--mud-palette-warning);
+    }
+
+    /* AI node */
+    .ai-node {
+        border-left: 4px solid #AB47BC;
+    }
+
+    .ai-node .connector-node-header {
+        background: rgba(171, 71, 188, 0.1);
+    }
+
+    /* Workflow node */
+    .workflow-node {
+        border-left: 4px solid #26A69A;
+    }
+
+    .workflow-node .connector-node-header {
+        background: rgba(38, 166, 154, 0.1);
+    }
+
+    /* SQL Transform node */
+    .sql-transform-node {
+        border-left: 4px solid #CE93D8;
+        min-width: 180px;
+    }
+
+    .sql-header {
+        background: rgba(206, 147, 216, 0.1) !important;
+    }
+
+    .sql-preview {
+        padding: 4px 12px 6px;
+        font-size: 10px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        color: var(--mud-palette-text-secondary);
+        background: rgba(206, 147, 216, 0.05);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .sql-result-preview {
+        padding: 4px 8px 6px;
+        max-height: 100px;
+        overflow: hidden;
+    }
+
+    .sql-result-table {
+        width: 100%;
+        font-size: 9px;
+        font-family: monospace;
+        border-collapse: collapse;
+    }
+
+    .sql-result-table th {
+        background: rgba(206, 147, 216, 0.15);
+        padding: 2px 4px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 1px solid rgba(206, 147, 216, 0.3);
+    }
+
+    .sql-result-table td {
+        padding: 1px 4px;
+        border-bottom: 1px solid var(--mud-palette-lines-default);
+        max-width: 60px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sql-result-more {
+        font-size: 9px;
+        color: var(--mud-palette-text-secondary);
+        text-align: center;
+        padding: 2px;
+    }
+
+    /* Exception Handler node */
+    .exception-handler-node {
+        border-left: 4px solid #EF5350;
+        min-width: 170px;
+    }
+
+    .exception-header {
+        background: rgba(239, 83, 80, 0.1) !important;
+    }
+
+    .exception-strategy-bar {
+        display: flex;
+        gap: 4px;
+        padding: 4px 12px 6px;
+        align-items: center;
+    }
+
+    .strategy-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-family: monospace;
+        white-space: nowrap;
+    }
+
+    .strategy-normal {
+        background: rgba(var(--mud-palette-success-rgb), 0.15);
+        color: var(--mud-palette-success);
+    }
+
+    .strategy-warning {
+        background: rgba(var(--mud-palette-warning-rgb), 0.15);
+        color: var(--mud-palette-warning);
+    }
+
+    .strategy-critical {
+        background: rgba(var(--mud-palette-error-rgb), 0.15);
+        color: var(--mud-palette-error);
+    }
+
+    .dlq-badge {
+        font-size: 9px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(var(--mud-palette-info-rgb), 0.15);
+        color: var(--mud-palette-info);
+        font-weight: 600;
+    }
+
+    .last-exception-preview {
+        padding: 4px 12px 6px;
+        font-size: 9px;
+        font-family: monospace;
+        color: var(--mud-palette-error);
+        background: rgba(239, 83, 80, 0.05);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .connector-node-port {
+        width: 12px;
+        height: 12px;
+        background: var(--mud-palette-primary);
+        border: 2px solid var(--mud-palette-surface);
+        border-radius: 50%;
+    }
+
+    .connector-node-port-error {
+        background: var(--mud-palette-error) !important;
+    }
+
+    .status-success .connector-node-header {
+        background: rgba(var(--mud-palette-success-rgb), 0.1);
+    }
+
+    .status-error .connector-node-header {
+        background: rgba(var(--mud-palette-error-rgb), 0.1);
+    }
+
+    .disabled-node {
+        opacity: 0.5;
+        filter: grayscale(0.5);
+    }
+
+    .validation-warning {
+        border-color: var(--mud-palette-warning) !important;
+        box-shadow: 0 0 0 2px rgba(var(--mud-palette-warning-rgb), 0.3);
+    }
+
+    .validation-error {
+        border-color: var(--mud-palette-error) !important;
+        box-shadow: 0 0 0 2px rgba(var(--mud-palette-error-rgb), 0.3);
+    }
+
+    /* Live metrics badges */
+    .node-metrics-bar {
+        display: flex;
+        gap: 4px;
+        padding: 4px 12px 6px;
+    }
+
+    .metric-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-family: monospace;
+        white-space: nowrap;
+    }
+
+    .metric-badge.throughput {
+        background: rgba(var(--mud-palette-success-rgb), 0.15);
+        color: var(--mud-palette-success);
+    }
+
+    .metric-badge.latency {
+        background: rgba(var(--mud-palette-info-rgb), 0.15);
+        color: var(--mud-palette-info);
+    }
+
+    .metric-badge.errors {
+        background: rgba(var(--mud-palette-error-rgb), 0.15);
+        color: var(--mud-palette-error);
+    }
+
+    /* Breakpoint dot */
+    .breakpoint-dot {
+        position: absolute;
+        left: -6px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 12px;
+        height: 12px;
+        background: var(--mud-palette-error);
+        border-radius: 50%;
+        border: 2px solid var(--mud-palette-surface);
+        z-index: 10;
+    }
+
+    /* Queue depth badge */
+    /* Lineage highlighting */
+    .lineage-highlighted {
+        border-color: #00BCD4 !important;
+        box-shadow: 0 0 12px rgba(0, 188, 212, 0.5);
+        animation: lineage-glow 1.5s ease-in-out infinite;
+    }
+
+    @@keyframes lineage-glow {
+        0%, 100% { box-shadow: 0 0 8px rgba(0, 188, 212, 0.3); }
+        50% { box-shadow: 0 0 20px rgba(0, 188, 212, 0.6); }
+    }
+
+    /* Worker badge */
+    .worker-badge-bar {
+        display: flex;
+        padding: 2px 12px 4px;
+    }
+
+    .worker-badge {
+        font-size: 9px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-family: monospace;
+        white-space: nowrap;
+        background: rgba(var(--mud-palette-info-rgb), 0.15);
+        color: var(--mud-palette-info);
+    }
+
+    .queue-depth-badge {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        min-width: 18px;
+        height: 18px;
+        background: var(--mud-palette-warning);
+        color: white;
+        border-radius: 9px;
+        font-size: 10px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 4px;
+        z-index: 10;
+    }
+
+    /* Port labels for composite/sub-pipeline nodes */
+    .composite-port-labels {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 8px 6px;
+        gap: 8px;
+    }
+
+    .port-label-group {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .port-label {
+        font-size: 9px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        white-space: nowrap;
+        font-family: monospace;
+    }
+
+    .input-port-label {
+        background: rgba(var(--mud-palette-success-rgb), 0.15);
+        color: var(--mud-palette-success);
+    }
+
+    .output-port-label {
+        background: rgba(var(--mud-palette-info-rgb), 0.15);
+        color: var(--mud-palette-info);
+    }
+</style>

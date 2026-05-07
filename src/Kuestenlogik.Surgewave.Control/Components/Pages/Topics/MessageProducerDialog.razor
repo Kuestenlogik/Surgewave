@@ -1,0 +1,492 @@
+@inject ISurgewaveApiClient ApiClient
+@inject ISchemaRegistryClient SchemaClient
+@inject NotificationState Notification
+@inject ILocalStorageService LocalStorage
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Send" Class="mr-2" />
+            Produce Message to @TopicName
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" Border="true" Class="mb-4">
+            <MudTabPanel Text="Single" Icon="@Icons.Material.Filled.Message">
+                @* Format Selection *@
+                <MudGrid Class="mb-3">
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="string" @bind-Value="_format" Label="Format" Variant="Variant.Outlined" Dense="true">
+                            <MudSelectItem Value="@("JSON")">JSON</MudSelectItem>
+                            <MudSelectItem Value="@("Plain Text")">Plain Text</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="int?" @bind-Value="_selectedPartition" Label="Partition" Variant="Variant.Outlined" Dense="true"
+                                   Clearable="true" Placeholder="Auto (round-robin)">
+                            @for (int i = 0; i < PartitionCount; i++)
+                            {
+                                var p = i;
+                                <MudSelectItem Value="@((int?)p)">Partition @p</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+
+                @* Schema Selection *@
+                @if (_availableSchemas.Count > 0)
+                {
+                    <MudSelect T="string" @bind-Value="_selectedSchema" Label="Schema (optional)" Variant="Variant.Outlined"
+                               Dense="true" Clearable="true" Class="mb-3">
+                        @foreach (var schema in _availableSchemas)
+                        {
+                            <MudSelectItem Value="@schema">@schema</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+
+                @* Key Editor *@
+                <MudTextField @bind-Value="_key" Label="Key" Variant="Variant.Outlined"
+                              Placeholder="Message key (optional)" Class="mb-3" />
+
+                @* Value Editor *@
+                <MudTextField @bind-Value="_value" Label="Value" Variant="Variant.Outlined"
+                              Lines="12" Placeholder="@(_format == "JSON" ? "{ \"example\": \"value\" }" : "Message content...")"
+                              Class="mb-3" />
+
+                @if (_format == "JSON")
+                {
+                    <div class="d-flex gap-2 mb-3">
+                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FormatAlignLeft"
+                                   OnClick="FormatJson" Disabled="@string.IsNullOrWhiteSpace(_value)">
+                            Format JSON
+                        </MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Compress"
+                                   OnClick="MinifyJson" Disabled="@string.IsNullOrWhiteSpace(_value)">
+                            Minify
+                        </MudButton>
+                        @if (!string.IsNullOrWhiteSpace(_jsonError))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Icon="@Icons.Material.Filled.Error">
+                                @_jsonError
+                            </MudChip>
+                        }
+                    </div>
+                }
+
+                @* Headers Editor *@
+                <MudExpansionPanels Class="mb-3" Elevation="0">
+                    <MudExpansionPanel Text="@($"Headers ({_headers.Count})")" Expanded="@(_headers.Count > 0)">
+                        @for (int i = 0; i < _headers.Count; i++)
+                        {
+                            var index = i;
+                            <MudGrid Class="mb-2">
+                                <MudItem xs="5">
+                                    <MudTextField @bind-Value="_headers[index].Key" Label="Key" Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="5">
+                                    <MudTextField @bind-Value="_headers[index].Value" Label="Value" Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="2" Class="d-flex align-center">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => _headers.RemoveAt(index))" />
+                                </MudItem>
+                            </MudGrid>
+                        }
+                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => _headers.Add(new HeaderEntry()))">
+                            Add Header
+                        </MudButton>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+
+                @* Templates *@
+                @if (_templates.Count > 0)
+                {
+                    <MudExpansionPanels Class="mb-3" Elevation="0">
+                        <MudExpansionPanel Text="@($"Templates ({_templates.Count})")">
+                            <MudList T="MessageTemplate" Dense="true">
+                                @foreach (var template in _templates)
+                                {
+                                    <MudListItem OnClick="@(() => ApplyTemplate(template))">
+                                        <div class="d-flex justify-space-between align-center" style="width: 100%;">
+                                            <div>
+                                                <MudText Typo="Typo.body2">@template.Name</MudText>
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">@template.Format</MudText>
+                                            </div>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                           Color="Color.Error"
+                                                           OnClick="@(() => DeleteTemplate(template))" />
+                                        </div>
+                                    </MudListItem>
+                                }
+                            </MudList>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                }
+            </MudTabPanel>
+
+            <MudTabPanel Text="Batch" Icon="@Icons.Material.Filled.DynamicFeed">
+                <MudAlert Severity="Severity.Info" Class="mb-3">
+                    Enter one JSON message per line. Each line should be a complete JSON object with optional
+                    <code>key</code>, <code>value</code>, <code>headers</code>, and <code>partition</code> fields.
+                </MudAlert>
+                <MudTextField @bind-Value="_batchInput" Label="Batch Messages (JSON Lines)" Variant="Variant.Outlined"
+                              Lines="15" Placeholder='{"key": "k1", "value": "{\"name\": \"test\"}"}\n{"key": "k2", "value": "{\"name\": \"test2\"}"}'
+                              Class="mb-3" />
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    @ParseBatchCount() message(s) detected
+                </MudText>
+            </MudTabPanel>
+        </MudTabs>
+
+        @* Produce Result *@
+        @if (_lastResult != null)
+        {
+            <MudAlert Severity="Severity.Success" Class="mt-2">
+                Produced to partition @_lastResult.Partition at offset @_lastResult.Offset
+            </MudAlert>
+        }
+        @if (_batchResults.Count > 0)
+        {
+            <MudAlert Severity="Severity.Success" Class="mt-2">
+                @_batchResults.Count message(s) produced successfully
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Close</MudButton>
+        @if (_activeTab == 0)
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="SaveAsTemplate"
+                       Disabled="@string.IsNullOrWhiteSpace(_value)">
+                Save as Template
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
+                       OnClick="ProduceSingleAsync" Disabled="@(_producing || string.IsNullOrWhiteSpace(_value))">
+                @if (_producing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Produce
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
+                       OnClick="ProduceBatchAsync" Disabled="@(_producing || string.IsNullOrWhiteSpace(_batchInput))">
+                @if (_producing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Produce Batch
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string TopicName { get; set; } = "";
+
+    [Parameter]
+    public int PartitionCount { get; set; } = 1;
+
+    private int _activeTab;
+    private string _format = "JSON";
+    private int? _selectedPartition;
+    private string? _selectedSchema;
+    private string? _key;
+    private string? _value;
+    private string? _batchInput;
+    private string? _jsonError;
+    private bool _producing;
+    private ProduceMessageResult? _lastResult;
+    private List<ProduceMessageResult> _batchResults = [];
+    private List<HeaderEntry> _headers = [];
+    private List<MessageTemplate> _templates = [];
+    private List<string> _availableSchemas = [];
+
+    private const string TemplatesStorageKey = "surgewave-producer-templates";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTemplatesAsync();
+        await LoadSchemasAsync();
+    }
+
+    private async Task LoadTemplatesAsync()
+    {
+        try
+        {
+            var allTemplates = await LocalStorage.GetItemAsync<Dictionary<string, List<MessageTemplate>>>(TemplatesStorageKey);
+            if (allTemplates != null && allTemplates.TryGetValue(TopicName, out var topicTemplates))
+            {
+                _templates = topicTemplates;
+            }
+        }
+        catch
+        {
+            _templates = [];
+        }
+    }
+
+    private async Task LoadSchemasAsync()
+    {
+        try
+        {
+            var subjects = await SchemaClient.GetSubjectsAsync();
+            _availableSchemas = subjects
+                .Where(s => s.Contains(TopicName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch
+        {
+            _availableSchemas = [];
+        }
+    }
+
+    private async Task ProduceSingleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_value)) return;
+
+        if (_format == "JSON")
+        {
+            _jsonError = ValidateJson(_value);
+            if (_jsonError != null) return;
+        }
+
+        _producing = true;
+        _lastResult = null;
+        StateHasChanged();
+
+        try
+        {
+            var request = new ProduceMessageRequest
+            {
+                Key = string.IsNullOrWhiteSpace(_key) ? null : _key,
+                Value = _value,
+                Headers = _headers.Count > 0
+                    ? _headers.Where(h => !string.IsNullOrWhiteSpace(h.Key))
+                        .ToDictionary(h => h.Key, h => h.Value ?? "")
+                    : null,
+                Partition = _selectedPartition
+            };
+
+            _lastResult = await ApiClient.ProduceMessageAsync(TopicName, request);
+            if (_lastResult != null)
+            {
+                Notification.ShowSuccess($"Message produced to {TopicName}[{_lastResult.Partition}] at offset {_lastResult.Offset}");
+            }
+            else
+            {
+                Notification.ShowError("Failed to produce message");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error producing message: {ex.Message}");
+        }
+        finally
+        {
+            _producing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProduceBatchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_batchInput)) return;
+
+        _producing = true;
+        _batchResults = [];
+        StateHasChanged();
+
+        try
+        {
+            var requests = ParseBatchMessages();
+            if (requests.Count == 0)
+            {
+                Notification.ShowError("No valid messages found in batch input");
+                return;
+            }
+
+            _batchResults = (await ApiClient.ProduceBatchAsync(TopicName, requests)).ToList();
+            if (_batchResults.Count > 0)
+            {
+                Notification.ShowSuccess($"{_batchResults.Count} message(s) produced to {TopicName}");
+            }
+            else
+            {
+                Notification.ShowError("Failed to produce batch messages");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error producing batch: {ex.Message}");
+        }
+        finally
+        {
+            _producing = false;
+            StateHasChanged();
+        }
+    }
+
+    private List<ProduceMessageRequest> ParseBatchMessages()
+    {
+        var results = new List<ProduceMessageRequest>();
+        if (string.IsNullOrWhiteSpace(_batchInput)) return results;
+
+        foreach (var line in _batchInput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                var doc = System.Text.Json.JsonDocument.Parse(line);
+                var root = doc.RootElement;
+
+                var request = new ProduceMessageRequest
+                {
+                    Key = root.TryGetProperty("key", out var k) ? k.GetString() : null,
+                    Value = root.TryGetProperty("value", out var v) ? (v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : v.GetRawText()) : null,
+                    Partition = root.TryGetProperty("partition", out var p) ? p.GetInt32() : null
+                };
+
+                if (root.TryGetProperty("headers", out var h) && h.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    request.Headers = new Dictionary<string, string>();
+                    foreach (var prop in h.EnumerateObject())
+                    {
+                        request.Headers[prop.Name] = prop.Value.GetString() ?? "";
+                    }
+                }
+
+                results.Add(request);
+            }
+            catch
+            {
+                // Skip invalid lines
+            }
+        }
+
+        return results;
+    }
+
+    private int ParseBatchCount()
+    {
+        if (string.IsNullOrWhiteSpace(_batchInput)) return 0;
+        return _batchInput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
+    }
+
+    private void FormatJson()
+    {
+        if (string.IsNullOrWhiteSpace(_value)) return;
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(_value);
+            _value = System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            _jsonError = null;
+        }
+        catch (Exception ex)
+        {
+            _jsonError = ex.Message;
+        }
+    }
+
+    private void MinifyJson()
+    {
+        if (string.IsNullOrWhiteSpace(_value)) return;
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(_value);
+            _value = System.Text.Json.JsonSerializer.Serialize(doc);
+            _jsonError = null;
+        }
+        catch (Exception ex)
+        {
+            _jsonError = ex.Message;
+        }
+    }
+
+    private static string? ValidateJson(string json)
+    {
+        try
+        {
+            System.Text.Json.JsonDocument.Parse(json);
+            return null;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return $"Invalid JSON: {ex.Message}";
+        }
+    }
+
+    private void ApplyTemplate(MessageTemplate template)
+    {
+        _key = template.Key;
+        _value = template.Value;
+        _format = template.Format;
+        _headers = [];
+        if (template.Headers != null)
+        {
+            foreach (var h in template.Headers)
+            {
+                _headers.Add(new HeaderEntry { Key = h.Key, Value = h.Value });
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveAsTemplate()
+    {
+        if (string.IsNullOrWhiteSpace(_value)) return;
+
+        var template = new MessageTemplate
+        {
+            Name = $"Template {_templates.Count + 1} - {DateTime.Now:HH:mm:ss}",
+            Key = _key,
+            Value = _value,
+            Format = _format,
+            Headers = _headers.Count > 0
+                ? _headers.Where(h => !string.IsNullOrWhiteSpace(h.Key))
+                    .ToDictionary(h => h.Key, h => h.Value ?? "")
+                : null
+        };
+        _templates.Add(template);
+        await PersistTemplatesAsync();
+        Notification.ShowSuccess("Template saved");
+    }
+
+    private async Task DeleteTemplate(MessageTemplate template)
+    {
+        _templates.Remove(template);
+        await PersistTemplatesAsync();
+    }
+
+    private async Task PersistTemplatesAsync()
+    {
+        try
+        {
+            var allTemplates = await LocalStorage.GetItemAsync<Dictionary<string, List<MessageTemplate>>>(TemplatesStorageKey)
+                ?? new Dictionary<string, List<MessageTemplate>>();
+            allTemplates[TopicName] = _templates;
+            await LocalStorage.SetItemAsync(TemplatesStorageKey, allTemplates);
+        }
+        catch
+        {
+            // Ignore storage errors
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private sealed class HeaderEntry
+    {
+        public string Key { get; set; } = "";
+        public string? Value { get; set; }
+    }
+}

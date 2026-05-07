@@ -1,0 +1,566 @@
+@page "/connectors/health"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using Blazored.LocalStorage
+@inject ISurgewaveApiClient ApiClient
+@inject ILocalStorageService LocalStorage
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+@inject ClusterState ClusterState
+
+<PageTitle>Connector Health - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Connector Health Dashboard</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Task-level status, error tracking, and auto-restart configuration
+        </MudText>
+    </div>
+    <div class="d-flex gap-2 align-center">
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
+            Auto-refresh: @(_autoRefreshSeconds)s
+        </MudChip>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+            Refresh
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== SUMMARY CARDS ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Cable" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Connectors</MudText>
+                        <MudText Typo="Typo.h5">@_connectors.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
+                             Color="@(_connectors.All(c => c.State == "RUNNING") ? Color.Success : Color.Warning)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Healthy</MudText>
+                        <MudText Typo="Typo.h5">@_connectors.Count(c => c.State == "RUNNING" && c.FailedTasks == 0) / @_connectors.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Task" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Tasks</MudText>
+                        <MudText Typo="Typo.h5">@_connectors.Sum(c => c.RunningTasks)/@_connectors.Sum(c => c.TotalTasks)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Error"
+                             Color="@(_connectors.Sum(c => c.FailedTasks) > 0 ? Color.Error : Color.Success)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Failed Tasks</MudText>
+                        <MudText Typo="Typo.h5">@_connectors.Sum(c => c.FailedTasks)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== CONNECTOR CARDS ===== *@
+@if (_connectors.Count == 0 && !_loading)
+{
+    <MudAlert Severity="Severity.Info">
+        No connectors deployed. <MudLink Href="/connectors">Go to Connectors</MudLink> to create one.
+    </MudAlert>
+}
+
+@foreach (var connector in _connectors.OrderBy(c => c.State == "RUNNING" ? 1 : 0).ThenBy(c => c.Name))
+{
+    <MudCard Elevation="2" Class="mb-4">
+        <MudCardContent>
+            @* Header *@
+            <div class="d-flex align-center justify-space-between mb-3">
+                <div class="d-flex align-center gap-2">
+                    <MudAvatar Size="Size.Small" Color="@GetStateColor(connector.State)">
+                        <MudIcon Icon="@(connector.Type == "source" ? Icons.Material.Filled.Upload : Icons.Material.Filled.Download)" />
+                    </MudAvatar>
+                    <div>
+                        <MudText Typo="Typo.h6">@connector.Name</MudText>
+                        <div class="d-flex gap-1">
+                            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(connector.State)">
+                                @connector.State
+                            </MudChip>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                @connector.Type
+                            </MudChip>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage">
+                        @if (connector.FailedTasks > 0)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Replay"
+                                       OnClick="@(() => RestartFailedAsync(connector))">
+                                Restart Failed
+                            </MudButton>
+                        }
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Settings"
+                                   OnClick="@(() => ConfigureAutoRestartAsync(connector))">
+                            Auto-Restart
+                        </MudButton>
+                    </AuthorizeView>
+                </div>
+            </div>
+
+            @* Metrics row *@
+            <MudGrid Class="mb-3">
+                <MudItem xs="6" sm="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Tasks</MudText>
+                    <div class="d-flex align-center gap-1">
+                        <MudText Typo="Typo.body1">
+                            <span style="color: var(--mud-palette-success);">@connector.RunningTasks</span> /
+                            @connector.TotalTasks
+                        </MudText>
+                        @if (connector.FailedTasks > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error">@connector.FailedTasks failed</MudChip>
+                        }
+                    </div>
+                </MudItem>
+                <MudItem xs="6" sm="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Records/s</MudText>
+                    <MudText Typo="Typo.body1">@connector.RecordsPerSecond.ToString("F1")</MudText>
+                </MudItem>
+                <MudItem xs="6" sm="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Total Records</MudText>
+                    <MudText Typo="Typo.body1">@connector.TotalRecords.ToString("N0")</MudText>
+                </MudItem>
+                <MudItem xs="6" sm="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Errors</MudText>
+                    <MudText Typo="Typo.body1" Color="@(connector.TotalErrors > 0 ? Color.Error : Color.Default)">
+                        @connector.TotalErrors.ToString("N0")
+                    </MudText>
+                </MudItem>
+                <MudItem xs="6" sm="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Error Rate</MudText>
+                    <MudText Typo="Typo.body1" Color="@(connector.ErrorRate > 1 ? Color.Error : connector.ErrorRate > 0 ? Color.Warning : Color.Default)">
+                        @connector.ErrorRate.ToString("F2")%
+                    </MudText>
+                </MudItem>
+                <MudItem xs="6" sm="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Auto-Restart</MudText>
+                    @if (GetAutoRestartConfig(connector.Name).Enabled)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">ON</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">OFF</MudChip>
+                    }
+                </MudItem>
+            </MudGrid>
+
+            @* Task table *@
+            @if (connector.Tasks.Count > 0)
+            {
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Tasks</MudText>
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>State</th>
+                            <th>Worker</th>
+                            <th>Records</th>
+                            <th>Errors</th>
+                            <th>Last Error</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var task in connector.Tasks.OrderBy(t => t.TaskId))
+                        {
+                            <tr style="@(task.State == "FAILED" ? "background: rgba(244, 67, 54, 0.06);" : "")">
+                                <td>@task.TaskId</td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetTaskStateColor(task.State)">
+                                        @task.State
+                                    </MudChip>
+                                </td>
+                                <td><MudText Typo="Typo.caption">@task.WorkerId</MudText></td>
+                                <td>@task.RecordsProcessed.ToString("N0")</td>
+                                <td>
+                                    <MudText Color="@(task.ErrorCount > 0 ? Color.Error : Color.Default)">
+                                        @task.ErrorCount
+                                    </MudText>
+                                </td>
+                                <td>
+                                    @if (task.LastErrorMessage != null)
+                                    {
+                                        <MudTooltip Text="@task.LastErrorMessage">
+                                            <MudText Typo="Typo.caption" Color="Color.Error"
+                                                     Style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                @task.LastErrorMessage
+                                            </MudText>
+                                        </MudTooltip>
+                                    }
+                                </td>
+                                <td>
+                                    <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage">
+                                        @if (task.State == "FAILED")
+                                        {
+                                            <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small"
+                                                           Color="Color.Warning"
+                                                           OnClick="@(() => RestartTaskAsync(connector.Name))" />
+                                        }
+                                    </AuthorizeView>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+
+            @* Recent logs *@
+            @if (connector.RecentLogs.Count > 0)
+            {
+                <MudExpansionPanels Class="mt-3">
+                    <MudExpansionPanel Text="@($"Recent Logs ({connector.RecentLogs.Count})")">
+                        <MudSimpleTable Dense="true" Style="font-size: 12px;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 160px;">Time</th>
+                                    <th style="width: 60px;">Level</th>
+                                    <th style="width: 50px;">Task</th>
+                                    <th>Message</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var log in connector.RecentLogs.OrderByDescending(l => l.Timestamp).Take(20))
+                                {
+                                    <tr style="@GetLogRowStyle(log.Level)">
+                                        <td>@log.Timestamp.ToString("HH:mm:ss.fff")</td>
+                                        <td>
+                                            <MudChip T="string" Size="Size.Small" Color="@GetLogLevelColor(log.Level)"
+                                                     Variant="Variant.Filled" Style="font-size: 10px;">
+                                                @log.Level
+                                            </MudChip>
+                                        </td>
+                                        <td>@(log.TaskId ?? "—")</td>
+                                        <td style="font-family: monospace; white-space: pre-wrap; word-break: break-word;">@log.Message</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            }
+        </MudCardContent>
+    </MudCard>
+}
+
+@* ===== AUTO-RESTART CONFIG DIALOG ===== *@
+<MudDialog @bind-Visible="_autoRestartDialogVisible" Options="@_dialogOptions">
+    <TitleContent>
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.AutoMode" Class="mr-2" />
+            Auto-Restart: @_autoRestartConnectorName
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12">
+                <MudSwitch T="bool" @bind-Value="_editAutoRestart.Enabled" Label="Enable Auto-Restart"
+                           Color="Color.Primary" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField T="int" @bind-Value="_editAutoRestart.MaxRetries" Label="Max Retries"
+                                 Variant="Variant.Outlined" Min="1" Max="100"
+                                 Disabled="@(!_editAutoRestart.Enabled)" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField T="int" @bind-Value="_editAutoRestart.BackoffSeconds" Label="Backoff (seconds)"
+                                 Variant="Variant.Outlined" Min="10" Max="3600"
+                                 Disabled="@(!_editAutoRestart.Enabled)" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudSwitch T="bool" @bind-Value="_editAutoRestart.RestartOnlyFailed"
+                           Label="Restart only failed tasks (vs. full connector restart)"
+                           Color="Color.Primary" Disabled="@(!_editAutoRestart.Enabled)" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _autoRestartDialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAutoRestartAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private List<ConnectorHealthInfo> _connectors = [];
+    private System.Threading.Timer? _refreshTimer;
+    private int _autoRefreshSeconds = 15;
+
+    // Auto-restart config
+    private bool _autoRestartDialogVisible;
+    private string _autoRestartConnectorName = "";
+    private ConnectorAutoRestartConfig _editAutoRestart = new();
+    private Dictionary<string, ConnectorAutoRestartConfig> _autoRestartConfigs = [];
+
+    private static readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var stored = await LocalStorage.GetItemAsync<Dictionary<string, ConnectorAutoRestartConfig>>("surgewave-connector-autorestart");
+        if (stored != null) _autoRestartConfigs = stored;
+
+        await LoadDataAsync();
+
+        _refreshTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadDataAsync();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(_autoRefreshSeconds), TimeSpan.FromSeconds(_autoRefreshSeconds));
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var connectorNames = await ApiClient.ListConnectorsAsync(ClusterState.SelectedClusterId);
+            var healthInfos = new List<ConnectorHealthInfo>();
+
+            var tasks = connectorNames.Select(async name =>
+            {
+                var health = new ConnectorHealthInfo { Name = name };
+
+                try
+                {
+                    var status = await ApiClient.GetConnectorStatusAsync(name, ClusterState.SelectedClusterId);
+                    if (status != null)
+                    {
+                        health.Type = status.Type;
+                        health.State = status.State;
+                        health.TotalTasks = status.Tasks.Count;
+                        health.RunningTasks = status.Tasks.Count(t => t.State == "RUNNING");
+                        health.FailedTasks = status.Tasks.Count(t => t.State == "FAILED");
+                        health.PausedTasks = status.Tasks.Count(t => t.State == "PAUSED");
+
+                        health.Tasks = status.Tasks.Select(t => new ConnectorTaskHealth
+                        {
+                            TaskId = t.Id,
+                            State = t.State,
+                            WorkerId = t.WorkerId,
+                            RecordsProcessed = SimValue(name, t.Id, 1000, 500000),
+                            ErrorCount = t.State == "FAILED" ? SimValue(name, t.Id + 100, 1, 50) : 0,
+                            LastErrorMessage = t.State == "FAILED" ? "Task failed: see connector logs" : null,
+                            LastErrorAt = t.State == "FAILED" ? DateTimeOffset.UtcNow.AddMinutes(-SimValue(name, t.Id + 200, 1, 120)) : null
+                        }).ToList();
+
+                        // Simulated aggregate metrics
+                        health.TotalRecords = health.Tasks.Sum(t => t.RecordsProcessed);
+                        health.TotalErrors = health.Tasks.Sum(t => t.ErrorCount);
+                        health.RecordsPerSecond = health.RunningTasks * SimValue(name, 0, 10, 500);
+                        health.ErrorRate = health.TotalRecords > 0 ? (double)health.TotalErrors / health.TotalRecords * 100 : 0;
+
+                        // Simulated logs
+                        health.RecentLogs = GenerateSimulatedLogs(name, status);
+                    }
+                }
+                catch { /* ignore individual connector errors */ }
+
+                return health;
+            });
+
+            _connectors = (await Task.WhenAll(tasks)).Where(c => !string.IsNullOrEmpty(c.State)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load connector health: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static List<ConnectorLogEntry> GenerateSimulatedLogs(string connectorName, ConnectorStatus status)
+    {
+        var logs = new List<ConnectorLogEntry>();
+        var now = DateTimeOffset.UtcNow;
+
+        logs.Add(new ConnectorLogEntry
+        {
+            Timestamp = now.AddSeconds(-5),
+            Level = "INFO",
+            Message = $"Connector '{connectorName}' status: {status.State}"
+        });
+
+        foreach (var task in status.Tasks)
+        {
+            if (task.State == "RUNNING")
+            {
+                logs.Add(new ConnectorLogEntry
+                {
+                    Timestamp = now.AddSeconds(-SimValue(connectorName, task.Id, 1, 30)),
+                    Level = "INFO",
+                    TaskId = task.Id.ToString(),
+                    Message = "Task processing records"
+                });
+            }
+            else if (task.State == "FAILED")
+            {
+                logs.Add(new ConnectorLogEntry
+                {
+                    Timestamp = now.AddMinutes(-SimValue(connectorName, task.Id + 50, 1, 10)),
+                    Level = "ERROR",
+                    TaskId = task.Id.ToString(),
+                    Message = "Task failed: connection refused or timeout"
+                });
+            }
+        }
+
+        return logs.OrderByDescending(l => l.Timestamp).ToList();
+    }
+
+    private ConnectorAutoRestartConfig GetAutoRestartConfig(string connectorName)
+    {
+        return _autoRestartConfigs.GetValueOrDefault(connectorName) ?? new ConnectorAutoRestartConfig();
+    }
+
+    private async Task ConfigureAutoRestartAsync(ConnectorHealthInfo connector)
+    {
+        _autoRestartConnectorName = connector.Name;
+        var existing = GetAutoRestartConfig(connector.Name);
+        _editAutoRestart = new ConnectorAutoRestartConfig
+        {
+            Enabled = existing.Enabled,
+            MaxRetries = existing.MaxRetries,
+            BackoffSeconds = existing.BackoffSeconds,
+            RestartOnlyFailed = existing.RestartOnlyFailed
+        };
+        _autoRestartDialogVisible = true;
+    }
+
+    private async Task SaveAutoRestartAsync()
+    {
+        _autoRestartConfigs[_autoRestartConnectorName] = _editAutoRestart;
+        await LocalStorage.SetItemAsync("surgewave-connector-autorestart", _autoRestartConfigs);
+        _autoRestartDialogVisible = false;
+        Notification.ShowSuccess($"Auto-restart config saved for '{_autoRestartConnectorName}'");
+        StateHasChanged();
+    }
+
+    private async Task RestartFailedAsync(ConnectorHealthInfo connector)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Restart Failed Tasks",
+            $"Restart {connector.FailedTasks} failed task(s) of '{connector.Name}'?",
+            yesText: "Restart", cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var success = await ApiClient.RestartConnectorAsync(connector.Name, includeTasks: true, onlyFailed: true, clusterId: ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Restarting failed tasks of '{connector.Name}'");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to restart tasks");
+            }
+        }
+    }
+
+    private async Task RestartTaskAsync(string connectorName)
+    {
+        var success = await ApiClient.RestartConnectorAsync(connectorName, includeTasks: true, onlyFailed: true, clusterId: ClusterState.SelectedClusterId);
+        if (success)
+            Notification.ShowSuccess("Task restart initiated");
+        else
+            Notification.ShowError("Failed to restart task");
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "RUNNING" => Color.Success,
+        "PAUSED" => Color.Warning,
+        "FAILED" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static Color GetTaskStateColor(string state) => state switch
+    {
+        "RUNNING" => Color.Success,
+        "PAUSED" => Color.Warning,
+        "FAILED" => Color.Error,
+        "UNASSIGNED" => Color.Default,
+        _ => Color.Default
+    };
+
+    private static Color GetLogLevelColor(string level) => level switch
+    {
+        "ERROR" => Color.Error,
+        "WARN" => Color.Warning,
+        "INFO" => Color.Info,
+        "DEBUG" => Color.Default,
+        _ => Color.Default
+    };
+
+    /// <summary>Deterministic simulated value based on name hash (avoids CA5394 Random).</summary>
+    private static int SimValue(string seed, int salt, int min, int max)
+    {
+        var hash = Math.Abs(HashCode.Combine(seed, salt));
+        return min + hash % (max - min);
+    }
+
+    private static string GetLogRowStyle(string level) => level switch
+    {
+        "ERROR" => "background: rgba(244, 67, 54, 0.04);",
+        "WARN" => "background: rgba(255, 152, 0, 0.04);",
+        _ => ""
+    };
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+}

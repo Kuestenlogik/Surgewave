@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+# Stop services before removal
+systemctl stop storm-broker 2>/dev/null || true
+systemctl stop storm-control 2>/dev/null || true
+systemctl disable storm-broker 2>/dev/null || true
+systemctl disable storm-control 2>/dev/null || true

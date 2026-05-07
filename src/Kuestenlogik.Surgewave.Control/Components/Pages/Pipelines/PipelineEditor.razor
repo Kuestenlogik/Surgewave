@@ -1,0 +1,3006 @@
+@page "/pipelines/new"
+@page "/pipelines/{Id}/edit"
+@rendermode InteractiveServer
+@using Blazor.Diagrams
+@using Blazor.Diagrams.Options
+@using Blazor.Diagrams.Core.PathGenerators
+@using Blazor.Diagrams.Core.Routers
+@using Blazor.Diagrams.Core.Geometry
+@using Blazor.Diagrams.Core.Models
+@using Kuestenlogik.Surgewave.Control.Components.Pipeline
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Models.Collaboration
+@using Kuestenlogik.Surgewave.Control.Services
+@using Kuestenlogik.Surgewave.Control.Services.Collaboration
+@using Microsoft.AspNetCore.SignalR.Client
+@inject IPipelineApiClient ApiClient
+@inject IConnectorRegistryService ConnectorRegistry
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+@inject IChatApiClient ChatApi
+@inject CollaborationStateService CollaborationState
+@implements IAsyncDisposable
+
+<PageTitle>@(_isNew ? "New Pipeline" : _pipelineName) - Surgewave Control</PageTitle>
+
+<div @ref="_keyboardTarget" tabindex="0" @onkeydown="HandleKeyDown" @onkeydown:preventDefault="_preventKeyDefault"
+     class="pipeline-editor-container" @onfocus="OnContainerFocus">
+
+    @* Header Bar - Fixed at top *@
+    <MudPaper Elevation="2" Class="pa-3 pipeline-header">
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_pipelineName" Label="Pipeline Name" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Required="true" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_pipelineDescription" Label="Description" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" md="4" Class="d-flex align-center justify-end gap-2">
+                @if (_isDirty)
+                {
+                    <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Warning" Variant="Variant.Text">
+                        Unsaved changes
+                    </MudChip>
+                }
+                else if (_lastSaveTime.HasValue)
+                {
+                    <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Success" Variant="Variant.Text">
+                        Saved @_lastSaveTime.Value.ToString("HH:mm:ss")
+                    </MudChip>
+                }
+                @if (!_isNew)
+                {
+                    <MudToggleIconButton Toggled="_collaborationEnabled"
+                                         Icon="@Icons.Material.Filled.PeopleOutline"
+                                         ToggledIcon="@Icons.Material.Filled.People"
+                                         ToggledColor="Color.Primary"
+                                         Size="MudBlazor.Size.Small"
+                                         ToggledChanged="OnCollaborationToggled" />
+                    @if (_collaborationEnabled && _collabUsers.Count > 0)
+                    {
+                        <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Info" Variant="Variant.Text">
+                            @_collabUsers.Count online
+                        </MudChip>
+                    }
+                }
+                <MudButton Variant="Variant.Outlined" OnClick="Cancel">Cancel</MudButton>
+                <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                               Disabled="@_saving">
+                        @if (_saving)
+                        {
+                            <MudProgressCircular Size="MudBlazor.Size.Small" Indeterminate="true" Class="mr-2" />
+                        }
+                        Save
+                    </MudButton>
+                    @if (!_isNew)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="@(_validationIssues.Count > 0 ? Color.Warning : Color.Default)"
+                                   OnClick="ValidateAsync" Disabled="@_validating"
+                                   StartIcon="@Icons.Material.Filled.FactCheck">
+                            @if (_validating)
+                            {
+                                <MudProgressCircular Size="MudBlazor.Size.Small" Indeterminate="true" Class="mr-1" />
+                            }
+                            Validate
+                            @if (_validationIssues.Count > 0)
+                            {
+                                <MudChip T="string" Size="MudBlazor.Size.Small" Color="@(_validationErrors > 0 ? Color.Error : Color.Warning)" Class="ml-1">
+                                    @_validationIssues.Count
+                                </MudChip>
+                            }
+                        </MudButton>
+                    }
+                    @if (!_isNew && _pipeline?.Status == PipelineStatus.Running && _isDirty)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="AnalyzeAndHotDeployAsync"
+                                   StartIcon="@Icons.Material.Filled.FlashOn" Disabled="@_saving">
+                            Hot Deploy
+                        </MudButton>
+                    }
+                    @if (!_isNew && _pipeline?.Status != PipelineStatus.Running)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveAndStartAsync"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@_saving">
+                            Save & Start
+                        </MudButton>
+                    }
+                </AuthorizeView>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @if (_breadcrumb.Count > 0)
+    {
+        <MudBreadcrumbs Items="@GetBreadcrumbItems()" Class="pa-0 my-1">
+            <ItemTemplate Context="item">
+                <MudLink OnClick="@(() => NavigateBreadcrumb(item.Href ?? ""))">
+                    <MudIcon Icon="@(item.Icon ?? Icons.Material.Filled.AccountTree)" Size="MudBlazor.Size.Small" Class="mr-1" />
+                    @item.Text
+                </MudLink>
+            </ItemTemplate>
+        </MudBreadcrumbs>
+    }
+
+    @if (_pendingConnector != null)
+    {
+        <MudAlert Severity="Severity.Info" Class="my-2">
+            Click on the canvas to place: <strong>@_pendingConnector.Name</strong>
+            <MudButton Variant="Variant.Text" Size="MudBlazor.Size.Small" OnClick="ClearPendingConnector" Class="ml-2">
+                Cancel
+            </MudButton>
+        </MudAlert>
+    }
+
+    @* Main Content Area - Flexbox layout *@
+    <div class="pipeline-main-content">
+        @* Left Panel - Connector Palette / Parameters *@
+        <div class="pipeline-panel pipeline-palette">
+            <MudTabs @bind-ActivePanelIndex="_leftPanelTab" Rounded="true" PanelClass="pa-0">
+                <MudTabPanel Text="Connectors" Icon="@Icons.Material.Filled.Extension">
+                    <NodePalette ConnectorTypes="@_connectorTypes"
+                                 OnConnectorSelected="OnConnectorSelectedFromPalette"
+                                 OnConnectorDragStart="OnConnectorDragStarted"
+                                 AvailablePipelines="@_availablePipelines"
+                                 OnPipelineNodeSelected="OnSubPipelineSelectedFromPalette" />
+                </MudTabPanel>
+                <MudTabPanel Text="Parameters" Icon="@Icons.Material.Filled.Tune">
+                    <ParameterPanel Parameters="_parameters"
+                                    ParametersChanged="OnParametersChanged"
+                                    Environments="_environments"
+                                    EnvironmentsChanged="OnEnvironmentsChanged" />
+                </MudTabPanel>
+                <MudTabPanel Text="Schedule" Icon="@Icons.Material.Filled.Schedule">
+                    <SchedulePanel Schedule="@_scheduleConfig"
+                                   ScheduleChanged="OnScheduleChanged" />
+                </MudTabPanel>
+            </MudTabs>
+        </div>
+
+        @* Center - Canvas *@
+        <div class="pipeline-canvas-container">
+            <PipelineToolbar EditorState="_editorState"
+                             HasSelection="@(_selectedNodes.Count > 0)"
+                             SelectionCount="@_selectedNodes.Count"
+                             ZoomLevel="@(_diagram?.Zoom ?? 1.0)"
+                             SnapToGrid="@_snapToGrid"
+                             UndoRequested="Undo"
+                             RedoRequested="Redo"
+                             CutRequested="Cut"
+                             CopyRequested="Copy"
+                             PasteRequested="Paste"
+                             SelectAllRequested="SelectAll"
+                             DeleteSelectedRequested="DeleteSelected"
+                             ToggleDisabledRequested="ToggleSelectedNodesDisabled"
+                             ZoomInRequested="ZoomIn"
+                             ZoomOutRequested="ZoomOut"
+                             FitToViewRequested="FitToView"
+                             AutoLayoutRequested="AutoLayout"
+                             AutoLayoutDirectionRequested="AutoLayoutWithDirection"
+                             AlignHorizontalRequested="AlignHorizontal"
+                             AlignVerticalRequested="AlignVertical"
+                             DistributeHorizontalRequested="DistributeHorizontal"
+                             DistributeVerticalRequested="DistributeVertical"
+                             SnapToGridToggled="ToggleSnapToGrid"
+                             HasGroupSelected="@HasGroupSelected()"
+                             GroupSelectionRequested="GroupSelectedNodes"
+                             UngroupSelectionRequested="UngroupSelectedNodes"
+                             DebugMode="@_debugMode"
+                             DebugModeToggled="ToggleDebugMode"
+                             ResumeAllRequested="DebugResumeAll" />
+
+            <div class="pipeline-canvas">
+                <PipelineDiagramCanvas Diagram="@_diagram"
+                                       PendingConnector="@_pendingConnector"
+                                       OnNodeAdded="OnNodeAdded"
+                                       OnNodeSelected="OnNodeSelected"
+                                       OnLinkCreated="OnLinkCreated"
+                                       OnPendingConnectorCleared="ClearPendingConnector"
+                                       OnConnectorDropped="OnConnectorDropped"
+                                       OnContextMenuRequested="OnCanvasContextMenu" />
+
+                <PipelineMiniMap Diagram="@_diagram"
+                                 SelectedNode="@_selectedNode"
+                                 OnNodeFocused="FocusNode" />
+
+                @if (_showAlignmentGuides && (_horizontalGuides.Count > 0 || _verticalGuides.Count > 0))
+                {
+                    <AlignmentGuideOverlay HorizontalGuides="_horizontalGuides" VerticalGuides="_verticalGuides" />
+                }
+
+                @if (_collaborationEnabled)
+                {
+                    <CollaborationOverlay Users="@_collabUsers"
+                                           NodeLocks="@_collabNodeLocks"
+                                           Comments="@_collabComments"
+                                           PendingApprovals="@_collabApprovals.Count(a => a.Status == ApprovalStatus.Pending)" />
+                }
+            </div>
+        </div>
+
+        @* Right Panel - Config & Details *@
+        <div class="pipeline-panel pipeline-config">
+            <NodeConfigPanel SelectedNode="@_selectedNode"
+                             ConfigSchema="@_selectedConfigSchema"
+                             OnNodeConfigChanged="OnNodeConfigChanged"
+                             OnNodeDeleted="OnNodeDeleted"
+                             OpenSubPipeline="OpenSubPipelineEditor"
+                             ConfigurePortMapping="OpenPortMappingDialog"
+                             AvailableWorkers="@GetAvailableWorkersForSelectedNode()" />
+
+            @if (!_isNew)
+            {
+                <DebugPanel DebugMode="@_debugMode"
+                            DebugModeToggled="@(async (bool v) => await ToggleDebugMode())"
+                            DebugState="@_debugState"
+                            RemoveBreakpoint="@(async (string nodeId) => { if (Id != null) { await ApiClient.RemoveBreakpointAsync(Id, nodeId); } })"
+                            StepNode="@(async (string nodeId) => await DebugStepNode(nodeId))"
+                            ResumeNodeRequested="@(async (string nodeId) => await DebugResumeNode(nodeId))"
+                            ResumeAll="DebugResumeAll" />
+
+                <LiveDataPreviewPanel PipelineId="@Id"
+                                      SelectedNodeId="@_selectedNode?.NodeId"
+                                      OnLineageClicked="OnLineagePathReceived" />
+
+                <VersionHistoryPanel PipelineId="@Id"
+                                     OnVersionRestored="OnVersionRestored" />
+
+                @if (_collaborationEnabled)
+                {
+                    <CommentPanel Comments="@_collabComments"
+                                  FilterNodeId="@_commentFilterNodeId"
+                                  UserName="@_collabUserName"
+                                  OnAddComment="OnAddComment"
+                                  OnResolveComment="OnResolveComment"
+                                  OnNodeFilterCleared="() => { _commentFilterNodeId = null; StateHasChanged(); }" />
+
+                    <ApprovalPanel Approvals="@_collabApprovals"
+                                   UserName="@_collabUserName"
+                                   OnRequestApproval="OnRequestApproval"
+                                   OnReviewApproval="OnReviewApproval" />
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@if (_hasChatEndpoint && !_isNew)
+{
+    <MudFab Color="Color.Primary" StartIcon="@Icons.Material.Filled.Chat"
+            Style="position: fixed; bottom: 24px; right: 24px; z-index: 1100;"
+            OnClick="ToggleChatDrawer" />
+    <ChatDrawer PipelineId="@(Id ?? "")" IsOpen="_chatDrawerOpen" IsOpenChanged="OnChatDrawerChanged" />
+}
+
+<style>
+    .pipeline-editor-container {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 100px);
+        outline: none;
+        overflow: hidden;
+    }
+
+    .pipeline-header {
+        flex-shrink: 0;
+        margin-bottom: 8px;
+    }
+
+    .pipeline-main-content {
+        display: flex;
+        flex: 1;
+        gap: 16px;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .pipeline-panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .pipeline-palette {
+        width: 250px;
+        flex-shrink: 0;
+    }
+
+    .pipeline-palette > :deep(.mud-paper) {
+        height: 100%;
+        overflow-y: auto;
+    }
+
+    .pipeline-canvas-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .pipeline-canvas {
+        flex: 1;
+        position: relative;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 4px;
+    }
+
+    .pipeline-config {
+        width: 300px;
+        flex-shrink: 0;
+        overflow-y: auto;
+    }
+
+    .pipeline-config > :deep(.mud-paper) {
+        margin-bottom: 16px;
+    }
+</style>
+
+@* Node Search Overlay *@
+@if (_showSearch)
+{
+    <div class="search-overlay">
+        <MudPaper Elevation="4" Class="search-box pa-2">
+            <MudTextField @bind-Value="_searchQuery" Label="Search nodes..." Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Immediate="true" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          @onkeydown="HandleSearchKeyDown"
+                          @ref="_searchField" />
+            @if (_searchResults.Count > 0)
+            {
+                <MudText Typo="Typo.caption" Class="mt-1">
+                    @(_searchResultIndex + 1) / @_searchResults.Count - Enter: next, Shift+Enter: previous
+                </MudText>
+            }
+            else if (!string.IsNullOrEmpty(_searchQuery))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">
+                    No nodes found
+                </MudText>
+            }
+        </MudPaper>
+    </div>
+}
+
+@* Context Menu *@
+@if (_showContextMenu)
+{
+    <div class="context-menu-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault></div>
+    <MudPaper Class="context-menu" Elevation="8" Style="@($"left: {_contextMenuX}px; top: {_contextMenuY}px;")">
+        <MudList T="string" Dense="true" Class="pa-0">
+            @if (_contextMenuNode != null)
+            {
+                @if (_contextMenuNode.IsComposite)
+                {
+                    <MudListItem Icon="@Icons.Material.Filled.OpenInNew" OnClick="@(() => { CloseContextMenu(); OpenSubPipelineEditor(_contextMenuNode.SubPipelineId); })">
+                        Open Sub-Pipeline
+                    </MudListItem>
+                    <MudDivider />
+                }
+                <MudListItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => ContextMenuEditNode())">
+                    Edit Configuration
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => ContextMenuDuplicateNode())">
+                    Duplicate
+                </MudListItem>
+                <MudDivider />
+                <MudListItem Icon="@Icons.Material.Filled.ContentCut" OnClick="@(() => ContextMenuCutNode())">
+                    Cut
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => ContextMenuCopyNode())">
+                    Copy
+                </MudListItem>
+                <MudDivider />
+                <MudListItem Icon="@(_contextMenuNode.IsDisabled ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff)"
+                             OnClick="@(() => ContextMenuToggleDisabled())">
+                    @(_contextMenuNode.IsDisabled ? "Enable" : "Disable")
+                </MudListItem>
+                @if (_debugMode)
+                {
+                    <MudDivider />
+                    <MudListItem Icon="@Icons.Material.Filled.BugReport"
+                                 IconColor="@(_contextMenuNode.HasBreakpoint ? Color.Error : Color.Default)"
+                                 OnClick="@(async () => { await ToggleBreakpoint(_contextMenuNode); CloseContextMenu(); })">
+                        @(_contextMenuNode.HasBreakpoint ? "Remove Breakpoint" : "Toggle Breakpoint")
+                    </MudListItem>
+                }
+                <MudListItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error" OnClick="@(() => ContextMenuDeleteNode())">
+                    Delete
+                </MudListItem>
+            }
+            else
+            {
+                <MudListItem Icon="@Icons.Material.Filled.ContentPaste" Disabled="@(!_editorState.HasClipboard)" OnClick="@(() => ContextMenuPaste())">
+                    Paste
+                </MudListItem>
+                <MudDivider />
+                <MudListItem Icon="@Icons.Material.Filled.SelectAll" OnClick="@(() => { SelectAll(); CloseContextMenu(); })">
+                    Select All
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.AutoAwesomeMosaic" OnClick="@(() => { AutoLayoutWithDirection(LayoutDirection.TopToBottom); CloseContextMenu(); })">
+                    Auto Layout (TB)
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.ViewStream" OnClick="@(() => { AutoLayoutWithDirection(LayoutDirection.LeftToRight); CloseContextMenu(); })">
+                    Auto Layout (LR)
+                </MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.FitScreen" OnClick="@(() => { FitToView(); CloseContextMenu(); })">
+                    Fit to View
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+}
+
+<style>
+    .search-overlay {
+        position: fixed;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1200;
+    }
+    .search-box {
+        min-width: 350px;
+    }
+    .context-menu-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1299;
+    }
+    .context-menu {
+        position: fixed;
+        z-index: 1300;
+        min-width: 180px;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public string? Id { get; set; }
+
+    private bool _isNew => string.IsNullOrEmpty(Id);
+    private PipelineDefinition? _pipeline;
+    private string _pipelineName = "New Pipeline";
+    private string _pipelineDescription = "";
+    private bool _saving = false;
+    private bool _validating = false;
+    private List<PipelineValidationIssueDto> _validationIssues = [];
+    private int _validationErrors => _validationIssues.Count(i => i.Severity == "Error");
+
+    private BlazorDiagram _diagram = null!;
+    private ConnectorNode? _selectedNode;
+    private ConnectorConfigSchema? _selectedConfigSchema;
+    private List<ConnectorTypeInfo> _connectorTypes = [];
+    private ConnectorTypeInfo? _pendingConnector;
+    private ConnectorTypeInfo? _draggingConnector;
+
+    private readonly PipelineEditorState _editorState = new();
+    private readonly List<ConnectorNode> _selectedNodes = [];
+    private List<PipelineSummary> _availablePipelines = [];
+    private string? _pendingSubPipelineId;
+    private string? _pendingSubPipelineName;
+
+    // Breadcrumb navigation for sub-pipelines
+    private readonly Stack<BreadcrumbEntry> _breadcrumb = new();
+
+    // Keyboard handling
+    private ElementReference _keyboardTarget;
+    private bool _preventKeyDefault;
+
+    // Context menu
+    private bool _showContextMenu;
+    private double _contextMenuX;
+    private double _contextMenuY;
+    private ConnectorNode? _contextMenuNode;
+
+    // Snap to grid
+    private bool _snapToGrid = true;
+    private const double GridSize = 20.0;
+
+    // Node search
+    private bool _showSearch;
+    private string _searchQuery = "";
+    private List<ConnectorNode> _searchResults = [];
+    private int _searchResultIndex;
+    private MudTextField<string>? _searchField;
+
+    // Auto-save
+    private System.Threading.Timer? _autoSaveTimer;
+    private bool _isDirty;
+    private DateTime? _lastSaveTime;
+    private const int AutoSaveIntervalMs = 30000; // 30 seconds
+
+    // Metrics polling (Feature 4)
+    private System.Threading.Timer? _metricsTimer;
+    private const int MetricsIntervalMs = 3000;
+    private bool _pipelineIsRunning;
+
+    // Debug mode (Feature 1)
+    private bool _debugMode;
+    private DebugState? _debugState;
+    private System.Threading.Timer? _debugTimer;
+    private const int DebugPollIntervalMs = 1000;
+
+    // Pipeline parameters (Feature 3)
+    private List<PipelineParameter> _parameters = [];
+    private List<PipelineEnvironment> _environments = [];
+    private int _leftPanelTab;
+
+    // Pipeline schedule
+    private ScheduleConfig? _scheduleConfig;
+
+    // Data provenance / lineage highlighting
+    private readonly HashSet<string> _highlightedLineageNodes = [];
+    private CancellationTokenSource? _lineageHighlightCts;
+
+    // Alignment guides
+    private bool _showAlignmentGuides = true;
+    private readonly List<AlignmentGuide> _horizontalGuides = [];
+    private readonly List<AlignmentGuide> _verticalGuides = [];
+    private const double AlignmentSnapThreshold = 10.0;
+
+    // Chat drawer
+    private bool _chatDrawerOpen;
+    private bool _hasChatEndpoint;
+
+    // Collaboration (multi-user editing via SignalR)
+    private bool _collaborationEnabled;
+    private HubConnection? _hubConnection;
+    private string _collabUserName = $"User-{System.Security.Cryptography.RandomNumberGenerator.GetInt32(1000, 9999)}";
+    private List<PresenceInfo> _collabUsers = [];
+    private List<PipelineComment> _collabComments = [];
+    private List<ApprovalRequest> _collabApprovals = [];
+    private Dictionary<string, string> _collabNodeLocks = [];
+    private string? _commentFilterNodeId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await _keyboardTarget.FocusAsync();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        InitializeDiagram();
+        _editorState.StateChanged += StateHasChanged;
+
+        // Load connector types
+        try
+        {
+            var types = await ConnectorRegistry.GetConnectorTypesAsync();
+            _connectorTypes = types.ToList();
+
+            // Add built-in Streams processing nodes
+            _connectorTypes.AddRange(GetBuiltInStreamsNodes());
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load connector types: {ex.Message}");
+        }
+
+        // Load available pipelines for sub-pipeline palette
+        try
+        {
+            var allPipelines = await ApiClient.ListPipelinesAsync();
+            _availablePipelines = allPipelines
+                .Where(p => p.Id != Id) // Exclude current pipeline to prevent self-reference
+                .Select(p => new PipelineSummary(p.Id, p.Name, p.Description, p.Nodes.Count))
+                .ToList();
+        }
+        catch
+        {
+            // Non-critical — sub-pipeline palette just won't show pipelines
+        }
+
+        // Load existing pipeline if editing
+        if (!_isNew)
+        {
+            await LoadPipelineAsync();
+        }
+
+        // Start auto-save timer
+        _autoSaveTimer = new System.Threading.Timer(
+            async _ => await AutoSaveAsync(),
+            null,
+            AutoSaveIntervalMs,
+            AutoSaveIntervalMs);
+    }
+
+    private void InitializeDiagram()
+    {
+        var options = new BlazorDiagramOptions
+        {
+            AllowMultiSelection = true
+        };
+        options.Zoom.Enabled = true;
+        options.Zoom.Minimum = 0.5;
+        options.Zoom.Maximum = 2;
+        options.Links.DefaultRouter = new NormalRouter();
+        options.Links.DefaultPathGenerator = new SmoothPathGenerator();
+
+        _diagram = new BlazorDiagram(options);
+
+        // Register custom models
+        _diagram.RegisterComponent<ConnectorNode, ConnectorNodeWidget>();
+        _diagram.RegisterComponent<PipelineLink, PipelineLinkWidget>();
+        _diagram.RegisterComponent<NodeGroup, NodeGroupWidget>();
+
+        // Track selection changes
+        _diagram.SelectionChanged += OnSelectionChanged;
+
+        // Track node movements for alignment guides
+        _diagram.Nodes.Added += RegisterNodeMovementEvents;
+    }
+
+    private void RegisterNodeMovementEvents(Blazor.Diagrams.Core.Models.NodeModel node)
+    {
+        node.Moving += OnNodeMoving;
+        node.Moved += OnNodeMoved;
+    }
+
+    private void OnNodeMoving(Blazor.Diagrams.Core.Models.Base.MovableModel model)
+    {
+        if (!_showAlignmentGuides || model is not ConnectorNode movingNode) return;
+
+        _horizontalGuides.Clear();
+        _verticalGuides.Clear();
+
+        var movingX = movingNode.Position?.X ?? 0;
+        var movingY = movingNode.Position?.Y ?? 0;
+
+        foreach (var otherNode in _diagram.Nodes.OfType<ConnectorNode>())
+        {
+            if (otherNode.NodeId == movingNode.NodeId) continue;
+
+            var otherX = otherNode.Position?.X ?? 0;
+            var otherY = otherNode.Position?.Y ?? 0;
+
+            // Check horizontal alignment (same Y)
+            if (Math.Abs(movingY - otherY) < AlignmentSnapThreshold)
+            {
+                _horizontalGuides.Add(AlignmentGuide.Horizontal(otherY, otherNode.NodeId));
+            }
+
+            // Check vertical alignment (same X)
+            if (Math.Abs(movingX - otherX) < AlignmentSnapThreshold)
+            {
+                _verticalGuides.Add(AlignmentGuide.Vertical(otherX, otherNode.NodeId));
+            }
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnNodeMoved(Blazor.Diagrams.Core.Models.Base.MovableModel model)
+    {
+        // Clear guides when movement stops
+        _horizontalGuides.Clear();
+        _verticalGuides.Clear();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnSelectionChanged(Blazor.Diagrams.Core.Models.Base.SelectableModel? model)
+    {
+        _selectedNodes.Clear();
+        foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+        {
+            if (node.Selected)
+            {
+                _selectedNodes.Add(node);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task LoadPipelineAsync()
+    {
+        try
+        {
+            _pipeline = await ApiClient.GetPipelineAsync(Id!);
+            if (_pipeline == null)
+            {
+                Notification.ShowError("Pipeline not found");
+                Navigation.NavigateTo("/pipelines");
+                return;
+            }
+
+            _pipelineName = _pipeline.Name;
+            _pipelineDescription = _pipeline.Description ?? "";
+            _parameters = _pipeline.Parameters.ToList();
+            _environments = _pipeline.Environments.ToList();
+            _scheduleConfig = _pipeline.Schedule;
+
+            // Restore nodes
+            foreach (var node in _pipeline.Nodes)
+            {
+                var isSource = node.IsComposite ? false : DetermineIsSource(node.ConnectorType);
+                var isSink = node.IsComposite ? false : DetermineIsSink(node.ConnectorType);
+                var isTransform = !isSource && !isSink && !node.IsComposite;
+
+                var connectorNode = new ConnectorNode(new Point(node.X, node.Y))
+                {
+                    NodeId = node.Id,
+                    ConnectorType = node.ConnectorType,
+                    Label = node.Label,
+                    IsSource = isSource,
+                    IsSink = isSink,
+                    SubPipelineId = node.SubPipelineId,
+                    HasErrorPort = isTransform
+                };
+
+                connectorNode.RetryPolicy = node.RetryPolicy;
+                connectorNode.PortMappingsJson = node.PortMappingsJson;
+
+                // Restore port labels from mapping
+                if (!string.IsNullOrEmpty(node.PortMappingsJson))
+                {
+                    try
+                    {
+                        var mapping = System.Text.Json.JsonSerializer.Deserialize<SubPipelinePortMappingModel>(node.PortMappingsJson);
+                        if (mapping != null)
+                        {
+                            connectorNode.InputPortLabels = mapping.InputMappings
+                                .Select(m => m.SubNodeLabel ?? m.SubPipelineNodeId).ToList();
+                            connectorNode.OutputPortLabels = mapping.OutputMappings
+                                .Select(m => m.SubNodeLabel ?? m.SubPipelineNodeId).ToList();
+                        }
+                    }
+                    catch { /* ignore parse errors */ }
+                }
+
+                foreach (var (key, value) in node.Config)
+                {
+                    connectorNode.Config[key] = value;
+                }
+
+                // Add ports: composite nodes get both in/out
+                if (node.IsComposite)
+                {
+                    connectorNode.AddPort(PortAlignment.Left);
+                    connectorNode.AddPort(PortAlignment.Right);
+                }
+                else if (isSource)
+                {
+                    connectorNode.AddPort(PortAlignment.Right);
+                }
+                else if (isSink)
+                {
+                    connectorNode.AddPort(PortAlignment.Left);
+                }
+                else
+                {
+                    connectorNode.AddPort(PortAlignment.Left);
+                    connectorNode.AddPort(PortAlignment.Right);
+                    connectorNode.AddPort(PortAlignment.Bottom); // Error port
+                }
+
+                _diagram.Nodes.Add(connectorNode);
+            }
+
+            // Restore connections
+            foreach (var connection in _pipeline.Connections)
+            {
+                var sourceNode = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == connection.SourceNodeId);
+                var targetNode = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == connection.TargetNodeId);
+
+                if (sourceNode != null && targetNode != null)
+                {
+                    var isErrorConnection = connection.Type == "error";
+
+                    // For error connections, use the Bottom port as source
+                    var sourcePort = isErrorConnection
+                        ? sourceNode.Ports.FirstOrDefault(p => p.Alignment == PortAlignment.Bottom) ?? sourceNode.Ports.FirstOrDefault()
+                        : sourceNode.Ports.FirstOrDefault(p => p.Alignment != PortAlignment.Bottom) ?? sourceNode.Ports.FirstOrDefault();
+                    var targetPort = targetNode.Ports.FirstOrDefault(p => p.Alignment == PortAlignment.Left) ?? targetNode.Ports.FirstOrDefault();
+
+                    if (sourcePort != null && targetPort != null)
+                    {
+                        var link = new PipelineLink(sourcePort, targetPort)
+                        {
+                            ConnectionId = connection.Id,
+                            InternalTopic = connection.InternalTopic,
+                            IsErrorLink = isErrorConnection
+                        };
+                        _diagram.Links.Add(link);
+                    }
+                }
+            }
+
+            // Save initial state for undo
+            SaveStateForUndo("Load pipeline");
+
+            // Start metrics polling if pipeline is running
+            if (_pipeline.Status == PipelineStatus.Running)
+            {
+                _pipelineIsRunning = true;
+                StartMetricsTimer();
+            }
+
+            // Detect ChatEndpoint nodes for chat FAB
+            _hasChatEndpoint = _pipeline.Nodes.Any(n =>
+                n.ConnectorType.Contains("ChatEndpoint", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load pipeline: {ex.Message}");
+            Navigation.NavigateTo("/pipelines");
+        }
+    }
+
+    private bool DetermineIsSource(string connectorType)
+    {
+        // Built-in Streams nodes are never Source/Sink
+        if (connectorType == ConnectorNode.SqlTransformType ||
+            connectorType == ConnectorNode.ExceptionHandlerType)
+            return false;
+
+        var type = _connectorTypes.FirstOrDefault(t => t.Type == connectorType);
+        return type?.IsSource ?? connectorType.Contains("Source", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool DetermineIsSink(string connectorType)
+    {
+        // Built-in Streams nodes are never Source/Sink
+        if (connectorType == ConnectorNode.SqlTransformType ||
+            connectorType == ConnectorNode.ExceptionHandlerType)
+            return false;
+
+        var type = _connectorTypes.FirstOrDefault(t => t.Type == connectorType);
+        return type?.IsSink ?? connectorType.Contains("Sink", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnConnectorSelectedFromPalette(ConnectorTypeInfo connector)
+    {
+        _pendingConnector = connector;
+        StateHasChanged();
+    }
+
+    private void ClearPendingConnector()
+    {
+        _pendingConnector = null;
+        _draggingConnector = null;
+        StateHasChanged();
+    }
+
+    private void OnConnectorDragStarted(ConnectorTypeInfo connector)
+    {
+        _draggingConnector = connector;
+    }
+
+    private async Task OnConnectorDropped((ConnectorTypeInfo Connector, double X, double Y) args)
+    {
+        if (_draggingConnector == null) return;
+
+        var x = _snapToGrid ? SnapToGridValue(args.X) : args.X;
+        var y = _snapToGrid ? SnapToGridValue(args.Y) : args.Y;
+        var node = CreateNodeFromConnector(_draggingConnector, x, y);
+        _diagram.Nodes.Add(node);
+        await OnNodeAdded(node);
+        _draggingConnector = null;
+    }
+
+    private ConnectorNode CreateNodeFromConnector(ConnectorTypeInfo connector, double x, double y)
+    {
+        if (_snapToGrid)
+        {
+            x = SnapToGridValue(x);
+            y = SnapToGridValue(y);
+        }
+
+        var isTransform = !connector.IsSource && !connector.IsSink;
+
+        var node = new ConnectorNode(new Point(x, y))
+        {
+            NodeId = Guid.NewGuid().ToString("N"),
+            ConnectorType = connector.Type,
+            Label = connector.Name,
+            IsSource = connector.IsSource,
+            IsSink = connector.IsSink,
+            HasErrorPort = isTransform
+        };
+
+        // Add ports based on node type
+        if (connector.IsSource)
+        {
+            node.AddPort(PortAlignment.Right);
+        }
+        else if (connector.IsSink)
+        {
+            node.AddPort(PortAlignment.Left);
+        }
+        else
+        {
+            node.AddPort(PortAlignment.Left);
+            node.AddPort(PortAlignment.Right);
+            // Error port at bottom for transform/logic nodes
+            node.AddPort(PortAlignment.Bottom);
+        }
+
+        return node;
+    }
+
+    private async Task OnNodeAdded(ConnectorNode node)
+    {
+        SaveStateForUndo("Add node");
+        _selectedNode = node;
+        await LoadConfigSchemaAsync(node.ConnectorType);
+        ValidateAllNodes();
+        StateHasChanged();
+    }
+
+    private async Task OnNodeSelected(ConnectorNode node)
+    {
+        _selectedNode = node;
+        await LoadConfigSchemaAsync(node.ConnectorType);
+        StateHasChanged();
+    }
+
+    private Task OnLinkCreated(PipelineLink link)
+    {
+        // Detect error-port links: source port at Bottom alignment = error routing
+        if (link.Source?.Model is Blazor.Diagrams.Core.Models.PortModel sourcePort &&
+            sourcePort.Alignment == PortAlignment.Bottom)
+        {
+            link.IsErrorLink = true;
+        }
+
+        SaveStateForUndo("Create link");
+        ValidateAllNodes();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadConfigSchemaAsync(string connectorType)
+    {
+        // Built-in Streams nodes handle their own config UI — no schema needed
+        if (connectorType == ConnectorNode.SqlTransformType ||
+            connectorType == ConnectorNode.ExceptionHandlerType)
+        {
+            _selectedConfigSchema = null;
+            return;
+        }
+
+        try
+        {
+            _selectedConfigSchema = await ConnectorRegistry.GetConfigSchemaAsync(connectorType);
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowWarning($"Could not load config schema: {ex.Message}");
+            _selectedConfigSchema = null;
+        }
+    }
+
+    private static List<ConnectorTypeInfo> GetBuiltInStreamsNodes() =>
+    [
+        new ConnectorTypeInfo
+        {
+            Type = ConnectorNode.SqlTransformType,
+            Name = "SQL Transform",
+            Category = "Streams",
+            IsSource = false,
+            IsSink = false,
+            Description = "Process streaming data with SQL queries. Supports SELECT, WHERE, GROUP BY, JOIN, window functions, and 20+ scalar functions.",
+            Tags = ["sql", "transform", "query", "streams", "filter", "aggregate"],
+            Icon = "Code"
+        },
+        new ConnectorTypeInfo
+        {
+            Type = ConnectorNode.ExceptionHandlerType,
+            Name = "Exception Handler",
+            Category = "Streams",
+            IsSource = false,
+            IsSink = false,
+            Description = "Handle uncaught exceptions with configurable strategies: Replace Thread, Shutdown Client, or Shutdown Application. Optional DLQ routing.",
+            Tags = ["exception", "error", "handler", "resilience", "dlq", "streams"],
+            Icon = "Shield"
+        }
+    ];
+
+    private string[]? GetAvailableWorkersForSelectedNode()
+    {
+        if (_selectedNode == null) return null;
+
+        var connectorType = _connectorTypes.FirstOrDefault(t => t.Type == _selectedNode.ConnectorType);
+        return connectorType?.AvailableOnWorkers;
+    }
+
+    private void OnNodeConfigChanged(ConnectorNode node)
+    {
+        _diagram.Refresh();
+    }
+
+    private void OnNodeDeleted(ConnectorNode node)
+    {
+        SaveStateForUndo("Delete node");
+        _diagram.Nodes.Remove(node);
+        _selectedNode = null;
+        _selectedConfigSchema = null;
+        StateHasChanged();
+    }
+
+    // Undo/Redo
+    private void SaveStateForUndo(string description)
+    {
+        var nodes = _diagram.Nodes.OfType<ConnectorNode>();
+        var links = _diagram.Links.OfType<PipelineLink>();
+        _editorState.SaveState(nodes, links, description);
+        _isDirty = true;
+    }
+
+    private void Undo()
+    {
+        var nodes = _diagram.Nodes.OfType<ConnectorNode>();
+        var links = _diagram.Links.OfType<PipelineLink>();
+        var snapshot = _editorState.Undo(nodes, links);
+        if (snapshot != null)
+        {
+            RestoreSnapshot(snapshot);
+            Notification.ShowInfo("Undo: " + snapshot.Description);
+        }
+    }
+
+    private void Redo()
+    {
+        var nodes = _diagram.Nodes.OfType<ConnectorNode>();
+        var links = _diagram.Links.OfType<PipelineLink>();
+        var snapshot = _editorState.Redo(nodes, links);
+        if (snapshot != null)
+        {
+            RestoreSnapshot(snapshot);
+            Notification.ShowInfo("Redo");
+        }
+    }
+
+    private void RestoreSnapshot(PipelineSnapshot snapshot)
+    {
+        // Clear current state
+        _diagram.Nodes.Clear();
+        _diagram.Links.Clear();
+
+        // Restore nodes
+        foreach (var sn in snapshot.Nodes)
+        {
+            var node = new ConnectorNode(new Point(sn.X, sn.Y))
+            {
+                NodeId = sn.NodeId,
+                ConnectorType = sn.ConnectorType,
+                Label = sn.Label,
+                IsSource = sn.IsSource,
+                IsSink = sn.IsSink,
+                SubPipelineId = sn.SubPipelineId,
+                SubPipelineName = sn.SubPipelineName
+            };
+            foreach (var (key, value) in sn.Config)
+            {
+                node.Config[key] = value;
+            }
+            _diagram.Nodes.Add(node);
+        }
+
+        // Restore links
+        foreach (var sl in snapshot.Links)
+        {
+            var sourceNode = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == sl.SourceNodeId);
+            var targetNode = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == sl.TargetNodeId);
+            if (sourceNode != null && targetNode != null)
+            {
+                var sourcePort = sourceNode.Ports.FirstOrDefault();
+                var targetPort = targetNode.Ports.FirstOrDefault();
+                if (sourcePort != null && targetPort != null)
+                {
+                    var link = new PipelineLink(sourcePort, targetPort)
+                    {
+                        ConnectionId = sl.ConnectionId,
+                        InternalTopic = sl.InternalTopic
+                    };
+                    _diagram.Links.Add(link);
+                }
+            }
+        }
+
+        _selectedNode = null;
+        _selectedConfigSchema = null;
+        StateHasChanged();
+    }
+
+    // Clipboard
+    private void Cut()
+    {
+        if (_selectedNodes.Count == 0) return;
+        _editorState.CutNodes(_selectedNodes);
+        SaveStateForUndo("Cut nodes");
+        foreach (var node in _selectedNodes.ToList())
+        {
+            _diagram.Nodes.Remove(node);
+        }
+        _selectedNode = null;
+        _selectedConfigSchema = null;
+        Notification.ShowInfo($"Cut {_selectedNodes.Count} node(s)");
+    }
+
+    private void Copy()
+    {
+        if (_selectedNodes.Count == 0) return;
+        _editorState.CopyNodes(_selectedNodes);
+        Notification.ShowInfo($"Copied {_selectedNodes.Count} node(s)");
+    }
+
+    private void Paste()
+    {
+        var clipboardNodes = _editorState.GetClipboardNodes();
+        if (clipboardNodes.Count == 0) return;
+
+        SaveStateForUndo("Paste nodes");
+
+        // Calculate paste position (offset from last paste or center of view)
+        var baseX = 100.0;
+        var baseY = 100.0;
+        if (_diagram.Nodes.Any())
+        {
+            baseX = _diagram.Nodes.Max(n => n.Position?.X ?? 0) + 200;
+        }
+
+        foreach (var cn in clipboardNodes)
+        {
+            var node = new ConnectorNode(new Point(baseX + cn.RelativeX, baseY + cn.RelativeY))
+            {
+                NodeId = Guid.NewGuid().ToString("N"),
+                ConnectorType = cn.ConnectorType,
+                Label = cn.Label != null ? cn.Label + " (copy)" : null,
+                IsSource = DetermineIsSource(cn.ConnectorType),
+                IsSink = DetermineIsSink(cn.ConnectorType)
+            };
+            foreach (var (key, value) in cn.Config)
+            {
+                node.Config[key] = value;
+            }
+            _diagram.Nodes.Add(node);
+        }
+
+        Notification.ShowInfo($"Pasted {clipboardNodes.Count} node(s)");
+    }
+
+    // Selection
+    private void SelectAll()
+    {
+        _diagram.SelectModel(_diagram.Nodes.First(), false); // Clear selection
+        foreach (var node in _diagram.Nodes)
+        {
+            _diagram.SelectModel(node, true); // Add to selection
+        }
+    }
+
+    private void DeleteSelected()
+    {
+        if (_selectedNodes.Count == 0) return;
+        SaveStateForUndo("Delete selected");
+        foreach (var node in _selectedNodes.ToList())
+        {
+            _diagram.Nodes.Remove(node);
+        }
+        _selectedNode = null;
+        _selectedConfigSchema = null;
+    }
+
+    // Zoom
+    private void ZoomIn() => _diagram.SetZoom(_diagram.Zoom * 1.2);
+    private void ZoomOut() => _diagram.SetZoom(_diagram.Zoom / 1.2);
+    private void FitToView()
+    {
+        // Simple fit - reset zoom and pan
+        _diagram.SetZoom(1);
+        _diagram.SetPan(0, 0);
+    }
+
+    // Layout
+    private readonly PipelineLayoutService _layoutService = new();
+
+    private void AutoLayout()
+    {
+        AutoLayoutWithDirection(LayoutDirection.TopToBottom);
+    }
+
+    private void AutoLayoutWithDirection(LayoutDirection direction)
+    {
+        SaveStateForUndo("Auto layout");
+        var nodes = _diagram.Nodes.OfType<ConnectorNode>().ToList();
+        if (nodes.Count == 0) return;
+
+        // Extract links
+        var links = _diagram.Links.OfType<PipelineLink>()
+            .Select(l => (
+                SourceId: ((ConnectorNode?)l.Source?.Model)?.NodeId ?? "",
+                TargetId: ((ConnectorNode?)l.Target?.Model)?.NodeId ?? ""
+            ))
+            .Where(l => !string.IsNullOrEmpty(l.SourceId) && !string.IsNullOrEmpty(l.TargetId))
+            .ToList();
+
+        // Extract groups
+        var groups = _diagram.Groups.OfType<NodeGroup>()
+            .Select(g => (
+                GroupName: g.GroupName ?? "Group",
+                NodeIds: (IReadOnlyList<string>)g.Children
+                    .OfType<ConnectorNode>()
+                    .Select(n => n.NodeId)
+                    .ToList()
+            ))
+            .Where(g => g.NodeIds.Count > 0)
+            .ToList();
+
+        LayoutResult result;
+        if (groups.Count > 0)
+        {
+            result = _layoutService.ComputeLayoutWithGroups(nodes, links, groups, direction);
+        }
+        else
+        {
+            result = _layoutService.ComputeLayout(nodes, links, direction);
+        }
+
+        // Apply positions
+        foreach (var node in nodes)
+        {
+            if (result.Positions.TryGetValue(node.NodeId, out var pos))
+            {
+                var x = _snapToGrid ? SnapToGridValue(pos.X) : pos.X;
+                var y = _snapToGrid ? SnapToGridValue(pos.Y) : pos.Y;
+                node.SetPosition(x, y);
+            }
+        }
+
+        _diagram.Refresh();
+    }
+
+    private void AlignHorizontal()
+    {
+        if (_selectedNodes.Count < 2) return;
+        SaveStateForUndo("Align horizontal");
+        var avgY = _selectedNodes.Average(n => n.Position?.Y ?? 0);
+        foreach (var node in _selectedNodes)
+        {
+            node.SetPosition(node.Position?.X ?? 0, avgY);
+        }
+        _diagram.Refresh();
+    }
+
+    private void AlignVertical()
+    {
+        if (_selectedNodes.Count < 2) return;
+        SaveStateForUndo("Align vertical");
+        var avgX = _selectedNodes.Average(n => n.Position?.X ?? 0);
+        foreach (var node in _selectedNodes)
+        {
+            node.SetPosition(avgX, node.Position?.Y ?? 0);
+        }
+        _diagram.Refresh();
+    }
+
+    private void DistributeHorizontal()
+    {
+        if (_selectedNodes.Count < 3) return;
+        SaveStateForUndo("Distribute horizontal");
+        var sorted = _selectedNodes.OrderBy(n => n.Position?.X ?? 0).ToList();
+        var minX = sorted.First().Position?.X ?? 0;
+        var maxX = sorted.Last().Position?.X ?? 0;
+        var step = (maxX - minX) / (sorted.Count - 1);
+
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            sorted[i].SetPosition(minX + i * step, sorted[i].Position?.Y ?? 0);
+        }
+        _diagram.Refresh();
+    }
+
+    private void DistributeVertical()
+    {
+        if (_selectedNodes.Count < 3) return;
+        SaveStateForUndo("Distribute vertical");
+        var sorted = _selectedNodes.OrderBy(n => n.Position?.Y ?? 0).ToList();
+        var minY = sorted.First().Position?.Y ?? 0;
+        var maxY = sorted.Last().Position?.Y ?? 0;
+        var step = (maxY - minY) / (sorted.Count - 1);
+
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            sorted[i].SetPosition(sorted[i].Position?.X ?? 0, minY + i * step);
+        }
+        _diagram.Refresh();
+    }
+
+    // Grouping
+    private bool HasGroupSelected()
+    {
+        return _diagram.Groups.OfType<NodeGroup>().Any(g => g.Selected);
+    }
+
+    private void GroupSelectedNodes()
+    {
+        if (_selectedNodes.Count < 2) return;
+        SaveStateForUndo("Group nodes");
+
+        var group = new NodeGroup(_selectedNodes.Cast<Blazor.Diagrams.Core.Models.NodeModel>())
+        {
+            GroupName = $"Group ({_selectedNodes.Count} nodes)"
+        };
+
+        _diagram.Groups.Add(group);
+        Notification.ShowInfo($"Created group with {_selectedNodes.Count} nodes");
+    }
+
+    private void UngroupSelectedNodes()
+    {
+        var selectedGroups = _diagram.Groups.OfType<NodeGroup>().Where(g => g.Selected).ToList();
+        if (selectedGroups.Count == 0) return;
+
+        SaveStateForUndo("Ungroup nodes");
+
+        foreach (var group in selectedGroups)
+        {
+            _diagram.Groups.Remove(group);
+        }
+
+        Notification.ShowInfo($"Ungrouped {selectedGroups.Count} group(s)");
+    }
+
+    private async Task FocusNode(ConnectorNode node)
+    {
+        // Center view on node
+        if (node.Position != null)
+        {
+            _diagram.SetPan(-node.Position.X + 300, -node.Position.Y + 200);
+        }
+        _selectedNode = node;
+        await LoadConfigSchemaAsync(node.ConnectorType);
+        StateHasChanged();
+    }
+
+    private void OnSubPipelineSelectedFromPalette(PipelineSummary pipeline)
+    {
+        _pendingSubPipelineId = pipeline.Id;
+        _pendingSubPipelineName = pipeline.Name;
+
+        // Create and place the sub-pipeline node immediately
+        SaveStateForUndo("Add sub-pipeline node");
+
+        // Place near center or offset from last node
+        var baseX = 100.0;
+        var baseY = 100.0;
+        if (_diagram.Nodes.Any())
+        {
+            baseX = _diagram.Nodes.Max(n => n.Position?.X ?? 0) + 50;
+            baseY = _diagram.Nodes.Average(n => n.Position?.Y ?? 0);
+        }
+
+        if (_snapToGrid)
+        {
+            baseX = SnapToGridValue(baseX);
+            baseY = SnapToGridValue(baseY);
+        }
+
+        var node = new ConnectorNode(new Point(baseX, baseY))
+        {
+            NodeId = Guid.NewGuid().ToString("N"),
+            ConnectorType = "SubPipeline",
+            Label = pipeline.Name,
+            IsSource = false,
+            IsSink = false,
+            SubPipelineId = pipeline.Id,
+            SubPipelineName = pipeline.Name
+        };
+        node.Config["pipeline.id"] = pipeline.Id;
+
+        // Composite nodes get both input and output ports
+        node.AddPort(PortAlignment.Left);
+        node.AddPort(PortAlignment.Right);
+
+        _diagram.Nodes.Add(node);
+        _pendingSubPipelineId = null;
+        _pendingSubPipelineName = null;
+
+        ValidateAllNodes();
+        Notification.ShowInfo($"Sub-pipeline '{pipeline.Name}' added");
+        StateHasChanged();
+    }
+
+    private PipelineDefinition BuildPipelineDefinition()
+    {
+        var nodes = _diagram.Nodes.OfType<ConnectorNode>()
+            .Select(n => new PipelineNode
+            {
+                Id = n.NodeId,
+                ConnectorType = n.ConnectorType,
+                Config = new Dictionary<string, string>(n.Config),
+                X = n.Position?.X ?? 0,
+                Y = n.Position?.Y ?? 0,
+                Label = n.Label,
+                SubPipelineId = n.SubPipelineId,
+                PortMappingsJson = n.PortMappingsJson,
+                RetryPolicy = n.RetryPolicy
+            })
+            .ToList();
+
+        var connections = _diagram.Links.OfType<PipelineLink>()
+            .Select(l => new PipelineConnection
+            {
+                Id = l.ConnectionId,
+                SourceNodeId = ((ConnectorNode?)l.Source?.Model)?.NodeId ?? "",
+                TargetNodeId = ((ConnectorNode?)l.Target?.Model)?.NodeId ?? "",
+                InternalTopic = l.InternalTopic,
+                Type = l.IsErrorLink ? "error" : null
+            })
+            .Where(c => !string.IsNullOrEmpty(c.SourceNodeId) && !string.IsNullOrEmpty(c.TargetNodeId))
+            .ToList();
+
+        return new PipelineDefinition
+        {
+            Id = _pipeline?.Id ?? Guid.NewGuid().ToString("N"),
+            Name = _pipelineName,
+            Description = _pipelineDescription,
+            Nodes = nodes,
+            Connections = connections,
+            Status = _pipeline?.Status ?? PipelineStatus.Draft,
+            CreatedAt = _pipeline?.CreatedAt ?? DateTimeOffset.UtcNow,
+            Parameters = _parameters,
+            Environments = _environments,
+            Schedule = _scheduleConfig
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pipelineName))
+        {
+            Notification.ShowWarning("Please enter a pipeline name");
+            return;
+        }
+
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var definition = BuildPipelineDefinition();
+
+            if (_isNew)
+            {
+                _pipeline = await ApiClient.CreatePipelineAsync(definition.Name, definition.Description,
+                    definition.Nodes, definition.Connections);
+                Notification.ShowSuccess("Pipeline created");
+                Navigation.NavigateTo($"/pipelines/{_pipeline.Id}/edit", replace: true);
+            }
+            else
+            {
+                _pipeline = await ApiClient.UpdatePipelineAsync(Id!, definition.Name, definition.Description,
+                    definition.Nodes, definition.Connections);
+                Notification.ShowSuccess("Pipeline saved");
+            }
+            _isDirty = false;
+            _lastSaveTime = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to save pipeline: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AutoSaveAsync()
+    {
+        // Only auto-save if dirty and not a new pipeline
+        if (!_isDirty || _isNew || _saving) return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                var definition = BuildPipelineDefinition();
+                _pipeline = await ApiClient.UpdatePipelineAsync(Id!, definition.Name, definition.Description,
+                    definition.Nodes, definition.Connections);
+                _isDirty = false;
+                _lastSaveTime = DateTime.Now;
+                StateHasChanged();
+            });
+        }
+        catch
+        {
+            // Silently fail - user can manually save
+        }
+    }
+
+    private async Task AnalyzeAndHotDeployAsync()
+    {
+        if (_pipeline == null || Id == null) return;
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var definition = BuildPipelineDefinition();
+            var request = new UpdatePipelineRequest
+            {
+                Name = definition.Name,
+                Description = definition.Description,
+                Nodes = definition.Nodes,
+                Connections = definition.Connections
+            };
+
+            var analysis = await ApiClient.AnalyzeChangesAsync(Id, request);
+            if (analysis is { IsHotDeployable: true })
+            {
+                var success = await ApiClient.HotDeployAsync(Id, request);
+                if (success)
+                {
+                    Notification.ShowSuccess("Changes hot-deployed successfully");
+                    _isDirty = false;
+                    _lastSaveTime = DateTime.Now;
+                }
+                else
+                {
+                    Notification.ShowWarning("Hot-deploy failed - changes require pipeline restart");
+                }
+            }
+            else if (analysis is { RequiresRestart: true })
+            {
+                var reasons = string.Join("; ", analysis.RestartReasons);
+                Notification.ShowWarning($"Cannot hot-deploy: {reasons}. Stop and restart the pipeline.");
+            }
+            else
+            {
+                Notification.ShowInfo("No config changes detected");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Hot-deploy failed: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveAndStartAsync()
+    {
+        await SaveAsync();
+
+        if (_pipeline != null)
+        {
+            try
+            {
+                if (_parameters.Count > 0)
+                {
+                    // Start with merged parameters (defaults + first environment if any)
+                    var envName = _environments.Count > 0 ? _environments[0].Name : null;
+                    var mergedParams = MergeParameters(envName);
+                    await ApiClient.StartPipelineWithParametersAsync(_pipeline.Id, mergedParams);
+                }
+                else
+                {
+                    await ApiClient.StartPipelineAsync(_pipeline.Id);
+                }
+                Notification.ShowSuccess("Pipeline started");
+                _pipelineIsRunning = true;
+                StartMetricsTimer();
+            }
+            catch (Exception ex)
+            {
+                Notification.ShowError($"Failed to start pipeline: {ex.Message}");
+            }
+        }
+    }
+
+    private void Cancel()
+    {
+        Navigation.NavigateTo("/pipelines");
+    }
+
+    // --- Metrics & Debug Polling (Features 1, 2, 4) ---
+
+    private void StartMetricsTimer()
+    {
+        _metricsTimer?.Dispose();
+        _metricsTimer = new System.Threading.Timer(
+            async _ => await RefreshMetricsAsync(),
+            null,
+            0,
+            MetricsIntervalMs);
+    }
+
+    private void StopMetricsTimer()
+    {
+        _metricsTimer?.Dispose();
+        _metricsTimer = null;
+    }
+
+    private async Task RefreshMetricsAsync()
+    {
+        if (_isNew || Id is null) return;
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                var status = await ApiClient.GetPipelineStatusAsync(Id);
+                var wasRunning = _pipelineIsRunning;
+                _pipelineIsRunning = status?.Status == PipelineStatus.Running;
+
+                if (_pipelineIsRunning)
+                {
+                    var metrics = await ApiClient.GetPipelineMetricsAsync(Id);
+                    if (metrics != null)
+                    {
+                        ApplyMetricsToNodes(metrics);
+                        ApplyMetricsToLinks(metrics);
+                    }
+
+                    // Update node running state
+                    foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+                    {
+                        var nodeStatus = status?.Nodes.FirstOrDefault(n => n.NodeId == node.NodeId);
+                        node.IsRunning = nodeStatus?.State == "Running" || _pipelineIsRunning;
+                    }
+
+                    if (!wasRunning)
+                        _diagram.Refresh();
+                }
+                else if (wasRunning)
+                {
+                    // Pipeline stopped — clear metrics
+                    foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+                    {
+                        node.IsRunning = false;
+                        node.RecordsPerSec = 0;
+                        node.TotalErrors = 0;
+                        node.P99LatencyMs = 0;
+                    }
+                    foreach (var link in _diagram.Links.OfType<PipelineLink>())
+                    {
+                        link.QueueDepth = 0;
+                        link.BackPressureLevel = Models.Pipeline.BackPressureLevel.Normal;
+                    }
+                    StopMetricsTimer();
+                }
+
+                StateHasChanged();
+            });
+        }
+        catch
+        {
+            // Silently ignore metrics fetch errors
+        }
+    }
+
+    private void ApplyMetricsToNodes(PipelineMetricsResponse metrics)
+    {
+        foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+        {
+            if (metrics.Nodes.TryGetValue(node.NodeId, out var nm))
+            {
+                node.RecordsPerSec = nm.RecordsPerSec > 0 ? nm.RecordsPerSec : metrics.RecordsPerSec / Math.Max(metrics.Nodes.Count, 1);
+                node.TotalErrors = nm.Errors;
+                node.P99LatencyMs = nm.P99LatencyMs;
+            }
+        }
+        _diagram.Refresh();
+    }
+
+    private void ApplyMetricsToLinks(PipelineMetricsResponse metrics)
+    {
+        foreach (var link in _diagram.Links.OfType<PipelineLink>())
+        {
+            if (metrics.Connections.TryGetValue(link.ConnectionId, out var cm))
+            {
+                link.QueueDepth = cm.QueueDepth;
+                link.Throughput = cm.ThroughputPerSec;
+                link.BackPressureLevel = cm.Level;
+            }
+        }
+    }
+
+    private void StartDebugTimer()
+    {
+        _debugTimer?.Dispose();
+        _debugTimer = new System.Threading.Timer(
+            async _ => await RefreshDebugStateAsync(),
+            null,
+            0,
+            DebugPollIntervalMs);
+    }
+
+    private void StopDebugTimer()
+    {
+        _debugTimer?.Dispose();
+        _debugTimer = null;
+        _debugState = null;
+    }
+
+    private async Task RefreshDebugStateAsync()
+    {
+        if (_isNew || Id is null || !_debugMode) return;
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                _debugState = await ApiClient.GetDebugStateAsync(Id);
+                if (_debugState != null)
+                {
+                    foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+                    {
+                        node.HasBreakpoint = _debugState.Breakpoints.Contains(node.NodeId);
+                        if (_debugState.PausedNodes.TryGetValue(node.NodeId, out var paused))
+                        {
+                            node.IsPaused = true;
+                            node.QueueDepth = paused.QueueDepth;
+                        }
+                        else
+                        {
+                            node.IsPaused = false;
+                            node.QueueDepth = 0;
+                        }
+                    }
+                    _diagram.Refresh();
+                }
+                StateHasChanged();
+            });
+        }
+        catch
+        {
+            // Silently ignore
+        }
+    }
+
+    private async Task ToggleDebugMode()
+    {
+        _debugMode = !_debugMode;
+        if (_debugMode)
+        {
+            StartDebugTimer();
+        }
+        else
+        {
+            StopDebugTimer();
+            foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+            {
+                node.HasBreakpoint = false;
+                node.IsPaused = false;
+                node.QueueDepth = 0;
+            }
+            _diagram.Refresh();
+        }
+    }
+
+    private async Task ToggleBreakpoint(ConnectorNode node)
+    {
+        if (_isNew || Id is null) return;
+        try
+        {
+            if (node.HasBreakpoint)
+            {
+                await ApiClient.RemoveBreakpointAsync(Id, node.NodeId);
+                node.HasBreakpoint = false;
+            }
+            else
+            {
+                await ApiClient.SetBreakpointsAsync(Id, [node.NodeId]);
+                node.HasBreakpoint = true;
+            }
+            _diagram.Refresh();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Breakpoint toggle failed: {ex.Message}");
+        }
+    }
+
+    private async Task DebugStepNode(string nodeId)
+    {
+        if (_isNew || Id is null) return;
+        try { await ApiClient.StepNodeAsync(Id, nodeId); }
+        catch (Exception ex) { Notification.ShowError($"Step failed: {ex.Message}"); }
+    }
+
+    private async Task DebugResumeNode(string nodeId)
+    {
+        if (_isNew || Id is null) return;
+        try { await ApiClient.ResumeNodeAsync(Id, nodeId); }
+        catch (Exception ex) { Notification.ShowError($"Resume failed: {ex.Message}"); }
+    }
+
+    private async Task DebugResumeAll()
+    {
+        if (_isNew || Id is null) return;
+        try { await ApiClient.ResumeAllAsync(Id); }
+        catch (Exception ex) { Notification.ShowError($"Resume all failed: {ex.Message}"); }
+    }
+
+    // --- Pipeline Parameters (Feature 3) ---
+
+    private Task OnParametersChanged(List<PipelineParameter> parameters)
+    {
+        _parameters = parameters;
+        _isDirty = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OnEnvironmentsChanged(List<PipelineEnvironment> environments)
+    {
+        _environments = environments;
+        _isDirty = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OnScheduleChanged(ScheduleConfig? schedule)
+    {
+        _scheduleConfig = schedule;
+        _isDirty = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnLineagePathReceived(string provenancePath)
+    {
+        // Parse pipe-delimited provenance path
+        var nodeIds = provenancePath.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList();
+        if (nodeIds.Count > 0)
+            await HighlightLineagePath(nodeIds);
+    }
+
+    private async Task HighlightLineagePath(List<string> nodeIds)
+    {
+        // Cancel any previous highlight timer
+        _lineageHighlightCts?.Cancel();
+        _lineageHighlightCts = new CancellationTokenSource();
+        var ct = _lineageHighlightCts.Token;
+
+        // Clear previous highlights
+        ClearLineageHighlights();
+
+        // Set highlights for matching nodes and links
+        _highlightedLineageNodes.Clear();
+        foreach (var id in nodeIds)
+            _highlightedLineageNodes.Add(id);
+
+        foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+        {
+            node.IsLineageHighlighted = _highlightedLineageNodes.Contains(node.NodeId);
+        }
+
+        // Highlight links between consecutive lineage nodes
+        for (var i = 0; i < nodeIds.Count - 1; i++)
+        {
+            var sourceId = nodeIds[i];
+            var targetId = nodeIds[i + 1];
+            foreach (var link in _diagram.Links.OfType<PipelineLink>())
+            {
+                var linkSourceNode = _diagram.Nodes.OfType<ConnectorNode>()
+                    .FirstOrDefault(n => n.Ports.Any(p => p == link.Source?.Model));
+                var linkTargetNode = _diagram.Nodes.OfType<ConnectorNode>()
+                    .FirstOrDefault(n => n.Ports.Any(p => p == link.Target?.Model));
+
+                if (linkSourceNode?.NodeId == sourceId && linkTargetNode?.NodeId == targetId)
+                {
+                    link.IsLineageHighlighted = true;
+                }
+            }
+        }
+
+        _diagram.Refresh();
+        StateHasChanged();
+
+        // Auto-clear after 5 seconds
+        try
+        {
+            await Task.Delay(5000, ct);
+            ClearLineageHighlights();
+            _diagram.Refresh();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException)
+        {
+            // New highlight started, ignore
+        }
+    }
+
+    private void ClearLineageHighlights()
+    {
+        _highlightedLineageNodes.Clear();
+        foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+            node.IsLineageHighlighted = false;
+        foreach (var link in _diagram.Links.OfType<PipelineLink>())
+            link.IsLineageHighlighted = false;
+    }
+
+    private async Task OpenPortMappingDialog(ConnectorNode node)
+    {
+        if (string.IsNullOrEmpty(node.SubPipelineId)) return;
+
+        var parentInputPorts = _diagram.Nodes.OfType<ConnectorNode>()
+            .Where(n => n.IsSource)
+            .Select(n => n.NodeId)
+            .ToList();
+        var parentOutputPorts = _diagram.Nodes.OfType<ConnectorNode>()
+            .Where(n => n.IsSink)
+            .Select(n => n.NodeId)
+            .ToList();
+
+        SubPipelinePortMappingModel? existing = null;
+        if (!string.IsNullOrEmpty(node.PortMappingsJson))
+        {
+            try
+            {
+                existing = System.Text.Json.JsonSerializer.Deserialize<SubPipelinePortMappingModel>(node.PortMappingsJson);
+            }
+            catch { /* ignore parse errors */ }
+        }
+
+        var parameters = new DialogParameters<PortMappingDialog>
+        {
+            { x => x.SubPipelineId, node.SubPipelineId },
+            { x => x.SubPipelineName, node.SubPipelineName ?? "Sub-Pipeline" },
+            { x => x.ParentInputPorts, parentInputPorts },
+            { x => x.ParentOutputPorts, parentOutputPorts },
+            { x => x.ExistingMapping, existing }
+        };
+
+        var dialog = await DialogService.ShowAsync<PortMappingDialog>("Port Mapping", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: SubPipelinePortMappingModel mapping })
+        {
+            node.PortMappingsJson = System.Text.Json.JsonSerializer.Serialize(mapping);
+            node.InputPortLabels = mapping.InputMappings.Select(m => m.SubNodeLabel ?? m.SubPipelineNodeId).ToList();
+            node.OutputPortLabels = mapping.OutputMappings.Select(m => m.SubNodeLabel ?? m.SubPipelineNodeId).ToList();
+            _isDirty = true;
+            _diagram.Refresh();
+        }
+    }
+
+    private Dictionary<string, string> MergeParameters(string? environmentName)
+    {
+        var result = new Dictionary<string, string>();
+
+        // Start with defaults
+        foreach (var p in _parameters)
+        {
+            result[p.Name] = p.DefaultValue;
+        }
+
+        // Apply environment overrides
+        if (environmentName != null)
+        {
+            var env = _environments.FirstOrDefault(e => e.Name == environmentName);
+            if (env != null)
+            {
+                foreach (var (key, value) in env.Overrides)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                        result[key] = value;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private async Task OnVersionRestored(PipelineDefinition restored)
+    {
+        _pipeline = restored;
+        _pipelineName = restored.Name;
+        _pipelineDescription = restored.Description ?? "";
+
+        // Rebuild diagram from restored definition
+        _diagram.Nodes.Clear();
+        _diagram.Links.Clear();
+
+        foreach (var node in restored.Nodes)
+        {
+            var connectorNode = new ConnectorNode(new Point(node.X, node.Y))
+            {
+                NodeId = node.Id,
+                ConnectorType = node.ConnectorType,
+                Label = node.Label,
+                IsSource = node.IsComposite ? false : DetermineIsSource(node.ConnectorType),
+                IsSink = node.IsComposite ? false : DetermineIsSink(node.ConnectorType),
+                SubPipelineId = node.SubPipelineId
+            };
+
+            foreach (var (key, value) in node.Config)
+            {
+                connectorNode.Config[key] = value;
+            }
+
+            if (node.IsComposite)
+            {
+                connectorNode.AddPort(PortAlignment.Left);
+                connectorNode.AddPort(PortAlignment.Right);
+            }
+
+            _diagram.Nodes.Add(connectorNode);
+        }
+
+        foreach (var connection in restored.Connections)
+        {
+            var sourceNode = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == connection.SourceNodeId);
+            var targetNode = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == connection.TargetNodeId);
+
+            if (sourceNode != null && targetNode != null)
+            {
+                var sourcePort = sourceNode.Ports.FirstOrDefault();
+                var targetPort = targetNode.Ports.FirstOrDefault();
+
+                if (sourcePort != null && targetPort != null)
+                {
+                    var link = new PipelineLink(sourcePort, targetPort)
+                    {
+                        ConnectionId = connection.Id,
+                        InternalTopic = connection.InternalTopic
+                    };
+                    _diagram.Links.Add(link);
+                }
+            }
+        }
+
+        SaveStateForUndo("Restore version");
+        Notification.ShowSuccess("Version restored");
+        await Task.CompletedTask;
+    }
+
+    // Keyboard shortcuts
+    private void OnContainerFocus()
+    {
+        // Container is now focused, keyboard shortcuts active
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        _preventKeyDefault = false;
+
+        // Ctrl shortcuts
+        if (e.CtrlKey && !e.ShiftKey && !e.AltKey)
+        {
+            switch (e.Key.ToLowerInvariant())
+            {
+                case "z":
+                    _preventKeyDefault = true;
+                    Undo();
+                    break;
+                case "y":
+                    _preventKeyDefault = true;
+                    Redo();
+                    break;
+                case "x":
+                    _preventKeyDefault = true;
+                    Cut();
+                    break;
+                case "c":
+                    _preventKeyDefault = true;
+                    Copy();
+                    break;
+                case "v":
+                    _preventKeyDefault = true;
+                    Paste();
+                    break;
+                case "a":
+                    _preventKeyDefault = true;
+                    SelectAll();
+                    break;
+                case "s":
+                    _preventKeyDefault = true;
+                    await SaveAsync();
+                    break;
+                case "f":
+                    _preventKeyDefault = true;
+                    await OpenSearch();
+                    break;
+                case "0":
+                    _preventKeyDefault = true;
+                    FitToView();
+                    break;
+                case "g":
+                    _preventKeyDefault = true;
+                    GroupSelectedNodes();
+                    break;
+            }
+        }
+        // Ctrl+Shift shortcuts
+        else if (e.CtrlKey && e.ShiftKey && !e.AltKey)
+        {
+            switch (e.Key.ToLowerInvariant())
+            {
+                case "z":
+                    _preventKeyDefault = true;
+                    Redo();
+                    break;
+            }
+        }
+        // No modifier shortcuts
+        else if (!e.CtrlKey && !e.ShiftKey && !e.AltKey)
+        {
+            switch (e.Key)
+            {
+                case "Delete":
+                case "Backspace":
+                    _preventKeyDefault = true;
+                    DeleteSelected();
+                    break;
+                case "Escape":
+                    _preventKeyDefault = true;
+                    if (_pendingConnector != null)
+                    {
+                        ClearPendingConnector();
+                    }
+                    else
+                    {
+                        DeselectAll();
+                    }
+                    break;
+                case "+":
+                case "=":
+                    _preventKeyDefault = true;
+                    ZoomIn();
+                    break;
+                case "-":
+                    _preventKeyDefault = true;
+                    ZoomOut();
+                    break;
+                case "ArrowUp":
+                    _preventKeyDefault = true;
+                    MoveSelectedNodes(0, -10);
+                    break;
+                case "ArrowDown":
+                    _preventKeyDefault = true;
+                    MoveSelectedNodes(0, 10);
+                    break;
+                case "ArrowLeft":
+                    _preventKeyDefault = true;
+                    MoveSelectedNodes(-10, 0);
+                    break;
+                case "ArrowRight":
+                    _preventKeyDefault = true;
+                    MoveSelectedNodes(10, 0);
+                    break;
+                case "d":
+                    _preventKeyDefault = true;
+                    ToggleSelectedNodesDisabled();
+                    break;
+            }
+        }
+    }
+
+    private void ToggleSelectedNodesDisabled()
+    {
+        if (_selectedNodes.Count == 0) return;
+
+        var anyEnabled = _selectedNodes.Any(n => !n.IsDisabled);
+        foreach (var node in _selectedNodes)
+        {
+            node.IsDisabled = anyEnabled; // If any enabled, disable all; else enable all
+        }
+        ValidateAllNodes();
+        _diagram.Refresh();
+        Notification.ShowInfo(anyEnabled ? "Nodes disabled" : "Nodes enabled");
+    }
+
+    private void DeselectAll()
+    {
+        foreach (var node in _diagram.Nodes.OfType<ConnectorNode>().Where(n => n.Selected).ToList())
+        {
+            _diagram.UnselectModel(node);
+        }
+        _selectedNodes.Clear();
+        _selectedNode = null;
+        _selectedConfigSchema = null;
+        StateHasChanged();
+    }
+
+    private void MoveSelectedNodes(double dx, double dy)
+    {
+        if (_selectedNodes.Count == 0) return;
+        foreach (var node in _selectedNodes)
+        {
+            var x = (node.Position?.X ?? 0) + dx;
+            var y = (node.Position?.Y ?? 0) + dy;
+            if (_snapToGrid)
+            {
+                x = SnapToGridValue(x);
+                y = SnapToGridValue(y);
+            }
+            node.SetPosition(x, y);
+        }
+        _diagram.Refresh();
+    }
+
+    private void ToggleSnapToGrid()
+    {
+        _snapToGrid = !_snapToGrid;
+        if (_snapToGrid)
+        {
+            // Snap all nodes to grid
+            foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+            {
+                var x = SnapToGridValue(node.Position?.X ?? 0);
+                var y = SnapToGridValue(node.Position?.Y ?? 0);
+                node.SetPosition(x, y);
+            }
+            _diagram.Refresh();
+        }
+        Notification.ShowInfo(_snapToGrid ? "Snap to Grid enabled" : "Snap to Grid disabled");
+    }
+
+    private double SnapToGridValue(double value)
+    {
+        return Math.Round(value / GridSize) * GridSize;
+    }
+
+    // Node search
+    private async Task OpenSearch()
+    {
+        _showSearch = true;
+        _searchQuery = "";
+        _searchResults.Clear();
+        _searchResultIndex = 0;
+        StateHasChanged();
+        await Task.Delay(50); // Wait for render
+        if (_searchField != null)
+        {
+            await _searchField.FocusAsync();
+        }
+    }
+
+    private void CloseSearch()
+    {
+        _showSearch = false;
+        _searchQuery = "";
+        _searchResults.Clear();
+        StateHasChanged();
+    }
+
+    private void HandleSearchKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                CloseSearch();
+                break;
+            case "Enter":
+                if (_searchResults.Count > 0)
+                {
+                    if (e.ShiftKey)
+                    {
+                        // Previous result
+                        _searchResultIndex = (_searchResultIndex - 1 + _searchResults.Count) % _searchResults.Count;
+                    }
+                    else
+                    {
+                        // Next result
+                        _searchResultIndex = (_searchResultIndex + 1) % _searchResults.Count;
+                    }
+                    FocusSearchResult();
+                }
+                break;
+            default:
+                // Update search results
+                Task.Run(async () =>
+                {
+                    await Task.Delay(100); // Debounce
+                    await InvokeAsync(() =>
+                    {
+                        UpdateSearchResults();
+                        StateHasChanged();
+                    });
+                });
+                break;
+        }
+    }
+
+    private void UpdateSearchResults()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            _searchResults.Clear();
+            return;
+        }
+
+        var query = _searchQuery.ToLowerInvariant();
+        _searchResults = _diagram.Nodes.OfType<ConnectorNode>()
+            .Where(n => (n.Label?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        n.ConnectorType.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        n.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        _searchResultIndex = 0;
+        if (_searchResults.Count > 0)
+        {
+            FocusSearchResult();
+        }
+    }
+
+    private void FocusSearchResult()
+    {
+        if (_searchResultIndex < 0 || _searchResultIndex >= _searchResults.Count) return;
+
+        var node = _searchResults[_searchResultIndex];
+        if (node.Position != null)
+        {
+            _diagram.SetPan(-node.Position.X + 300, -node.Position.Y + 200);
+            _diagram.SelectModel(node, false);
+            _selectedNode = node;
+            _ = LoadConfigSchemaAsync(node.ConnectorType);
+        }
+        StateHasChanged();
+    }
+
+    // Validation
+    private void ValidateAllNodes()
+    {
+        foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+        {
+            ValidateNode(node);
+        }
+        _diagram.Refresh();
+    }
+
+    private void ValidateNode(ConnectorNode node)
+    {
+        node.ValidationState = NodeValidationState.Valid;
+        node.ValidationMessage = null;
+
+        // Skip validation for disabled nodes
+        if (node.IsDisabled) return;
+
+        // Validate composite nodes
+        if (node.IsComposite)
+        {
+            if (string.IsNullOrEmpty(node.SubPipelineId))
+            {
+                node.ValidationState = NodeValidationState.Error;
+                node.ValidationMessage = "Sub-pipeline reference is missing";
+                return;
+            }
+
+            // Check that referenced pipeline exists
+            if (!_availablePipelines.Any(p => p.Id == node.SubPipelineId))
+            {
+                node.ValidationState = NodeValidationState.Warning;
+                node.ValidationMessage = "Referenced pipeline may have been deleted";
+                return;
+            }
+        }
+
+        // Check for unconnected source (should have outgoing connections)
+        if (node.IsSource)
+        {
+            var hasOutgoing = _diagram.Links.Any(l =>
+                l.Source?.Model is ConnectorNode sourceNode && sourceNode.NodeId == node.NodeId);
+            if (!hasOutgoing)
+            {
+                node.ValidationState = NodeValidationState.Warning;
+                node.ValidationMessage = "Source node has no outgoing connections";
+                return;
+            }
+        }
+
+        // Check for unconnected sink (should have incoming connections)
+        if (node.IsSink)
+        {
+            var hasIncoming = _diagram.Links.Any(l =>
+                l.Target?.Model is ConnectorNode targetNode && targetNode.NodeId == node.NodeId);
+            if (!hasIncoming)
+            {
+                node.ValidationState = NodeValidationState.Warning;
+                node.ValidationMessage = "Sink node has no incoming connections";
+                return;
+            }
+        }
+
+        // Check for transform nodes (should have both incoming and outgoing)
+        if (!node.IsSource && !node.IsSink)
+        {
+            var hasIncoming = _diagram.Links.Any(l =>
+                l.Target?.Model is ConnectorNode targetNode && targetNode.NodeId == node.NodeId);
+            var hasOutgoing = _diagram.Links.Any(l =>
+                l.Source?.Model is ConnectorNode sourceNode && sourceNode.NodeId == node.NodeId);
+
+            if (!hasIncoming && !hasOutgoing)
+            {
+                node.ValidationState = NodeValidationState.Warning;
+                node.ValidationMessage = "Transform node is not connected";
+            }
+            else if (!hasIncoming)
+            {
+                node.ValidationState = NodeValidationState.Warning;
+                node.ValidationMessage = "Transform node has no incoming connections";
+            }
+            else if (!hasOutgoing)
+            {
+                node.ValidationState = NodeValidationState.Warning;
+                node.ValidationMessage = "Transform node has no outgoing connections";
+            }
+        }
+
+        // Check for required config fields
+        var requiredFields = GetRequiredConfigFields(node);
+        foreach (var field in requiredFields)
+        {
+            if (!node.Config.ContainsKey(field) || string.IsNullOrWhiteSpace(node.Config[field]))
+            {
+                node.ValidationState = NodeValidationState.Error;
+                node.ValidationMessage = $"Required field '{field}' is not set";
+                return;
+            }
+        }
+    }
+
+    private IEnumerable<string> GetRequiredConfigFields(ConnectorNode node)
+    {
+        // Get required fields from the schema if available
+        var connectorType = _connectorTypes.FirstOrDefault(t => t.Type == node.ConnectorType);
+        // For now, return empty - actual implementation would check the schema
+        return [];
+    }
+
+    // Context menu handlers
+    private void OnCanvasContextMenu((double X, double Y, ConnectorNode? Node) args)
+    {
+        ShowContextMenu(args.X, args.Y, args.Node);
+    }
+
+    private void ShowContextMenu(double x, double y, ConnectorNode? node)
+    {
+        _contextMenuX = x;
+        _contextMenuY = y;
+        _contextMenuNode = node;
+        _showContextMenu = true;
+        StateHasChanged();
+    }
+
+    private void CloseContextMenu()
+    {
+        _showContextMenu = false;
+        _contextMenuNode = null;
+        StateHasChanged();
+    }
+
+    private async Task ContextMenuEditNode()
+    {
+        CloseContextMenu();
+        if (_contextMenuNode != null)
+        {
+            _selectedNode = _contextMenuNode;
+            await LoadConfigSchemaAsync(_contextMenuNode.ConnectorType);
+            StateHasChanged();
+        }
+    }
+
+    private void ContextMenuDuplicateNode()
+    {
+        CloseContextMenu();
+        if (_contextMenuNode == null) return;
+
+        SaveStateForUndo("Duplicate node");
+        var original = _contextMenuNode;
+        var node = new ConnectorNode(new Point((original.Position?.X ?? 0) + 50, (original.Position?.Y ?? 0) + 50))
+        {
+            NodeId = Guid.NewGuid().ToString("N"),
+            ConnectorType = original.ConnectorType,
+            Label = original.Label != null ? original.Label + " (copy)" : null,
+            IsSource = original.IsSource,
+            IsSink = original.IsSink
+        };
+
+        foreach (var (key, value) in original.Config)
+        {
+            node.Config[key] = value;
+        }
+
+        if (original.IsSource)
+        {
+            node.AddPort(PortAlignment.Right);
+        }
+        else if (original.IsSink)
+        {
+            node.AddPort(PortAlignment.Left);
+        }
+        else
+        {
+            node.AddPort(PortAlignment.Left);
+            node.AddPort(PortAlignment.Right);
+        }
+
+        _diagram.Nodes.Add(node);
+        Notification.ShowInfo("Node duplicated");
+    }
+
+    private void ContextMenuCutNode()
+    {
+        CloseContextMenu();
+        if (_contextMenuNode == null) return;
+        _selectedNodes.Clear();
+        _selectedNodes.Add(_contextMenuNode);
+        Cut();
+    }
+
+    private void ContextMenuCopyNode()
+    {
+        CloseContextMenu();
+        if (_contextMenuNode == null) return;
+        _selectedNodes.Clear();
+        _selectedNodes.Add(_contextMenuNode);
+        Copy();
+    }
+
+    private void ContextMenuToggleDisabled()
+    {
+        CloseContextMenu();
+        if (_contextMenuNode == null) return;
+        _contextMenuNode.IsDisabled = !_contextMenuNode.IsDisabled;
+        _diagram.Refresh();
+        Notification.ShowInfo(_contextMenuNode.IsDisabled ? "Node disabled" : "Node enabled");
+    }
+
+    private void ContextMenuDeleteNode()
+    {
+        CloseContextMenu();
+        if (_contextMenuNode == null) return;
+        SaveStateForUndo("Delete node");
+        _diagram.Nodes.Remove(_contextMenuNode);
+        if (_selectedNode == _contextMenuNode)
+        {
+            _selectedNode = null;
+            _selectedConfigSchema = null;
+        }
+        StateHasChanged();
+    }
+
+    private void ContextMenuPaste()
+    {
+        CloseContextMenu();
+        Paste();
+    }
+
+    private List<BreadcrumbItem> GetBreadcrumbItems()
+    {
+        var items = new List<BreadcrumbItem>();
+        foreach (var entry in _breadcrumb.Reverse())
+        {
+            items.Add(new BreadcrumbItem(entry.Name, entry.PipelineId, icon: Icons.Material.Filled.AccountTree));
+        }
+        items.Add(new BreadcrumbItem(_pipelineName, null, disabled: true, icon: Icons.Material.Filled.Edit));
+        return items;
+    }
+
+    private void OpenSubPipelineEditor(string? subPipelineId)
+    {
+        if (string.IsNullOrEmpty(subPipelineId)) return;
+
+        // Push current state onto breadcrumb stack
+        _breadcrumb.Push(new BreadcrumbEntry(
+            Id ?? "new",
+            _pipelineName,
+            BuildPipelineDefinition()
+        ));
+
+        // Navigate to the sub-pipeline editor
+        Navigation.NavigateTo($"/pipelines/{subPipelineId}/edit");
+    }
+
+    private void NavigateBreadcrumb(string pipelineId)
+    {
+        // Pop until we reach the target
+        while (_breadcrumb.Count > 0)
+        {
+            var entry = _breadcrumb.Pop();
+            if (entry.PipelineId == pipelineId)
+            {
+                Navigation.NavigateTo(
+                    pipelineId == "new" ? "/pipelines/new" : $"/pipelines/{pipelineId}/edit");
+                return;
+            }
+        }
+    }
+
+    private sealed record BreadcrumbEntry(string PipelineId, string Name, PipelineDefinition? SavedState);
+
+    public async ValueTask DisposeAsync()
+    {
+        _autoSaveTimer?.Dispose();
+        _metricsTimer?.Dispose();
+        _debugTimer?.Dispose();
+        _lineageHighlightCts?.Cancel();
+        _lineageHighlightCts?.Dispose();
+        _editorState.StateChanged -= StateHasChanged;
+        if (_diagram != null)
+        {
+            _diagram.SelectionChanged -= OnSelectionChanged;
+        }
+
+        // Disconnect from collaboration hub
+        if (_hubConnection != null)
+        {
+            try
+            {
+                if (!_isNew && Id != null)
+                {
+                    await _hubConnection.SendAsync("LeavePipeline", Id);
+                }
+                await _hubConnection.DisposeAsync();
+            }
+            catch
+            {
+                // Ignore errors during shutdown
+            }
+        }
+    }
+
+    // Chat drawer
+    private void ToggleChatDrawer()
+    {
+        _chatDrawerOpen = !_chatDrawerOpen;
+    }
+
+    private void OnChatDrawerChanged(bool open)
+    {
+        _chatDrawerOpen = open;
+    }
+
+    // --- Collaboration (Multi-User Editing) ---
+
+    private async Task OnCollaborationToggled(bool enabled)
+    {
+        _collaborationEnabled = enabled;
+        if (enabled && !_isNew && Id != null)
+        {
+            await StartCollaborationAsync();
+        }
+        else if (!enabled)
+        {
+            await StopCollaborationAsync();
+        }
+    }
+
+    private async Task StartCollaborationAsync()
+    {
+        if (_hubConnection != null) return;
+
+        var hubUrl = Navigation.ToAbsoluteUri("/hubs/collaboration");
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(hubUrl)
+            .WithAutomaticReconnect()
+            .Build();
+
+        // Register event handlers
+        _hubConnection.On<PresenceInfo>("UserJoined", user =>
+        {
+            if (user.ConnectionId != _hubConnection.ConnectionId)
+            {
+                _collabUsers.RemoveAll(u => u.ConnectionId == user.ConnectionId);
+                _collabUsers.Add(user);
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<string>("UserLeft", connectionId =>
+        {
+            _collabUsers.RemoveAll(u => u.ConnectionId == connectionId);
+            // Remove locks held by this user
+            var lockedNodes = _collabNodeLocks.Where(kv => kv.Value == connectionId).Select(kv => kv.Key).ToList();
+            foreach (var nodeId in lockedNodes) _collabNodeLocks.Remove(nodeId);
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<IReadOnlyList<PresenceInfo>>("PresenceSnapshot", users =>
+        {
+            _collabUsers = users.Where(u => u.ConnectionId != _hubConnection.ConnectionId).ToList();
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<string, double, double>("CursorMoved", (connectionId, x, y) =>
+        {
+            var user = _collabUsers.FirstOrDefault(u => u.ConnectionId == connectionId);
+            if (user != null)
+            {
+                user.CursorX = x;
+                user.CursorY = y;
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<string, string, double, double>("NodeMoved", (connectionId, nodeId, x, y) =>
+        {
+            var node = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == nodeId);
+            if (node != null)
+            {
+                node.SetPosition(x, y);
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<string, string>("NodeRemoved", (connectionId, nodeId) =>
+        {
+            var node = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == nodeId);
+            if (node != null)
+            {
+                _diagram.Nodes.Remove(node);
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<string, string, string>("NodeConfigChanged", (connectionId, nodeId, configJson) =>
+        {
+            var node = _diagram.Nodes.OfType<ConnectorNode>().FirstOrDefault(n => n.NodeId == nodeId);
+            if (node != null)
+            {
+                try
+                {
+                    var config = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(configJson);
+                    if (config != null)
+                    {
+                        node.Config.Clear();
+                        foreach (var (key, value) in config)
+                        {
+                            node.Config[key] = value;
+                        }
+                    }
+                }
+                catch { /* ignore deserialization errors */ }
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<string, string>("NodeLocked", (connectionId, nodeId) =>
+        {
+            _collabNodeLocks[nodeId] = connectionId;
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<string, string>("NodeUnlocked", (connectionId, nodeId) =>
+        {
+            _collabNodeLocks.Remove(nodeId);
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<string, string>("LockDenied", (nodeId, owner) =>
+        {
+            var ownerUser = _collabUsers.FirstOrDefault(u => u.ConnectionId == owner);
+            Notification.ShowWarning($"Node is being edited by {ownerUser?.UserName ?? "another user"}");
+        });
+
+        _hubConnection.On<IReadOnlyDictionary<string, string>>("NodeLocksSnapshot", locks =>
+        {
+            _collabNodeLocks = new Dictionary<string, string>(locks);
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<PipelineComment>("CommentAdded", comment =>
+        {
+            _collabComments.Add(comment);
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<string>("CommentResolved", commentId =>
+        {
+            var comment = _collabComments.FirstOrDefault(c => c.Id == commentId);
+            if (comment != null) comment.Resolved = !comment.Resolved;
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<IReadOnlyList<PipelineComment>>("CommentsSnapshot", comments =>
+        {
+            _collabComments = comments.ToList();
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<ApprovalRequest>("ApprovalRequested", approval =>
+        {
+            _collabApprovals.Add(approval);
+            Notification.ShowInfo($"{approval.RequestedBy} requested approval: {approval.Message}");
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<string, ApprovalStatus, string>("ApprovalReviewed", (approvalId, status, reviewer) =>
+        {
+            var approval = _collabApprovals.FirstOrDefault(a => a.Id == approvalId);
+            if (approval != null)
+            {
+                approval.Status = status;
+                approval.ReviewedBy = reviewer;
+                approval.ReviewedAt = DateTimeOffset.UtcNow;
+            }
+            Notification.ShowInfo($"{reviewer} {status.ToString().ToLowerInvariant()} the change");
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<IReadOnlyList<ApprovalRequest>>("ApprovalsSnapshot", approvals =>
+        {
+            _collabApprovals = approvals.ToList();
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+            await _hubConnection.SendAsync("JoinPipeline", Id, _collabUserName);
+            Notification.ShowSuccess("Collaboration mode enabled");
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to connect to collaboration hub: {ex.Message}");
+            _collaborationEnabled = false;
+        }
+    }
+
+    private async Task StopCollaborationAsync()
+    {
+        if (_hubConnection != null && Id != null)
+        {
+            try
+            {
+                await _hubConnection.SendAsync("LeavePipeline", Id);
+                await _hubConnection.DisposeAsync();
+            }
+            catch { /* ignore */ }
+            _hubConnection = null;
+        }
+        _collabUsers.Clear();
+        _collabComments.Clear();
+        _collabApprovals.Clear();
+        _collabNodeLocks.Clear();
+        StateHasChanged();
+    }
+
+    private async Task BroadcastNodeMoved(string nodeId, double x, double y)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("NodeMoved", Id, nodeId, x, y);
+        }
+    }
+
+    private async Task BroadcastNodeRemoved(string nodeId)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("NodeRemoved", Id, nodeId);
+        }
+    }
+
+    private async Task BroadcastNodeConfigChanged(string nodeId, Dictionary<string, string> config)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(config);
+            await _hubConnection.SendAsync("NodeConfigChanged", Id, nodeId, json);
+        }
+    }
+
+    private async Task CollabLockNode(string nodeId)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("LockNode", Id, nodeId);
+        }
+    }
+
+    private async Task CollabUnlockNode(string nodeId)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("UnlockNode", Id, nodeId);
+        }
+    }
+
+    private async Task OnAddComment((string Text, string? NodeId) args)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("AddComment", Id, _collabUserName, args.Text, args.NodeId);
+        }
+    }
+
+    private async Task OnResolveComment(string commentId)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("ResolveComment", Id, commentId);
+        }
+    }
+
+    private async Task OnRequestApproval(string? message)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("RequestApproval", Id, _collabUserName, message);
+        }
+    }
+
+    private async Task OnReviewApproval((string ApprovalId, bool Approved) args)
+    {
+        if (_hubConnection?.State == HubConnectionState.Connected && Id != null)
+        {
+            await _hubConnection.SendAsync("ReviewApproval", Id, args.ApprovalId, args.Approved, _collabUserName);
+        }
+    }
+
+    private async Task ValidateAsync()
+    {
+        if (Id == null) return;
+        _validating = true;
+        _validationIssues.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var result = await ApiClient.ValidatePipelineAsync(Id);
+            _validationIssues = result?.Issues ?? [];
+
+            // Apply validation state to nodes
+            foreach (var node in _diagram.Nodes.OfType<ConnectorNode>())
+            {
+                var issues = _validationIssues.Where(i => i.NodeId == node.NodeId).ToList();
+                if (issues.Any(i => i.Severity == "Error"))
+                {
+                    node.ValidationState = NodeValidationState.Error;
+                    node.ValidationMessage = string.Join("; ", issues.Where(i => i.Severity == "Error").Select(i => i.Message));
+                }
+                else if (issues.Any(i => i.Severity == "Warning"))
+                {
+                    node.ValidationState = NodeValidationState.Warning;
+                    node.ValidationMessage = string.Join("; ", issues.Where(i => i.Severity == "Warning").Select(i => i.Message));
+                }
+                else
+                {
+                    node.ValidationState = NodeValidationState.Valid;
+                    node.ValidationMessage = null;
+                }
+
+                // Store issues as JSON in config for NodeConfigPanel display
+                if (issues.Count > 0)
+                {
+                    node.Config["_validation"] = System.Text.Json.JsonSerializer.Serialize(
+                        issues.Select(i => new { i.Severity, i.Code, i.Message }));
+                }
+                else
+                {
+                    node.Config.Remove("_validation");
+                }
+            }
+
+            _diagram.Refresh();
+
+            if (_validationErrors > 0)
+                Notification.ShowWarning($"Validation: {_validationErrors} error(s), {_validationIssues.Count - _validationErrors} warning(s)");
+            else if (_validationIssues.Count > 0)
+                Notification.ShowInfo($"Validation: {_validationIssues.Count} warning(s), no errors");
+            else
+                Notification.ShowSuccess("Validation passed — no issues");
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Validation failed: {ex.Message}");
+        }
+        finally
+        {
+            _validating = false;
+            StateHasChanged();
+        }
+    }
+
+}

@@ -1,0 +1,168 @@
+@using Kuestenlogik.Surgewave.Control.Models.Marketplace
+@inject IReviewService ReviewService
+@inject NotificationState Notifications
+
+<MudPaper Elevation="1" Class="pa-4">
+    <MudText Typo="Typo.h6" Class="mb-3">Write a Review</MudText>
+
+    <div class="mb-3">
+        <MudText Typo="Typo.body2" Class="mb-1">Your Rating</MudText>
+        <RatingStars Value="@_rating" ValueChanged="OnRatingChanged" ReadOnly="false" Size="Size.Large" />
+        @if (_submitted && _rating == 0)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error">Please select a rating.</MudText>
+        }
+    </div>
+
+    <MudTextField @bind-Value="_author"
+                  Label="Display Name"
+                  Variant="Variant.Outlined"
+                  Class="mb-3"
+                  Required="true"
+                  RequiredError="Display name is required." />
+
+    <MudTextField @bind-Value="_title"
+                  Label="Review Title (optional)"
+                  Variant="Variant.Outlined"
+                  Class="mb-3" />
+
+    <MudTextField @bind-Value="_comment"
+                  Label="Your Review (optional)"
+                  Variant="Variant.Outlined"
+                  Lines="4"
+                  Class="mb-3" />
+
+    <div class="mb-3">
+        <MudText Typo="Typo.body2" Class="mb-1">Tags (select all that apply)</MudText>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var tag in AvailableTags)
+            {
+                var isSelected = _selectedTags.Contains(tag);
+                <MudChip T="string"
+                         Size="Size.Small"
+                         Color="@(isSelected ? Color.Primary : Color.Default)"
+                         Variant="@(isSelected ? Variant.Filled : Variant.Outlined)"
+                         OnClick="@(() => ToggleTag(tag))">
+                    @tag
+                </MudChip>
+            }
+        </div>
+    </div>
+
+    <div class="d-flex justify-end gap-2">
+        <MudButton Variant="Variant.Text" OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="Submit"
+                   Disabled="_submitting">
+            @if (_submitting)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Submit Review
+        </MudButton>
+    </div>
+</MudPaper>
+
+@code {
+    /// <summary>
+    /// The connector being reviewed.
+    /// </summary>
+    [Parameter]
+    public string ConnectorId { get; set; } = "";
+
+    /// <summary>
+    /// Callback when a review is submitted successfully.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnReviewSubmitted { get; set; }
+
+    /// <summary>
+    /// Callback when the form is cancelled.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnCancelled { get; set; }
+
+    private static readonly string[] AvailableTags =
+    [
+        "Easy Setup",
+        "Reliable",
+        "Well Documented",
+        "Fast",
+        "Good Support",
+        "Feature Rich",
+        "Lightweight",
+        "Production Ready"
+    ];
+
+    private double _rating;
+    private string _author = "";
+    private string? _title;
+    private string? _comment;
+    private readonly HashSet<string> _selectedTags = [];
+    private bool _submitting;
+    private bool _submitted;
+
+    private void OnRatingChanged(double value) => _rating = value;
+
+    private void ToggleTag(string tag)
+    {
+        if (!_selectedTags.Remove(tag))
+            _selectedTags.Add(tag);
+    }
+
+    private async Task Submit()
+    {
+        _submitted = true;
+
+        if (_rating < 1 || string.IsNullOrWhiteSpace(_author))
+            return;
+
+        _submitting = true;
+        StateHasChanged();
+
+        try
+        {
+            var review = new ConnectorReview
+            {
+                ConnectorId = ConnectorId,
+                Author = _author.Trim(),
+                Rating = (int)_rating,
+                Title = string.IsNullOrWhiteSpace(_title) ? null : _title.Trim(),
+                Comment = string.IsNullOrWhiteSpace(_comment) ? null : _comment.Trim(),
+                Tags = [.. _selectedTags]
+            };
+
+            await ReviewService.SubmitReviewAsync(review);
+            Notifications.ShowSuccess("Review submitted successfully!");
+
+            // Reset form
+            _rating = 0;
+            _title = null;
+            _comment = null;
+            _selectedTags.Clear();
+            _submitted = false;
+
+            await OnReviewSubmitted.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Failed to submit review: {ex.Message}");
+        }
+        finally
+        {
+            _submitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Cancel()
+    {
+        _rating = 0;
+        _title = null;
+        _comment = null;
+        _selectedTags.Clear();
+        _submitted = false;
+        await OnCancelled.InvokeAsync();
+    }
+}

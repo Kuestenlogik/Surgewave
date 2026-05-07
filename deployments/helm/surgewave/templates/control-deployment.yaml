@@ -1,0 +1,54 @@
+{{- if .Values.control.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "surgewave.fullname" . }}-control
+  labels:
+    {{- include "surgewave.control.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.control.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "surgewave.control.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "surgewave.control.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "surgewave.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: surgewave-control
+          image: "{{ .Values.control.image.repository }}:{{ .Values.control.image.tag }}"
+          imagePullPolicy: {{ .Values.control.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.control.port }}
+              protocol: TCP
+          env:
+            - name: ASPNETCORE_URLS
+              value: "http://+:{{ .Values.control.port }}"
+            - name: Surgewave__BootstrapServers
+              value: {{ include "surgewave.bootstrapServers" . | quote }}
+          resources:
+            {{- toYaml .Values.control.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+{{- end }}

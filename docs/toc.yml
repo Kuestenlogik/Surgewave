@@ -1,0 +1,207 @@
+- name: Home
+  href: index.md
+
+- name: Introduction
+  href: comparison.md
+  items:
+    - name: Why Surgewave?
+      href: comparison.md
+    - name: Use Cases
+      href: use-cases.md
+
+- name: Getting Started
+  href: quickstart/
+  items:
+    - name: Quickstart
+      href: quickstart/
+    - name: Setup
+      href: setup/
+    - name: Tutorials
+      href: tutorials/
+    - name: Samples
+      href: samples/
+    - name: Testing
+      href: setup/testing.md
+
+- name: Architecture
+  href: storage/
+  items:
+    - name: Storage
+      href: storage/
+    - name: Transport
+      href: transport/
+    - name: Clustering
+      href: clustering/
+    - name: Embedded Mode
+      href: setup/embedded.md
+    - name: Internals
+      href: architecture/internals.md
+
+- name: Clients
+  href: clients/
+  items:
+    - name: Overview
+      href: clients/
+    - name: .NET Client
+      href: clients/dotnet.md
+    - name: Producer API
+      href: clients/producer.md
+    - name: Consumer API
+      href: clients/consumer.md
+    - name: Streaming Consumer
+      href: streaming-consumer.md
+    - name: Priority Lanes
+      href: priority-lanes.md
+    - name: Kafka Compatibility
+      href: clients/kafka-compat.md
+    - name: Conformance
+      href: conformance/
+      items:
+        - name: Overview
+          href: conformance/
+        - name: Kafka API matrix
+          href: conformance/kafka-rpcs.md
+        - name: KIP coverage and tests
+          href: conformance/kips.md
+        - name: Schema Registry
+          href: conformance/schema-registry.md
+
+- name: Features
+  href: features/
+  items:
+    - name: Overview
+      href: features/
+    - name: Kafka Streams
+      href: features/streams.md
+    - name: Kafka Connect
+      href: features/connect.md
+    - name: Schema Registry
+      href: features/schema-registry.md
+    - name: Transactions
+      href: features/transactions.md
+    - name: Quotas
+      href: features/quotas.md
+    - name: QueueView
+      href: queue-view.md
+    - name: AMQP Adapter
+      href: amqp-adapter.md
+    - name: Interactive Queries
+      href: interactive-queries.md
+    - name: Circuit Breaker
+      href: circuit-breaker.md
+    - name: Cruise Control
+      href: features/cruise-control.md
+    - name: Intent-Based Config
+      href: features/intent-based-config.md
+    - name: ONNX ML Scoring
+      href: features/ml-scoring.md
+    - name: WASM Plugins
+      href: features/wasm-plugins.md
+
+- name: Connectors
+  href: connectors/
+  items:
+    - name: Overview
+      href: connectors/
+    - name: AWS S3
+      href: connectors/s3.md
+    - name: Azure Blob Storage
+      href: connectors/azure-blob.md
+    - name: Google Cloud Storage
+      href: connectors/gcs.md
+    - name: PostgreSQL CDC
+      href: connectors/postgresql.md
+    - name: MongoDB
+      href: connectors/mongodb.md
+    - name: Elasticsearch
+      href: connectors/elasticsearch.md
+    - name: Generic Database
+      href: connectors/database.md
+    - name: MQTT
+      href: connectors/mqtt.md
+    - name: Redis
+      href: connectors/redis.md
+    - name: HTTP Webhook
+      href: connectors/http.md
+    - name: Custom Connectors
+      href: connectors/custom-connectors.md
+
+- name: AI & LLM
+  href: ai/
+  items:
+    - name: Overview
+      href: ai/
+    - name: OpenAI
+      href: ai/openai.md
+    - name: Ollama
+      href: ai/ollama.md
+    - name: Qdrant
+      href: ai/qdrant.md
+    - name: Guardrails
+      href: ai/guardrails.md
+    - name: Agent Memory
+      href: ai/agent-memory.md
+    - name: Pipeline Chat
+      href: ai/pipeline-chat.md
+    - name: Agent Integration
+      href: ai/agent-integration.md
+
+- name: Testing
+  href: testing/
+  items:
+    - name: Chaos Testing
+      href: testing/chaos-testing.md
+
+- name: Production
+  href: deployment/
+  items:
+    - name: Deployment
+      href: deployment/
+    - name: Security
+      href: security/
+    - name: Tools
+      href: tools/
+    - name: Performance
+      href: performance/
+    - name: Monitoring
+      href: monitoring/
+    - name: Operations
+      href: operations/
+
+- name: Cookbook
+  href: cookbook/
+  items:
+    - name: Overview
+      href: cookbook/
+    - name: Produce & Consume
+      href: cookbook/produce-consume.md
+    - name: Schema Registry
+      href: cookbook/schema-registry.md
+    - name: Streams Topology
+      href: cookbook/streams-topology.md
+    - name: Connect Pipeline
+      href: cookbook/connect-pipeline.md
+    - name: QueueView
+      href: cookbook/queue-view.md
+    - name: Monitoring
+      href: cookbook/monitoring.md
+
+- name: Reference
+  href: reference/
+  items:
+    - name: Overview
+      href: reference/
+    - name: Configuration
+      href: reference/config-reference.md
+    - name: REST API
+      href: reference/rest-api-reference.md
+    - name: Feature Toggles
+      href: reference/feature-toggles.md
+    - name: Error Codes
+      href: reference/error-codes.md
+    - name: API Reference
+      href: api/index.md
+    - name: Glossary
+      href: glossary.md
+    - name: FAQ
+      href: faq.md

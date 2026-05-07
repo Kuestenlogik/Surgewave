@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package
+    Name="Storm Broker"
+    Manufacturer="Kustenlogik"
+    Version="!(bind.FileVersion.BrokerExe)"
+    UpgradeCode="7A3C9E1F-4B2D-4F8A-9C6E-1D5A3B7F2E4C"
+    Scope="perMachine"
+    Language="1033"
+    Codepage="1252">
+
+    <SummaryInformation
+      Description="Storm - High-performance event streaming platform for Windows"
+      Keywords="Storm, Kafka, Event Streaming, Message Broker" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Storm is already installed."
+      AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Standard directories -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Storm">
+        <Directory Id="BrokerDir" Name="broker" />
+        <Directory Id="CliDir" Name="cli" />
+        <Directory Id="ControlDir" Name="control" />
+        <Directory Id="DataDir" Name="data" />
+        <Directory Id="LogsDir" Name="logs" />
+        <Directory Id="PluginsDir" Name="plugins" />
+        <Directory Id="ModelsDir" Name="models" />
+        <Directory Id="WasmDir" Name="wasm-plugins" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StormShortcutDir" Name="Storm" />
+    </StandardDirectory>
+
+    <!-- Features -->
+    <Feature Id="BrokerFeature" Title="Storm Broker" Description="Storm Broker service and runtime files" Level="1" Absent="disallow">
+      <ComponentGroupRef Id="BrokerFiles" />
+      <ComponentRef Id="BrokerServiceComponent" />
+      <ComponentRef Id="BrokerConfigComponent" />
+      <ComponentRef Id="DataDirComponent" />
+      <ComponentRef Id="LogsDirComponent" />
+      <ComponentRef Id="PluginsDirComponent" />
+      <ComponentRef Id="ModelsDirComponent" />
+      <ComponentRef Id="WasmDirComponent" />
+      <ComponentRef Id="BrokerShortcutComponent" />
+    </Feature>
+
+    <Feature Id="CliFeature" Title="Storm CLI" Description="Storm command-line interface (added to PATH)" Level="1">
+      <ComponentGroupRef Id="CliFiles" />
+      <ComponentRef Id="CliPathComponent" />
+    </Feature>
+
+    <Feature Id="ControlFeature" Title="Storm Control UI" Description="Web-based administration dashboard" Level="2">
+      <ComponentGroupRef Id="ControlFiles" />
+      <ComponentRef Id="ControlShortcutComponent" />
+    </Feature>
+
+    <!-- UI -->
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <ui:WixUI Id="WixUI_FeatureTree" />
+
+    <!-- Set default install directory via property -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- Set the icon in Add/Remove Programs -->
+    <Icon Id="StormIcon" SourceFile="storm.ico" />
+    <Property Id="ARPPRODUCTICON" Value="StormIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Kuestenlogik/Storm" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Kuestenlogik/Storm" />
+
+  </Package>
+</Wix>

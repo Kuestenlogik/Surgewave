@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Edge-to-Cloud sync for Surgewave. Run an embedded Surgewave broker at the edge (IoT, factory, vehicle) with automatic cloud synchronization and offline buffering.</Description>
+    <PackageTags>surgewave;kafka;edge;iot;sync;offline;embedded</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Runtime\Kuestenlogik.Surgewave.Runtime.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Quic\Kuestenlogik.Surgewave.Transport.Quic.csproj" />
+  </ItemGroup>
+
+</Project>

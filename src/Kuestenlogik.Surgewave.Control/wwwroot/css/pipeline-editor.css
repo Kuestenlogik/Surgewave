@@ -1,0 +1,368 @@
+/* Pipeline Editor Styles */
+
+/* Monaco script editor in NodeConfigPanel */
+.script-editor {
+    height: 300px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+/* Diagram Canvas */
+.diagram-canvas-container {
+    width: 100%;
+    height: calc(100vh - 250px);
+    min-height: 500px;
+    background-color: var(--mud-palette-background);
+    background-image:
+        linear-gradient(rgba(0,0,0,.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Node Palette */
+.node-palette {
+    height: calc(100vh - 250px);
+    overflow-y: auto;
+}
+
+.connector-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    margin: 6px 0;
+    background-color: var(--mud-palette-surface);
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 6px;
+    cursor: grab;
+    transition: all 0.2s ease;
+    font-size: 13px;
+}
+
+.connector-item:hover {
+    background-color: var(--mud-palette-action-default-hover);
+    border-color: var(--mud-palette-primary);
+    transform: translateX(2px);
+}
+
+.connector-item:active {
+    cursor: grabbing;
+    transform: scale(0.98);
+}
+
+.connector-item .mud-icon-root {
+    opacity: 0.7;
+}
+
+/* Connector Nodes */
+.connector-node {
+    min-width: 160px;
+    max-width: 220px;
+    background: var(--mud-palette-surface);
+    border: 2px solid var(--mud-palette-lines-default);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    font-family: inherit;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.connector-node:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.connector-node.selected {
+    border-color: var(--mud-palette-primary);
+    box-shadow: 0 0 0 3px rgba(var(--mud-palette-primary-rgb), 0.2),
+                0 4px 12px rgba(0,0,0,0.15);
+}
+
+.connector-node-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--mud-palette-background-gray);
+    border-radius: 6px 6px 0 0;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.connector-node-icon {
+    margin-right: 10px;
+    font-size: 16px;
+    opacity: 0.8;
+}
+
+.connector-node-title {
+    font-weight: 600;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+
+.connector-node-status {
+    padding: 6px 14px 10px;
+    font-size: 11px;
+    color: var(--mud-palette-text-secondary);
+}
+
+/* Node Type Indicators */
+.source-node {
+    border-left: 4px solid var(--mud-palette-success);
+}
+
+.source-node .connector-node-header {
+    background: linear-gradient(135deg, rgba(var(--mud-palette-success-rgb), 0.08), transparent);
+}
+
+.sink-node {
+    border-left: 4px solid var(--mud-palette-info);
+}
+
+.sink-node .connector-node-header {
+    background: linear-gradient(135deg, rgba(var(--mud-palette-info-rgb), 0.08), transparent);
+}
+
+.transform-node {
+    border-left: 4px solid var(--mud-palette-warning);
+}
+
+.transform-node .connector-node-header {
+    background: linear-gradient(135deg, rgba(var(--mud-palette-warning-rgb), 0.08), transparent);
+}
+
+/* Node Status Colors */
+.status-success .connector-node-header {
+    background: rgba(var(--mud-palette-success-rgb), 0.12);
+}
+
+.status-error .connector-node-header {
+    background: rgba(var(--mud-palette-error-rgb), 0.12);
+}
+
+.status-warning .connector-node-header {
+    background: rgba(var(--mud-palette-warning-rgb), 0.12);
+}
+
+/* Ports */
+.connector-node-port {
+    width: 14px;
+    height: 14px;
+    background: var(--mud-palette-primary);
+    border: 3px solid var(--mud-palette-surface);
+    border-radius: 50%;
+    position: absolute;
+    cursor: crosshair;
+    transition: transform 0.15s ease;
+}
+
+.connector-node-port:hover {
+    transform: scale(1.3);
+}
+
+.connector-node-port.connected {
+    background: var(--mud-palette-success);
+}
+
+/* Links */
+.diagram-link {
+    stroke: var(--mud-palette-primary);
+    stroke-width: 2;
+    fill: none;
+    transition: stroke-width 0.2s ease;
+}
+
+.diagram-link:hover {
+    stroke-width: 4;
+}
+
+.diagram-link.selected {
+    stroke: var(--mud-palette-secondary);
+    stroke-width: 3;
+}
+
+/* Config Panel */
+.config-panel {
+    height: calc(100vh - 250px);
+    overflow-y: auto;
+}
+
+.config-panel .mud-input-control {
+    margin-bottom: 12px;
+}
+
+/* Zoom Controls */
+.zoom-controls {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--mud-palette-surface);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+/* Composite (Sub-Pipeline) Nodes */
+.composite-node {
+    border: 2px dashed var(--mud-palette-tertiary) !important;
+}
+
+.composite-node .connector-node-header {
+    background: linear-gradient(135deg, rgba(var(--mud-palette-tertiary-rgb), 0.12), transparent);
+}
+
+.composite-node-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px 8px;
+}
+
+.composite-node.selected {
+    box-shadow: 0 0 0 3px rgba(var(--mud-palette-tertiary-rgb), 0.2);
+}
+
+/* Pipeline items in palette */
+.pipeline-item {
+    border-left: 3px solid var(--mud-palette-tertiary);
+}
+
+/* Dark Mode Adjustments */
+.mud-theme-dark .diagram-canvas-container {
+    background-image:
+        linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+}
+
+.mud-theme-dark .connector-node {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.mud-theme-dark .connector-item:hover {
+    background-color: rgba(255,255,255,0.05);
+}
+
+/* Back-Pressure Link Visualization (Feature 2) */
+.link-backpressure-warning path {
+    stroke: #FFA726 !important;
+    stroke-width: 3;
+}
+
+.link-backpressure-critical path {
+    stroke: #EF5350 !important;
+    stroke-width: 4;
+    stroke-dasharray: 12, 4;
+    animation: backpressure-flow 1s linear infinite;
+}
+
+@keyframes backpressure-flow {
+    to { stroke-dashoffset: -16; }
+}
+
+/* Error Link Visualization (Feature 5) */
+.error-link path {
+    stroke: var(--mud-palette-error) !important;
+    stroke-dasharray: 8, 4;
+}
+
+.error-link .link-label-text {
+    fill: var(--mud-palette-error);
+}
+
+.error-link .link-label-bg {
+    stroke: var(--mud-palette-error);
+}
+
+/* Error Port (Feature 5) */
+.connector-node-port-error {
+    background: var(--mud-palette-error) !important;
+}
+
+/* Node Metrics Bar (Feature 4) */
+.node-metrics-bar {
+    display: flex;
+    gap: 4px;
+    padding: 4px 12px 6px;
+}
+
+.metric-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
+.metric-badge.throughput {
+    background: rgba(var(--mud-palette-success-rgb), 0.15);
+    color: var(--mud-palette-success);
+}
+
+.metric-badge.latency {
+    background: rgba(var(--mud-palette-info-rgb), 0.15);
+    color: var(--mud-palette-info);
+}
+
+.metric-badge.errors {
+    background: rgba(var(--mud-palette-error-rgb), 0.15);
+    color: var(--mud-palette-error);
+}
+
+/* Debug Breakpoint (Feature 1) */
+.breakpoint-dot {
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 12px;
+    height: 12px;
+    background: var(--mud-palette-error);
+    border-radius: 50%;
+    border: 2px solid var(--mud-palette-surface);
+    z-index: 10;
+}
+
+/* Paused Node (Feature 1) */
+.paused-node {
+    border-color: var(--mud-palette-warning) !important;
+    animation: pause-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pause-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(var(--mud-palette-warning-rgb), 0.2); }
+    50% { box-shadow: 0 0 0 6px rgba(var(--mud-palette-warning-rgb), 0.4); }
+}
+
+/* Queue Depth Badge (Feature 1) */
+.queue-depth-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    min-width: 18px;
+    height: 18px;
+    background: var(--mud-palette-warning);
+    color: white;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    z-index: 10;
+}
+
+/* Back-Pressure Queue Badge on Links (Feature 2) */
+.link-queue-badge {
+    font-size: 10px;
+    font-weight: bold;
+    font-family: monospace;
+}

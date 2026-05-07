@@ -1,0 +1,823 @@
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISurgewaveApiClient SurgewaveApi
+
+<MudPaper Elevation="2" Class="pa-3" Style="height: 100%; overflow-y: auto;">
+    @if (SelectedNode == null)
+    {
+        <MudText Color="Color.Secondary" Class="text-center pa-4">
+            Select a node to configure
+        </MudText>
+    }
+    else
+    {
+        <MudText Typo="Typo.h6" Class="mb-3">@SelectedNode.DisplayName</MudText>
+
+        <MudTextField @bind-Value="@_label" Label="Label" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Class="mb-3" @bind-Value:after="OnLabelChanged" />
+
+        <MudDivider Class="my-3" />
+
+        @if (SelectedNode.IsSqlTransform)
+        {
+            @* SQL Transform configuration *@
+            <MudText Typo="Typo.subtitle2" Style="color: #CE93D8;" Class="mb-2">
+                <MudIcon Icon="@Icons.Material.Filled.Code" Size="MudBlazor.Size.Small" Class="mr-1" Style="color: #CE93D8;" />
+                SQL Query
+            </MudText>
+
+            <MudTextField @bind-Value="_sqlQuery" Label="SQL Query" Variant="Variant.Outlined"
+                          Lines="8" Class="mb-2 sql-editor-field"
+                          Placeholder="SELECT key, value, COUNT(*) as cnt&#10;FROM input_stream&#10;WHERE value > 100&#10;GROUP BY key"
+                          @bind-Value:after="OnSqlQueryChanged"
+                          Style="font-family: 'Consolas', 'Monaco', monospace; font-size: 12px;" />
+
+            <MudExpansionPanels Class="mb-3" Elevation="0">
+                <MudExpansionPanel Text="SQL Reference" MaxHeight="300" Style="font-size: 12px;">
+                    <MudText Typo="Typo.caption" Class="mb-1"><strong>Supported SQL:</strong></MudText>
+                    <MudText Typo="Typo.caption">SELECT, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT</MudText>
+                    <MudText Typo="Typo.caption">JOIN (INNER, LEFT, RIGHT, FULL)</MudText>
+                    <MudText Typo="Typo.caption">TUMBLE/HOP/SESSION windows</MudText>
+                    <MudText Typo="Typo.caption">CREATE STREAM/TABLE AS SELECT</MudText>
+                    <MudDivider Class="my-1" />
+                    <MudText Typo="Typo.caption" Class="mb-1"><strong>Aggregations:</strong></MudText>
+                    <MudText Typo="Typo.caption">COUNT, SUM, AVG, MIN, MAX, STDDEV, VARIANCE</MudText>
+                    <MudDivider Class="my-1" />
+                    <MudText Typo="Typo.caption" Class="mb-1"><strong>Functions:</strong></MudText>
+                    <MudText Typo="Typo.caption">UPPER, LOWER, TRIM, SUBSTRING, CONCAT, REPLACE, COALESCE, ABS, ROUND, CEIL, FLOOR, SQRT, POW, LOG, LENGTH, NOW</MudText>
+                    <MudDivider Class="my-1" />
+                    <MudText Typo="Typo.caption" Class="mb-1"><strong>Expressions:</strong></MudText>
+                    <MudText Typo="Typo.caption">CASE/WHEN, CAST, IN, BETWEEN, LIKE, IS NULL</MudText>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+
+            <MudTextField @bind-Value="_sqlInputTopic" Label="Input Topic" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Class="mb-2" HelperText="Source stream/table for SQL processing"
+                          @bind-Value:after="OnSqlConfigChanged" />
+
+            <MudTextField @bind-Value="_sqlOutputTopic" Label="Output Topic" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Class="mb-3" HelperText="Target stream for SQL results"
+                          @bind-Value:after="OnSqlConfigChanged" />
+
+            <MudSelect T="string" @bind-Value="_sqlEmitStrategy" Label="Emit Strategy" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Class="mb-3" @bind-Value:after="OnSqlConfigChanged">
+                <MudSelectItem Value="@("changes")">EMIT CHANGES (on every update)</MudSelectItem>
+                <MudSelectItem Value="@("final")">EMIT FINAL (on window close)</MudSelectItem>
+            </MudSelect>
+        }
+        else if (SelectedNode.IsExceptionHandler)
+        {
+            @* Exception Handler configuration *@
+            <MudText Typo="Typo.subtitle2" Color="Color.Error" Class="mb-2">
+                <MudIcon Icon="@Icons.Material.Filled.Shield" Size="MudBlazor.Size.Small" Class="mr-1" Color="Color.Error" />
+                Exception Handling
+            </MudText>
+
+            <MudSelect T="string" @bind-Value="_exceptionStrategy" Label="Strategy" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Class="mb-2" @bind-Value:after="OnExceptionConfigChanged">
+                <MudSelectItem Value="@("ReplaceThread")">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Autorenew" Size="MudBlazor.Size.Small" Color="Color.Success" />
+                        Replace Thread
+                    </div>
+                </MudSelectItem>
+                <MudSelectItem Value="@("ShutdownClient")">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Warning" Size="MudBlazor.Size.Small" Color="Color.Warning" />
+                        Shutdown Client
+                    </div>
+                </MudSelectItem>
+                <MudSelectItem Value="@("ShutdownApplication")">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.PowerSettingsNew" Size="MudBlazor.Size.Small" Color="Color.Error" />
+                        Shutdown Application
+                    </div>
+                </MudSelectItem>
+            </MudSelect>
+
+            <MudAlert Severity="@GetStrategySeverity(_exceptionStrategy)" Dense="true" Class="mb-3" Variant="Variant.Outlined">
+                @GetStrategyDescription(_exceptionStrategy)
+            </MudAlert>
+
+            <MudSwitch T="bool" @bind-Value="_exceptionDlqEnabled" Label="Send to Dead Letter Queue"
+                       @bind-Value:after="OnExceptionConfigChanged" Class="mb-2" />
+
+            @if (_exceptionDlqEnabled)
+            {
+                <MudTextField @bind-Value="_exceptionDlqTopic" Label="DLQ Topic" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Class="mb-2" HelperText="Topic for failed records"
+                              @bind-Value:after="OnExceptionConfigChanged" />
+            }
+
+            <MudSwitch T="bool" @bind-Value="_exceptionRetryEnabled" Label="Retry before handling"
+                       @bind-Value:after="OnExceptionConfigChanged" Class="mb-2" />
+
+            @if (_exceptionRetryEnabled)
+            {
+                <MudNumericField T="int" @bind-Value="_exceptionMaxRetries" Label="Max Retries"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="100" Class="mb-2"
+                                 @bind-Value:after="OnExceptionConfigChanged" />
+            }
+
+            <MudSwitch T="bool" @bind-Value="_exceptionLogEnabled" Label="Log exceptions"
+                       @bind-Value:after="OnExceptionConfigChanged" Class="mb-2" />
+        }
+        else if (_loading)
+        {
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+        }
+        else if (ConfigSchema != null)
+        {
+            <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2">Configuration</MudText>
+
+            @foreach (var key in ConfigSchema.Keys.OrderBy(k => k.IsRequired ? 0 : 1).ThenBy(k => k.Name))
+            {
+                var editorType = ResolveEditor(key);
+                <div class="mb-3">
+                    @if (editorType == "Cron")
+                    {
+                        <CronBuilder Label="@key.Name"
+                                     Value="@GetStringValue(key.Name)"
+                                     ValueChanged="@(v => OnExpressionChanged(key.Name, v))" />
+                    }
+                    else if (editorType == "Condition")
+                    {
+                        <ConditionBuilder Label="@key.Name"
+                                          Value="@GetStringValue(key.Name)"
+                                          ValueChanged="@(v => OnExpressionChanged(key.Name, v))" />
+                    }
+                    else if (editorType == "Expression")
+                    {
+                        <ExpressionEditor Label="@key.Name"
+                                          Value="@GetStringValue(key.Name)"
+                                          ValueChanged="@(v => OnExpressionChanged(key.Name, v))"
+                                          Type="@GetExpressionType(key.Name)"
+                                          HelperText="@key.Documentation" />
+                    }
+                    else if (editorType is "Code" or "Sql")
+                    {
+                        var language = editorType == "Sql" ? "sql" : key.EditorLanguage ?? "csharp";
+                        <MudText Typo="Typo.caption" Class="mb-1">@key.Name</MudText>
+                        <BlazorMonaco.Editor.StandaloneCodeEditor
+                            @ref="_codeEditor"
+                            Id="@($"code-editor-{key.Name}")"
+                            ConstructionOptions="@(_ => GetCodeEditorOptions(key.Name, language))"
+                            OnDidChangeModelContent="@(() => OnCodeChanged(key.Name))"
+                            CssClass="script-editor" />
+                        @if (!string.IsNullOrEmpty(key.Documentation))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@key.Documentation</MudText>
+                        }
+                    }
+                    else if (editorType == "Topic")
+                    {
+                        <MudAutocomplete T="string" @bind-Value="@_stringValues[key.Name]"
+                            Label="@key.Name" CoerceText="false" CoerceValue="false"
+                            SearchFunc="@((text, ct) => SearchTopicsAsync(text))"
+                            HelperText="@GetHelperText(key)" Required="@key.IsRequired"
+                            Variant="Variant.Outlined" Margin="Margin.Dense"
+                            @bind-Value:after="@(() => OnConfigChanged(key.Name))">
+                            <ItemTemplate Context="topic">
+                                <div class="d-flex justify-space-between" style="width:100%">
+                                    <MudText>@topic</MudText>
+                                    @{ var info = _cachedTopics?.FirstOrDefault(t => t.Name == topic); }
+                                    @if (info != null)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            @info.PartitionCount partitions
+                                        </MudText>
+                                    }
+                                </div>
+                            </ItemTemplate>
+                        </MudAutocomplete>
+                    }
+                    else if (editorType == "Select" && key.Options?.Length > 0)
+                    {
+                        <MudSelect T="string" @bind-Value="@_stringValues[key.Name]" Label="@key.Name"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   HelperText="@key.Documentation" Required="@key.IsRequired"
+                                   @bind-Value:after="@(() => OnConfigChanged(key.Name))">
+                            @foreach (var option in key.Options)
+                            {
+                                <MudSelectItem Value="@option">@option</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    else if (editorType == "Multiline")
+                    {
+                        <MudTextField @bind-Value="@_stringValues[key.Name]" Label="@key.Name"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Lines="5"
+                                      HelperText="@key.Documentation" Required="@key.IsRequired"
+                                      @bind-Value:after="@(() => OnConfigChanged(key.Name))" />
+                    }
+                    else if (key.Type == "Boolean")
+                    {
+                        <MudSwitch T="bool" @bind-Value="@_boolValues[key.Name]" Label="@key.Name"
+                                   @bind-Value:after="@(() => OnConfigChanged(key.Name))" />
+                    }
+                    else if (key.Type == "Int" || key.Type == "Long")
+                    {
+                        <MudNumericField T="long" @bind-Value="@_numericValues[key.Name]" Label="@key.Name"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         HelperText="@key.Documentation"
+                                         Required="@key.IsRequired"
+                                         @bind-Value:after="@(() => OnConfigChanged(key.Name))" />
+                    }
+                    else if (key.Type == "Password")
+                    {
+                        <MudTextField @bind-Value="@_stringValues[key.Name]" Label="@key.Name"
+                                      InputType="InputType.Password"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      HelperText="@key.Documentation"
+                                      Required="@key.IsRequired"
+                                      @bind-Value:after="@(() => OnConfigChanged(key.Name))" />
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="@_stringValues[key.Name]" Label="@key.Name"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      HelperText="@(GetHelperText(key))"
+                                      Required="@key.IsRequired"
+                                      Placeholder="@key.DefaultValue"
+                                      @bind-Value:after="@(() => OnConfigChanged(key.Name))" />
+                        @if (IsParameterized(key.Name))
+                        {
+                            <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Info" Variant="Variant.Outlined" Class="mt-n1 mb-1">
+                                Parameterized
+                            </MudChip>
+                        }
+                    }
+                </div>
+            }
+        }
+
+        @if (!SelectedNode.IsStreamsNode)
+        {
+            <RetryConfigSection Policy="@SelectedNode.RetryPolicy"
+                               PolicyChanged="OnRetryPolicyChanged" />
+        }
+
+        @* Placement strategy *@
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Dns" Size="MudBlazor.Size.Small" Class="mr-1" />
+            Placement
+        </MudText>
+        <MudSelect T="string" @bind-Value="_placementStrategy" Label="Strategy"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2"
+                   HelperText="How to select the target worker for this node"
+                   @bind-Value:after="OnPlacementChanged">
+            <MudSelectItem Value="@("Auto")">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoMode" Size="MudBlazor.Size.Small" Color="Color.Primary" />
+                    Auto
+                </div>
+            </MudSelectItem>
+            <MudSelectItem Value="@("TagBased")">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Label" Size="MudBlazor.Size.Small" Color="Color.Warning" />
+                    Tag-based
+                </div>
+            </MudSelectItem>
+            <MudSelectItem Value="@("Manual")">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.TouchApp" Size="MudBlazor.Size.Small" Color="Color.Info" />
+                    Manual
+                </div>
+            </MudSelectItem>
+        </MudSelect>
+
+        @if (_placementStrategy == "TagBased")
+        {
+            <MudTextField @bind-Value="_placementTags" Label="Required Tags"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2"
+                          HelperText="Comma-separated worker tags (e.g., gpu, high-memory)"
+                          Immediate="true"
+                          OnBlur="OnPlacementChanged" />
+        }
+
+        @if (_placementStrategy == "Manual" && AvailableWorkers?.Length > 0)
+        {
+            <MudSelect T="string" @bind-Value="_selectedWorker" Label="Target Worker"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2"
+                       @bind-Value:after="OnPlacementChanged">
+                @foreach (var worker in AvailableWorkers)
+                {
+                    <MudSelectItem Value="@worker">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Cloud" Size="MudBlazor.Size.Small" Color="Color.Info" />
+                            @worker
+                        </div>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        <MudCheckBox T="bool" @bind-Value="_allowAutoInstall" Label="Allow auto-install missing plugins"
+                     Dense="true" Class="mb-2"
+                     @bind-Value:after="OnPlacementChanged" />
+
+        @* Validation issues for this node *@
+        @if (_validationIssues.Count > 0)
+        {
+            <MudDivider Class="my-2" />
+            @foreach (var issue in _validationIssues)
+            {
+                <MudAlert Severity="@GetSeverity(issue.Severity)" Dense="true" Class="mb-1"
+                          NoIcon="false">
+                    @issue.Message
+                </MudAlert>
+            }
+        }
+
+        @if (SelectedNode.IsComposite)
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Color="Color.Tertiary" Class="mb-2">Sub-Pipeline</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                @(SelectedNode.SubPipelineName ?? "Sub-Pipeline")
+            </MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" FullWidth="true"
+                       StartIcon="@Icons.Material.Filled.OpenInNew" Class="mb-2"
+                       OnClick="@(() => OpenSubPipeline.InvokeAsync(SelectedNode.SubPipelineId))">
+                Open Pipeline
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true"
+                       StartIcon="@Icons.Material.Filled.SettingsInputComponent" Class="mb-3"
+                       OnClick="@(() => ConfigurePortMapping.InvokeAsync(SelectedNode))">
+                Configure Port Mapping
+            </MudButton>
+        }
+
+        <MudDivider Class="my-3" />
+
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" FullWidth="true"
+                   StartIcon="@Icons.Material.Filled.Delete" OnClick="OnDeleteNode">
+            Delete Node
+        </MudButton>
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public ConnectorNode? SelectedNode { get; set; }
+
+    [Parameter]
+    public ConnectorConfigSchema? ConfigSchema { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorNode> OnNodeConfigChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorNode> OnNodeDeleted { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> OpenSubPipeline { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorNode> ConfigurePortMapping { get; set; }
+
+    /// <summary>
+    /// Available remote worker IDs for this connector type. Null when distributed mode is not enabled.
+    /// </summary>
+    [Parameter]
+    public string[]? AvailableWorkers { get; set; }
+
+    private bool _loading = false;
+    private string _label = "";
+    private string _selectedWorker = "auto";
+    private BlazorMonaco.Editor.StandaloneCodeEditor? _codeEditor;
+
+    // Placement fields
+    private string _placementStrategy = "Auto";
+    private string _placementTags = "";
+    private bool _allowAutoInstall = true;
+    private List<ValidationIssueModel> _validationIssues = [];
+
+    private Dictionary<string, string> _stringValues = new();
+    private Dictionary<string, bool> _boolValues = new();
+    private Dictionary<string, long> _numericValues = new();
+
+    // SQL Transform fields
+    private string _sqlQuery = "";
+    private string _sqlInputTopic = "";
+    private string _sqlOutputTopic = "";
+    private string _sqlEmitStrategy = "changes";
+
+    // Exception Handler fields
+    private string _exceptionStrategy = "ReplaceThread";
+    private bool _exceptionDlqEnabled;
+    private string _exceptionDlqTopic = "";
+    private bool _exceptionRetryEnabled;
+    private int _exceptionMaxRetries = 3;
+    private bool _exceptionLogEnabled = true;
+
+    // Topic auto-complete
+    private IReadOnlyList<TopicInfo>? _cachedTopics;
+    private bool _topicsLoading;
+
+    // Field names that should use special editors
+    private static readonly HashSet<string> CronFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cron.expression", "cron", "schedule", "schedule.cron"
+    };
+
+    private static readonly HashSet<string> ConditionFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "condition", "filter.condition", "if.condition"
+    };
+
+    private static readonly HashSet<string> ExpressionFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "expression", "key.expression", "value.expression",
+        "filter.expression", "map.expression", "transform.expression"
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (SelectedNode != null)
+        {
+            _label = SelectedNode.Label ?? "";
+            _selectedWorker = SelectedNode.Config.TryGetValue("_worker", out var w) ? w : "auto";
+
+            // Initialize placement fields
+            var placement = SelectedNode.Placement;
+            _placementStrategy = placement?.Strategy ?? "Auto";
+            _placementTags = placement?.RequiredTags != null ? string.Join(", ", placement.RequiredTags) : "";
+            _allowAutoInstall = placement?.AllowAutoInstall ?? true;
+            if (placement?.Strategy == "Manual" && !string.IsNullOrEmpty(placement.WorkerId))
+                _selectedWorker = placement.WorkerId;
+
+            // Load validation issues from config
+            _validationIssues = [];
+            if (SelectedNode.Config.TryGetValue("_validation", out var validationJson))
+            {
+                try { _validationIssues = System.Text.Json.JsonSerializer.Deserialize<List<ValidationIssueModel>>(validationJson) ?? []; }
+                catch { /* ignore parse errors */ }
+            }
+
+            if (SelectedNode.IsSqlTransform)
+            {
+                InitializeSqlValues();
+            }
+            else if (SelectedNode.IsExceptionHandler)
+            {
+                InitializeExceptionValues();
+            }
+            else
+            {
+                InitializeConfigValues();
+            }
+        }
+        else
+        {
+            _label = "";
+            _selectedWorker = "auto";
+            _stringValues.Clear();
+            _boolValues.Clear();
+            _numericValues.Clear();
+        }
+    }
+
+    private void InitializeConfigValues()
+    {
+        _stringValues.Clear();
+        _boolValues.Clear();
+        _numericValues.Clear();
+
+        if (ConfigSchema == null || SelectedNode == null)
+        {
+            return;
+        }
+
+        foreach (var key in ConfigSchema.Keys)
+        {
+            var value = SelectedNode.Config.TryGetValue(key.Name, out var v) ? v : key.DefaultValue ?? "";
+
+            if (key.Type == "Boolean")
+            {
+                _boolValues[key.Name] = bool.TryParse(value, out var b) && b;
+            }
+            else if (key.Type == "Int" || key.Type == "Long")
+            {
+                _numericValues[key.Name] = long.TryParse(value, out var n) ? n : 0;
+            }
+            else
+            {
+                _stringValues[key.Name] = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves which editor to use. Explicit editor hint takes priority, then name-based fallback.
+    /// </summary>
+    private static string ResolveEditor(ConfigKeyInfo key)
+    {
+        // Explicit editor hint from connector
+        if (!string.IsNullOrEmpty(key.Editor))
+            return key.Editor;
+
+        // Name-based fallback for backward compatibility
+        if (CronFields.Contains(key.Name)) return "Cron";
+        if (ConditionFields.Contains(key.Name)) return "Condition";
+        if (ExpressionFields.Contains(key.Name)) return "Expression";
+        if (key.Name.Contains("topic", StringComparison.OrdinalIgnoreCase)) return "Topic";
+
+        return "Default";
+    }
+
+    private static bool IsTopicField(string name) => name.Contains("topic", StringComparison.OrdinalIgnoreCase);
+
+    private async Task EnsureTopicsLoadedAsync()
+    {
+        if (_cachedTopics != null || _topicsLoading) return;
+        _topicsLoading = true;
+        try
+        {
+            _cachedTopics = await SurgewaveApi.ListTopicsAsync();
+        }
+        catch
+        {
+            _cachedTopics = [];
+        }
+        finally
+        {
+            _topicsLoading = false;
+        }
+    }
+
+    private async Task<IEnumerable<string>> SearchTopicsAsync(string? text)
+    {
+        await EnsureTopicsLoadedAsync();
+        if (_cachedTopics == null) return [];
+        if (string.IsNullOrWhiteSpace(text))
+            return _cachedTopics.Select(t => t.Name);
+        return _cachedTopics
+            .Where(t => t.Name.Contains(text, StringComparison.OrdinalIgnoreCase))
+            .Select(t => t.Name);
+    }
+
+    private string GetStringValue(string keyName)
+    {
+        return _stringValues.TryGetValue(keyName, out var v) ? v : "";
+    }
+
+    private ExpressionEditor.ExpressionType GetExpressionType(string keyName)
+    {
+        if (keyName.Contains("filter", StringComparison.OrdinalIgnoreCase))
+            return ExpressionEditor.ExpressionType.Filter;
+        if (keyName.Contains("key", StringComparison.OrdinalIgnoreCase) ||
+            keyName.Contains("value", StringComparison.OrdinalIgnoreCase) ||
+            keyName.Contains("map", StringComparison.OrdinalIgnoreCase) ||
+            keyName.Contains("transform", StringComparison.OrdinalIgnoreCase))
+            return ExpressionEditor.ExpressionType.Transform;
+        return ExpressionEditor.ExpressionType.Condition;
+    }
+
+    private static string GetHelperText(ConfigKeyInfo key)
+    {
+        var doc = key.Documentation ?? "";
+        return string.IsNullOrEmpty(doc) ? "Use ${param.xyz} for parameterization" : $"{doc} (Use ${{param.xyz}} for parameterization)";
+    }
+
+    private bool IsParameterized(string keyName)
+    {
+        return _stringValues.TryGetValue(keyName, out var v) && v.Contains("${param.", StringComparison.Ordinal);
+    }
+
+    private void OnLabelChanged()
+    {
+        if (SelectedNode != null)
+        {
+            SelectedNode.Label = _label;
+            OnNodeConfigChanged.InvokeAsync(SelectedNode);
+        }
+    }
+
+    private void OnWorkerChanged()
+    {
+        if (SelectedNode == null) return;
+
+        if (_selectedWorker == "auto" || string.IsNullOrEmpty(_selectedWorker))
+        {
+            SelectedNode.Config.Remove("_worker");
+        }
+        else
+        {
+            SelectedNode.Config["_worker"] = _selectedWorker;
+        }
+
+        OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private void OnPlacementChanged()
+    {
+        if (SelectedNode == null) return;
+
+        var tags = _placementTags
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        SelectedNode.Placement = new Models.Pipeline.NodePlacementConfig
+        {
+            Strategy = _placementStrategy,
+            RequiredTags = tags,
+            WorkerId = _placementStrategy == "Manual" ? _selectedWorker : null,
+            AllowAutoInstall = _allowAutoInstall
+        };
+
+        // Keep legacy _worker in sync for backward compatibility
+        if (_placementStrategy == "Manual" && !string.IsNullOrEmpty(_selectedWorker))
+            SelectedNode.Config["_worker"] = _selectedWorker;
+        else
+            SelectedNode.Config.Remove("_worker");
+
+        OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private BlazorMonaco.Editor.StandaloneEditorConstructionOptions GetCodeEditorOptions(string keyName, string language)
+    {
+        var value = SelectedNode != null && _stringValues.TryGetValue(keyName, out var v) ? v : "";
+        return new BlazorMonaco.Editor.StandaloneEditorConstructionOptions
+        {
+            Language = language,
+            Theme = "vs-dark",
+            Value = value,
+            AutomaticLayout = true,
+            Minimap = new BlazorMonaco.Editor.EditorMinimapOptions { Enabled = false },
+            FontSize = 13,
+            LineNumbers = "on",
+            RenderLineHighlight = "line",
+            ScrollBeyondLastLine = false,
+            TabSize = 4
+        };
+    }
+
+    private async Task OnCodeChanged(string keyName)
+    {
+        if (_codeEditor == null || SelectedNode == null) return;
+        var value = await _codeEditor.GetValue();
+        _stringValues[keyName] = value;
+        SelectedNode.Config[keyName] = value;
+        await OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private static MudBlazor.Severity GetSeverity(string severity) => severity switch
+    {
+        "Error" => MudBlazor.Severity.Error,
+        "Warning" => MudBlazor.Severity.Warning,
+        _ => MudBlazor.Severity.Info
+    };
+
+    private sealed record ValidationIssueModel
+    {
+        public string Severity { get; init; } = "Info";
+        public string Code { get; init; } = "";
+        public string Message { get; init; } = "";
+    }
+
+    private async Task OnExpressionChanged(string keyName, string value)
+    {
+        if (SelectedNode == null)
+            return;
+
+        _stringValues[keyName] = value;
+
+        if (string.IsNullOrEmpty(value))
+        {
+            SelectedNode.Config.Remove(keyName);
+        }
+        else
+        {
+            SelectedNode.Config[keyName] = value;
+        }
+
+        await OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private void OnConfigChanged(string keyName)
+    {
+        if (SelectedNode == null || ConfigSchema == null)
+        {
+            return;
+        }
+
+        var key = ConfigSchema.Keys.FirstOrDefault(k => k.Name == keyName);
+        if (key == null)
+        {
+            return;
+        }
+
+        string value;
+        if (key.Type == "Boolean")
+        {
+            value = _boolValues.TryGetValue(keyName, out var b) ? b.ToString().ToLowerInvariant() : "false";
+        }
+        else if (key.Type == "Int" || key.Type == "Long")
+        {
+            value = _numericValues.TryGetValue(keyName, out var n) ? n.ToString() : "0";
+        }
+        else
+        {
+            value = _stringValues.TryGetValue(keyName, out var s) ? s : "";
+        }
+
+        if (string.IsNullOrEmpty(value) && !key.IsRequired)
+        {
+            SelectedNode.Config.Remove(keyName);
+        }
+        else
+        {
+            SelectedNode.Config[keyName] = value;
+        }
+
+        OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private async Task OnRetryPolicyChanged(Models.Pipeline.RetryPolicy? policy)
+    {
+        if (SelectedNode != null)
+        {
+            SelectedNode.RetryPolicy = policy;
+            await OnNodeConfigChanged.InvokeAsync(SelectedNode);
+        }
+    }
+
+    // SQL Transform methods
+    private void InitializeSqlValues()
+    {
+        if (SelectedNode == null) return;
+        _sqlQuery = SelectedNode.Config.TryGetValue("sql.query", out var q) ? q : "";
+        _sqlInputTopic = SelectedNode.Config.TryGetValue("sql.input.topic", out var i) ? i : "";
+        _sqlOutputTopic = SelectedNode.Config.TryGetValue("sql.output.topic", out var o) ? o : "";
+        _sqlEmitStrategy = SelectedNode.Config.TryGetValue("sql.emit", out var e) ? e : "changes";
+    }
+
+    private void OnSqlQueryChanged()
+    {
+        if (SelectedNode == null) return;
+        SelectedNode.Config["sql.query"] = _sqlQuery;
+        OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private void OnSqlConfigChanged()
+    {
+        if (SelectedNode == null) return;
+        if (!string.IsNullOrEmpty(_sqlInputTopic))
+            SelectedNode.Config["sql.input.topic"] = _sqlInputTopic;
+        if (!string.IsNullOrEmpty(_sqlOutputTopic))
+            SelectedNode.Config["sql.output.topic"] = _sqlOutputTopic;
+        SelectedNode.Config["sql.emit"] = _sqlEmitStrategy;
+        OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    // Exception Handler methods
+    private void InitializeExceptionValues()
+    {
+        if (SelectedNode == null) return;
+        _exceptionStrategy = SelectedNode.Config.TryGetValue("exception.strategy", out var s) ? s : "ReplaceThread";
+        _exceptionDlqEnabled = SelectedNode.Config.TryGetValue("dlq.enabled", out var d) && d == "true";
+        _exceptionDlqTopic = SelectedNode.Config.TryGetValue("dlq.topic", out var t) ? t : "";
+        _exceptionRetryEnabled = SelectedNode.Config.TryGetValue("retry.enabled", out var r) && r == "true";
+        _exceptionMaxRetries = SelectedNode.Config.TryGetValue("retry.max", out var m) && int.TryParse(m, out var mv) ? mv : 3;
+        _exceptionLogEnabled = !SelectedNode.Config.TryGetValue("log.enabled", out var l) || l != "false";
+    }
+
+    private void OnExceptionConfigChanged()
+    {
+        if (SelectedNode == null) return;
+        SelectedNode.Config["exception.strategy"] = _exceptionStrategy;
+        SelectedNode.Config["dlq.enabled"] = _exceptionDlqEnabled.ToString().ToLowerInvariant();
+        if (_exceptionDlqEnabled && !string.IsNullOrEmpty(_exceptionDlqTopic))
+            SelectedNode.Config["dlq.topic"] = _exceptionDlqTopic;
+        else
+            SelectedNode.Config.Remove("dlq.topic");
+        SelectedNode.Config["retry.enabled"] = _exceptionRetryEnabled.ToString().ToLowerInvariant();
+        if (_exceptionRetryEnabled)
+            SelectedNode.Config["retry.max"] = _exceptionMaxRetries.ToString();
+        SelectedNode.Config["log.enabled"] = _exceptionLogEnabled.ToString().ToLowerInvariant();
+        OnNodeConfigChanged.InvokeAsync(SelectedNode);
+    }
+
+    private static Severity GetStrategySeverity(string strategy) => strategy switch
+    {
+        "ShutdownClient" => Severity.Warning,
+        "ShutdownApplication" => Severity.Error,
+        _ => Severity.Success
+    };
+
+    private static string GetStrategyDescription(string strategy) => strategy switch
+    {
+        "ReplaceThread" => "Failed thread will be replaced with a new one. Partitions are reassigned automatically. Best for transient failures.",
+        "ShutdownClient" => "The Streams client instance will shut down gracefully. Other instances in the group will take over partitions.",
+        "ShutdownApplication" => "The entire application will shut down. Use only for critical, unrecoverable errors.",
+        _ => ""
+    };
+
+    private async Task OnDeleteNode()
+    {
+        if (SelectedNode != null)
+        {
+            await OnNodeDeleted.InvokeAsync(SelectedNode);
+        }
+    }
+}

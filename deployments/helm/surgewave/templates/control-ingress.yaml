@@ -1,0 +1,31 @@
+{{- if and .Values.control.enabled .Values.control.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "surgewave.fullname" . }}-control
+  labels:
+    {{- include "surgewave.control.labels" . | nindent 4 }}
+  {{- with .Values.control.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.control.ingress.className }}
+  ingressClassName: {{ .Values.control.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.control.ingress.hostname }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "surgewave.fullname" . }}-control
+                port:
+                  number: {{ .Values.control.port }}
+  {{- with .Values.control.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

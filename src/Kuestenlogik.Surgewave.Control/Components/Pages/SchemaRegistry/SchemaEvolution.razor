@@ -1,0 +1,486 @@
+@page "/schemas/evolution"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISchemaRegistryClient SchemaClient
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageTitle>Schema Evolution - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Schema Evolution</MudText>
+
+<MudText Typo="Typo.body1" Class="mb-4">
+    AI-assisted analysis of schema changes with generated migration code.
+</MudText>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
+    <MudTabPanel Text="Detected Changes" Icon="@Icons.Material.Filled.CompareArrows">
+        @if (_loadingChanges)
+        {
+            <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+        }
+        else if (_changes.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Class="ma-4">
+                No schema changes detected yet. Changes appear when new schema versions are registered.
+            </MudAlert>
+        }
+        else
+        {
+            <MudTable Items="@_changes" Hover="true" Dense="true" Class="ma-4">
+                <HeaderContent>
+                    <MudTh>Subject</MudTh>
+                    <MudTh>Version</MudTh>
+                    <MudTh>Change Type</MudTh>
+                    <MudTh>Breaking</MudTh>
+                    <MudTh>Fields Changed</MudTh>
+                    <MudTh>Detected</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.SubjectName</MudTd>
+                    <MudTd>v@(context.OldVersion) → v@(context.NewVersion)</MudTd>
+                    <MudTd>@context.ChangeType</MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@(context.Breaking == "Major" ? Color.Error : context.Breaking == "Minor" ? Color.Warning : Color.Success)">
+                            @context.Breaking
+                        </MudChip>
+                    </MudTd>
+                    <MudTd>@context.FieldChangeCount</MudTd>
+                    <MudTd>@context.DetectedAt.ToString("g")</MudTd>
+                    <MudTd>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                   OnClick="@(() => ViewReport(context))">
+                            View Report
+                        </MudButton>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+
+        <MudButton Variant="Variant.Outlined" OnClick="LoadChangesAsync" Class="ma-4"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Refresh
+        </MudButton>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Analyze Schemas" Icon="@Icons.Material.Filled.Science">
+        <MudGrid Class="pa-4">
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_oldSchemaInput" Label="Old Schema (JSON)" Lines="12"
+                              Variant="Variant.Outlined" Placeholder="{&quot;type&quot;:&quot;object&quot;,...}" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_newSchemaInput" Label="New Schema (JSON)" Lines="12"
+                              Variant="Variant.Outlined" Placeholder="{&quot;type&quot;:&quot;object&quot;,...}" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AnalyzeSchemasAsync"
+                           StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="_analyzing">
+                    Analyze Changes
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+
+        @if (_analyzeResult is not null)
+        {
+            <MudPaper Elevation="1" Class="pa-4 ma-4">
+                <MudText Typo="Typo.h6">Analysis Result</MudText>
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.body2" Class="mb-2">
+                    <strong>Breaking Level:</strong>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@(_analyzeResult.Breaking == "Major" ? Color.Error : _analyzeResult.Breaking == "Minor" ? Color.Warning : Color.Success)">
+                        @_analyzeResult.Breaking
+                    </MudChip>
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mb-2"><strong>Summary:</strong> @_analyzeResult.Summary</MudText>
+
+                @if (_analyzeResult.MigrationSteps.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">Migration Steps</MudText>
+                    <MudList T="string" Dense="true">
+                        @foreach (var step in _analyzeResult.MigrationSteps)
+                        {
+                            <MudListItem T="string" Icon="@Icons.Material.Filled.ChevronRight">
+                                @step.Description
+                                @if (step.CodeSnippet is not null)
+                                {
+                                    <MudText Typo="Typo.caption" Class="ml-8" Style="font-family: monospace;">
+                                        @step.CodeSnippet
+                                    </MudText>
+                                }
+                            </MudListItem>
+                        }
+                    </MudList>
+                }
+
+                @if (!string.IsNullOrEmpty(_analyzeResult.GeneratedCode))
+                {
+                    <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">Generated Code</MudText>
+                    <MudPaper Elevation="0" Class="pa-3" Style="background: var(--mud-palette-background-grey); font-family: monospace; white-space: pre-wrap; overflow-x: auto;">
+                        @_analyzeResult.GeneratedCode
+                    </MudPaper>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy"
+                               OnClick="@(() => CopyToClipboard(_analyzeResult.GeneratedCode))">
+                        Copy Code
+                    </MudButton>
+                }
+            </MudPaper>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="Generate Model" Icon="@Icons.Material.Filled.Code">
+        <MudGrid Class="pa-4">
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_modelSchemaInput" Label="JSON Schema" Lines="12"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_modelClassName" Label="Class Name" Variant="Variant.Outlined"
+                              Placeholder="MyEvent" Class="mb-2" />
+                <MudTextField @bind-Value="_modelNamespace" Label="Namespace" Variant="Variant.Outlined"
+                              Placeholder="Surgewave.Models" Class="mb-2" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GenerateModelAsync"
+                           StartIcon="@Icons.Material.Filled.AutoFixHigh" Disabled="_generatingModel">
+                    Generate Model
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+
+        @if (!string.IsNullOrEmpty(_generatedModelCode))
+        {
+            <MudPaper Elevation="1" Class="pa-4 ma-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Generated C# Model</MudText>
+                <MudPaper Elevation="0" Class="pa-3" Style="background: var(--mud-palette-background-grey); font-family: monospace; white-space: pre-wrap; overflow-x: auto;">
+                    @_generatedModelCode
+                </MudPaper>
+                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy"
+                           OnClick="@(() => CopyToClipboard(_generatedModelCode))" Class="mt-2">
+                    Copy Code
+                </MudButton>
+            </MudPaper>
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@if (_selectedReport is not null)
+{
+    <MudDialog @bind-Visible="_showReportDialog" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
+        <TitleContent>
+            <MudText Typo="Typo.h6">Impact Report: @_selectedReport.SubjectName v@(_selectedReport.NewVersion)</MudText>
+        </TitleContent>
+        <DialogContent>
+            <MudText Typo="Typo.body2" Class="mb-2"><strong>Summary:</strong> @_selectedReport.Summary</MudText>
+            <MudText Typo="Typo.body2" Class="mb-4">
+                <strong>Breaking Level:</strong>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(_selectedReport.Breaking == "Major" ? Color.Error : _selectedReport.Breaking == "Minor" ? Color.Warning : Color.Success)">
+                    @_selectedReport.Breaking
+                </MudChip>
+            </MudText>
+
+            @if (_selectedReport.LlmExplanation is not null)
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-4">
+                    <MudText Typo="Typo.subtitle2">AI Explanation</MudText>
+                    @_selectedReport.LlmExplanation
+                </MudAlert>
+            }
+
+            @if (_selectedReport.MigrationSteps.Count > 0)
+            {
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Migration Steps</MudText>
+                <MudList T="string" Dense="true" Class="mb-4">
+                    @foreach (var step in _selectedReport.MigrationSteps)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.ChevronRight">
+                            @step.Description
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+
+            @if (!string.IsNullOrEmpty(_selectedReport.GeneratedCode))
+            {
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Generated Migration Code</MudText>
+                <MudPaper Elevation="0" Class="pa-3" Style="background: var(--mud-palette-background-grey); font-family: monospace; white-space: pre-wrap; overflow-x: auto;">
+                    @_selectedReport.GeneratedCode
+                </MudPaper>
+                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy"
+                           OnClick="@(() => CopyToClipboard(_selectedReport.GeneratedCode))" Class="mt-2">
+                    Copy Code
+                </MudButton>
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showReportDialog = false)">Close</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private bool _loadingChanges;
+    private bool _analyzing;
+    private bool _generatingModel;
+    private bool _showReportDialog;
+
+    private List<SchemaChangeViewModel> _changes = [];
+    private string _oldSchemaInput = "";
+    private string _newSchemaInput = "";
+    private string _modelSchemaInput = "";
+    private string _modelClassName = "MyEvent";
+    private string _modelNamespace = "Surgewave.Models";
+    private string _generatedModelCode = "";
+
+    private AnalyzeResultViewModel? _analyzeResult;
+    private ReportViewModel? _selectedReport;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadChangesAsync();
+    }
+
+    private async Task LoadChangesAsync()
+    {
+        _loadingChanges = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.GetAsync("/api/schema-evolution/changes");
+            if (response.IsSuccessStatusCode)
+            {
+                var changes = await response.Content.ReadFromJsonAsync<List<SchemaChangeDto>>();
+                _changes = changes?.Select(c => new SchemaChangeViewModel
+                {
+                    SubjectName = c.SubjectName,
+                    OldVersion = c.OldVersion,
+                    NewVersion = c.NewVersion,
+                    ChangeType = c.ChangeType,
+                    Breaking = c.Breaking,
+                    FieldChangeCount = c.FieldChanges?.Count ?? 0,
+                    DetectedAt = c.DetectedAt
+                }).ToList() ?? [];
+            }
+        }
+        catch
+        {
+            // API may not be available yet
+        }
+        finally
+        {
+            _loadingChanges = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ViewReport(SchemaChangeViewModel change)
+    {
+        try
+        {
+            var response = await Http.GetAsync($"/api/schema-evolution/report/{change.SubjectName}/{change.NewVersion}");
+            if (response.IsSuccessStatusCode)
+            {
+                var report = await response.Content.ReadFromJsonAsync<ReportDto>();
+                if (report is not null)
+                {
+                    _selectedReport = new ReportViewModel
+                    {
+                        SubjectName = change.SubjectName,
+                        NewVersion = change.NewVersion,
+                        Breaking = change.Breaking,
+                        Summary = report.Summary ?? "",
+                        LlmExplanation = report.LlmExplanation,
+                        MigrationSteps = report.MigrationSteps?.Select(s => new MigrationStepViewModel
+                        {
+                            Description = s.Description ?? "",
+                            CodeSnippet = s.CodeSnippet
+                        }).ToList() ?? [],
+                        GeneratedCode = report.GeneratedCode ?? ""
+                    };
+                    _showReportDialog = true;
+                    StateHasChanged();
+                }
+            }
+            else
+            {
+                Snackbar.Add($"Report not found for {change.SubjectName} v{change.NewVersion}", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load report: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task AnalyzeSchemasAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_oldSchemaInput) || string.IsNullOrWhiteSpace(_newSchemaInput))
+        {
+            Snackbar.Add("Both schemas are required", Severity.Warning);
+            return;
+        }
+
+        _analyzing = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new { OldSchema = _oldSchemaInput, NewSchema = _newSchemaInput, Subject = "manual-analysis" };
+            var response = await Http.PostAsJsonAsync("/api/schema-evolution/analyze", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<AnalyzeResultDto>();
+                if (result is not null)
+                {
+                    _analyzeResult = new AnalyzeResultViewModel
+                    {
+                        Breaking = result.Change?.Breaking ?? "None",
+                        Summary = result.Report?.Summary ?? "No changes detected",
+                        MigrationSteps = result.Report?.MigrationSteps?.Select(s => new MigrationStepViewModel
+                        {
+                            Description = s.Description ?? "",
+                            CodeSnippet = s.CodeSnippet
+                        }).ToList() ?? [],
+                        GeneratedCode = result.Report?.GeneratedCode ?? ""
+                    };
+                }
+            }
+            else
+            {
+                Snackbar.Add("Analysis failed", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _analyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GenerateModelAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_modelSchemaInput))
+        {
+            Snackbar.Add("Schema is required", Severity.Warning);
+            return;
+        }
+
+        _generatingModel = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new { Schema = _modelSchemaInput, ClassName = _modelClassName, Namespace = _modelNamespace };
+            var response = await Http.PostAsJsonAsync("/api/schema-evolution/generate-model", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<CodeResponseDto>();
+                _generatedModelCode = result?.Code ?? "";
+            }
+            else
+            {
+                Snackbar.Add("Model generation failed", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _generatingModel = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CopyToClipboard(string text)
+    {
+        // JS interop would be ideal; for now, show a snackbar
+        Snackbar.Add("Code copied (use browser copy)", Severity.Info);
+    }
+
+    // --- DTOs for JSON deserialization ---
+
+    private sealed class SchemaChangeDto
+    {
+        public string SubjectName { get; set; } = "";
+        public int OldVersion { get; set; }
+        public int NewVersion { get; set; }
+        public string ChangeType { get; set; } = "";
+        public string Breaking { get; set; } = "None";
+        public List<object>? FieldChanges { get; set; }
+        public DateTimeOffset DetectedAt { get; set; }
+    }
+
+    private sealed class ReportDto
+    {
+        public string? Summary { get; set; }
+        public string? GeneratedCode { get; set; }
+        public string? LlmExplanation { get; set; }
+        public List<MigrationStepDto>? MigrationSteps { get; set; }
+    }
+
+    private sealed class MigrationStepDto
+    {
+        public string? Description { get; set; }
+        public string? CodeSnippet { get; set; }
+    }
+
+    private sealed class AnalyzeResultDto
+    {
+        public SchemaChangeDto? Change { get; set; }
+        public ReportDto? Report { get; set; }
+    }
+
+    private sealed class CodeResponseDto
+    {
+        public string? Code { get; set; }
+    }
+
+    // --- View Models ---
+
+    private sealed class SchemaChangeViewModel
+    {
+        public string SubjectName { get; set; } = "";
+        public int OldVersion { get; set; }
+        public int NewVersion { get; set; }
+        public string ChangeType { get; set; } = "";
+        public string Breaking { get; set; } = "None";
+        public int FieldChangeCount { get; set; }
+        public DateTimeOffset DetectedAt { get; set; }
+    }
+
+    private sealed class AnalyzeResultViewModel
+    {
+        public string Breaking { get; set; } = "None";
+        public string Summary { get; set; } = "";
+        public List<MigrationStepViewModel> MigrationSteps { get; set; } = [];
+        public string GeneratedCode { get; set; } = "";
+    }
+
+    private sealed class ReportViewModel
+    {
+        public string SubjectName { get; set; } = "";
+        public int NewVersion { get; set; }
+        public string Breaking { get; set; } = "None";
+        public string Summary { get; set; } = "";
+        public string? LlmExplanation { get; set; }
+        public List<MigrationStepViewModel> MigrationSteps { get; set; } = [];
+        public string GeneratedCode { get; set; } = "";
+    }
+
+    private sealed class MigrationStepViewModel
+    {
+        public string Description { get; set; } = "";
+        public string? CodeSnippet { get; set; }
+    }
+}

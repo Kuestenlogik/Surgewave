@@ -1,0 +1,324 @@
+@page "/brokers/{BrokerId:int}"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+
+<PageTitle>Broker @BrokerId - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadBrokerAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else if (_broker != null)
+{
+    <MudGrid>
+        @* Broker Header *@
+        <MudItem xs="12">
+            <MudPaper Elevation="2" Class="pa-4">
+                <div class="d-flex justify-space-between align-center">
+                    <div class="d-flex align-center">
+                        <MudAvatar Color="@(_broker.IsController ? Color.Warning : Color.Primary)" Size="Size.Large" Class="mr-4">
+                            @_broker.BrokerId
+                        </MudAvatar>
+                        <div>
+                            <MudText Typo="Typo.h4">Broker @_broker.BrokerId</MudText>
+                            <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
+                                @_broker.Host:@_broker.Port
+                                @if (_broker.IsController)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-2">Controller</MudChip>
+                                }
+                            </MudText>
+                        </div>
+                    </div>
+                    <div>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                                   OnClick="LoadBrokerAsync">
+                            Refresh
+                        </MudButton>
+                    </div>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        @* Broker Information *@
+        <MudItem xs="12" md="6">
+            <MudCard Elevation="2" Style="height: 100%">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Broker Information</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudSimpleTable Dense="true">
+                        <tbody>
+                            <tr>
+                                <td style="width: 40%"><MudText Typo="Typo.body2" Color="Color.Secondary">Broker ID</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_broker.BrokerId</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Host</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_broker.Host</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Port</MudText></td>
+                                <td><MudText Typo="Typo.body1">@_broker.Port</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Rack</MudText></td>
+                                <td><MudText Typo="Typo.body1">@(_broker.Rack ?? "N/A")</MudText></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Role</MudText></td>
+                                <td>
+                                    @if (_broker.IsController)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Controller</MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default">Replica</MudChip>
+                                    }
+                                </td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Connection Info *@
+        <MudItem xs="12" md="6">
+            <MudCard Elevation="2" Style="height: 100%">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Connection</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudSimpleTable Dense="true">
+                        <tbody>
+                            <tr>
+                                <td style="width: 40%"><MudText Typo="Typo.body2" Color="Color.Secondary">Bootstrap Server</MudText></td>
+                                <td>
+                                    <MudText Typo="Typo.body1" Style="font-family: monospace;">
+                                        @_broker.Host:@_broker.Port
+                                    </MudText>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Status</MudText></td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@(_isOnline ? Color.Success : Color.Error)">
+                                        @(_isOnline ? "Online" : "Offline")
+                                    </MudChip>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Partition Leadership *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Partition Leadership</MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">
+                            @_leaderPartitions.Count Leader / @_replicaPartitions.Count Replica
+                        </MudChip>
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (_leaderPartitions.Count == 0 && _replicaPartitions.Count == 0)
+                    {
+                        <MudText Color="Color.Secondary">No partitions assigned to this broker.</MudText>
+                    }
+                    else
+                    {
+                        <MudSimpleTable Dense="true" Hover="true">
+                            <thead>
+                                <tr>
+                                    <th>Topic</th>
+                                    <th>Partition</th>
+                                    <th>Role</th>
+                                    <th>Replicas</th>
+                                    <th>ISR</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var p in _leaderPartitions.Concat(_replicaPartitions).OrderBy(x => x.Topic).ThenBy(x => x.PartitionId))
+                                {
+                                    <tr>
+                                        <td>
+                                            <MudLink Href="@($"/topics/{p.Topic}")">@p.Topic</MudLink>
+                                        </td>
+                                        <td>@p.PartitionId</td>
+                                        <td>
+                                            @if (p.IsLeader)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Leader</MudChip>
+                                            }
+                                            else
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Replica</MudChip>
+                                            }
+                                        </td>
+                                        <td>@string.Join(", ", p.Replicas)</td>
+                                        <td>
+                                            @if (p.Isr.Count == p.Replicas.Count)
+                                            {
+                                                <MudText Color="Color.Success">@string.Join(", ", p.Isr)</MudText>
+                                            }
+                                            else
+                                            {
+                                                <MudText Color="Color.Warning">@string.Join(", ", p.Isr)</MudText>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter]
+    public int BrokerId { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+    private BrokerInfo? _broker;
+    private bool _isOnline = true;
+    private List<BrokerPartitionInfo> _leaderPartitions = [];
+    private List<BrokerPartitionInfo> _replicaPartitions = [];
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Brokers", "/brokers"),
+            new($"Broker {BrokerId}", null, true)
+        ];
+
+        ClusterState.OnChange += async () =>
+        {
+            await LoadBrokerAsync();
+            StateHasChanged();
+        };
+        await LoadBrokerAsync();
+    }
+
+    private async Task LoadBrokerAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            var brokers = await ApiClient.ListBrokersAsync(clusterId);
+            _broker = brokers.FirstOrDefault(b => b.BrokerId == BrokerId);
+
+            if (_broker == null)
+            {
+                _error = $"Broker {BrokerId} not found";
+            }
+            else
+            {
+                // Check broker health
+                try
+                {
+                    var health = await ApiClient.GetHealthDetailsAsync();
+                    _isOnline = health?.Status == "Healthy";
+                }
+                catch
+                {
+                    _isOnline = false;
+                }
+
+                // Load partition leadership info
+                if (clusterId != null)
+                {
+                    await LoadPartitionLeadershipAsync(clusterId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadPartitionLeadershipAsync(string clusterId)
+    {
+        _leaderPartitions = [];
+        _replicaPartitions = [];
+
+        try
+        {
+            var topics = await ApiClient.ListTopicsAsync(clusterId, includeInternal: true);
+
+            foreach (var topic in topics)
+            {
+                var topicDetails = await ApiClient.DescribeTopicAsync(topic.Name, clusterId);
+                if (topicDetails?.Partitions == null) continue;
+
+                foreach (var partition in topicDetails.Partitions)
+                {
+                    // Check if this broker is involved in this partition
+                    if (!partition.Replicas.Contains(BrokerId)) continue;
+
+                    var info = new BrokerPartitionInfo(
+                        topic.Name,
+                        partition.PartitionId,
+                        partition.Leader == BrokerId,
+                        partition.Replicas.ToList(),
+                        partition.Isr.ToList());
+
+                    if (info.IsLeader)
+                        _leaderPartitions.Add(info);
+                    else
+                        _replicaPartitions.Add(info);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore errors loading partition data
+        }
+    }
+
+    private record BrokerPartitionInfo(
+        string Topic,
+        int PartitionId,
+        bool IsLeader,
+        List<int> Replicas,
+        List<int> Isr);
+}

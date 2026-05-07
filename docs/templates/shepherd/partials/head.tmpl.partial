@@ -1,0 +1,5 @@
+{{!-- Shepherd.js Tour Integration --}}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/shepherd.js@13/dist/css/shepherd.css"/>
+<script src="https://cdn.jsdelivr.net/npm/shepherd.js@13/dist/js/shepherd.min.js"></script>
+<link rel="stylesheet" href="{{_rel}}public/shepherd-custom.css"/>
+<script src="{{_rel}}public/shepherd-tours.js" defer></script>

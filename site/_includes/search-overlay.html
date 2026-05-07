@@ -1,0 +1,13 @@
+{%- comment -%}
+Pagefind search overlay. Hidden by default; opened via the .surgewave-search-trigger
+button in the header or the keyboard shortcuts (`/`, `Ctrl+K` / `Cmd+K`).
+PagefindUI mounts into <div id="search">. Closed via Esc or backdrop click.
+{%- endcomment -%}
+<div class="surgewave-search-overlay" id="surgewave-search-overlay" aria-hidden="true" inert>
+  <div class="surgewave-search-overlay-panel" role="dialog" aria-label="Search">
+    <div id="search"></div>
+    <div class="surgewave-search-hint">
+      <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open selected / full results · <kbd>Esc</kbd> close
+    </div>
+  </div>
+</div>

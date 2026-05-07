@@ -1,0 +1,121 @@
+@using Kuestenlogik.Surgewave.Control.Models.Collaboration
+
+<MudPaper Elevation="2" Class="pa-3">
+    <MudText Typo="Typo.h6" Class="mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.RateReview" Class="mr-1" />
+        Approvals
+        @if (_pendingCount > 0)
+        {
+            <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Error" Variant="Variant.Text" Class="ml-2">
+                @_pendingCount
+            </MudChip>
+        }
+    </MudText>
+
+    @* Request approval form *@
+    <div class="d-flex gap-2 mb-3">
+        <MudTextField @bind-Value="_approvalMessage" Label="Describe changes for review..."
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="MudBlazor.Size.Small"
+                   Disabled="@string.IsNullOrWhiteSpace(_approvalMessage)"
+                   OnClick="RequestApproval" Class="align-self-center">
+            Request
+        </MudButton>
+    </div>
+
+    @* Approvals list *@
+    <div style="max-height: 250px; overflow-y: auto;">
+        @foreach (var approval in Approvals.OrderByDescending(a => a.RequestedAt))
+        {
+            <MudCard Elevation="0" Class="mb-2 pa-2"
+                     Style="@(approval.Status != ApprovalStatus.Pending ? "opacity: 0.7;" : "")">
+                <div class="d-flex align-center justify-space-between">
+                    <MudText Typo="Typo.caption" Style="font-weight: 600;">
+                        @approval.RequestedBy
+                    </MudText>
+                    <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Filled"
+                             Color="@GetStatusColor(approval.Status)">
+                        @approval.Status
+                    </MudChip>
+                </div>
+
+                @if (!string.IsNullOrEmpty(approval.Message))
+                {
+                    <MudText Typo="Typo.body2" Class="mt-1">@approval.Message</MudText>
+                }
+
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                    @FormatTime(approval.RequestedAt)
+                </MudText>
+
+                @if (approval.Status == ApprovalStatus.Pending && approval.RequestedBy != UserName)
+                {
+                    <div class="d-flex gap-1 mt-2">
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" Size="MudBlazor.Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Check"
+                                   OnClick="() => OnReviewApproval.InvokeAsync((approval.Id, true))">
+                            Approve
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="MudBlazor.Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Close"
+                                   OnClick="() => OnReviewApproval.InvokeAsync((approval.Id, false))">
+                            Reject
+                        </MudButton>
+                    </div>
+                }
+
+                @if (approval.ReviewedBy != null)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                        @(approval.Status == ApprovalStatus.Approved ? "Approved" : "Rejected") by @approval.ReviewedBy
+                        @if (approval.ReviewedAt.HasValue)
+                        {
+                            <text> (@FormatTime(approval.ReviewedAt.Value))</text>
+                        }
+                    </MudText>
+                }
+            </MudCard>
+        }
+
+        @if (!Approvals.Any())
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="pa-4">
+                No approval requests
+            </MudText>
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public IReadOnlyList<ApprovalRequest> Approvals { get; set; } = [];
+    [Parameter] public string UserName { get; set; } = "Anonymous";
+    [Parameter] public EventCallback<string?> OnRequestApproval { get; set; }
+    [Parameter] public EventCallback<(string ApprovalId, bool Approved)> OnReviewApproval { get; set; }
+
+    private string _approvalMessage = "";
+    private int _pendingCount => Approvals.Count(a => a.Status == ApprovalStatus.Pending);
+
+    private async Task RequestApproval()
+    {
+        if (string.IsNullOrWhiteSpace(_approvalMessage)) return;
+        await OnRequestApproval.InvokeAsync(_approvalMessage.Trim());
+        _approvalMessage = "";
+    }
+
+    private static Color GetStatusColor(ApprovalStatus status) => status switch
+    {
+        ApprovalStatus.Pending => Color.Warning,
+        ApprovalStatus.Approved => Color.Success,
+        ApprovalStatus.Rejected => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string FormatTime(DateTimeOffset time)
+    {
+        var ago = DateTimeOffset.UtcNow - time;
+        return ago.TotalMinutes < 1 ? "just now"
+             : ago.TotalMinutes < 60 ? $"{(int)ago.TotalMinutes}m ago"
+             : ago.TotalHours < 24 ? $"{(int)ago.TotalHours}h ago"
+             : time.ToString("MMM dd HH:mm");
+    }
+}

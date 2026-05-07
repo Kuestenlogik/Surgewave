@@ -1,0 +1,207 @@
+@page "/consumer-groups"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject IDialogService DialogService
+
+<PageTitle>Consumer Groups - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Consumer Groups</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_searchText" Label="Search groups" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="OnSearchChanged"
+                          data-tour-id="consumer-search" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect @bind-Value="_stateFilter" Label="State filter" Variant="Variant.Outlined"
+                       @bind-Value:after="OnFilterChanged" data-tour-id="state-filter">
+                <MudSelectItem Value="@("")">All States</MudSelectItem>
+                <MudSelectItem Value="@("Stable")">Stable</MudSelectItem>
+                <MudSelectItem Value="@("PreparingRebalance")">Preparing Rebalance</MudSelectItem>
+                <MudSelectItem Value="@("CompletingRebalance")">Completing Rebalance</MudSelectItem>
+                <MudSelectItem Value="@("Empty")">Empty</MudSelectItem>
+                <MudSelectItem Value="@("Dead")">Dead</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center justify-end">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="LoadGroupsAsync">
+                Refresh
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadGroupsAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudTable Items="@_filteredGroups" Dense="true" Hover="true" Striped="true" Elevation="2"
+              Loading="@_loading" LoadingProgressColor="Color.Primary">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.GroupId)">Group ID</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.State)">State</MudTableSortLabel></MudTh>
+            <MudTh>Protocol Type</MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.MemberCount)">Members</MudTableSortLabel></MudTh>
+            <MudTh Style="width: 120px">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Group ID">
+                <MudLink Href="@($"/consumer-groups/{Uri.EscapeDataString(context.GroupId)}")">@context.GroupId</MudLink>
+            </MudTd>
+            <MudTd DataLabel="State">
+                <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)">@context.State</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Protocol Type">@context.ProtocolType</MudTd>
+            <MudTd DataLabel="Members">@context.MemberCount</MudTd>
+            <MudTd DataLabel="Actions">
+                <MudTooltip Text="View details">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   Href="@($"/consumer-groups/{Uri.EscapeDataString(context.GroupId)}")" />
+                </MudTooltip>
+                <MudTooltip Text="Delete group">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => ConfirmDeleteAsync(context))"
+                                   Disabled="@(context.State != "Empty" && context.State != "Dead")" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Color="Color.Secondary">No consumer groups found</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
+        </PagerContent>
+    </MudTable>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string _searchText = "";
+    private string _stateFilter = "";
+    private List<ConsumerGroupInfo> _groups = [];
+
+    private IEnumerable<ConsumerGroupInfo> _filteredGroups
+    {
+        get
+        {
+            var result = _groups.AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                result = result.Where(g => g.GroupId.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(_stateFilter))
+                result = result.Where(g => g.State == _stateFilter);
+
+            return result;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClusterState.OnChange += async () =>
+        {
+            await LoadGroupsAsync();
+            StateHasChanged();
+        };
+        await LoadGroupsAsync();
+    }
+
+    private async Task LoadGroupsAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            _groups = (await ApiClient.ListConsumerGroupsAsync(clusterId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSearchChanged()
+    {
+        await Task.CompletedTask;
+        StateHasChanged();
+    }
+
+    private async Task OnFilterChanged()
+    {
+        await Task.CompletedTask;
+        StateHasChanged();
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Stable" => Color.Success,
+        "PreparingRebalance" or "CompletingRebalance" => Color.Warning,
+        "Empty" => Color.Default,
+        "Dead" => Color.Error,
+        _ => Color.Default
+    };
+
+    private async Task ConfirmDeleteAsync(ConsumerGroupInfo group)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.ContentText, $"Are you sure you want to delete consumer group '{group.GroupId}'?" },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Color, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Consumer Group", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await DeleteGroupAsync(group);
+        }
+    }
+
+    private async Task DeleteGroupAsync(ConsumerGroupInfo group)
+    {
+        try
+        {
+            var success = await ApiClient.DeleteConsumerGroupAsync(group.GroupId, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Consumer group '{group.GroupId}' deleted successfully");
+                await LoadGroupsAsync();
+            }
+            else
+            {
+                Notification.ShowError($"Failed to delete consumer group '{group.GroupId}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error deleting group: {ex.Message}");
+        }
+    }
+}

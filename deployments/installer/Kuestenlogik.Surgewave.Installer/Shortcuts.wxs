@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Start Menu shortcuts for Storm -->
+    <Component Id="BrokerShortcutComponent" Directory="StormShortcutDir" Guid="C9D0E1F2-A3B4-5678-CDEF-789012345678">
+      <Shortcut
+        Id="StormBrokerShortcut"
+        Name="Storm Broker (Console)"
+        Description="Start Storm Broker in console mode"
+        Target="[BrokerDir]Kuestenlogik.Storm.Broker.exe"
+        WorkingDirectory="INSTALLFOLDER"
+        Icon="StormIcon" />
+
+      <RegistryValue
+        Root="HKLM"
+        Key="SOFTWARE\Kustenlogik\Storm"
+        Name="BrokerShortcutInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes" />
+
+      <RemoveFolder Id="RemoveStormShortcutDir" On="uninstall" />
+    </Component>
+
+    <Component Id="ControlShortcutComponent" Directory="StormShortcutDir" Guid="D0E1F2A3-B4C5-6789-DEFA-890123456789">
+      <Shortcut
+        Id="StormControlShortcut"
+        Name="Storm Control UI"
+        Description="Open Storm Control web dashboard"
+        Target="[ControlDir]Kuestenlogik.Storm.Control.exe"
+        Arguments="--urls http://localhost:5050"
+        WorkingDirectory="INSTALLFOLDER"
+        Icon="StormIcon" />
+
+      <Shortcut
+        Id="StormControlBrowserShortcut"
+        Name="Storm Dashboard (Browser)"
+        Description="Open Storm dashboard in browser"
+        Target="[SystemFolder]cmd.exe"
+        Arguments="/c start http://localhost:5050" />
+
+      <RegistryValue
+        Root="HKLM"
+        Key="SOFTWARE\Kustenlogik\Storm"
+        Name="ControlShortcutInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+</Wix>

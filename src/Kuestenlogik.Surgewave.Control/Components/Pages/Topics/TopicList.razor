@@ -1,0 +1,180 @@
+@page "/topics"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject IDialogService DialogService
+
+<PageTitle>Topics - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Topics</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_searchText" Label="Search topics" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="OnSearchChanged"
+                          data-tour-id="topic-search" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSwitch @bind-Value="_includeInternal" Label="Include internal topics" Color="Color.Primary"
+                       T="bool" @bind-Value:after="LoadTopicsAsync"
+                       data-tour-id="internal-topics-toggle" />
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center justify-end">
+            <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                           Href="/topics/create" data-tour-id="create-topic-btn">
+                    Create Topic
+                </MudButton>
+            </AuthorizeView>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadTopicsAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudTable Items="@_filteredTopics" Dense="true" Hover="true" Striped="true" Elevation="2"
+              Loading="@_loading" LoadingProgressColor="Color.Primary">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.PartitionCount)">Partitions</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.ReplicationFactor)">Replication</MudTableSortLabel></MudTh>
+            <MudTh>Internal</MudTh>
+            <MudTh Style="width: 120px">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">
+                <MudLink Href="@($"/topics/{context.Name}")">@context.Name</MudLink>
+            </MudTd>
+            <MudTd DataLabel="Partitions">@context.PartitionCount</MudTd>
+            <MudTd DataLabel="Replication">@context.ReplicationFactor</MudTd>
+            <MudTd DataLabel="Internal">
+                @if (context.IsInternal)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">Internal</MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Actions">
+                <MudTooltip Text="View details">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   Href="@($"/topics/{context.Name}")" />
+                </MudTooltip>
+                <AuthorizeView Policy="@SurgewavePolicies.TopicsManage" Context="auth">
+                    <MudTooltip Text="Delete topic">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => ConfirmDeleteAsync(context))"
+                                       Disabled="@context.IsInternal" />
+                    </MudTooltip>
+                </AuthorizeView>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Color="Color.Secondary">No topics found</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
+        </PagerContent>
+    </MudTable>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string _searchText = "";
+    private bool _includeInternal;
+    private List<TopicInfo> _topics = [];
+    private IEnumerable<TopicInfo> _filteredTopics => string.IsNullOrWhiteSpace(_searchText)
+        ? _topics
+        : _topics.Where(t => t.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClusterState.OnChange += async () =>
+        {
+            await LoadTopicsAsync();
+            StateHasChanged();
+        };
+        await LoadTopicsAsync();
+    }
+
+    private async Task LoadTopicsAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            _topics = (await ApiClient.ListTopicsAsync(clusterId, _includeInternal)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSearchChanged()
+    {
+        await Task.CompletedTask;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmDeleteAsync(TopicInfo topic)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.ContentText, $"Are you sure you want to delete topic '{topic.Name}'? This action cannot be undone." },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Color, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Topic", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await DeleteTopicAsync(topic);
+        }
+    }
+
+    private async Task DeleteTopicAsync(TopicInfo topic)
+    {
+        try
+        {
+            var success = await ApiClient.DeleteTopicAsync(topic.Name, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Topic '{topic.Name}' deleted successfully");
+                await LoadTopicsAsync();
+            }
+            else
+            {
+                Notification.ShowError($"Failed to delete topic '{topic.Name}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error deleting topic: {ex.Message}");
+        }
+    }
+}

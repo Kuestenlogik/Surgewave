@@ -1,0 +1,106 @@
+@* Reusable star-rating component. Display mode shows filled/empty stars; input mode allows clicking. *@
+
+<div class="d-flex align-center rating-stars" style="gap: 2px;">
+    @for (int i = 1; i <= 5; i++)
+    {
+        var star = i;
+        @if (ReadOnly)
+        {
+            <MudIcon Icon="@GetStarIcon(star)"
+                     Color="@GetStarColor(star)"
+                     Size="@Size" />
+        }
+        else
+        {
+            <MudIconButton Icon="@GetStarIcon(star)"
+                           Color="@GetStarColor(star)"
+                           Size="@Size"
+                           OnClick="@(() => SetRating(star))"
+                           Class="pa-0"
+                           Style="min-width: auto;" />
+        }
+    }
+    @if (ShowValue && Value > 0)
+    {
+        <MudText Typo="@ValueTypo" Color="Color.Secondary" Class="ml-1">
+            @Value.ToString("F1")
+        </MudText>
+    }
+    @if (ShowCount && Count > 0)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-1">
+            (@Count)
+        </MudText>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// The current rating value (1-5, or fractional for display).
+    /// </summary>
+    [Parameter]
+    public double Value { get; set; }
+
+    /// <summary>
+    /// Callback when the value changes (input mode).
+    /// </summary>
+    [Parameter]
+    public EventCallback<double> ValueChanged { get; set; }
+
+    /// <summary>
+    /// When true, stars are display-only. When false, they are clickable.
+    /// </summary>
+    [Parameter]
+    public bool ReadOnly { get; set; } = true;
+
+    /// <summary>
+    /// Size of the star icons.
+    /// </summary>
+    [Parameter]
+    public Size Size { get; set; } = Size.Small;
+
+    /// <summary>
+    /// Whether to show the numeric value next to the stars.
+    /// </summary>
+    [Parameter]
+    public bool ShowValue { get; set; }
+
+    /// <summary>
+    /// Whether to show the review count in parentheses.
+    /// </summary>
+    [Parameter]
+    public bool ShowCount { get; set; }
+
+    /// <summary>
+    /// Number of reviews (shown when ShowCount is true).
+    /// </summary>
+    [Parameter]
+    public int Count { get; set; }
+
+    /// <summary>
+    /// Typography for the numeric value.
+    /// </summary>
+    [Parameter]
+    public Typo ValueTypo { get; set; } = Typo.body2;
+
+    private string GetStarIcon(int star)
+    {
+        if (star <= Value)
+            return Icons.Material.Filled.Star;
+        if (star - 0.5 <= Value)
+            return Icons.Material.Filled.StarHalf;
+        return Icons.Material.Filled.StarBorder;
+    }
+
+    private Color GetStarColor(int star)
+    {
+        return star <= Math.Ceiling(Value) ? Color.Warning : Color.Default;
+    }
+
+    private async Task SetRating(int star)
+    {
+        if (ReadOnly) return;
+        Value = star;
+        await ValueChanged.InvokeAsync(star);
+    }
+}

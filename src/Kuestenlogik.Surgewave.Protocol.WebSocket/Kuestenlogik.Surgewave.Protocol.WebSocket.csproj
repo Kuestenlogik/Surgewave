@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave WebSocket protocol adapter for browser-based streaming clients</Description>
+    <PackageTags>surgewave;kafka;protocol;websocket;browser</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="pluginsettings.json" Condition="Exists('pluginsettings.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- MSBuild task: surgewave plugins pack/install (Kuestenlogik.Surgewave.Build) -->
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Build\Kuestenlogik.Surgewave.Build.csproj" PrivateAssets="all" />
+  </ItemGroup>
+  <Import Project="..\Kuestenlogik.Surgewave.Build\build\Kuestenlogik.Surgewave.Build.targets" />
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

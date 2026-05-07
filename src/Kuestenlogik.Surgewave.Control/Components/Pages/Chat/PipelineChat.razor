@@ -1,0 +1,546 @@
+@page "/pipelines/{Id}/chat"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models.Chat
+@inject IChatApiClient ChatApi
+@inject IPipelineApiClient PipelineApi
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Chat - Surgewave Control</PageTitle>
+
+<div class="pipeline-chat-page">
+    @* Header *@
+    <MudPaper Elevation="2" Class="pa-3 chat-page-header">
+        <div class="d-flex align-center gap-3">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="NavigateBack" />
+            <MudIcon Icon="@Icons.Material.Filled.Chat" Color="Color.Primary" Size="Size.Large" />
+            <div>
+                <MudText Typo="Typo.h6">@(_pipelineName ?? "Pipeline Chat")</MudText>
+                @if (_pipelineDescription != null)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@_pipelineDescription</MudText>
+                }
+            </div>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                       Href="@($"/pipelines/{Id}/edit")" Size="Size.Small">
+                Open Editor
+            </MudButton>
+        </div>
+    </MudPaper>
+
+    <div class="chat-page-content">
+        @* Session Sidebar *@
+        <MudPaper Elevation="1" Class="chat-sidebar">
+            <div class="pa-3 d-flex align-center justify-space-between">
+                <MudText Typo="Typo.subtitle1">Sessions</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.AddComment" Size="Size.Small"
+                               Color="Color.Primary" OnClick="StartNewSession" />
+            </div>
+            <MudDivider />
+            @if (_loadingSessions)
+            {
+                <div class="d-flex justify-center pa-4">
+                    <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+                </div>
+            }
+            else if (_sessions.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-3 text-center">
+                    No sessions yet
+                </MudText>
+            }
+            else
+            {
+                <MudList T="string" Dense="true" SelectedValue="@_selectedSessionId"
+                         SelectedValueChanged="OnSessionSelected" Class="pa-0">
+                    @foreach (var session in _sessions)
+                    {
+                        <MudListItem Value="@session.SessionId"
+                                     Class="@(_selectedSessionId == session.SessionId ? "mud-selected-item" : "")">
+                            <div class="d-flex flex-column">
+                                <div class="d-flex align-center justify-space-between">
+                                    <MudText Typo="Typo.body2">
+                                        @session.SessionId[..Math.Min(12, session.SessionId.Length)]...
+                                    </MudText>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(() => DeleteSessionAsync(session.SessionId))" />
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @session.MessageCount messages - @session.LastActivityAt.LocalDateTime.ToString("g")
+                                </MudText>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+
+        @* Chat Area *@
+        <div class="chat-main-area">
+            <div class="chat-messages-area" @ref="_messagesContainer">
+                @if (_loadingHistory)
+                {
+                    <div class="d-flex justify-center pa-8">
+                        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+                    </div>
+                }
+                else if (_messages.Count == 0)
+                {
+                    <div class="d-flex flex-column align-center justify-center" style="height: 100%;">
+                        <MudIcon Icon="@Icons.Material.Filled.ChatBubbleOutline" Size="Size.Large"
+                                 Color="Color.Secondary" Style="font-size: 4rem;" />
+                        <MudText Typo="Typo.h6" Color="Color.Secondary" Class="mt-4">
+                            Start a conversation
+                        </MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">
+                            Send a message to begin chatting with this pipeline.
+                        </MudText>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var msg in _messages)
+                    {
+                        <div class="chat-msg-row @GetRowAlignment(msg.Role)">
+                            @if (msg.Role == "system")
+                            {
+                                <div class="chat-msg-system pa-2 mx-8 my-1">
+                                    <MudText Typo="Typo.caption" Align="Align.Center" Style="font-style: italic; opacity: 0.6;">
+                                        @msg.Content
+                                    </MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <MudPaper Class="@GetMsgClass(msg.Role)" Elevation="1">
+                                    @if (msg.Role != "user")
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Primary" Class="mb-1">
+                                            <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Class="mr-1" />
+                                            Assistant
+                                        </MudText>
+                                    }
+                                    <MudText Typo="Typo.body1" Style="white-space: pre-wrap; word-break: break-word;">
+                                        @msg.Content
+                                    </MudText>
+                                    <MudText Typo="Typo.caption" Class="mt-2" Style="opacity: 0.5;">
+                                        @msg.Timestamp.LocalDateTime.ToString("HH:mm:ss")
+                                    </MudText>
+                                </MudPaper>
+                            }
+                        </div>
+                    }
+
+                    @if (_waitingForResponse && !_isStreaming)
+                    {
+                        <div class="chat-msg-row chat-row-left">
+                            <MudPaper Class="chat-msg chat-msg-assistant pa-3 my-1" Elevation="1">
+                                <div class="d-flex align-center gap-2">
+                                    <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">Thinking...</MudText>
+                                </div>
+                            </MudPaper>
+                        </div>
+                    }
+                }
+            </div>
+
+            @* Input Bar *@
+            <MudPaper Elevation="2" Class="chat-input-area pa-3">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_messageText" Label="Type your message..." Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Lines="1" Immediate="true"
+                                  OnKeyDown="OnInputKeyDown" Disabled="@_waitingForResponse"
+                                  Class="flex-grow-1" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                                   Variant="Variant.Filled" Size="Size.Large"
+                                   OnClick="SendMessage"
+                                   Disabled="@(string.IsNullOrWhiteSpace(_messageText) || _waitingForResponse)" />
+                </div>
+            </MudPaper>
+        </div>
+    </div>
+</div>
+
+<style>
+    .pipeline-chat-page {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 100px);
+    }
+
+    .chat-page-header {
+        flex-shrink: 0;
+        margin-bottom: 8px;
+    }
+
+    .chat-page-content {
+        display: flex;
+        flex: 1;
+        gap: 8px;
+        min-height: 0;
+    }
+
+    .chat-sidebar {
+        width: 280px;
+        flex-shrink: 0;
+        overflow-y: auto;
+    }
+
+    .chat-main-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .chat-messages-area {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .chat-input-area {
+        flex-shrink: 0;
+    }
+
+    .chat-msg-row {
+        display: flex;
+        width: 100%;
+    }
+
+    .chat-row-right {
+        justify-content: flex-end;
+    }
+
+    .chat-row-left {
+        justify-content: flex-start;
+    }
+
+    .chat-row-center {
+        justify-content: center;
+    }
+
+    .chat-msg {
+        max-width: 70%;
+        border-radius: 16px;
+        padding: 12px 16px;
+        margin: 4px 0;
+    }
+
+    .chat-msg-user {
+        background-color: var(--mud-palette-primary) !important;
+        color: var(--mud-palette-primary-text) !important;
+        border-bottom-right-radius: 4px;
+    }
+
+    .chat-msg-assistant {
+        background-color: var(--mud-palette-surface) !important;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-bottom-left-radius: 4px;
+    }
+
+    .chat-msg-system {
+        max-width: 100%;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = "";
+
+    private string? _pipelineName;
+    private string? _pipelineDescription;
+    private string _messageText = "";
+    private string? _selectedSessionId;
+    private bool _loadingSessions;
+    private bool _loadingHistory;
+    private bool _waitingForResponse;
+    private bool _isStreaming;
+    private List<ChatMessageModel> _messages = [];
+    private List<ChatSessionSummary> _sessions = [];
+    private ElementReference _messagesContainer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPipelineInfoAsync();
+        await LoadSessionsAsync();
+    }
+
+    private async Task LoadPipelineInfoAsync()
+    {
+        try
+        {
+            var pipeline = await PipelineApi.GetPipelineAsync(Id);
+            if (pipeline != null)
+            {
+                _pipelineName = pipeline.Name;
+                _pipelineDescription = pipeline.Description;
+            }
+        }
+        catch
+        {
+            _pipelineName = "Pipeline";
+        }
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        _loadingSessions = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await ChatApi.ListSessionsAsync(Id);
+            _sessions = response.Sessions.OrderByDescending(s => s.LastActivityAt).ToList();
+
+            if (_sessions.Count > 0 && string.IsNullOrEmpty(_selectedSessionId))
+            {
+                _selectedSessionId = _sessions[0].SessionId;
+                await LoadHistoryAsync(_selectedSessionId);
+            }
+        }
+        catch
+        {
+            _sessions = [];
+        }
+        finally
+        {
+            _loadingSessions = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadHistoryAsync(string sessionId)
+    {
+        _loadingHistory = true;
+        StateHasChanged();
+
+        try
+        {
+            var history = await ChatApi.GetHistoryAsync(Id, sessionId);
+            _messages = history.Messages.ToList();
+        }
+        catch
+        {
+            _messages = [];
+        }
+        finally
+        {
+            _loadingHistory = false;
+            StateHasChanged();
+            await ScrollToBottomAsync();
+        }
+    }
+
+    private async Task OnSessionSelected(string sessionId)
+    {
+        _selectedSessionId = sessionId;
+        if (!string.IsNullOrEmpty(sessionId))
+        {
+            await LoadHistoryAsync(sessionId);
+        }
+    }
+
+    private void StartNewSession()
+    {
+        _selectedSessionId = null;
+        _messages = [];
+        StateHasChanged();
+    }
+
+    private async Task DeleteSessionAsync(string sessionId)
+    {
+        try
+        {
+            await ChatApi.DeleteSessionAsync(Id, sessionId);
+            _sessions.RemoveAll(s => s.SessionId == sessionId);
+
+            if (_selectedSessionId == sessionId)
+            {
+                _selectedSessionId = _sessions.FirstOrDefault()?.SessionId;
+                _messages = [];
+
+                if (_selectedSessionId != null)
+                {
+                    await LoadHistoryAsync(_selectedSessionId);
+                }
+            }
+
+            StateHasChanged();
+        }
+        catch
+        {
+            // Swallow for now
+        }
+    }
+
+    private async Task OnInputKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        var text = _messageText?.Trim();
+        if (string.IsNullOrWhiteSpace(text) || _waitingForResponse)
+            return;
+
+        var userMessage = new ChatMessageModel
+        {
+            Id = Guid.NewGuid().ToString(),
+            Role = "user",
+            Content = text,
+            Timestamp = DateTimeOffset.Now
+        };
+        _messages.Add(userMessage);
+        _messageText = "";
+        _waitingForResponse = true;
+        StateHasChanged();
+        await ScrollToBottomAsync();
+
+        try
+        {
+            // Try streaming first, fall back to sync
+            await SendMessageStreamingAsync(text);
+        }
+        catch
+        {
+            // Streaming failed, fall back to synchronous
+            try
+            {
+                await SendMessageSyncAsync(text);
+            }
+            catch (Exception ex)
+            {
+                _messages.Add(new ChatMessageModel
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Role = "system",
+                    Content = $"Error: {ex.Message}",
+                    Timestamp = DateTimeOffset.Now
+                });
+            }
+        }
+        finally
+        {
+            _waitingForResponse = false;
+            _isStreaming = false;
+            StateHasChanged();
+            await ScrollToBottomAsync();
+        }
+    }
+
+    private async Task SendMessageStreamingAsync(string text)
+    {
+        // Add an empty assistant message bubble that we'll fill progressively
+        var assistantMessage = new ChatMessageModel
+        {
+            Id = Guid.NewGuid().ToString(),
+            Role = "assistant",
+            Content = "",
+            Timestamp = DateTimeOffset.Now
+        };
+        _messages.Add(assistantMessage);
+        _isStreaming = true;
+        StateHasChanged();
+        await ScrollToBottomAsync();
+
+        await foreach (var evt in ChatApi.StreamMessageAsync(Id, text, _selectedSessionId))
+        {
+            switch (evt.Type)
+            {
+                case "token":
+                    assistantMessage.Content += evt.Token;
+                    await InvokeAsync(StateHasChanged);
+                    await ScrollToBottomAsync();
+                    break;
+
+                case "done":
+                    // Finalize with the full content from the server
+                    assistantMessage.Content = evt.FullContent ?? assistantMessage.Content;
+                    assistantMessage = assistantMessage with { Id = evt.MessageId ?? assistantMessage.Id };
+                    _messages[^1] = assistantMessage;
+
+                    if (string.IsNullOrEmpty(_selectedSessionId) && evt.SessionId is not null)
+                    {
+                        _selectedSessionId = evt.SessionId;
+                        await LoadSessionsAsync();
+                    }
+                    break;
+
+                case "error":
+                    // Remove the empty assistant bubble and show error
+                    _messages.Remove(assistantMessage);
+                    _messages.Add(new ChatMessageModel
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        Role = "system",
+                        Content = $"Error: {evt.Error}",
+                        Timestamp = DateTimeOffset.Now
+                    });
+                    break;
+            }
+        }
+    }
+
+    private async Task SendMessageSyncAsync(string text)
+    {
+        var response = await ChatApi.SendMessageAsync(Id, text, _selectedSessionId);
+
+        if (string.IsNullOrEmpty(_selectedSessionId))
+        {
+            _selectedSessionId = response.SessionId;
+            await LoadSessionsAsync();
+        }
+
+        _messages.Add(new ChatMessageModel
+        {
+            Id = response.MessageId,
+            Role = response.Role,
+            Content = response.Content,
+            Timestamp = response.Timestamp,
+            Metadata = response.Metadata
+        });
+    }
+
+    private async Task ScrollToBottomAsync()
+    {
+        try
+        {
+            await Task.Delay(50);
+            await JS.InvokeVoidAsync("eval",
+                "document.querySelector('.chat-messages-area')?.scrollTo(0, document.querySelector('.chat-messages-area')?.scrollHeight ?? 0)");
+        }
+        catch
+        {
+            // JS interop may fail during prerender
+        }
+    }
+
+    private void NavigateBack()
+    {
+        Navigation.NavigateTo($"/pipelines/{Id}/edit");
+    }
+
+    private static string GetRowAlignment(string role) => role switch
+    {
+        "user" => "chat-row-right",
+        "system" => "chat-row-center",
+        _ => "chat-row-left"
+    };
+
+    private static string GetMsgClass(string role) => role switch
+    {
+        "user" => "chat-msg chat-msg-user pa-3 my-1",
+        _ => "chat-msg chat-msg-assistant pa-3 my-1"
+    };
+}

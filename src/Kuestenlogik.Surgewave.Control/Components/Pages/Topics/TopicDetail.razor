@@ -1,0 +1,438 @@
+@page "/topics/{TopicName}"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISchemaRegistryClient SchemaClient
+
+<PageTitle>@TopicName - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadTopicAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else if (_topic != null)
+{
+    <MudGrid>
+        @* Topic Header *@
+        <MudItem xs="12">
+            <MudPaper Elevation="2" Class="pa-4">
+                <div class="d-flex justify-space-between align-center">
+                    <div>
+                        <MudText Typo="Typo.h4">@_topic.Name</MudText>
+                        <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
+                            @_topic.PartitionCount partitions | Replication factor: @_topic.ReplicationFactor
+                            @if (_topic.IsInternal)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">Internal</MudChip>
+                            }
+                        </MudText>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
+                                       OnClick="OpenProducerAsync" Disabled="@_topic.IsInternal">
+                                Produce Message
+                            </MudButton>
+                        </AuthorizeView>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                                   StartIcon="@Icons.Material.Filled.Schema"
+                                   OnClick="InferSchemaAsync" Disabled="@(_inferring || _topic.IsInternal)">
+                            @if (_inferring)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
+                            Infer Schema
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Settings"
+                                   Href="@($"/topics/{TopicName}/config")">
+                            Configuration
+                        </MudButton>
+                        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                       OnClick="ConfirmDeleteAsync" Disabled="@_topic.IsInternal">
+                                Delete
+                            </MudButton>
+                        </AuthorizeView>
+                    </div>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        @* Partition Overview *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Partitions</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudTable Items="@_topic.Partitions" Dense="true" Hover="true" Striped="true">
+                        <HeaderContent>
+                            <MudTh>Partition</MudTh>
+                            <MudTh>Leader</MudTh>
+                            <MudTh>Replicas</MudTh>
+                            <MudTh>ISR</MudTh>
+                            <MudTh>High Watermark</MudTh>
+                            <MudTh>Log Start</MudTh>
+                            <MudTh>Messages</MudTh>
+                            <MudTh>Actions</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Partition">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.PartitionId</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Leader">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Broker @context.Leader</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Replicas">
+                                @foreach (var replica in context.Replicas)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="mr-1">@replica</MudChip>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="ISR">
+                                @foreach (var isr in context.Isr)
+                                {
+                                    <MudChip T="string" Size="Size.Small"
+                                             Color="@(isr == context.Leader ? Color.Success : Color.Info)" Class="mr-1">@isr</MudChip>
+                                }
+                                @if (context.Isr.Count < context.Replicas.Count)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small"
+                                             Title="Under-replicated" />
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="High Watermark">@context.HighWatermark.ToString("N0")</MudTd>
+                            <MudTd DataLabel="Log Start">@context.LogStartOffset.ToString("N0")</MudTd>
+                            <MudTd DataLabel="Messages">@((context.HighWatermark - context.LogStartOffset).ToString("N0"))</MudTd>
+                            <MudTd>
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Search"
+                                           Href="@($"/topics/{TopicName}/partitions/{context.PartitionId}/messages")"
+                                           Disabled="@(context.HighWatermark == context.LogStartOffset)">
+                                    Browse
+                                </MudButton>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Configuration Preview *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Configuration</MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Href="@($"/topics/{TopicName}/config")">
+                            View All
+                        </MudButton>
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (_topic.Configs.Count == 0)
+                    {
+                        <MudText Color="Color.Secondary">No custom configuration</MudText>
+                    }
+                    else
+                    {
+                        <MudSimpleTable Dense="true" Hover="true">
+                            <thead>
+                                <tr>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var config in _topic.Configs.Take(10))
+                                {
+                                    <tr>
+                                        <td><MudText Typo="Typo.body2">@config.Key</MudText></td>
+                                        <td><MudText Typo="Typo.body2"><code>@config.Value</code></MudText></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                        @if (_topic.Configs.Count > 10)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                                ... and @(_topic.Configs.Count - 10) more
+                            </MudText>
+                        }
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Inferred Schema *@
+        @if (_inferredSchema != null)
+        {
+            <MudItem xs="12">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Inferred Schema</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Sampled @_inferredSchema.ValidMessageCount of @_inferredSchema.SampleCount messages |
+                                Inferred at @_inferredSchema.InferredAt.LocalDateTime.ToString("g")
+                            </MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       OnClick="RegisterInferredSchemaAsync" Disabled="@_registering"
+                                       StartIcon="@Icons.Material.Filled.Save">
+                                @if (_registering)
+                                {
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                }
+                                Register in Schema Registry
+                            </MudButton>
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_inferredSchema.FieldStats.Count > 0)
+                        {
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Fields (@_inferredSchema.FieldStats.Count)</MudText>
+                            <MudSimpleTable Dense="true" Hover="true" Striped="true" Class="mb-4">
+                                <thead>
+                                    <tr>
+                                        <th>Path</th>
+                                        <th>Type</th>
+                                        <th>Format</th>
+                                        <th>Nullable</th>
+                                        <th>Required</th>
+                                        <th>Seen</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var field in _inferredSchema.FieldStats)
+                                    {
+                                        <tr>
+                                            <td><code>@field.Path</code></td>
+                                            <td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@field.Type</MudChip></td>
+                                            <td>@(field.Format ?? "---")</td>
+                                            <td>
+                                                @if (field.Nullable)
+                                                {
+                                                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Warning" />
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (field.Required)
+                                                {
+                                                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success" />
+                                                }
+                                            </td>
+                                            <td>@field.SeenCount / @field.TotalCount</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        }
+
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">JSON Schema</MudText>
+                        <pre style="font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 0; background: var(--mud-palette-background-grey); padding: 12px; border-radius: 4px; overflow: auto; max-height: 400px;">@FormatJson(_inferredSchema.Schema)</pre>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    [Parameter]
+    public string TopicName { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+    private TopicDescription? _topic;
+    private bool _inferring;
+    private bool _registering;
+    private InferredSchemaModel? _inferredSchema;
+
+    private readonly List<BreadcrumbItem> _breadcrumbs =
+    [
+        new("Topics", "/topics"),
+        new("", null, true)
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs[1] = new BreadcrumbItem(TopicName, null, true);
+        ClusterState.OnChange += async () =>
+        {
+            await LoadTopicAsync();
+            StateHasChanged();
+        };
+        await LoadTopicAsync();
+    }
+
+    private async Task LoadTopicAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            _topic = await ApiClient.DescribeTopicAsync(TopicName, clusterId);
+            if (_topic == null)
+            {
+                _error = $"Topic '{TopicName}' not found";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenProducerAsync()
+    {
+        var parameters = new DialogParameters<MessageProducerDialog>
+        {
+            { x => x.TopicName, TopicName },
+            { x => x.PartitionCount, _topic?.PartitionCount ?? 1 }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseOnEscapeKey = true
+        };
+
+        await DialogService.ShowAsync<MessageProducerDialog>("Produce Message", parameters, options);
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.ContentText, $"Are you sure you want to delete topic '{TopicName}'? This action cannot be undone." },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Color, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Topic", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await DeleteTopicAsync();
+        }
+    }
+
+    private async Task DeleteTopicAsync()
+    {
+        try
+        {
+            var success = await ApiClient.DeleteTopicAsync(TopicName, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Topic '{TopicName}' deleted successfully");
+                Navigation.NavigateTo("/topics");
+            }
+            else
+            {
+                Notification.ShowError($"Failed to delete topic '{TopicName}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error deleting topic: {ex.Message}");
+        }
+    }
+
+    private async Task InferSchemaAsync()
+    {
+        _inferring = true;
+        StateHasChanged();
+
+        try
+        {
+            _inferredSchema = await SchemaClient.InferSchemaAsync(TopicName);
+            if (_inferredSchema == null)
+            {
+                Notification.ShowWarning("No valid JSON messages found in topic to infer schema");
+            }
+            else
+            {
+                Notification.ShowSuccess($"Inferred schema with {_inferredSchema.FieldStats.Count} fields from {_inferredSchema.ValidMessageCount} messages");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Schema inference failed: {ex.Message}");
+        }
+        finally
+        {
+            _inferring = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RegisterInferredSchemaAsync()
+    {
+        _registering = true;
+        StateHasChanged();
+
+        try
+        {
+            var schemaId = await SchemaClient.InferAndRegisterSchemaAsync(TopicName);
+            if (schemaId != null)
+            {
+                Notification.ShowSuccess($"Inferred schema registered with ID {schemaId}");
+            }
+            else
+            {
+                Notification.ShowError("Failed to register inferred schema");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Registration failed: {ex.Message}");
+        }
+        finally
+        {
+            _registering = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string FormatJson(string json)
+    {
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+}

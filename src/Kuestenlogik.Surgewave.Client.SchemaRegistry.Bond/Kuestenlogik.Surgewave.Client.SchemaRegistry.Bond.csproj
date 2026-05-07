@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client.SchemaRegistry\Kuestenlogik.Surgewave.Client.SchemaRegistry.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Bond.CSharp" />
+  </ItemGroup>
+
+</Project>

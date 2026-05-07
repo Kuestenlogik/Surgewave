@@ -1,0 +1,475 @@
+@using Kuestenlogik.Surgewave.Client.Native.Operations.Plugins
+@using Kuestenlogik.Surgewave.Control.Models.Marketplace
+@inject IReviewService ReviewService
+@inject NotificationState Notifications
+
+<MudDialog>
+    <DialogContent>
+        @if (Package == null)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else
+        {
+            <MudGrid>
+                @* Header *@
+                <MudItem xs="12">
+                    <div class="d-flex align-center mb-4">
+                        @if (!string.IsNullOrEmpty(Package.IconUrl))
+                        {
+                            <MudAvatar Size="Size.Large" Class="mr-3">
+                                <MudImage Src="@Package.IconUrl" Alt="@Package.Name" />
+                            </MudAvatar>
+                        }
+                        else
+                        {
+                            <MudAvatar Color="Color.Primary" Size="Size.Large" Class="mr-3">
+                                <MudIcon Icon="@Icons.Material.Filled.Extension" />
+                            </MudAvatar>
+                        }
+                        <div>
+                            <div class="d-flex align-center">
+                                <MudText Typo="Typo.h5">@Package.Name</MudText>
+                                @if (Package.IsSigned)
+                                {
+                                    <MudTooltip Text="@($"Verified signature: {Package.SignerIdentity} ({Package.SignerProvider})")">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success"
+                                                 Icon="@Icons.Material.Filled.VerifiedUser"
+                                                 Class="ml-2">
+                                            Verified
+                                        </MudChip>
+                                    </MudTooltip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                @Package.PackageId
+                            </MudText>
+                            @if (_ratingSummary is { TotalReviews: > 0 })
+                            {
+                                <div class="mt-1">
+                                    <RatingStars Value="@_ratingSummary.AverageRating"
+                                                 ReadOnly="true"
+                                                 Size="Size.Small"
+                                                 ShowValue="true"
+                                                 ShowCount="true"
+                                                 Count="@_ratingSummary.TotalReviews" />
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </MudItem>
+
+                @* Info Cards *@
+                <MudItem xs="12" sm="4">
+                    <MudPaper Elevation="0" Class="pa-3" Style="background-color: var(--mud-palette-background-gray);">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
+                        <MudText Typo="Typo.body1">@Package.Version</MudText>
+                        @if (Package.IsInstalled && Package.InstalledVersion != Package.Version)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">
+                                Installed: @Package.InstalledVersion
+                            </MudText>
+                        }
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudPaper Elevation="0" Class="pa-3" Style="background-color: var(--mud-palette-background-gray);">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Downloads</MudText>
+                        <MudText Typo="Typo.body1">@Package.DownloadCount.ToString("N0")</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudPaper Elevation="0" Class="pa-3" Style="background-color: var(--mud-palette-background-gray);">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Status</MudText>
+                        <MudText Typo="Typo.body1">
+                            @if (Package.IsInstalled)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Installed</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Not Installed</MudChip>
+                            }
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+
+                @* Tabs: Details / Reviews *@
+                <MudItem xs="12">
+                    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-2">
+                        <MudTabPanel Text="Details" Icon="@Icons.Material.Filled.Info">
+                            @* Description *@
+                            <MudText Typo="Typo.subtitle2" Class="mt-3">Description</MudText>
+                            <MudText Typo="Typo.body2">@(Package.Description ?? "No description available")</MudText>
+
+                            @* Connector Types *@
+                            @if (Package.ConnectorTypes.Count > 0)
+                            {
+                                <MudText Typo="Typo.subtitle2" Class="mt-3">Connector Types</MudText>
+                                <div class="d-flex flex-wrap gap-1 mt-1">
+                                    @foreach (var type in Package.ConnectorTypes)
+                                    {
+                                        <MudChip T="string" Size="Size.Small"
+                                                 Color="@(type == "source" ? Color.Success : Color.Warning)">
+                                            @type
+                                        </MudChip>
+                                    }
+                                </div>
+                            }
+
+                            @* Tags *@
+                            @if (Package.Tags.Count > 0)
+                            {
+                                <MudText Typo="Typo.subtitle2" Class="mt-3">Tags</MudText>
+                                <div class="d-flex flex-wrap gap-1 mt-1">
+                                    @foreach (var tag in Package.Tags)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                            @tag
+                                        </MudChip>
+                                    }
+                                </div>
+                            }
+
+                            @* Links *@
+                            <div class="d-flex gap-2 mt-3">
+                                @if (!string.IsNullOrEmpty(Package.ProjectUrl))
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Href="@Package.ProjectUrl" Target="_blank"
+                                               StartIcon="@Icons.Material.Filled.OpenInNew">
+                                        Project
+                                    </MudButton>
+                                }
+                                @if (!string.IsNullOrEmpty(Package.License))
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Secondary"
+                                               StartIcon="@Icons.Material.Filled.Gavel">
+                                        @Package.License
+                                    </MudButton>
+                                }
+                            </div>
+
+                            @* Dependencies *@
+                            <MudExpansionPanels Class="mt-4">
+                                <MudExpansionPanel Text="Dependencies" Expanded="false">
+                                    @if (_loadingDeps)
+                                    {
+                                        <MudProgressLinear Indeterminate="true" />
+                                    }
+                                    else if (_dependencyTree != null)
+                                    {
+                                        <MudTreeView T="string" Dense="true" Hover="true">
+                                            @RenderDependencyNode(_dependencyTree, true)
+                                        </MudTreeView>
+                                    }
+                                    else
+                                    {
+                                        <MudText Color="Color.Secondary">No dependencies</MudText>
+                                    }
+                                </MudExpansionPanel>
+                            </MudExpansionPanels>
+
+                            @* Available Versions *@
+                            @if (Package.AvailableVersions.Count > 1)
+                            {
+                                <MudExpansionPanels Class="mt-2">
+                                    <MudExpansionPanel Text="Available Versions" Expanded="false">
+                                        <MudSimpleTable Dense="true">
+                                            <thead>
+                                                <tr>
+                                                    <th>Version</th>
+                                                    <th>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var version in Package.AvailableVersions.Take(10))
+                                                {
+                                                    <tr>
+                                                        <td>
+                                                            @version
+                                                            @if (version == Package.Version)
+                                                            {
+                                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="ml-2">Latest</MudChip>
+                                                            }
+                                                            @if (version == Package.InstalledVersion)
+                                                            {
+                                                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ml-2">Installed</MudChip>
+                                                            }
+                                                        </td>
+                                                        <td>
+                                                            @if (version != Package.InstalledVersion)
+                                                            {
+                                                                <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                                           OnClick="@(() => InstallVersion(version))">
+                                                                    Install
+                                                                </MudButton>
+                                                            }
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                    </MudExpansionPanel>
+                                </MudExpansionPanels>
+                            }
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="Reviews" Icon="@Icons.Material.Filled.RateReview"
+                                     BadgeData="@(_ratingSummary?.TotalReviews > 0 ? _ratingSummary.TotalReviews.ToString() : null)"
+                                     BadgeColor="Color.Primary">
+                            @if (!_showReviewForm)
+                            {
+                                <MudButton Variant="Variant.Outlined"
+                                           Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Edit"
+                                           OnClick="@(() => _showReviewForm = true)"
+                                           Class="mt-3 mb-3">
+                                    Write a Review
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <div class="mt-3 mb-3">
+                                    <ReviewForm ConnectorId="@Package.PackageId"
+                                                OnReviewSubmitted="OnReviewSubmitted"
+                                                OnCancelled="@(() => _showReviewForm = false)" />
+                                </div>
+                            }
+
+                            <ReviewList @ref="_reviewList" ConnectorId="@Package.PackageId" />
+                        </MudTabPanel>
+                    </MudTabs>
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Close</MudButton>
+        @if (Package != null)
+        {
+            @if (!Package.IsInstalled)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="Install" Disabled="_installing">
+                    @if (_installing)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    Install
+                </MudButton>
+            }
+            else if (Package.InstalledVersion != Package.Version)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                           OnClick="Install" Disabled="_installing">
+                    @if (_installing)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    Update to @Package.Version
+                </MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                           OnClick="Uninstall" Disabled="_installing">
+                    Uninstall
+                </MudButton>
+            }
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public PluginInfo? Package { get; set; }
+
+    [Parameter]
+    public IConnectorMarketplaceService? MarketplaceService { get; set; }
+
+    private bool _installing;
+    private bool _loadingDeps;
+    private DependencyTreeNode? _dependencyTree;
+    private ConnectorRatingSummary? _ratingSummary;
+    private bool _showReviewForm;
+    private ReviewList? _reviewList;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Package != null)
+        {
+            if (MarketplaceService != null)
+                await LoadDependencies();
+
+            await LoadRatingSummary();
+        }
+    }
+
+    private async Task LoadDependencies()
+    {
+        _loadingDeps = true;
+        StateHasChanged();
+
+        try
+        {
+            _dependencyTree = await MarketplaceService!.GetDependencyTreeAsync(Package!.PackageId);
+        }
+        catch
+        {
+            // Ignore errors loading dependencies
+        }
+        finally
+        {
+            _loadingDeps = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadRatingSummary()
+    {
+        try
+        {
+            _ratingSummary = await ReviewService.GetRatingSummaryAsync(Package!.PackageId);
+        }
+        catch
+        {
+            // Rating summary is optional
+        }
+    }
+
+    private async Task OnReviewSubmitted()
+    {
+        _showReviewForm = false;
+        await LoadRatingSummary();
+        if (_reviewList != null)
+            await _reviewList.RefreshAsync();
+        StateHasChanged();
+    }
+
+    private RenderFragment RenderDependencyNode(DependencyTreeNode node, bool isRoot)
+    {
+        return builder =>
+        {
+            builder.OpenComponent<MudTreeViewItem<string>>(0);
+            builder.AddAttribute(1, "Value", node.PackageId);
+
+            var icon = node.IsInstalled
+                ? Icons.Material.Filled.CheckCircle
+                : Icons.Material.Filled.Circle;
+            var iconColor = node.IsInstalled ? Color.Success :
+                           node.IsMissing ? Color.Error : Color.Default;
+
+            builder.AddAttribute(2, "Icon", icon);
+            builder.AddAttribute(3, "IconColor", iconColor);
+            builder.AddAttribute(4, "Text", $"{node.PackageId}@{node.Version}" +
+                (node.IsCircular ? " (circular)" : "") +
+                (node.IsMissing ? " (missing)" : ""));
+
+            if (node.Children.Count > 0 && !node.IsCircular)
+            {
+                builder.AddAttribute(5, "ChildContent", (RenderFragment)(childBuilder =>
+                {
+                    foreach (var child in node.Children)
+                    {
+                        childBuilder.AddContent(0, RenderDependencyNode(child, false));
+                    }
+                }));
+            }
+
+            builder.CloseComponent();
+        };
+    }
+
+    private async Task Install()
+    {
+        if (Package == null || MarketplaceService == null) return;
+
+        _installing = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await MarketplaceService.InstallAsync(Package.PackageId, Package.Version);
+
+            if (result.IsSuccess)
+            {
+                Notifications.ShowSuccess($"Installed {Package.Name} v{Package.Version}");
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Notifications.ShowError($"Failed: {string.Join(", ", result.Errors)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Installation failed: {ex.Message}");
+        }
+        finally
+        {
+            _installing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task InstallVersion(string version)
+    {
+        if (Package == null || MarketplaceService == null) return;
+
+        _installing = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await MarketplaceService.InstallAsync(Package.PackageId, version);
+
+            if (result.IsSuccess)
+            {
+                Notifications.ShowSuccess($"Installed {Package.Name} v{version}");
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Notifications.ShowError($"Failed: {string.Join(", ", result.Errors)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Installation failed: {ex.Message}");
+        }
+        finally
+        {
+            _installing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Uninstall()
+    {
+        if (Package == null || MarketplaceService == null) return;
+
+        try
+        {
+            var result = await MarketplaceService.UninstallAsync(Package.PackageId);
+            if (result.IsSuccess)
+            {
+                Notifications.ShowSuccess($"Uninstalled {Package.Name}");
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Notifications.ShowError($"Uninstall failed: {result.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Uninstall failed: {ex.Message}");
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

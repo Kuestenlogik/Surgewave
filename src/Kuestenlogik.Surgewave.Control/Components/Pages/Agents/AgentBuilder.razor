@@ -1,0 +1,1069 @@
+@page "/agents/builder"
+@page "/agents/builder/{Id}"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using System.Text.Json
+@inject IAgentConfigService AgentService
+@inject IPipelineApiClient PipelineApi
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<PageTitle>Agent Design Studio - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">
+    <MudIcon Icon="@Icons.Material.Filled.DesignServices" Class="mr-2" />
+    Agent Design Studio
+</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    @(_isEditing ? $"Editing: {_config.Name}" : "Design, configure, and test your AI agent")
+</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="9">
+        <MudPaper Elevation="2" Class="pa-0">
+            <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" PanelClass="pa-4"
+                     @bind-ActivePanelIndex="_activeTab" Color="Color.Primary" SliderColor="Color.Primary">
+
+                @* ===== Tab 1: Persona ===== *@
+                <MudTabPanel Text="Persona" Icon="@Icons.Material.Filled.Person">
+                    <MudText Typo="Typo.h6" Class="mb-3">Agent Persona</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                        Define how your agent presents itself to users.
+                    </MudText>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudTextField @bind-Value="_config.Name" Label="Agent Name" Required="true"
+                                          Variant="Variant.Outlined" Class="mb-3"
+                                          HelperText="Internal name for this agent" />
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudTextField @bind-Value="_config.Persona.DisplayName" Label="Display Name"
+                                          Variant="Variant.Outlined" Class="mb-3"
+                                          HelperText="Name shown to users (defaults to Agent Name)" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudTextField @bind-Value="_config.Description" Label="Description"
+                                  Variant="Variant.Outlined" Class="mb-3" Lines="2"
+                                  HelperText="What does this agent do?" />
+
+                    <MudGrid>
+                        <MudItem xs="12" md="4">
+                            <MudTextField @bind-Value="_config.Persona.Avatar" Label="Avatar"
+                                          Variant="Variant.Outlined" Class="mb-3"
+                                          HelperText="Emoji or icon name (e.g. robot, brain)" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudSelect T="string" @bind-Value="_config.Persona.Tonality" Label="Tonality"
+                                       Variant="Variant.Outlined" Class="mb-3">
+                                <MudSelectItem T="string" Value="@("Professional")">Professional</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("Casual")">Casual</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("Technical")">Technical</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("Friendly")">Friendly</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudSelect T="string" @bind-Value="_config.Persona.Language" Label="Language"
+                                       Variant="Variant.Outlined" Class="mb-3">
+                                <MudSelectItem T="string" Value="@("auto")">Auto-detect</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("en")">English</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("de")">German (Deutsch)</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("fr")">French (Fran&#231;ais)</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("es")">Spanish (Espa&#241;ol)</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("ja")">Japanese</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("zh")">Chinese</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                    </MudGrid>
+                </MudTabPanel>
+
+                @* ===== Tab 2: Behavior ===== *@
+                <MudTabPanel Text="Behavior" Icon="@Icons.Material.Filled.Psychology">
+                    <MudText Typo="Typo.h6" Class="mb-3">System Prompt</MudText>
+                    <MudTextField @bind-Value="_config.SystemPrompt" Label="System Prompt"
+                                  Variant="Variant.Outlined" Lines="8" Class="mb-4"
+                                  HelperText="Core instructions that define the agent's behavior and personality" />
+
+                    <MudDivider Class="my-4" />
+
+                    <MudText Typo="Typo.h6" Class="mb-2">Instruction Blocks</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Add reusable instruction blocks. These are appended to the system prompt.
+                    </MudText>
+
+                    <MudStack Row="true" Spacing="1" Class="flex-wrap mb-3">
+                        @foreach (var (key, label) in InstructionTemplates.Labels)
+                        {
+                            var isActive = _config.Instructions.Contains(InstructionTemplates.Templates[key]);
+                            <MudChip T="string" Size="Size.Small" Variant="@(isActive ? Variant.Filled : Variant.Outlined)"
+                                     Color="@(isActive ? Color.Primary : Color.Default)"
+                                     OnClick="@(() => ToggleInstruction(key))">
+                                @label
+                            </MudChip>
+                        }
+                    </MudStack>
+
+                    @if (_config.Instructions.Count > 0)
+                    {
+                        <MudPaper Outlined="true" Class="pa-3 mb-3">
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Active Instructions</MudText>
+                            @for (var i = 0; i < _config.Instructions.Count; i++)
+                            {
+                                var index = i;
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-1">
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                                    <MudText Typo="Typo.body2" Style="flex: 1;">@_config.Instructions[index]</MudText>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                                   OnClick="@(() => RemoveInstruction(index))" />
+                                </MudStack>
+                            }
+                        </MudPaper>
+                    }
+
+                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-4">
+                        <MudTextField @bind-Value="_customInstruction" Label="Custom instruction" Variant="Variant.Outlined"
+                                      Style="flex: 1;" Margin="Margin.Dense" />
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="AddCustomInstruction"
+                                   Disabled="string.IsNullOrWhiteSpace(_customInstruction)">
+                            Add
+                        </MudButton>
+                    </MudStack>
+
+                    <MudDivider Class="my-4" />
+
+                    <MudText Typo="Typo.h6" Class="mb-2">Few-Shot Examples</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Provide example conversations to guide the agent's responses.
+                    </MudText>
+
+                    @for (var i = 0; i < _config.Examples.Count; i++)
+                    {
+                        var index = i;
+                        <MudPaper Outlined="true" Class="pa-3 mb-3">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                                <MudText Typo="Typo.subtitle2">Example @(index + 1)</MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveExample(index))" />
+                            </MudStack>
+                            <MudTextField @bind-Value="_config.Examples[index].UserMessage" Label="User says..."
+                                          Variant="Variant.Outlined" Lines="2" Class="mb-2" Margin="Margin.Dense" />
+                            <MudTextField @bind-Value="_config.Examples[index].AssistantResponse" Label="Agent responds..."
+                                          Variant="Variant.Outlined" Lines="2" Margin="Margin.Dense" />
+                        </MudPaper>
+                    }
+
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddExample">
+                        Add Example
+                    </MudButton>
+                </MudTabPanel>
+
+                @* ===== Tab 3: Model & Tools ===== *@
+                <MudTabPanel Text="Model & Tools" Icon="@Icons.Material.Filled.Settings">
+                    <MudText Typo="Typo.h6" Class="mb-3">LLM Configuration</MudText>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudSelect T="string" @bind-Value="_config.Provider" Label="Provider"
+                                       Variant="Variant.Outlined" Class="mb-3">
+                                <MudSelectItem T="string" Value="@("openai")">OpenAI</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("azure")">Azure OpenAI</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("ollama")">Ollama (Local)</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("custom")">Custom Endpoint</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudSelect T="string" @bind-Value="_config.Model" Label="Model"
+                                       Variant="Variant.Outlined" Class="mb-3">
+                                @foreach (var model in GetModelsForProvider(_config.Provider))
+                                {
+                                    <MudSelectItem T="string" Value="@model">@model</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudTextField @bind-Value="_config.ApiKey" Label="API Key" Variant="Variant.Outlined"
+                                  InputType="InputType.Password" Class="mb-3"
+                                  HelperText="API key or environment variable (e.g., $OPENAI_API_KEY)" />
+
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.body2" Class="mb-1">
+                                Temperature: @_config.Temperature.ToString("F1")
+                            </MudText>
+                            <MudSlider T="double" @bind-Value="_config.Temperature" Min="0.0" Max="2.0" Step="0.1"
+                                       Color="Color.Primary" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudNumericField T="int" @bind-Value="_config.MaxTurns" Label="Max Turns"
+                                             Variant="Variant.Outlined" Min="1" Max="50" Class="mb-3"
+                                             HelperText="Maximum conversation turns per message" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudSwitch T="bool" @bind-Value="_config.MemoryEnabled" Label="Enable Memory"
+                               Color="Color.Primary" Class="mb-3" />
+                    @if (_config.MemoryEnabled)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                            Memory is enabled. The agent will maintain conversation context across messages.
+                        </MudAlert>
+                    }
+
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.h6" Class="mb-2">Tools</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Connect external tools and services the agent can invoke.
+                    </MudText>
+
+                    @for (var i = 0; i < _config.ToolConfigs.Count; i++)
+                    {
+                        var index = i;
+                        <MudPaper Outlined="true" Class="pa-3 mb-3">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                                <MudText Typo="Typo.subtitle2">
+                                    <MudIcon Icon="@GetToolIcon(_config.ToolConfigs[index].Type)" Size="Size.Small" Class="mr-1" />
+                                    @_config.ToolConfigs[index].Name
+                                </MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveTool(index))" />
+                            </MudStack>
+                            <MudGrid>
+                                <MudItem xs="12" md="4">
+                                    <MudTextField @bind-Value="_config.ToolConfigs[index].Name" Label="Name"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    <MudSelect T="string" @bind-Value="_config.ToolConfigs[index].Type" Label="Type"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                                        <MudSelectItem T="string" Value="@("mcp")">MCP Server</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("surgewave-topic")">Surgewave Topic</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("http")">HTTP API</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    @if (_config.ToolConfigs[index].Type == "surgewave-topic")
+                                    {
+                                        <MudTextField @bind-Value="_config.ToolConfigs[index].TopicName" Label="Topic Name"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField @bind-Value="_config.ToolConfigs[index].Uri" Label="URI / Endpoint"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    }
+                                </MudItem>
+                            </MudGrid>
+                            <MudTextField @bind-Value="_config.ToolConfigs[index].Description" Label="Description (optional)"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+                        </MudPaper>
+                    }
+
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddTool">
+                        Add Tool
+                    </MudButton>
+                </MudTabPanel>
+
+                @* ===== Tab 4: Knowledge Base ===== *@
+                <MudTabPanel Text="Knowledge" Icon="@Icons.Material.Filled.LibraryBooks">
+                    <MudText Typo="Typo.h6" Class="mb-2">Knowledge Base</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                        Add knowledge sources for retrieval-augmented generation (RAG).
+                    </MudText>
+
+                    @for (var i = 0; i < _config.KnowledgeSources.Count; i++)
+                    {
+                        var index = i;
+                        <MudPaper Outlined="true" Class="pa-3 mb-3">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                                <MudText Typo="Typo.subtitle2">
+                                    <MudIcon Icon="@GetKnowledgeIcon(_config.KnowledgeSources[index].Type)" Size="Size.Small" Class="mr-1" />
+                                    @_config.KnowledgeSources[index].Name
+                                </MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveKnowledgeSource(index))" />
+                            </MudStack>
+                            <MudGrid>
+                                <MudItem xs="12" md="4">
+                                    <MudTextField @bind-Value="_config.KnowledgeSources[index].Name" Label="Name"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    <MudSelect T="string" @bind-Value="_config.KnowledgeSources[index].Type" Label="Type"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                                        <MudSelectItem T="string" Value="@("topic")">Surgewave Topic</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("document")">Inline Document</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("url")">External URL</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    @if (_config.KnowledgeSources[index].Type == "topic")
+                                    {
+                                        <MudTextField @bind-Value="_config.KnowledgeSources[index].TopicName" Label="Topic Name"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    }
+                                    else if (_config.KnowledgeSources[index].Type == "url")
+                                    {
+                                        <MudTextField @bind-Value="_config.KnowledgeSources[index].Url" Label="URL"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    }
+                                </MudItem>
+                            </MudGrid>
+                            @if (_config.KnowledgeSources[index].Type == "document")
+                            {
+                                <MudTextField @bind-Value="_config.KnowledgeSources[index].Content" Label="Content"
+                                              Variant="Variant.Outlined" Lines="4" Class="mt-2" Margin="Margin.Dense" />
+                            }
+                        </MudPaper>
+                    }
+
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddKnowledgeSource">
+                        Add Knowledge Source
+                    </MudButton>
+                </MudTabPanel>
+
+                @* ===== Tab 5: Output & Guardrails ===== *@
+                <MudTabPanel Text="Output & Guardrails" Icon="@Icons.Material.Filled.Shield">
+                    <MudText Typo="Typo.h6" Class="mb-3">Output Configuration</MudText>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="4">
+                            <MudSelect T="string" @bind-Value="_config.Output.Format" Label="Output Format"
+                                       Variant="Variant.Outlined" Class="mb-3">
+                                <MudSelectItem T="string" Value="@("text")">Plain Text</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("json")">JSON</MudSelectItem>
+                                <MudSelectItem T="string" Value="@("markdown")">Markdown</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudNumericField T="int?" @bind-Value="_config.Output.MaxLength" Label="Max Output Length"
+                                             Variant="Variant.Outlined" Class="mb-3" Min="0"
+                                             HelperText="Characters (empty = unlimited)" />
+                        </MudItem>
+                    </MudGrid>
+
+                    @if (_config.Output.Format == "json")
+                    {
+                        <MudTextField @bind-Value="_config.Output.JsonSchema" Label="JSON Schema (optional)"
+                                      Variant="Variant.Outlined" Lines="6" Class="mb-3"
+                                      HelperText="Define the expected JSON output structure" />
+                    }
+
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.h6" Class="mb-3">Guardrails</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Enable safety filters and content moderation.
+                    </MudText>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="4">
+                            <MudSwitch T="bool" @bind-Value="_config.Guardrails.PiiDetection"
+                                       Label="PII Detection & Redaction" Color="Color.Warning" Class="mb-2" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudSwitch T="bool" @bind-Value="_config.Guardrails.ToxicityFilter"
+                                       Label="Toxicity Filter" Color="Color.Error" Class="mb-2" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudSwitch T="bool" @bind-Value="_config.Guardrails.PromptInjectionDetection"
+                                       Label="Prompt Injection Detection" Color="Color.Info" Class="mb-2" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="12" md="4">
+                            <MudNumericField T="int?" @bind-Value="_config.Guardrails.MaxInputLength"
+                                             Label="Max Input Length" Variant="Variant.Outlined" Min="0"
+                                             HelperText="Characters (empty = unlimited)" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudNumericField T="int?" @bind-Value="_config.Guardrails.MaxOutputLength"
+                                             Label="Max Output Length" Variant="Variant.Outlined" Min="0"
+                                             HelperText="Characters (empty = unlimited)" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.h6" Class="mb-2">Workflow Rules</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Define conditional rules that trigger specific actions.
+                    </MudText>
+
+                    @for (var i = 0; i < _config.WorkflowRules.Count; i++)
+                    {
+                        var index = i;
+                        <MudPaper Outlined="true" Class="pa-3 mb-3">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                                <MudText Typo="Typo.subtitle2">Rule: @_config.WorkflowRules[index].Name</MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveWorkflowRule(index))" />
+                            </MudStack>
+                            <MudGrid>
+                                <MudItem xs="12" md="3">
+                                    <MudTextField @bind-Value="_config.WorkflowRules[index].Name" Label="Name"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" md="3">
+                                    <MudTextField @bind-Value="_config.WorkflowRules[index].Trigger" Label="Trigger"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  HelperText="contains:keyword, intent:type, regex:pattern" />
+                                </MudItem>
+                                <MudItem xs="12" md="3">
+                                    <MudSelect T="string" @bind-Value="_config.WorkflowRules[index].Action" Label="Action"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                                        <MudSelectItem T="string" Value="@("use-tool")">Use Tool</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("respond")">Respond with Text</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("escalate")">Escalate</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@("reject")">Reject</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" md="3">
+                                    <MudTextField @bind-Value="_config.WorkflowRules[index].ActionParameter"
+                                                  Label="Parameter" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  HelperText="Tool name, response text, etc." />
+                                </MudItem>
+                            </MudGrid>
+                        </MudPaper>
+                    }
+
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddWorkflowRule">
+                        Add Rule
+                    </MudButton>
+                </MudTabPanel>
+
+                @* ===== Tab 6: Test ===== *@
+                <MudTabPanel Text="Test" Icon="@Icons.Material.Filled.PlayCircle">
+                    <MudText Typo="Typo.h6" Class="mb-2">Test Your Agent</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Send test messages to see how the agent responds with the current configuration.
+                    </MudText>
+
+                    <MudPaper Outlined="true" Class="pa-0" Style="height: 400px; display: flex; flex-direction: column;">
+                        <div style="flex: 1; overflow-y: auto; padding: 12px;" @ref="_chatContainer">
+                            @if (_testMessages.Count == 0)
+                            {
+                                <div class="d-flex flex-column align-center justify-center" style="height: 100%;">
+                                    <MudIcon Icon="@Icons.Material.Filled.ChatBubbleOutline" Size="Size.Large" Color="Color.Secondary" />
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">
+                                        Send a message to test the agent configuration.
+                                    </MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                @foreach (var msg in _testMessages)
+                                {
+                                    <div class="d-flex @(msg.IsUser ? "justify-end" : "justify-start") mb-2">
+                                        <MudPaper Class="pa-2" Elevation="1" Style="@GetTestBubbleStyle(msg.IsUser)" MaxWidth="80%">
+                                            <MudText Typo="Typo.body2" Style="white-space: pre-wrap; word-break: break-word;">
+                                                @msg.Content
+                                            </MudText>
+                                            @if (msg.TriggeredRules.Count > 0)
+                                            {
+                                                <MudStack Row="true" Spacing="1" Class="mt-1 flex-wrap">
+                                                    @foreach (var rule in msg.TriggeredRules)
+                                                    {
+                                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">
+                                                            @rule
+                                                        </MudChip>
+                                                    }
+                                                </MudStack>
+                                            }
+                                            @if (msg.GuardrailsTriggered.Count > 0)
+                                            {
+                                                <MudStack Row="true" Spacing="1" Class="mt-1 flex-wrap">
+                                                    @foreach (var guardrail in msg.GuardrailsTriggered)
+                                                    {
+                                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error">
+                                                            @guardrail
+                                                        </MudChip>
+                                                    }
+                                                </MudStack>
+                                            }
+                                            <MudText Typo="Typo.caption" Style="opacity: 0.6;" Class="mt-1">
+                                                @msg.Timestamp.ToString("HH:mm:ss")
+                                            </MudText>
+                                        </MudPaper>
+                                    </div>
+                                }
+                            }
+                        </div>
+
+                        <MudDivider />
+
+                        <div class="pa-2">
+                            <MudGrid Spacing="1">
+                                <MudItem xs="9">
+                                    <MudTextField @bind-Value="_testInput" Label="Type a test message..."
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  OnKeyDown="OnTestKeyDown"
+                                                  Disabled="_testProcessing" />
+                                </MudItem>
+                                <MudItem xs="3" Class="d-flex align-center gap-1">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                                                   OnClick="SendTestMessage" Size="Size.Medium"
+                                                   Disabled="@(string.IsNullOrWhiteSpace(_testInput) || _testProcessing)" />
+                                    <MudTooltip Text="Reset chat">
+                                        <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small"
+                                                       Color="Color.Default" OnClick="ResetTestChat" />
+                                    </MudTooltip>
+                                </MudItem>
+                            </MudGrid>
+                        </div>
+                    </MudPaper>
+
+                    @if (_testProcessing)
+                    {
+                        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-1" />
+                    }
+                </MudTabPanel>
+            </MudTabs>
+        </MudPaper>
+
+        @* ===== Bottom Action Bar ===== *@
+        <MudPaper Elevation="2" Class="pa-4 mt-4">
+            <MudStack Row="true" Spacing="2" Justify="Justify.FlexEnd">
+                <MudButton Variant="Variant.Text" Href="/agents">Cancel</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           StartIcon="@Icons.Material.Filled.FileDownload"
+                           OnClick="ExportConfig"
+                           Disabled="string.IsNullOrWhiteSpace(_config.Name)">
+                    Export JSON
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.RocketLaunch"
+                           OnClick="DeployAsPipelineNode"
+                           Disabled="string.IsNullOrWhiteSpace(_config.Name)">
+                    Deploy as Pipeline Node
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="SaveAgent"
+                           Disabled="string.IsNullOrWhiteSpace(_config.Name)">
+                    Save Agent
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+
+    @* ===== Right Sidebar: Preview ===== *@
+    <MudItem xs="12" md="3">
+        <MudPaper Elevation="2" Class="pa-4 mb-4" Style="position: sticky; top: 80px;">
+            <MudText Typo="Typo.h6" Class="mb-3">Agent Preview</MudText>
+            <MudCard Outlined="true">
+                <MudCardHeader>
+                    <CardHeaderAvatar>
+                        <MudAvatar Color="Color.Primary" Variant="Variant.Outlined">
+                            @if (!string.IsNullOrEmpty(_config.Persona.Avatar))
+                            {
+                                <MudText>@_config.Persona.Avatar</MudText>
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
+                            }
+                        </MudAvatar>
+                    </CardHeaderAvatar>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.subtitle1">
+                            @(string.IsNullOrWhiteSpace(_config.Persona.DisplayName)
+                                ? (string.IsNullOrWhiteSpace(_config.Name) ? "Untitled Agent" : _config.Name)
+                                : _config.Persona.DisplayName)
+                        </MudText>
+                        <MudText Typo="Typo.caption">@_config.Provider / @_config.Model</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (!string.IsNullOrEmpty(_config.Description))
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-2">@_config.Description</MudText>
+                    }
+                    <MudStack Row="true" Spacing="1" Class="flex-wrap mb-2">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                 Icon="@Icons.Material.Filled.RecordVoiceOver">
+                            @_config.Persona.Tonality
+                        </MudChip>
+                        @if (_config.Persona.Language != "auto")
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                     Icon="@Icons.Material.Filled.Language">
+                                @_config.Persona.Language.ToUpperInvariant()
+                            </MudChip>
+                        }
+                    </MudStack>
+                    <MudStack Row="true" Spacing="1" Class="flex-wrap">
+                        @if (_config.MemoryEnabled)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info"
+                                     Icon="@Icons.Material.Filled.Memory" Variant="Variant.Text">
+                                Memory
+                            </MudChip>
+                        }
+                        @if (_config.ToolConfigs.Count > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning"
+                                     Icon="@Icons.Material.Filled.Build" Variant="Variant.Text">
+                                @_config.ToolConfigs.Count tool(s)
+                            </MudChip>
+                        }
+                        @if (_config.KnowledgeSources.Count > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success"
+                                     Icon="@Icons.Material.Filled.LibraryBooks" Variant="Variant.Text">
+                                @_config.KnowledgeSources.Count source(s)
+                            </MudChip>
+                        }
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                 Icon="@Icons.Material.Filled.Thermostat">
+                            T=@_config.Temperature.ToString("F1")
+                        </MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                 Icon="@Icons.Material.Filled.Loop">
+                            @_config.MaxTurns turns
+                        </MudChip>
+                    </MudStack>
+
+                    @if (_config.Guardrails is { PiiDetection: true } or { ToxicityFilter: true } or { PromptInjectionDetection: true })
+                    {
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">Guardrails</MudText>
+                        <MudStack Row="true" Spacing="1" Class="flex-wrap">
+                            @if (_config.Guardrails.PiiDetection)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">PII</MudChip>
+                            }
+                            @if (_config.Guardrails.ToxicityFilter)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">Toxicity</MudChip>
+                            }
+                            @if (_config.Guardrails.PromptInjectionDetection)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">Injection</MudChip>
+                            }
+                        </MudStack>
+                    }
+
+                    @if (_config.Instructions.Count > 0)
+                    {
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">
+                            @_config.Instructions.Count instruction(s)
+                        </MudText>
+                    }
+                    @if (_config.Examples.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @_config.Examples.Count few-shot example(s)
+                        </MudText>
+                    }
+                    @if (_config.WorkflowRules.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @_config.WorkflowRules.Count workflow rule(s)
+                        </MudText>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter] public string? Id { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public string? QueryId { get; set; }
+
+    private AgentConfig _config = new() { Name = "" };
+    private bool _isEditing;
+    private int _activeTab;
+    private string _customInstruction = "";
+
+    // Test chat
+    private string _testInput = "";
+    private bool _testProcessing;
+    private List<TestMessage> _testMessages = [];
+    private ElementReference _chatContainer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var editId = Id ?? QueryId;
+        if (!string.IsNullOrEmpty(editId))
+        {
+            var config = await AgentService.GetAsync(editId);
+            if (config != null)
+            {
+                _config = config;
+                _isEditing = true;
+
+                // Migrate legacy tools to ToolConfigs if needed
+                MigrateLegacyTools();
+            }
+        }
+    }
+
+    private void MigrateLegacyTools()
+    {
+        if (_config.Tools.Count > 0 && _config.ToolConfigs.Count == 0)
+        {
+            foreach (var tool in _config.Tools)
+            {
+                var type = tool.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? "http"
+                    : tool.Contains("://") ? "mcp"
+                    : "surgewave-topic";
+
+                _config.ToolConfigs.Add(new AgentToolConfig
+                {
+                    Name = tool,
+                    Type = type,
+                    Uri = type != "surgewave-topic" ? tool : null,
+                    TopicName = type == "surgewave-topic" ? tool : null
+                });
+            }
+        }
+    }
+
+    // ===== Instruction Blocks =====
+
+    private void ToggleInstruction(string key)
+    {
+        var text = InstructionTemplates.Templates[key];
+        if (_config.Instructions.Contains(text))
+            _config.Instructions.Remove(text);
+        else
+            _config.Instructions.Add(text);
+    }
+
+    private void RemoveInstruction(int index)
+    {
+        if (index >= 0 && index < _config.Instructions.Count)
+            _config.Instructions.RemoveAt(index);
+    }
+
+    private void AddCustomInstruction()
+    {
+        if (!string.IsNullOrWhiteSpace(_customInstruction))
+        {
+            _config.Instructions.Add(_customInstruction.Trim());
+            _customInstruction = "";
+        }
+    }
+
+    // ===== Few-Shot Examples =====
+
+    private void AddExample()
+    {
+        _config.Examples.Add(new FewShotExample
+        {
+            UserMessage = "",
+            AssistantResponse = ""
+        });
+    }
+
+    private void RemoveExample(int index)
+    {
+        if (index >= 0 && index < _config.Examples.Count)
+            _config.Examples.RemoveAt(index);
+    }
+
+    // ===== Tools =====
+
+    private void AddTool()
+    {
+        _config.ToolConfigs.Add(new AgentToolConfig
+        {
+            Name = $"tool-{_config.ToolConfigs.Count + 1}",
+            Type = "mcp"
+        });
+    }
+
+    private void RemoveTool(int index)
+    {
+        if (index >= 0 && index < _config.ToolConfigs.Count)
+            _config.ToolConfigs.RemoveAt(index);
+    }
+
+    // ===== Knowledge Sources =====
+
+    private void AddKnowledgeSource()
+    {
+        _config.KnowledgeSources.Add(new KnowledgeSource
+        {
+            Name = $"source-{_config.KnowledgeSources.Count + 1}",
+            Type = "topic"
+        });
+    }
+
+    private void RemoveKnowledgeSource(int index)
+    {
+        if (index >= 0 && index < _config.KnowledgeSources.Count)
+            _config.KnowledgeSources.RemoveAt(index);
+    }
+
+    // ===== Workflow Rules =====
+
+    private void AddWorkflowRule()
+    {
+        _config.WorkflowRules.Add(new WorkflowRule
+        {
+            Name = $"rule-{_config.WorkflowRules.Count + 1}",
+            Trigger = "contains:",
+            Action = "respond"
+        });
+    }
+
+    private void RemoveWorkflowRule(int index)
+    {
+        if (index >= 0 && index < _config.WorkflowRules.Count)
+            _config.WorkflowRules.RemoveAt(index);
+    }
+
+    // ===== Save / Deploy / Export =====
+
+    private async Task SaveAgent()
+    {
+        if (string.IsNullOrWhiteSpace(_config.Name))
+            return;
+
+        try
+        {
+            SyncLegacyTools();
+            await AgentService.SaveAsync(_config);
+            _isEditing = true;
+            Snackbar.Add($"Agent '{_config.Name}' saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to save agent: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeployAsPipelineNode()
+    {
+        if (string.IsNullOrWhiteSpace(_config.Name))
+            return;
+
+        try
+        {
+            _config.IsDeployed = true;
+            SyncLegacyTools();
+            await AgentService.SaveAsync(_config);
+
+            Snackbar.Add($"Agent '{_config.Name}' deployed as pipeline node", Severity.Success);
+            Navigation.NavigateTo("/agents");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to deploy agent: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ExportConfig()
+    {
+        try
+        {
+            SyncLegacyTools();
+            var json = JsonSerializer.Serialize(_config, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+
+            var fileName = $"agent-{_config.Name.ToLowerInvariant().Replace(' ', '-')}.json";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+            var base64 = Convert.ToBase64String(bytes);
+
+            await JS.InvokeVoidAsync("eval",
+                $"const a=document.createElement('a');a.href='data:application/json;base64,{base64}';a.download='{fileName}';a.click();");
+
+            Snackbar.Add("Configuration exported", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Export failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Sync ToolConfigs back to legacy Tools list for backward compatibility.
+    /// </summary>
+    private void SyncLegacyTools()
+    {
+        _config.Tools = _config.ToolConfigs
+            .Select(t => t.Uri ?? t.TopicName ?? t.Name)
+            .ToList();
+    }
+
+    // ===== Test Chat =====
+
+    private async Task OnTestKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendTestMessage();
+        }
+    }
+
+    private async Task SendTestMessage()
+    {
+        var text = _testInput?.Trim();
+        if (string.IsNullOrWhiteSpace(text) || _testProcessing)
+            return;
+
+        _testMessages.Add(new TestMessage(true, text, DateTime.Now));
+        _testInput = "";
+        _testProcessing = true;
+        StateHasChanged();
+
+        await Task.Delay(50); // Allow UI to update
+
+        try
+        {
+            // Simulate agent response based on current config
+            var response = SimulateAgentResponse(text);
+            _testMessages.Add(response);
+        }
+        catch (Exception ex)
+        {
+            _testMessages.Add(new TestMessage(false, $"Error: {ex.Message}", DateTime.Now));
+        }
+        finally
+        {
+            _testProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private TestMessage SimulateAgentResponse(string userInput)
+    {
+        var triggeredRules = new List<string>();
+        var guardrailsTriggered = new List<string>();
+
+        // Check guardrails
+        if (_config.Guardrails.MaxInputLength.HasValue && userInput.Length > _config.Guardrails.MaxInputLength.Value)
+            guardrailsTriggered.Add($"Input exceeds max length ({_config.Guardrails.MaxInputLength})");
+
+        if (_config.Guardrails.PiiDetection)
+        {
+            // Simple PII detection simulation
+            if (System.Text.RegularExpressions.Regex.IsMatch(userInput, @"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"))
+                guardrailsTriggered.Add("PII Detected: phone number");
+            if (System.Text.RegularExpressions.Regex.IsMatch(userInput, @"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"))
+                guardrailsTriggered.Add("PII Detected: email address");
+        }
+
+        // Check workflow rules
+        foreach (var rule in _config.WorkflowRules)
+        {
+            var matched = false;
+            if (rule.Trigger.StartsWith("contains:", StringComparison.OrdinalIgnoreCase))
+            {
+                var keyword = rule.Trigger[9..];
+                matched = userInput.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+            }
+            else if (rule.Trigger.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+            {
+                var pattern = rule.Trigger[6..];
+                try { matched = System.Text.RegularExpressions.Regex.IsMatch(userInput, pattern); }
+                catch { /* invalid regex */ }
+            }
+
+            if (matched)
+            {
+                triggeredRules.Add($"{rule.Name}: {rule.Action}");
+
+                if (rule.Action == "reject")
+                    return new TestMessage(false, rule.ActionParameter ?? "Request rejected by workflow rule.", DateTime.Now, triggeredRules, guardrailsTriggered);
+
+                if (rule.Action == "respond" && !string.IsNullOrEmpty(rule.ActionParameter))
+                    return new TestMessage(false, rule.ActionParameter, DateTime.Now, triggeredRules, guardrailsTriggered);
+            }
+        }
+
+        // Build simulated response
+        var parts = new List<string>();
+        parts.Add($"[Simulated Response - {_config.Persona.Tonality} tone]");
+
+        if (!string.IsNullOrEmpty(_config.SystemPrompt))
+            parts.Add($"System prompt active ({_config.SystemPrompt.Length} chars)");
+
+        if (_config.Instructions.Count > 0)
+            parts.Add($"Following {_config.Instructions.Count} instruction(s)");
+
+        if (_config.Examples.Count > 0)
+            parts.Add($"Using {_config.Examples.Count} few-shot example(s)");
+
+        if (_config.ToolConfigs.Count > 0)
+            parts.Add($"Tools available: {string.Join(", ", _config.ToolConfigs.Select(t => t.Name))}");
+
+        if (_config.KnowledgeSources.Count > 0)
+            parts.Add($"Knowledge sources: {string.Join(", ", _config.KnowledgeSources.Select(s => s.Name))}");
+
+        parts.Add($"Model: {_config.Provider}/{_config.Model} (T={_config.Temperature:F1})");
+
+        if (_config.Output.Format != "text")
+            parts.Add($"Output format: {_config.Output.Format}");
+
+        var response = string.Join("\n", parts);
+        return new TestMessage(false, response, DateTime.Now, triggeredRules, guardrailsTriggered);
+    }
+
+    private void ResetTestChat()
+    {
+        _testMessages.Clear();
+    }
+
+    // ===== Helpers =====
+
+    private static string[] GetModelsForProvider(string provider) => provider switch
+    {
+        "openai" => ["gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "o1", "o1-mini", "o3-mini"],
+        "azure" => ["gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-35-turbo"],
+        "ollama" => ["llama3", "llama3.1", "llama3.2", "mistral", "mixtral", "codellama", "phi3", "gemma2", "qwen2"],
+        "custom" => ["gpt-4", "gpt-4o", "llama3", "mistral", "custom"],
+        _ => ["gpt-4"]
+    };
+
+    private static string GetToolIcon(string type) => type switch
+    {
+        "mcp" => Icons.Material.Filled.Hub,
+        "surgewave-topic" => Icons.Material.Filled.Topic,
+        "http" => Icons.Material.Filled.Http,
+        _ => Icons.Material.Filled.Extension
+    };
+
+    private static string GetKnowledgeIcon(string type) => type switch
+    {
+        "topic" => Icons.Material.Filled.Topic,
+        "document" => Icons.Material.Filled.Description,
+        "url" => Icons.Material.Filled.Link,
+        _ => Icons.Material.Filled.Folder
+    };
+
+    private static string GetTestBubbleStyle(bool isUser) => isUser
+        ? "background-color: var(--mud-palette-primary); color: var(--mud-palette-primary-text); border-radius: 12px 12px 4px 12px;"
+        : "border-radius: 12px 12px 12px 4px;";
+
+    private sealed record TestMessage(
+        bool IsUser,
+        string Content,
+        DateTime Timestamp,
+        List<string>? TriggeredRules = null,
+        List<string>? GuardrailsTriggered = null)
+    {
+        public List<string> TriggeredRules { get; } = TriggeredRules ?? [];
+        public List<string> GuardrailsTriggered { get; } = GuardrailsTriggered ?? [];
+    }
+}

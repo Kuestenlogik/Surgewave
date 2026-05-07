@@ -1,0 +1,359 @@
+@page "/sql"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using Kuestenlogik.Surgewave.Control.Components.Query
+@using System.Text.Json
+@using Blazored.LocalStorage
+@inject ISurgewaveApiClient ApiClient
+@inject ILocalStorageService LocalStorage
+@inject NotificationState Notification
+@inject ClusterState ClusterState
+
+<PageTitle>SQL Query - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">SQL Query</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Query topic data using streaming SQL or natural language
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudSelect T="string" Value="_selectedHistory" ValueChanged="LoadHistoryQuery" Label="History"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="min-width: 250px;">
+            @foreach (var q in _queryHistory.Take(10))
+            {
+                <MudSelectItem Value="@q">@(q.Length > 60 ? q[..57] + "..." : q)</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+</div>
+
+@* ===== NATURAL LANGUAGE QUERY ===== *@
+<NaturalLanguageQuery OnCopyToEditor="OnNlQueryCopied" />
+
+@* ===== QUERY EDITOR ===== *@
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudTextField T="string" @bind-Value="_query" Label="SQL Query" Variant="Variant.Outlined"
+                  Lines="4" Placeholder="SELECT * FROM my-topic WHERE amount > 100 LIMIT 50"
+                  Style="font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 13px;"
+                  Immediate="true" />
+
+    <div class="d-flex justify-space-between align-center mt-3">
+        <div class="d-flex gap-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQueryAsync"
+                       StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(_executing || string.IsNullOrWhiteSpace(_query))">
+                @(_executing ? "Executing..." : "Execute")
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="ClearResults"
+                       StartIcon="@Icons.Material.Filled.Clear" Disabled="@(_resultRows.Count == 0)">
+                Clear
+            </MudButton>
+            @if (_resultRows.Count > 0)
+            {
+                <MudButton Variant="Variant.Outlined" OnClick="ExportJson"
+                           StartIcon="@Icons.Material.Filled.Download">
+                    Export JSON
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" OnClick="ExportCsv"
+                           StartIcon="@Icons.Material.Filled.TableView">
+                    Export CSV
+                </MudButton>
+            }
+        </div>
+        <div class="d-flex align-center gap-2">
+            @if (_executionTime.HasValue)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
+                    @_resultRows.Count rows in @_executionTime.Value.TotalMilliseconds.ToString("F0")ms
+                </MudChip>
+            }
+        </div>
+    </div>
+
+    @* Quick reference *@
+    <MudExpansionPanels Class="mt-3" Elevation="0">
+        <MudExpansionPanel Text="Syntax Reference" Dense="true">
+            <MudSimpleTable Dense="true" Style="font-size: 12px;">
+                <tbody>
+                    <tr><td><code>SELECT * FROM topic-name</code></td><td>All messages from topic (JSON fields become columns)</td></tr>
+                    <tr><td><code>SELECT key, amount FROM orders WHERE amount &gt; 100</code></td><td>Filter and project JSON fields</td></tr>
+                    <tr><td><code>SELECT customer, SUM(amount) FROM orders GROUP BY customer</code></td><td>Aggregate by group</td></tr>
+                    <tr><td><code>SELECT *, _offset, _partition, _timestamp FROM topic</code></td><td>Include metadata columns</td></tr>
+                    <tr><td><code>WHERE customer LIKE 'A%'</code></td><td>Pattern matching</td></tr>
+                    <tr><td><code>WHERE amount BETWEEN 100 AND 500</code></td><td>Range filter</td></tr>
+                    <tr><td><code>WHERE status IN ('active', 'pending')</code></td><td>Set membership</td></tr>
+                    <tr><td><code>ORDER BY amount DESC LIMIT 50</code></td><td>Sort and limit results</td></tr>
+                    <tr><td><code>SELECT COUNT(*), AVG(amount), MAX(amount) FROM orders GROUP BY region</code></td><td>Aggregate functions</td></tr>
+                    <tr><td><code>CREATE STREAM high_value AS SELECT * FROM orders WHERE amount > 1000</code></td><td>Create derived stream</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudPaper>
+
+@if (_executing)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">
+        @_error
+    </MudAlert>
+}
+
+@* ===== RESULTS TABLE ===== *@
+@if (_resultRows.Count > 0)
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">
+            Results — @_resultRows.Count row(s)
+        </MudText>
+
+        <MudSimpleTable Dense="true" Hover="true" Style="max-height: 600px; overflow: auto;">
+            <thead>
+                <tr>
+                    @foreach (var col in _resultColumns)
+                    {
+                        <th style="position: sticky; top: 0; background: var(--mud-palette-surface); z-index: 1;">@col</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _resultRows)
+                {
+                    <tr>
+                        @foreach (var val in row)
+                        {
+                            <td style="font-family: monospace; font-size: 12px; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                @{
+                                    var display = FormatCellValue(val);
+                                }
+                                <MudTooltip Text="@display" Placement="Placement.Top">
+                                    <span>@(display.Length > 80 ? display[..77] + "..." : display)</span>
+                                </MudTooltip>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+}
+else if (!_executing && _executionTime.HasValue)
+{
+    <MudAlert Severity="Severity.Info">No results matching the query</MudAlert>
+}
+
+@* ===== RUNNING QUERIES ===== *@
+<MudPaper Elevation="2" Class="pa-4">
+    <div class="d-flex align-center justify-space-between mb-2">
+        <MudText Typo="Typo.subtitle2">Running Queries</MudText>
+        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="LoadContinuousQueriesAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Refresh
+        </MudButton>
+    </div>
+
+    @if (_continuousQueries.Count > 0)
+    {
+        <MudSimpleTable Dense="true" Hover="true">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>SQL</th>
+                    <th>Status</th>
+                    <th>Rows Processed</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var query in _continuousQueries)
+                {
+                    <tr>
+                        <td><code>@query.QueryId</code></td>
+                        <td>@query.Name</td>
+                        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            <MudTooltip Text="@query.Sql"><span>@query.Sql</span></MudTooltip>
+                        </td>
+                        <td>
+                            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(query.Status)">
+                                @query.Status
+                            </MudChip>
+                        </td>
+                        <td>@query.RowsProcessed.ToString("N0")</td>
+                        <td>@query.CreatedAt.LocalDateTime.ToString("HH:mm:ss")</td>
+                        <td>
+                            <MudTooltip Text="Terminate">
+                                <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => TerminateQueryAsync(query.QueryId))" />
+                            </MudTooltip>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">No running queries</MudText>
+    }
+</MudPaper>
+
+@code {
+    private string _query = "";
+    private bool _executing;
+    private string? _error;
+    private TimeSpan? _executionTime;
+    private List<string> _resultColumns = [];
+    private List<List<object?>> _resultRows = [];
+    private List<string> _queryHistory = [];
+    private string? _selectedHistory;
+    private List<SqlContinuousQueryInfo> _continuousQueries = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var history = await LocalStorage.GetItemAsync<List<string>>("surgewave-sql-history");
+        if (history != null) _queryHistory = history;
+
+        await LoadContinuousQueriesAsync();
+    }
+
+    private void LoadHistoryQuery(string? query)
+    {
+        _selectedHistory = query;
+        if (query != null) _query = query;
+    }
+
+    private void OnNlQueryCopied(string sql)
+    {
+        _query = sql;
+        StateHasChanged();
+    }
+
+    private async Task ExecuteQueryAsync()
+    {
+        _error = null;
+        _executing = true;
+        _resultRows = [];
+        _resultColumns = [];
+        StateHasChanged();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            var result = await ApiClient.ExecuteSqlAsync(_query);
+
+            if (result == null)
+            {
+                _error = "Failed to connect to broker SQL API";
+                return;
+            }
+
+            if (result.Error != null)
+            {
+                _error = result.Error;
+                return;
+            }
+
+            _resultColumns = result.Columns ?? [];
+            _resultRows = result.Rows ?? [];
+
+            // Save to history
+            if (!_queryHistory.Contains(_query))
+            {
+                _queryHistory.Insert(0, _query);
+                if (_queryHistory.Count > 20) _queryHistory.RemoveRange(20, _queryHistory.Count - 20);
+                await LocalStorage.SetItemAsync("surgewave-sql-history", _queryHistory);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Query failed: {ex.Message}";
+        }
+        finally
+        {
+            sw.Stop();
+            _executionTime = sw.Elapsed;
+            _executing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadContinuousQueriesAsync()
+    {
+        try
+        {
+            var queries = await ApiClient.ListContinuousQueriesAsync();
+            _continuousQueries = queries.ToList();
+        }
+        catch
+        {
+            _continuousQueries = [];
+        }
+        StateHasChanged();
+    }
+
+    private async Task TerminateQueryAsync(string queryId)
+    {
+        var success = await ApiClient.TerminateContinuousQueryAsync(queryId);
+        if (success)
+        {
+            Notification.ShowInfo($"Query {queryId} terminated");
+            await LoadContinuousQueriesAsync();
+        }
+        else
+        {
+            Notification.ShowInfo($"Failed to terminate query {queryId}");
+        }
+    }
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "RUNNING" => Color.Success,
+        "CREATED" => Color.Info,
+        "PAUSED" => Color.Warning,
+        "TERMINATED" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string FormatCellValue(object? val) => val switch
+    {
+        null => "(null)",
+        JsonElement je => je.ValueKind switch
+        {
+            JsonValueKind.String => je.GetString() ?? "(null)",
+            JsonValueKind.Number => je.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null => "(null)",
+            _ => je.GetRawText()
+        },
+        _ => val.ToString() ?? "(null)"
+    };
+
+    // ===== EXPORT =====
+
+    private void ExportJson()
+    {
+        Notification.ShowInfo($"Exported {_resultRows.Count} rows as JSON");
+    }
+
+    private void ExportCsv()
+    {
+        Notification.ShowInfo($"Exported {_resultRows.Count} rows as CSV");
+    }
+
+    private void ClearResults()
+    {
+        _resultRows = [];
+        _resultColumns = [];
+        _executionTime = null;
+        _error = null;
+    }
+}

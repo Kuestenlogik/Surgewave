@@ -1,0 +1,208 @@
+# EditorConfig for Kuestenlogik.Storm
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.cs]
+# Code style
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+
+# Analyzer suppressions for library code
+# CA1002: Change List<T> to Collection<T> - List<T> is appropriate for internal DTOs
+dotnet_diagnostic.CA1002.severity = none
+
+# CA1028: Enum storage should be Int32 - short is required for Kafka wire protocol
+dotnet_diagnostic.CA1028.severity = none
+
+# CA1031: Do not catch general exceptions - acceptable in top-level handlers
+dotnet_diagnostic.CA1031.severity = suggestion
+
+# CA1034: Nested types should not be visible - nested types are used for related protocol structures
+dotnet_diagnostic.CA1034.severity = none
+
+# CA1062: Validate arguments of public methods - internal library code, nullable enabled
+dotnet_diagnostic.CA1062.severity = suggestion
+
+# CA1303: Literal strings in Console.WriteLine - acceptable for demo/diagnostic tools
+dotnet_diagnostic.CA1303.severity = none
+
+# CA1305: Culture in string formatting - not relevant for hex/binary display
+dotnet_diagnostic.CA1305.severity = suggestion
+
+# CA1724: Type names conflicting with namespaces - nested class Compression acceptable
+dotnet_diagnostic.CA1724.severity = none
+
+# CA1810: Static constructor for lookup table initialization - acceptable for CRC32C
+dotnet_diagnostic.CA1810.severity = none
+
+# CA1819: Properties should not return arrays - RecordBatch data needs array access
+dotnet_diagnostic.CA1819.severity = none
+
+# CA1822: Member does not access instance data - design choice, may change later
+dotnet_diagnostic.CA1822.severity = suggestion
+
+# CA1849: Call async methods when in async method - CTS.Cancel vs CancelAsync tradeoff
+dotnet_diagnostic.CA1849.severity = suggestion
+
+# CA2007: ConfigureAwait - not required, caller is responsible for sync context
+dotnet_diagnostic.CA2007.severity = none
+
+# CA2016: Forward CancellationToken - good practice but sometimes not applicable
+dotnet_diagnostic.CA2016.severity = suggestion
+
+# CA2213: Disposable fields should be disposed - important, keep as warning
+dotnet_diagnostic.CA2213.severity = warning
+
+# CA1308: Normalize strings to uppercase - lowercase is fine for config parsing
+dotnet_diagnostic.CA1308.severity = none
+
+# CA1515: Types can be internal - public types are by design for library use
+dotnet_diagnostic.CA1515.severity = none
+
+# CA1711: Identifiers should not have incorrect suffix - Impl suffix is common
+dotnet_diagnostic.CA1711.severity = none
+
+# CA1805: Member initialized with default value - explicit is clearer
+dotnet_diagnostic.CA1805.severity = none
+
+# CA1820: Test for empty strings using string length - minor optimization
+dotnet_diagnostic.CA1820.severity = suggestion
+
+# CA1848: Use LoggerMessage delegates - important but lower priority for now
+dotnet_diagnostic.CA1848.severity = suggestion
+
+# CA2201: Do not raise reserved exception types - should fix but low priority
+dotnet_diagnostic.CA2201.severity = suggestion
+
+# CA1307: StringComparison overload - good practice but not critical
+dotnet_diagnostic.CA1307.severity = suggestion
+
+# --- Moved from Directory.Build.props <NoWarn> for better granularity ---
+
+# CA1027: Enums matching Kafka protocol spec (not flags)
+dotnet_diagnostic.CA1027.severity = none
+
+# CA1720: Type names in enum values matching Kafka spec (String, Int, Long, Double)
+dotnet_diagnostic.CA1720.severity = none
+
+# CA1716: 'Stop' method name for Kafka Connect API compatibility
+dotnet_diagnostic.CA1716.severity = none
+
+# CA1815: Performance structs - Equals would add overhead
+dotnet_diagnostic.CA1815.severity = none
+
+# CA1873: Prefer span overloads - not always applicable
+dotnet_diagnostic.CA1873.severity = none
+
+# CA2024: Use Task.ConfigureAwait - covered by CA2007 policy
+dotnet_diagnostic.CA2024.severity = none
+
+# CA2025: Do not pass collections directly - DTOs need direct binding
+dotnet_diagnostic.CA2025.severity = none
+
+# CA2227: Collection properties on DTOs needed for JSON serialization
+dotnet_diagnostic.CA2227.severity = none
+
+# --- Moved from per-project csproj <NoWarn> ---
+
+# CA1812: Internal class instantiated via DI/reflection - widespread false positives
+dotnet_diagnostic.CA1812.severity = none
+
+# CA2255: ModuleInitializer is intended for storage engine registration
+dotnet_diagnostic.CA2255.severity = none
+
+# CA1010: Collections should implement generic interface - System.CommandLine types
+dotnet_diagnostic.CA1010.severity = none
+
+# CA1032: Implement standard exception constructors - Kafka compat layer
+dotnet_diagnostic.CA1032.severity = none
+
+# CA2225: Operator overloads have named alternates - not applicable for DSL/fluent APIs
+dotnet_diagnostic.CA2225.severity = none
+
+# CA1003: Use generic EventHandler - async events need Task-returning delegates
+dotnet_diagnostic.CA1003.severity = none
+
+# CA2234: Pass System.Uri instead of string - HTTP clients use string URLs
+dotnet_diagnostic.CA2234.severity = none
+
+# CA1852: Seal internal types - JSON DTOs and extensibility points
+dotnet_diagnostic.CA1852.severity = none
+
+# CA1054: URI parameters should not be strings - config POCOs use string URLs
+dotnet_diagnostic.CA1054.severity = none
+
+# CA1056: URI properties should not be strings - config and wire protocol use strings
+dotnet_diagnostic.CA1056.severity = none
+
+# CA5391: Use antiforgery tokens - SAML POST bindings from external IdP
+dotnet_diagnostic.CA5391.severity = none
+
+# CA5394: Non-cryptographic Random for non-security purposes (partition selection, jitter, chaos testing)
+dotnet_diagnostic.CA5394.severity = none
+
+# CA1000: Static members on generic types - factory method pattern
+dotnet_diagnostic.CA1000.severity = none
+
+# CA1024: Use properties where appropriate - methods are intentional for complex returns
+dotnet_diagnostic.CA1024.severity = none
+
+# CA1051: Do not declare visible instance fields - Streams DSL design choice
+dotnet_diagnostic.CA1051.severity = none
+
+# CA1710: Identifiers should have correct suffix - Streams API naming
+dotnet_diagnostic.CA1710.severity = none
+
+# CA1859: Use concrete types when possible - interface-based design
+dotnet_diagnostic.CA1859.severity = none
+
+# CA1001: Types that own disposable fields should be disposable - ownership transfer patterns
+dotnet_diagnostic.CA1001.severity = suggestion
+
+# CA1068: CancellationToken parameters must come last - output param more natural last
+dotnet_diagnostic.CA1068.severity = suggestion
+
+# CA1508: Avoid dead conditional code - intentional pattern checks for optional interfaces
+dotnet_diagnostic.CA1508.severity = none
+
+[tests/**.cs]
+# Suppress test-specific warnings
+dotnet_diagnostic.CA2000.severity = suggestion
+
+# xUnit1051: CancellationToken should use TestContext.Current.CancellationToken — deferred for incremental migration
+dotnet_diagnostic.xUnit1051.severity = suggestion
+
+# CA1707: Test method names with underscores are standard convention
+dotnet_diagnostic.CA1707.severity = none
+
+# CA1063: Simplified Dispose pattern is fine for test classes
+dotnet_diagnostic.CA1063.severity = none
+
+# CA1816: GC.SuppressFinalize not needed for simple test cleanup
+dotnet_diagnostic.CA1816.severity = none
+
+# CA1861: Prefer 'static readonly' fields over constant array arguments - test readability
+dotnet_diagnostic.CA1861.severity = none
+
+# CA2012: Use ValueTasks correctly - test simplifications
+dotnet_diagnostic.CA2012.severity = none
+
+[benchmarks/**.cs]
+# Suppress benchmark-specific warnings
+
+# CA1707: Benchmark method names with underscores are standard convention
+dotnet_diagnostic.CA1707.severity = none
+
+# CA1052: Static holder types should be static or sealed
+dotnet_diagnostic.CA1052.severity = none
+
+# CA1063: Simplified Dispose pattern is fine for benchmark classes
+dotnet_diagnostic.CA1063.severity = none

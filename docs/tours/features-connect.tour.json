@@ -1,0 +1,31 @@
+{
+    "id": "connect-overview",
+    "title": "Surgewave Connect Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "intro",
+            "title": "Surgewave Connect Framework",
+            "text": "Surgewave Connect is a distributed data integration framework compatible with the Kafka Connect API. It enables scalable, fault-tolerant data pipelines between Surgewave and external systems.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "connectors",
+            "title": "Connector Ecosystem",
+            "text": "Surgewave ships with 113+ connectors for databases (PostgreSQL, MongoDB, Cassandra), cloud storage (S3, Azure Blob, GCS), messaging systems (RabbitMQ, NATS, MQTT), and many more.",
+            "attachTo": { "element": "article h2", "on": "bottom" }
+        },
+        {
+            "id": "plugins",
+            "title": "Plugin Architecture",
+            "text": "Connectors are loaded as plugins from a configurable directory. Use the collect-connectors.ps1 script to gather connector DLLs after building.",
+            "attachTo": { "element": "article", "on": "top" }
+        },
+        {
+            "id": "custom",
+            "title": "Build Your Own",
+            "text": "Create custom connectors by implementing the source or sink connector interface. Check the Custom Connectors guide for a step-by-step walkthrough.",
+            "attachTo": { "element": "article", "on": "top" }
+        }
+    ]
+}

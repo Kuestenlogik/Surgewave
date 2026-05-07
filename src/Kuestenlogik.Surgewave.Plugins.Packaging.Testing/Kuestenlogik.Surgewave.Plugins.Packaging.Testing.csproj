@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Plugins.Packaging.Testing</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <Description>Shared ISppSigner contract test suite: an abstract xunit base class any ISppSigner implementation can derive from to inherit round-trip, tamper, unsigned, and missing-config assertions. Lets third-party signer providers prove their compliance with the Surgewave signer contract using the same tests the built-in ECDSA provider passes.</Description>
+    <PackageTags>surgewave;plugins;signing;contract-tests;xunit</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging\Kuestenlogik.Surgewave.Plugins.Packaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="xunit.v3.assert" />
+  </ItemGroup>
+
+</Project>

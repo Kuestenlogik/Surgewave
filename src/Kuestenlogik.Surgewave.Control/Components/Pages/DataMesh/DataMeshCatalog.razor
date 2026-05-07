@@ -1,0 +1,582 @@
+@page "/data-mesh"
+@using System.Net.Http.Json
+@using System.Text.Json
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+
+<PageTitle>Data Mesh - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Data Mesh</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Data Products with ownership, contracts, SLOs, and quality monitoring
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenRegisterDialog"
+                   StartIcon="@Icons.Material.Filled.Add">
+            Register Product
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+            Refresh
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== SUMMARY CARDS ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Products</MudText>
+                        <MudText Typo="Typo.h5">@_products.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Published</MudText>
+                        <MudText Typo="Typo.h5">@_products.Count(p => p.Status == "Published")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">SLO Met</MudText>
+                        <MudText Typo="Typo.h5">@_products.Count(p => p.MeetsSlo)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Domain" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Domains</MudText>
+                        <MudText Typo="Typo.h5">@_domains.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== FILTERS ===== *@
+<MudPaper Elevation="2" Class="pa-3 mb-4">
+    <MudGrid>
+        <MudItem xs="12" sm="4">
+            <MudTextField T="string" @bind-Value="_searchText" Placeholder="Search products..."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_filterDomain" Label="Domain" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true">
+                @foreach (var domain in _domains.OrderBy(d => d))
+                {
+                    <MudSelectItem Value="@domain">@domain</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_filterOwner" Label="Owner" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true">
+                @foreach (var owner in _owners.OrderBy(o => o))
+                {
+                    <MudSelectItem Value="@owner">@owner</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="string" @bind-Value="_filterStatus" Label="Status" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true">
+                <MudSelectItem Value="@("Draft")">Draft</MudSelectItem>
+                <MudSelectItem Value="@("Published")">Published</MudSelectItem>
+                <MudSelectItem Value="@("Deprecated")">Deprecated</MudSelectItem>
+                <MudSelectItem Value="@("Archived")">Archived</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ===== PRODUCT CARDS ===== *@
+@if (!_loading && FilteredProducts.Any())
+{
+    <MudGrid>
+        @foreach (var product in FilteredProducts)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <MudCard Elevation="2" Class="d-flex flex-column" Style="height: 100%;">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <div class="d-flex align-center justify-space-between">
+                                <MudText Typo="Typo.h6">@product.Name</MudText>
+                                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(product.Status)" Variant="Variant.Filled">
+                                    @product.Status
+                                </MudChip>
+                            </div>
+                            <div class="d-flex gap-1 mt-1">
+                                @if (!string.IsNullOrEmpty(product.Domain))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">@product.Domain</MudChip>
+                                }
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@product.Owner</MudChip>
+                            </div>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent Class="flex-grow-1">
+                        @if (!string.IsNullOrEmpty(product.Description))
+                        {
+                            <MudText Typo="Typo.body2" Class="mb-2" Style="max-height: 40px; overflow: hidden; text-overflow: ellipsis;">
+                                @product.Description
+                            </MudText>
+                        }
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Quality:</MudText>
+                            <MudProgressLinear Value="@product.QualityScore" Color="@GetQualityColor(product.QualityScore)"
+                                              Size="Size.Small" Rounded="true" Style="width: 100px;" />
+                            <MudText Typo="Typo.caption">@(product.QualityScore.ToString("F0"))%</MudText>
+                            @if (product.MeetsSlo)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                            }
+                            else if (product.QualityScore > 0)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Topic: @product.TopicName
+                        </MudText>
+                        @if (product.ConsumerCount > 0)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                                @product.ConsumerCount consumer(s)
+                            </MudText>
+                        }
+                        @if (product.Tags.Count > 0)
+                        {
+                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                @foreach (var tag in product.Tags.Take(3))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Default">@tag</MudChip>
+                                }
+                                @if (product.Tags.Count > 3)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">+@(product.Tags.Count - 3)</MudChip>
+                                }
+                            </div>
+                        }
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                   OnClick="@(() => ViewProduct(product))">
+                            Details
+                        </MudButton>
+                        @if (product.HasContract)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Info"
+                                       OnClick="@(() => ValidateProduct(product.Id))">
+                                Validate
+                            </MudButton>
+                        }
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+else if (!_loading)
+{
+    <MudAlert Severity="Severity.Info" Class="mt-4">
+        No data products found. Register a new data product to get started.
+    </MudAlert>
+}
+
+@* ===== DETAIL DIALOG ===== *@
+<MudDialog @bind-Visible="_detailDialogVisible" Options="_dialogOptions">
+    <TitleContent>
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Inventory2" Class="mr-2" />
+            @_selectedProduct?.Name
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_selectedProduct != null)
+        {
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+                <MudTabPanel Text="Overview" Icon="@Icons.Material.Filled.Info">
+                    <MudGrid>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topic</MudText>
+                            <MudText>@_selectedProduct.TopicName</MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Owner</MudText>
+                            <MudText>@_selectedProduct.Owner</MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Domain</MudText>
+                            <MudText>@(_selectedProduct.Domain ?? "N/A")</MudText>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
+                            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(_selectedProduct.Status)">@_selectedProduct.Status</MudChip>
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Description</MudText>
+                            <MudText>@(_selectedProduct.Description ?? "No description")</MudText>
+                        </MudItem>
+                    </MudGrid>
+                </MudTabPanel>
+                <MudTabPanel Text="Quality" Icon="@Icons.Material.Filled.Assessment">
+                    <div class="d-flex align-center gap-4 mb-4">
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Overall Score</MudText>
+                            <MudText Typo="Typo.h4">@(_selectedProduct.QualityScore.ToString("F1"))%</MudText>
+                        </div>
+                        <MudDivider Vertical="true" FlexItem="true" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">SLO Status</MudText>
+                            <MudText Typo="Typo.h5" Color="@(_selectedProduct.MeetsSlo ? Color.Success : Color.Warning)">
+                                @(_selectedProduct.MeetsSlo ? "Met" : "Breached")
+                            </MudText>
+                        </div>
+                    </div>
+                </MudTabPanel>
+                <MudTabPanel Text="Consumers" Icon="@Icons.Material.Filled.People">
+                    @if (_selectedProduct.Consumers.Count > 0)
+                    {
+                        <MudList T="string" Dense="true">
+                            @foreach (var consumer in _selectedProduct.Consumers)
+                            {
+                                <MudListItem T="string" Icon="@Icons.Material.Filled.Person">@consumer</MudListItem>
+                            }
+                        </MudList>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Secondary">No consumers registered</MudText>
+                    }
+                </MudTabPanel>
+            </MudTabs>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _detailDialogVisible = false)">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ===== REGISTER DIALOG ===== *@
+<MudDialog @bind-Visible="_registerDialogVisible" Options="_registerDialogOptions">
+    <TitleContent>
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Add" Class="mr-2" />
+            Register Data Product
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_newProduct.Id" Label="Product ID"
+                              Variant="Variant.Outlined" Required="true" HelperText="Unique identifier" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_newProduct.Name" Label="Name"
+                              Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_newProduct.Description" Label="Description"
+                              Variant="Variant.Outlined" Lines="2" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_newProduct.TopicName" Label="Topic Name"
+                              Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_newProduct.Owner" Label="Owner"
+                              Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_newProduct.Domain" Label="Domain"
+                              Variant="Variant.Outlined" HelperText="e.g. orders, payments, analytics" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_newProduct.ContactEmail" Label="Contact Email"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _registerDialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="RegisterProductAsync"
+                   Disabled="@(!IsRegisterFormValid)">Register</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private string _searchText = "";
+    private string? _filterDomain;
+    private string? _filterOwner;
+    private string? _filterStatus;
+
+    private List<DataProductViewModel> _products = [];
+    private List<string> _domains = [];
+    private List<string> _owners = [];
+
+    private bool _detailDialogVisible;
+    private DataProductViewModel? _selectedProduct;
+
+    private bool _registerDialogVisible;
+    private RegisterProductForm _newProduct = new();
+
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private readonly DialogOptions _registerDialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    private bool IsRegisterFormValid => !string.IsNullOrWhiteSpace(_newProduct.Id)
+        && !string.IsNullOrWhiteSpace(_newProduct.Name)
+        && !string.IsNullOrWhiteSpace(_newProduct.TopicName)
+        && !string.IsNullOrWhiteSpace(_newProduct.Owner);
+
+    private IEnumerable<DataProductViewModel> FilteredProducts
+    {
+        get
+        {
+            var results = _products.AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+            {
+                results = results.Where(p =>
+                    p.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                    (p.Description?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    p.Owner.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                    p.TopicName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                    (p.Domain?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            if (!string.IsNullOrEmpty(_filterDomain))
+                results = results.Where(p => string.Equals(p.Domain, _filterDomain, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(_filterOwner))
+                results = results.Where(p => string.Equals(p.Owner, _filterOwner, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(_filterStatus))
+                results = results.Where(p => string.Equals(p.Status, _filterStatus, StringComparison.OrdinalIgnoreCase));
+
+            return results;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var productsResponse = await Http.GetAsync("/api/data-mesh/products");
+            if (productsResponse.IsSuccessStatusCode)
+            {
+                var products = await productsResponse.Content.ReadFromJsonAsync<List<DataProductDto>>();
+                _products = products?.Select(MapToViewModel).ToList() ?? [];
+            }
+
+            var domainsResponse = await Http.GetAsync("/api/data-mesh/domains");
+            if (domainsResponse.IsSuccessStatusCode)
+            {
+                _domains = await domainsResponse.Content.ReadFromJsonAsync<List<string>>() ?? [];
+            }
+
+            _owners = _products
+                .Select(p => p.Owner)
+                .Where(o => !string.IsNullOrEmpty(o))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            // API might not be available if Data Mesh is disabled
+            _products = [];
+            _domains = [];
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ViewProduct(DataProductViewModel product)
+    {
+        _selectedProduct = product;
+        _detailDialogVisible = true;
+    }
+
+    private void OpenRegisterDialog()
+    {
+        _newProduct = new RegisterProductForm();
+        _registerDialogVisible = true;
+    }
+
+    private async Task RegisterProductAsync()
+    {
+        if (!IsRegisterFormValid) return;
+
+        var request = new
+        {
+            id = _newProduct.Id,
+            name = _newProduct.Name,
+            description = _newProduct.Description,
+            topicName = _newProduct.TopicName,
+            owner = _newProduct.Owner,
+            domain = _newProduct.Domain,
+            contract = string.IsNullOrEmpty(_newProduct.ContactEmail) ? null : new
+            {
+                contactEmail = _newProduct.ContactEmail
+            }
+        };
+
+        var response = await Http.PostAsJsonAsync("/api/data-mesh/products", request);
+        if (response.IsSuccessStatusCode)
+        {
+            _registerDialogVisible = false;
+            await LoadDataAsync();
+        }
+    }
+
+    private async Task ValidateProduct(string productId)
+    {
+        var response = await Http.PostAsync($"/api/data-mesh/products/{productId}/validate", null);
+        if (response.IsSuccessStatusCode)
+        {
+            await LoadDataAsync();
+        }
+    }
+
+    private static DataProductViewModel MapToViewModel(DataProductDto dto)
+    {
+        return new DataProductViewModel
+        {
+            Id = dto.Id ?? "",
+            Name = dto.Name ?? "",
+            Description = dto.Description,
+            TopicName = dto.TopicName ?? "",
+            Owner = dto.Owner ?? "",
+            Domain = dto.Domain,
+            Status = dto.Status ?? "Draft",
+            QualityScore = dto.LatestQuality?.OverallScore ?? 0,
+            MeetsSlo = dto.LatestQuality?.MeetsSlo ?? false,
+            HasContract = dto.Contract is not null,
+            ConsumerCount = dto.Consumers?.Count ?? 0,
+            Consumers = dto.Consumers ?? [],
+            Tags = dto.Tags?.Select(t => $"{t.Key}={t.Value}").ToList() ?? []
+        };
+    }
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "Published" => Color.Success,
+        "Deprecated" => Color.Warning,
+        "Archived" => Color.Default,
+        _ => Color.Info
+    };
+
+    private static Color GetQualityColor(double score) => score switch
+    {
+        > 90 => Color.Success,
+        > 70 => Color.Warning,
+        > 0 => Color.Error,
+        _ => Color.Default
+    };
+
+    // ===== View Models =====
+
+    private sealed class DataProductViewModel
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string TopicName { get; set; } = "";
+        public string Owner { get; set; } = "";
+        public string? Domain { get; set; }
+        public string Status { get; set; } = "Draft";
+        public double QualityScore { get; set; }
+        public bool MeetsSlo { get; set; }
+        public bool HasContract { get; set; }
+        public int ConsumerCount { get; set; }
+        public List<string> Consumers { get; set; } = [];
+        public List<string> Tags { get; set; } = [];
+    }
+
+    private sealed class RegisterProductForm
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string TopicName { get; set; } = "";
+        public string Owner { get; set; } = "";
+        public string? Domain { get; set; }
+        public string? ContactEmail { get; set; }
+    }
+
+    // ===== DTOs for API =====
+
+    private sealed class DataProductDto
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public string? TopicName { get; set; }
+        public string? Owner { get; set; }
+        public string? Domain { get; set; }
+        public string? Status { get; set; }
+        public DataContractDto? Contract { get; set; }
+        public Dictionary<string, string>? Tags { get; set; }
+        public List<string>? Consumers { get; set; }
+        public QualityMetricsDto? LatestQuality { get; set; }
+    }
+
+    private sealed class DataContractDto
+    {
+        public string? SchemaSubject { get; set; }
+        public string? ContactEmail { get; set; }
+    }
+
+    private sealed class QualityMetricsDto
+    {
+        public double OverallScore { get; set; }
+        public bool MeetsSlo { get; set; }
+    }
+}

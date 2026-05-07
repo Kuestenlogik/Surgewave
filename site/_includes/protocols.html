@@ -1,0 +1,69 @@
+<section class="protocols" id="protocols">
+  <div class="container">
+    <h2 class="section-title">Speak every protocol your stack already uses</h2>
+    <p class="section-lede">One broker, many wires. Surgewave's native protocol is the fast path for new .NET clients; the Kafka 4.x wire keeps every existing client connected. Each protocol is a discoverable plugin &mdash; load only what you need.</p>
+
+    <div class="protocol-grid">
+      <a class="protocol-card" href="{{ '/docs/transport/native-protocol.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge protocol-badge-strong">Native</span>
+          <span class="protocol-badge protocol-badge-accent">Low-latency</span>
+        </div>
+        <h3>Surgewave Native Protocol</h3>
+        <p>Zero-copy framed protocol over TCP/QUIC for new .NET clients. The fast path for in-process, edge, and latency-sensitive deployments &mdash; designed where the Kafka wire's TCP handshake is too costly.</p>
+      </a>
+
+      <a class="protocol-card" href="{{ '/docs/transport/kafka-protocol.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge">Kafka Wire</span>
+          <span class="protocol-badge">Migration path</span>
+        </div>
+        <h3>Kafka 4.x Wire Protocol</h3>
+        <p>Full Kafka 4.x RPC compatibility. Confluent.Kafka, kafka-go, librdkafka &mdash; they all connect on <code>:9092</code> without a code change. Migrate gradually, mix and match with the native protocol on the same broker.</p>
+      </a>
+
+      <a class="protocol-card" href="{{ '/docs/transport/grpc.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge">gRPC</span>
+        </div>
+        <h3>gRPC</h3>
+        <p>Server reflection, all four streaming flavours, JSON-transcoding for HTTP clients. Same broker, polyglot client SDKs.</p>
+      </a>
+
+      <a class="protocol-card" href="{{ '/docs/transport/mqtt.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge">MQTT</span>
+          <span class="protocol-badge">5.0</span>
+        </div>
+        <h3>MQTT 3.1.1 / 5.0</h3>
+        <p>QoS 0/1/2, retained messages, last-will. Bridges every IoT device into a Kafka-compatible event stream.</p>
+      </a>
+
+      <a class="protocol-card" href="{{ '/docs/transport/amqp.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge">AMQP</span>
+          <span class="protocol-badge">0.9.1</span>
+        </div>
+        <h3>AMQP 0.9.1</h3>
+        <p>Speak RabbitMQ's wire to existing apps while landing every routed message on a Surgewave topic for replay and analytics.</p>
+      </a>
+
+      <a class="protocol-card" href="{{ '/docs/transport/quic.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge">QUIC</span>
+          <span class="protocol-badge protocol-badge-accent">0-RTT</span>
+        </div>
+        <h3>QUIC / HTTP/3</h3>
+        <p>Loss-tolerant streaming for mobile producers and edge gateways. 0-RTT resumption keeps cold reconnects under 50&nbsp;ms.</p>
+      </a>
+
+      <a class="protocol-card" href="{{ '/docs/transport/websocket.html' | relative_url }}">
+        <div class="protocol-card-header">
+          <span class="protocol-badge">WebSocket</span>
+        </div>
+        <h3>WebSocket</h3>
+        <p>Browser-native producers/consumers without a sidecar. Same auth, same topics, same offsets as the Kafka clients.</p>
+      </a>
+    </div>
+  </div>
+</section>

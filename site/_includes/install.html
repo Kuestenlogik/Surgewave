@@ -1,0 +1,85 @@
+{%- comment -%}
+Install section — single tabbed code-block, Datadog/Vercel/Stripe
+pattern. Replaces the previous 4-card grid: less visual noise, richer
+focus on the active platform's snippet. The first .install-tab and
+.install-panel both carry .is-active so the section paints in a
+sensible default before main.js wires click-handlers (progressive
+enhancement: works without JS, just clicks dead).
+{%- endcomment -%}
+<section class="install" id="install">
+  <div class="container">
+    <h2 class="section-title">Install in under a minute</h2>
+    <p class="section-lede">Native packages for every major OS, plus a portable container image. Surgewave has no JVM dependency &mdash; the broker is one self-contained binary.</p>
+
+    <div class="install-tabbed">
+      <div class="install-tabs" role="tablist">
+        <button class="install-tab is-active" type="button" role="tab" data-target="install-windows" aria-selected="true">Windows</button>
+        <button class="install-tab" type="button" role="tab" data-target="install-linux" aria-selected="false">Linux</button>
+        <button class="install-tab" type="button" role="tab" data-target="install-docker" aria-selected="false">Docker</button>
+        <button class="install-tab" type="button" role="tab" data-target="install-k8s" aria-selected="false">Kubernetes</button>
+        <button class="install-tab" type="button" role="tab" data-target="install-embedded" aria-selected="false">Embedded</button>
+      </div>
+
+      <div class="install-panels">
+        <pre id="install-windows" class="install-panel is-active" role="tabpanel"><code>winget install Kuestenlogik.Surgewave
+<span class="install-comment"># or download surgewave-x.y.z-win-x64.msi from</span>
+<span class="install-comment"># github.com/Kuestenlogik/Surgewave/releases</span></code></pre>
+
+        <pre id="install-linux" class="install-panel" role="tabpanel" hidden><code><span class="install-comment"># Debian / Ubuntu</span>
+sudo apt install ./surgewave_x.y.z_amd64.deb
+
+<span class="install-comment"># RHEL / Fedora</span>
+sudo rpm -i surgewave-x.y.z.x86_64.rpm</code></pre>
+
+        <pre id="install-docker" class="install-panel" role="tabpanel" hidden><code>docker run -d \
+  -p 9092:9092 -p 5050:5050 \
+  ghcr.io/kuestenlogik/surgewave:latest</code></pre>
+
+        <pre id="install-k8s" class="install-panel" role="tabpanel" hidden><code>helm repo add surgewave https://kuestenlogik.github.io/Surgewave
+helm install surgewave surgewave/surgewave</code></pre>
+
+        <pre id="install-embedded" class="install-panel" role="tabpanel" hidden><code><span class="install-comment"># Run Surgewave in-process for tests, CI, edge gateways</span>
+dotnet add package Kuestenlogik.Surgewave.Broker
+
+<span class="install-comment"># Then in code:</span>
+var broker = await SurgewaveRuntime.Create().StartAsync();</code></pre>
+      </div>
+    </div>
+
+    <p class="install-footnote">
+      Want a deeper integration? See the
+      <a href="{{ '/docs/setup/embedded.html' | relative_url }}">embedded-broker guide</a>,
+      or browse the <a href="{{ '/download.html' | relative_url }}">full download options</a>.
+    </p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var tabs = document.querySelectorAll('.install-tab');
+    if (tabs.length === 0) return;
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        var targetId = tab.dataset.target;
+        // De-activate everything in this tab group
+        tab.parentElement.querySelectorAll('.install-tab').forEach(function (t) {
+          t.classList.remove('is-active');
+          t.setAttribute('aria-selected', 'false');
+        });
+        var panels = tab.closest('.install-tabbed').querySelectorAll('.install-panel');
+        panels.forEach(function (p) {
+          p.classList.remove('is-active');
+          p.setAttribute('hidden', '');
+        });
+        // Activate the picked one
+        tab.classList.add('is-active');
+        tab.setAttribute('aria-selected', 'true');
+        var panel = document.getElementById(targetId);
+        if (panel) {
+          panel.classList.add('is-active');
+          panel.removeAttribute('hidden');
+        }
+      });
+    });
+  })();
+</script>

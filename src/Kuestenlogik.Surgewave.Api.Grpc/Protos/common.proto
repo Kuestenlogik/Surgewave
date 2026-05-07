@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+// Shared types used across all Surgewave gRPC services
+
+message Record {
+  bytes key = 1;
+  bytes value = 2;
+  map<string, bytes> headers = 3;
+  int64 timestamp = 4;
+  int64 offset = 5;
+}
+
+message TopicPartition {
+  string topic = 1;
+  int32 partition = 2;
+}
+
+message PartitionInfo {
+  int32 partition_id = 1;
+  int32 leader = 2;
+  repeated int32 replicas = 3;
+  repeated int32 isr = 4;
+  int64 high_watermark = 5;
+  int64 log_start_offset = 6;
+}
+
+message TopicInfo {
+  string name = 1;
+  int32 num_partitions = 2;
+  int32 replication_factor = 3;
+  map<string, string> config = 4;
+  repeated PartitionInfo partitions = 5;
+  bool is_internal = 6;
+}
+
+message BrokerInfo {
+  int32 broker_id = 1;
+  string host = 2;
+  int32 port = 3;
+  string rack = 4;
+  // Inter-broker transport this broker uses for Raft/replication traffic
+  // ("tcp", "quic"). Self-reported; peers may use different transports on
+  // a heterogeneous cluster.
+  string peer_transport = 5;
+}
+
+message ResponseStatus {
+  ErrorCode error_code = 1;
+  string error_message = 2;
+}
+
+enum ErrorCode {
+  NONE = 0;
+  UNKNOWN = 1;
+  OFFSET_OUT_OF_RANGE = 2;
+  INVALID_MESSAGE = 3;
+  UNKNOWN_TOPIC_OR_PARTITION = 4;
+  INVALID_FETCH_SIZE = 5;
+  LEADER_NOT_AVAILABLE = 6;
+  NOT_LEADER_FOR_PARTITION = 7;
+  REQUEST_TIMED_OUT = 8;
+  MESSAGE_TOO_LARGE = 9;
+  INVALID_TOPIC = 10;
+  RECORD_LIST_TOO_LARGE = 11;
+  INVALID_REQUIRED_ACKS = 12;
+  TOPIC_ALREADY_EXISTS = 13;
+  INVALID_PARTITIONS = 14;
+  INVALID_REPLICATION_FACTOR = 15;
+  INVALID_CONFIG = 16;
+  COORDINATOR_NOT_AVAILABLE = 17;
+  NOT_COORDINATOR = 18;
+  INVALID_TXN_STATE = 19;
+  CONCURRENT_TRANSACTIONS = 20;
+  TRANSACTIONAL_ID_AUTHORIZATION_FAILED = 21;
+  SECURITY_DISABLED = 22;
+  CONNECT_DISABLED = 23;
+  SCHEMA_NOT_FOUND = 24;
+  INCOMPATIBLE_SCHEMA = 25;
+  SUBJECT_NOT_FOUND = 26;
+  QUOTA_EXCEEDED = 27;
+  ACL_DENIED = 28;
+  GROUP_NOT_FOUND = 29;
+  CONNECTOR_NOT_FOUND = 30;
+  TASK_NOT_FOUND = 31;
+  INVALID_PRODUCER_EPOCH = 32;
+  UNKNOWN_PRODUCER_ID = 33;
+  REBALANCE_IN_PROGRESS = 34;
+  ILLEGAL_GENERATION = 35;
+  UNKNOWN_MEMBER_ID = 36;
+  GROUP_NOT_EMPTY = 37;
+}
+
+enum ConfigResourceType {
+  UNKNOWN_RESOURCE = 0;
+  TOPIC = 1;
+  BROKER = 2;
+  BROKER_LOGGER = 3;
+}
+
+message ConfigResource {
+  ConfigResourceType type = 1;
+  string name = 2;
+}
+
+message ConfigEntry {
+  string key = 1;
+  string value = 2;
+}
+
+message ConfigEntryDetail {
+  string key = 1;
+  string value = 2;
+  bool is_read_only = 3;
+  bool is_default = 4;
+  bool is_sensitive = 5;
+}

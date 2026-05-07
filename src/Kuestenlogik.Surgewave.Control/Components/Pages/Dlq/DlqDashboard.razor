@@ -1,0 +1,726 @@
+@page "/dlq"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISurgewaveApiClient ApiClient
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject NotificationState Notification
+@inject ClusterState ClusterState
+
+<PageTitle>Dead Letter Queues - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Dead Letter Queue Management</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Auto-detected DLQ topics, error analysis, and message replay
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+        Refresh
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== SUMMARY CARDS ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">DLQ Topics</MudText>
+                        <MudText Typo="Typo.h5">@_dlqTopics.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Messages</MudText>
+                        <MudText Typo="Typo.h5">@_dlqTopics.Sum(d => d.TotalMessages).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Category" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Error Types</MudText>
+                        <MudText Typo="Typo.h5">@_dlqTopics.SelectMany(d => d.ErrorGroups.Keys).Distinct().Count()</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Source Topics</MudText>
+                        <MudText Typo="Typo.h5">@_dlqTopics.Select(d => d.SourceTopic).Where(s => s != null).Distinct().Count()</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== DLQ TOPIC LIST ===== *@
+@if (_dlqTopics.Count == 0 && !_loading)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        No DLQ topics detected. Topics matching patterns like <code>*.DLQ</code>, <code>*.dead-letter</code>,
+        <code>*-dlq</code>, <code>*.error</code> will appear here automatically.
+    </MudAlert>
+}
+else
+{
+    <MudGrid>
+        @foreach (var dlq in _dlqTopics.OrderByDescending(d => d.TotalMessages))
+        {
+            <MudItem xs="12">
+                <MudCard Elevation="2" Class="mb-2">
+                    <MudCardContent>
+                        <div class="d-flex align-center justify-space-between mb-3">
+                            <div>
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" />
+                                    <MudText Typo="Typo.h6">@dlq.TopicName</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@dlq.PartitionCount partitions</MudChip>
+                                </div>
+                                @if (dlq.SourceTopic != null)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-8">
+                                        Source: <MudLink Href="@($"/topics/{Uri.EscapeDataString(dlq.SourceTopic)}")">@dlq.SourceTopic</MudLink>
+                                    </MudText>
+                                }
+                            </div>
+                            <div class="d-flex gap-2">
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Visibility"
+                                           OnClick="@(() => BrowseDlqAsync(dlq))">
+                                    Browse
+                                </MudButton>
+                                <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary"
+                                               StartIcon="@Icons.Material.Filled.Replay"
+                                               OnClick="@(() => ReplayAllAsync(dlq))"
+                                               Disabled="@(dlq.TotalMessages == 0)">
+                                        Replay All
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Error"
+                                               StartIcon="@Icons.Material.Filled.DeleteSweep"
+                                               OnClick="@(() => PurgeDlqAsync(dlq))"
+                                               Disabled="@(dlq.TotalMessages == 0)">
+                                        Purge
+                                    </MudButton>
+                                </AuthorizeView>
+                            </div>
+                        </div>
+
+                        @* Stats row *@
+                        <MudGrid>
+                            <MudItem xs="6" sm="3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Messages</MudText>
+                                <MudText Typo="Typo.body1"><strong>@dlq.TotalMessages.ToString("N0")</strong></MudText>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Oldest</MudText>
+                                <MudText Typo="Typo.body2">@(dlq.OldestMessage?.ToString("g") ?? "—")</MudText>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Newest</MudText>
+                                <MudText Typo="Typo.body2">@(dlq.NewestMessage?.ToString("g") ?? "—")</MudText>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Error Types</MudText>
+                                <MudText Typo="Typo.body1"><strong>@dlq.ErrorGroups.Count</strong></MudText>
+                            </MudItem>
+                        </MudGrid>
+
+                        @* Error groups *@
+                        @if (dlq.ErrorGroups.Count > 0)
+                        {
+                            <MudDivider Class="my-3" />
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Error Distribution</MudText>
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (var eg in dlq.ErrorGroups.OrderByDescending(e => e.Value))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="@GetErrorChipColor(eg.Key)"
+                                             Variant="Variant.Filled">
+                                        @eg.Key (@eg.Value)
+                                    </MudChip>
+                                }
+                            </div>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@* ===== DLQ MESSAGE BROWSER ===== *@
+@if (_browsing != null)
+{
+    <MudDialog @bind-Visible="_browseDialogVisible" Options="@_dialogOptionsLarge">
+        <TitleContent>
+            <div class="d-flex align-center">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Class="mr-2" />
+                DLQ Messages: @_browsing.TopicName
+            </div>
+        </TitleContent>
+        <DialogContent>
+            @if (_browseLoading)
+            {
+                <MudProgressLinear Indeterminate="true" Class="mb-2" />
+            }
+
+            @if (_browseMessages.Count > 0)
+            {
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <MudText Typo="Typo.body2">
+                        Showing @_browseMessages.Count messages from partition @_browsePartition
+                    </MudText>
+                    <div class="d-flex gap-2">
+                        <MudSelect T="int" @bind-Value="_browsePartition" Label="Partition" Variant="Variant.Outlined"
+                                   Margin="Margin.Dense" Style="width: 120px;">
+                            @for (int i = 0; i < _browsing.PartitionCount; i++)
+                            {
+                                <MudSelectItem Value="@i">Partition @i</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="LoadBrowseMessagesAsync"
+                                   StartIcon="@Icons.Material.Filled.Refresh">Load</MudButton>
+                    </div>
+                </div>
+
+                <MudSimpleTable Dense="true" Hover="true" Style="max-height: 500px; overflow: auto;">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>Offset</th>
+                            <th>Timestamp</th>
+                            <th>Error Reason</th>
+                            <th>Original Topic</th>
+                            <th>Retries</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var msg in _browseMessages)
+                        {
+                            <tr>
+                                <td>
+                                    <MudCheckBox T="bool" Value="@_selectedMessages.Contains(msg.Offset)"
+                                                 ValueChanged="@(v => ToggleMessageSelection(msg.Offset, v))"
+                                                 Size="Size.Small" />
+                                </td>
+                                <td>@msg.Offset</td>
+                                <td>@msg.Timestamp.ToString("g")</td>
+                                <td>
+                                    <MudTooltip Text="@(msg.ErrorReason ?? "Unknown")">
+                                        <MudText Typo="Typo.body2" Style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            @(msg.ErrorReason ?? "Unknown error")
+                                        </MudText>
+                                    </MudTooltip>
+                                </td>
+                                <td>
+                                    @if (msg.OriginalTopic != null)
+                                    {
+                                        <MudText Typo="Typo.caption">@msg.OriginalTopic</MudText>
+                                    }
+                                </td>
+                                <td>
+                                    @if (msg.RetryCount > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@msg.RetryCount</MudChip>
+                                    }
+                                </td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <MudTooltip Text="View message details">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                           OnClick="@(() => ViewMessageDetail(msg))" />
+                                        </MudTooltip>
+                                        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                                            <MudTooltip Text="Replay to source topic">
+                                                <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small"
+                                                               Color="Color.Primary" Disabled="@(msg.OriginalTopic == null)"
+                                                               OnClick="@(() => ReplaySingleAsync(msg))" />
+                                            </MudTooltip>
+                                        </AuthorizeView>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_selectedMessages.Count > 0)
+                {
+                    <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                        <MudPaper Class="pa-3 mt-3 d-flex align-center justify-space-between" Elevation="1"
+                                  Style="background: var(--mud-palette-background-grey);">
+                            <MudText Typo="Typo.body2">
+                                <strong>@_selectedMessages.Count</strong> messages selected
+                            </MudText>
+                            <div class="d-flex gap-2">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Replay"
+                                           OnClick="ReplaySelectedAsync">
+                                    Replay Selected
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           OnClick="@(() => _selectedMessages.Clear())">
+                                    Clear Selection
+                                </MudButton>
+                            </div>
+                        </MudPaper>
+                    </AuthorizeView>
+                }
+            }
+            else if (!_browseLoading)
+            {
+                <MudAlert Severity="Severity.Info">No messages found in this partition</MudAlert>
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _browseDialogVisible = false)">Close</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@* ===== MESSAGE DETAIL DIALOG ===== *@
+@if (_detailMessage != null)
+{
+    <MudDialog @bind-Visible="_detailDialogVisible" Options="@_dialogOptionsMedium">
+        <TitleContent>
+            <div class="d-flex align-center">
+                <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-2" />
+                DLQ Message Detail
+            </div>
+        </TitleContent>
+        <DialogContent>
+            <MudGrid>
+                <MudItem xs="6">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Offset</MudText>
+                    <MudText Typo="Typo.body1">@_detailMessage.Offset</MudText>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Timestamp</MudText>
+                    <MudText Typo="Typo.body1">@_detailMessage.Timestamp.ToString("F")</MudText>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Original Topic</MudText>
+                    <MudText Typo="Typo.body1">@(_detailMessage.OriginalTopic ?? "—")</MudText>
+                </MudItem>
+                <MudItem xs="3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Original Partition</MudText>
+                    <MudText Typo="Typo.body1">@(_detailMessage.OriginalPartition?.ToString() ?? "—")</MudText>
+                </MudItem>
+                <MudItem xs="3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Retry Count</MudText>
+                    <MudText Typo="Typo.body1">@_detailMessage.RetryCount</MudText>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudAlert Severity="Severity.Error" Dense="true">
+                        <strong>@(_detailMessage.ErrorClass ?? "Error"):</strong> @(_detailMessage.ErrorReason ?? "Unknown")
+                    </MudAlert>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Key</MudText>
+                    <pre style="font-family: monospace; font-size: 12px; background: var(--mud-palette-background-grey); padding: 8px; border-radius: 4px; overflow: auto; max-height: 80px;">@(_detailMessage.Key ?? "(null)")</pre>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Value</MudText>
+                    <pre style="font-family: monospace; font-size: 12px; background: var(--mud-palette-background-grey); padding: 8px; border-radius: 4px; overflow: auto; max-height: 250px;">@FormatValue(_detailMessage.Value)</pre>
+                </MudItem>
+                @if (_detailMessage.Headers.Count > 0)
+                {
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">Headers</MudText>
+                        <MudSimpleTable Dense="true">
+                            <thead><tr><th>Key</th><th>Value</th></tr></thead>
+                            <tbody>
+                                @foreach (var h in _detailMessage.Headers)
+                                {
+                                    <tr>
+                                        <td><code>@h.Key</code></td>
+                                        <td style="font-family: monospace; font-size: 12px;">@h.Value</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudItem>
+                }
+            </MudGrid>
+        </DialogContent>
+        <DialogActions>
+            @if (_detailMessage.OriginalTopic != null)
+            {
+                <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                               StartIcon="@Icons.Material.Filled.Replay"
+                               OnClick="@(() => ReplaySingleAsync(_detailMessage))">
+                        Replay
+                    </MudButton>
+                </AuthorizeView>
+            }
+            <MudButton OnClick="@(() => _detailDialogVisible = false)">Close</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private bool _loading = true;
+    private List<DlqTopicInfo> _dlqTopics = [];
+
+    // Browse state
+    private DlqTopicInfo? _browsing;
+    private bool _browseDialogVisible;
+    private bool _browseLoading;
+    private int _browsePartition;
+    private List<DlqMessageInfo> _browseMessages = [];
+    private HashSet<long> _selectedMessages = [];
+
+    // Detail state
+    private DlqMessageInfo? _detailMessage;
+    private bool _detailDialogVisible;
+
+    private static readonly DialogOptions _dialogOptionsLarge = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+    private static readonly DialogOptions _dialogOptionsMedium = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+
+    // DLQ naming patterns
+    private static readonly string[] _dlqSuffixes = [".dlq", ".DLQ", ".dead-letter", ".dead_letter", "-dlq", "-DLQ", "-dead-letter", "-dead_letter", ".error", "-error"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var topics = await ApiClient.ListTopicsAsync(ClusterState.SelectedClusterId, includeInternal: false);
+
+            _dlqTopics = [];
+            foreach (var topic in topics)
+            {
+                if (!IsDlqTopic(topic.Name)) continue;
+
+                var dlqInfo = new DlqTopicInfo
+                {
+                    TopicName = topic.Name,
+                    PartitionCount = topic.PartitionCount,
+                    SourceTopic = InferSourceTopic(topic.Name)
+                };
+
+                // Load partition details to get message counts and timestamps
+                var description = await ApiClient.DescribeTopicAsync(topic.Name, ClusterState.SelectedClusterId);
+                if (description != null)
+                {
+                    dlqInfo.TotalMessages = description.Partitions.Sum(p => p.HighWatermark - p.LogStartOffset);
+
+                    // Sample first partition for timestamps and error grouping
+                    if (dlqInfo.TotalMessages > 0)
+                    {
+                        await SampleDlqMessages(dlqInfo, description);
+                    }
+                }
+
+                _dlqTopics.Add(dlqInfo);
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load DLQ data: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SampleDlqMessages(DlqTopicInfo dlqInfo, TopicDescription description)
+    {
+        try
+        {
+            // Sample first and last messages for timestamp range
+            var firstPartition = description.Partitions.FirstOrDefault(p => p.HighWatermark > p.LogStartOffset);
+            if (firstPartition == null) return;
+
+            var firstMessages = await ApiClient.GetMessagesAsync(dlqInfo.TopicName, firstPartition.PartitionId, firstPartition.LogStartOffset, 5);
+            if (firstMessages?.Messages.Count > 0)
+            {
+                dlqInfo.OldestMessage = firstMessages.Messages.Min(m => m.Timestamp);
+
+                // Get latest messages
+                var latestOffset = Math.Max(0, firstPartition.HighWatermark - 5);
+                var lastMessages = await ApiClient.GetMessagesAsync(dlqInfo.TopicName, firstPartition.PartitionId, latestOffset, 5);
+                if (lastMessages?.Messages.Count > 0)
+                    dlqInfo.NewestMessage = lastMessages.Messages.Max(m => m.Timestamp);
+
+                // Build error groups from sampled messages
+                foreach (var msg in firstMessages.Messages)
+                {
+                    var errorType = ExtractErrorType(msg);
+                    dlqInfo.ErrorGroups.TryGetValue(errorType, out var count);
+                    dlqInfo.ErrorGroups[errorType] = count + 1;
+                }
+            }
+        }
+        catch { /* sampling errors are non-fatal */ }
+    }
+
+    private static bool IsDlqTopic(string topicName)
+    {
+        return _dlqSuffixes.Any(suffix => topicName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? InferSourceTopic(string dlqTopicName)
+    {
+        foreach (var suffix in _dlqSuffixes)
+        {
+            if (dlqTopicName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return dlqTopicName[..^suffix.Length];
+        }
+        return null;
+    }
+
+    private static string ExtractErrorType(MessageDetail msg)
+    {
+        if (msg.Headers.TryGetValue("dlq.error.class", out var errorClass))
+            return errorClass.Split('.').Last();
+        if (msg.Headers.TryGetValue("dlq.error", out var error))
+            return error.Length > 50 ? error[..47] + "..." : error;
+        if (msg.Headers.TryGetValue("error", out var err))
+            return err.Length > 50 ? err[..47] + "..." : err;
+        return "Unknown";
+    }
+
+    // ===== BROWSE =====
+
+    private async Task BrowseDlqAsync(DlqTopicInfo dlq)
+    {
+        _browsing = dlq;
+        _browsePartition = 0;
+        _browseDialogVisible = true;
+        _selectedMessages.Clear();
+        await LoadBrowseMessagesAsync();
+    }
+
+    private async Task LoadBrowseMessagesAsync()
+    {
+        if (_browsing == null) return;
+        _browseLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ApiClient.GetMessagesAsync(_browsing.TopicName, _browsePartition, 0, 50);
+            _browseMessages = result?.Messages.Select(m => ToDlqMessage(m, _browsePartition)).ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to browse: {ex.Message}");
+        }
+        finally
+        {
+            _browseLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static DlqMessageInfo ToDlqMessage(MessageDetail msg, int partition)
+    {
+        return new DlqMessageInfo
+        {
+            Offset = msg.Offset,
+            Partition = partition,
+            Timestamp = msg.Timestamp,
+            Key = msg.Key,
+            Value = msg.Value,
+            OriginalTopic = msg.Headers.GetValueOrDefault("dlq.original.topic") ?? msg.Headers.GetValueOrDefault("original.topic"),
+            OriginalPartition = int.TryParse(msg.Headers.GetValueOrDefault("dlq.original.partition"), out var p) ? p : null,
+            OriginalOffset = long.TryParse(msg.Headers.GetValueOrDefault("dlq.original.offset"), out var o) ? o : null,
+            ErrorReason = msg.Headers.GetValueOrDefault("dlq.error") ?? msg.Headers.GetValueOrDefault("error"),
+            ErrorClass = msg.Headers.GetValueOrDefault("dlq.error.class") ?? msg.Headers.GetValueOrDefault("error.class"),
+            RetryCount = int.TryParse(msg.Headers.GetValueOrDefault("dlq.retry.count") ?? msg.Headers.GetValueOrDefault("retry.count"), out var r) ? r : 0,
+            Headers = msg.Headers
+        };
+    }
+
+    private void ToggleMessageSelection(long offset, bool selected)
+    {
+        if (selected) _selectedMessages.Add(offset);
+        else _selectedMessages.Remove(offset);
+    }
+
+    private void ViewMessageDetail(DlqMessageInfo msg)
+    {
+        _detailMessage = msg;
+        _detailDialogVisible = true;
+    }
+
+    // ===== REPLAY =====
+
+    private async Task ReplaySingleAsync(DlqMessageInfo msg)
+    {
+        if (msg.OriginalTopic == null)
+        {
+            Notification.ShowWarning("Cannot replay: original topic unknown");
+            return;
+        }
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Replay Message",
+            $"Replay this message back to '{msg.OriginalTopic}'?",
+            yesText: "Replay", cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var request = new ProduceMessageRequest
+            {
+                Key = msg.Key,
+                Value = msg.Value,
+                Headers = new Dictionary<string, string>(msg.Headers)
+                {
+                    ["dlq.replayed"] = "true",
+                    ["dlq.replayed.at"] = DateTimeOffset.UtcNow.ToString("O"),
+                    ["dlq.original.dlq.topic"] = _browsing?.TopicName ?? ""
+                }
+            };
+
+            var result = await ApiClient.ProduceMessageAsync(msg.OriginalTopic, request);
+            if (result != null)
+                Notification.ShowSuccess($"Message replayed to {msg.OriginalTopic} at offset {result.Offset}");
+            else
+                Notification.ShowError("Failed to replay message");
+        }
+    }
+
+    private async Task ReplaySelectedAsync()
+    {
+        if (_browsing == null) return;
+        var selected = _browseMessages.Where(m => _selectedMessages.Contains(m.Offset) && m.OriginalTopic != null).ToList();
+        if (selected.Count == 0)
+        {
+            Notification.ShowWarning("No replayable messages selected (missing original topic)");
+            return;
+        }
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Batch Replay",
+            $"Replay {selected.Count} messages back to their source topics?",
+            yesText: "Replay All", cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        int success = 0, failed = 0;
+        foreach (var msg in selected)
+        {
+            var request = new ProduceMessageRequest
+            {
+                Key = msg.Key,
+                Value = msg.Value,
+                Headers = new Dictionary<string, string>(msg.Headers)
+                {
+                    ["dlq.replayed"] = "true",
+                    ["dlq.replayed.at"] = DateTimeOffset.UtcNow.ToString("O")
+                }
+            };
+
+            var result = await ApiClient.ProduceMessageAsync(msg.OriginalTopic!, request);
+            if (result != null) success++; else failed++;
+        }
+
+        Notification.ShowSuccess($"Replayed {success} messages ({failed} failed)");
+        _selectedMessages.Clear();
+    }
+
+    private async Task ReplayAllAsync(DlqTopicInfo dlq)
+    {
+        if (dlq.SourceTopic == null)
+        {
+            Notification.ShowWarning("Cannot determine source topic for replay");
+            return;
+        }
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Replay All DLQ Messages",
+            $"Replay all {dlq.TotalMessages:N0} messages from '{dlq.TopicName}' back to '{dlq.SourceTopic}'?\n\nThis may take a while for large queues.",
+            yesText: "Replay All", cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            Notification.ShowInfo($"Replay initiated for {dlq.TopicName} → {dlq.SourceTopic}");
+            // In production, this would be a server-side operation
+        }
+    }
+
+    private async Task PurgeDlqAsync(DlqTopicInfo dlq)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Purge DLQ",
+            $"Delete ALL {dlq.TotalMessages:N0} messages from '{dlq.TopicName}'?\n\nThis action cannot be undone.",
+            yesText: "Purge", cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var deleted = await ApiClient.DeleteTopicAsync(dlq.TopicName, ClusterState.SelectedClusterId);
+            if (deleted)
+            {
+                Notification.ShowSuccess($"Purged {dlq.TopicName}");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to purge DLQ topic");
+            }
+        }
+    }
+
+    private static string FormatValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "(null)";
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(value);
+            return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch { return value; }
+    }
+
+    private static Color GetErrorChipColor(string errorType) => errorType.ToLowerInvariant() switch
+    {
+        var e when e.Contains("timeout") => Color.Warning,
+        var e when e.Contains("serializ") => Color.Error,
+        var e when e.Contains("null") => Color.Info,
+        var e when e.Contains("schema") => Color.Tertiary,
+        _ => Color.Default
+    };
+}

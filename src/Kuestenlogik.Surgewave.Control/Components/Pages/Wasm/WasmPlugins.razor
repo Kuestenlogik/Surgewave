@@ -1,0 +1,252 @@
+@page "/wasm"
+@inject ClusterState ClusterState
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>WASM Plugins - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">WASM Plugins</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadDataAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    @* Summary Cards *@
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Memory"
+                                 Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Plugins</MudText>
+                            <MudText Typo="Typo.h5">@_plugins.Count</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
+                                 Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Running</MudText>
+                            <MudText Typo="Typo.h5">@_plugins.Count(p => p.State == "Running")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.DataUsage"
+                                 Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Memory</MudText>
+                            <MudText Typo="Typo.h5">@FormatBytes(_plugins.Sum(p => p.MemoryUsageBytes))</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Message"
+                                 Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Messages Processed</MudText>
+                            <MudText Typo="Typo.h5">@_plugins.Sum(p => p.MessagesProcessed).ToString("N0")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+
+    @* Plugin Table *@
+    <MudTable Items="_plugins" Hover="true" Dense="true" Elevation="2">
+        <HeaderContent>
+            <MudTh>Plugin ID</MudTh>
+            <MudTh>Name</MudTh>
+            <MudTh>Type</MudTh>
+            <MudTh>Version</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Memory</MudTh>
+            <MudTh>Messages</MudTh>
+            <MudTh>Errors</MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Plugin ID">
+                <MudText Typo="Typo.body2"><code>@context.PluginId</code></MudText>
+            </MudTd>
+            <MudTd DataLabel="Name">@context.Name</MudTd>
+            <MudTd DataLabel="Type">
+                <MudChip T="string" Size="Size.Small" Color="GetTypeColor(context.Type)">
+                    @context.Type
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Version">@context.Version</MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small" Color="GetStateColor(context.State)">
+                    @context.State
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Memory">@FormatBytes(context.MemoryUsageBytes)</MudTd>
+            <MudTd DataLabel="Messages">@context.MessagesProcessed.ToString("N0")</MudTd>
+            <MudTd DataLabel="Errors">
+                @if (context.ErrorCount > 0)
+                {
+                    <MudText Color="Color.Error">@context.ErrorCount.ToString("N0")</MudText>
+                }
+                else
+                {
+                    <MudText>0</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Actions">
+                <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                    @if (context.State == "Running")
+                    {
+                        <MudButton Color="Color.Warning" OnClick="() => StopPluginAsync(context.PluginId)"
+                                   StartIcon="@Icons.Material.Filled.Stop">Stop</MudButton>
+                    }
+                    <MudButton Color="Color.Primary" OnClick="() => ReloadPluginAsync(context.PluginId)"
+                               StartIcon="@Icons.Material.Filled.Refresh">Reload</MudButton>
+                </MudButtonGroup>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No WASM plugins loaded. Use the WASM REST API to load plugins or enable hot-deploy.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    private List<WasmPluginInfo> _plugins = [];
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("SurgewaveApi");
+            var response = await client.GetAsync("/api/wasm/plugins");
+
+            if (response.IsSuccessStatusCode)
+            {
+                _plugins = await response.Content.ReadFromJsonAsync<List<WasmPluginInfo>>() ?? [];
+            }
+            else
+            {
+                _plugins = [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load WASM plugins: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ReloadPluginAsync(string pluginId)
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("SurgewaveApi");
+            await client.PostAsync($"/api/wasm/plugins/{pluginId}/reload", null);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to reload plugin: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    private async Task StopPluginAsync(string pluginId)
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("SurgewaveApi");
+            await client.PostAsync($"/api/wasm/plugins/{pluginId}/stop", null);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to stop plugin: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Running" => Color.Success,
+        "Stopped" => Color.Default,
+        "Failed" => Color.Error,
+        "Loading" => Color.Info,
+        _ => Color.Default
+    };
+
+    private static Color GetTypeColor(string type) => type switch
+    {
+        "Source" => Color.Success,
+        "Sink" => Color.Warning,
+        "Transform" => Color.Info,
+        "Function" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F1} MB";
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
+    }
+
+    private sealed class WasmPluginInfo
+    {
+        public string PluginId { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string State { get; set; } = "";
+        public long MemoryUsageBytes { get; set; }
+        public long MessagesProcessed { get; set; }
+        public long ErrorCount { get; set; }
+        public string Version { get; set; } = "";
+        public string? LastError { get; set; }
+    }
+}

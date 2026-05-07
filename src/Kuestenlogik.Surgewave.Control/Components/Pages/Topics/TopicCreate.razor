@@ -1,0 +1,190 @@
+@page "/topics/create"
+@attribute [Authorize(Policy = SurgewavePolicies.TopicsManage)]
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject NavigationManager Navigation
+
+<PageTitle>Create Topic - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+<MudText Typo="Typo.h4" Class="mb-4">Create Topic</MudText>
+
+<MudCard Elevation="2" Class="pa-4">
+    <MudForm @ref="_form" @bind-IsValid="@_formValid">
+        <MudGrid>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_name" Label="Topic Name" Variant="Variant.Outlined"
+                              Required="true" RequiredError="Topic name is required"
+                              Validation="@(new Func<string, string?>(ValidateTopicName))"
+                              HelperText="Letters, numbers, dots, underscores, and hyphens only" />
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudNumericField @bind-Value="_partitions" Label="Number of Partitions" Variant="Variant.Outlined"
+                                 Min="1" Max="10000" Required="true"
+                                 HelperText="Number of partitions for the topic" />
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudNumericField T="short" @bind-Value="_replicationFactor" Label="Replication Factor" Variant="Variant.Outlined"
+                                 Min="1" Max="10" Required="true"
+                                 HelperText="Number of replicas for each partition" />
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudExpansionPanels>
+                    <MudExpansionPanel Text="Advanced Configuration" MaxHeight="500">
+                        <MudGrid>
+                            <MudItem xs="12" md="6">
+                                <MudTextField @bind-Value="_retentionMs" Label="retention.ms" Variant="Variant.Outlined"
+                                              HelperText="Message retention time in milliseconds (-1 for infinite)" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField @bind-Value="_retentionBytes" Label="retention.bytes" Variant="Variant.Outlined"
+                                              HelperText="Maximum size of log before deletion (-1 for no limit)" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect @bind-Value="_cleanupPolicy" Label="cleanup.policy" Variant="Variant.Outlined"
+                                           HelperText="Log cleanup policy">
+                                    <MudSelectItem Value="@("delete")">delete</MudSelectItem>
+                                    <MudSelectItem Value="@("compact")">compact</MudSelectItem>
+                                    <MudSelectItem Value="@("compact,delete")">compact,delete</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect @bind-Value="_compressionType" Label="compression.type" Variant="Variant.Outlined"
+                                           HelperText="Compression type for the topic">
+                                    <MudSelectItem Value="@("producer")">producer (inherit)</MudSelectItem>
+                                    <MudSelectItem Value="@("none")">none</MudSelectItem>
+                                    <MudSelectItem Value="@("gzip")">gzip</MudSelectItem>
+                                    <MudSelectItem Value="@("snappy")">snappy</MudSelectItem>
+                                    <MudSelectItem Value="@("lz4")">lz4</MudSelectItem>
+                                    <MudSelectItem Value="@("zstd")">zstd</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField @bind-Value="_segmentBytes" Label="segment.bytes" Variant="Variant.Outlined"
+                                              HelperText="Segment file size in bytes" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField @bind-Value="_minInsyncReplicas" Label="min.insync.replicas" Variant="Variant.Outlined"
+                                              HelperText="Minimum number of in-sync replicas" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudItem>
+
+            <MudItem xs="12" Class="d-flex justify-end gap-2 mt-4">
+                <MudButton Variant="Variant.Text" Color="Color.Default" Href="/topics">
+                    Cancel
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateTopicAsync"
+                           Disabled="@(!_formValid || _creating)">
+                    @if (_creating)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    Create Topic
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudForm>
+</MudCard>
+
+@code {
+    private MudForm _form = null!;
+    private bool _formValid;
+    private bool _creating;
+
+    private string _name = "";
+    private int _partitions = 1;
+    private short _replicationFactor = 1;
+
+    // Advanced configuration
+    private string _retentionMs = "";
+    private string _retentionBytes = "";
+    private string _cleanupPolicy = "delete";
+    private string _compressionType = "producer";
+    private string _segmentBytes = "";
+    private string _minInsyncReplicas = "";
+
+    private readonly List<BreadcrumbItem> _breadcrumbs =
+    [
+        new("Topics", "/topics"),
+        new("Create", null, true)
+    ];
+
+    private static string? ValidateTopicName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "Topic name is required";
+
+        if (name.Length > 249)
+            return "Topic name must be 249 characters or less";
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[a-zA-Z0-9._-]+$"))
+            return "Topic name can only contain letters, numbers, dots, underscores, and hyphens";
+
+        if (name == "." || name == "..")
+            return "Topic name cannot be '.' or '..'";
+
+        return null;
+    }
+
+    private async Task CreateTopicAsync()
+    {
+        await _form.Validate();
+        if (!_formValid) return;
+
+        _creating = true;
+        StateHasChanged();
+
+        try
+        {
+            var configs = new Dictionary<string, string>();
+
+            if (!string.IsNullOrWhiteSpace(_retentionMs))
+                configs["retention.ms"] = _retentionMs;
+            if (!string.IsNullOrWhiteSpace(_retentionBytes))
+                configs["retention.bytes"] = _retentionBytes;
+            if (_cleanupPolicy != "delete")
+                configs["cleanup.policy"] = _cleanupPolicy;
+            if (_compressionType != "producer")
+                configs["compression.type"] = _compressionType;
+            if (!string.IsNullOrWhiteSpace(_segmentBytes))
+                configs["segment.bytes"] = _segmentBytes;
+            if (!string.IsNullOrWhiteSpace(_minInsyncReplicas))
+                configs["min.insync.replicas"] = _minInsyncReplicas;
+
+            var request = new CreateTopicRequest(
+                _name,
+                _partitions,
+                _replicationFactor,
+                configs.Count > 0 ? configs : null);
+
+            var success = await ApiClient.CreateTopicAsync(request, ClusterState.SelectedClusterId);
+
+            if (success)
+            {
+                Notification.ShowSuccess($"Topic '{_name}' created successfully");
+                Navigation.NavigateTo($"/topics/{_name}");
+            }
+            else
+            {
+                Notification.ShowError($"Failed to create topic '{_name}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error creating topic: {ex.Message}");
+        }
+        finally
+        {
+            _creating = false;
+            StateHasChanged();
+        }
+    }
+}

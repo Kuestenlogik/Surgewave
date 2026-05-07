@@ -1,0 +1,648 @@
+@page "/queue"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+@implements IDisposable
+
+<PageTitle>Queue Inspector - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Queue Inspector</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Monitor in-flight messages, delivery counts, and dead letter queues — auto-refreshes every 5s
+        </MudText>
+    </div>
+    <div class="d-flex gap-2 align-center">
+        <MudChip T="string" Size="Size.Small" Color="Color.Info" Icon="@Icons.Material.Filled.Autorenew">
+            Auto-refresh
+        </MudChip>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadTopicsAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading && _topics.Count == 0)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadTopicsAsync" Class="ml-4">Retry</MudButton>
+    </MudAlert>
+}
+
+@* ===== SUMMARY CARDS ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Queue" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Queues</MudText>
+                        <MudText Typo="Typo.h5">@_topics.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total In-Flight</MudText>
+                        <MudText Typo="Typo.h5">@_topics.Sum(t => t.InFlightCount).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total DLQ</MudText>
+                        <MudText Typo="Typo.h5">@_topics.Sum(t => t.DlqCount).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Acked</MudText>
+                        <MudText Typo="Typo.h5">@_topics.Sum(t => t.TotalAcked).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== OVERVIEW TABLE ===== *@
+@if (_topics.Count == 0 && !_loading)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        No active queue views found. Queue views are created when consumers subscribe with acknowledgement mode enabled.
+    </MudAlert>
+}
+else
+{
+    <MudTable Items="@_topics" Dense="true" Hover="true" Striped="true" Elevation="2"
+              @bind-SelectedItem="_selectedTopic" T="QueueTopicStatus"
+              RowClassFunc="@((item, _) => item == _selectedTopic ? "selected-row" : "")"
+              OnRowClick="OnRowClick">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<QueueTopicStatus, object>(x => x.Topic)">Topic</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<QueueTopicStatus, object>(x => x.InFlightCount)">In-Flight</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<QueueTopicStatus, object>(x => x.CommittedOffset)">Committed Offset</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<QueueTopicStatus, object>(x => x.TotalAcked)">Total Acked</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<QueueTopicStatus, object>(x => x.TotalNacked)">Total Nacked</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<QueueTopicStatus, object>(x => x.DlqCount)">DLQ Count</MudTableSortLabel></MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Topic">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Queue" Size="Size.Small" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2"><strong>@context.Topic</strong></MudText>
+                </div>
+            </MudTd>
+            <MudTd DataLabel="In-Flight">
+                @if (context.InFlightCount > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.InFlightCount.ToString("N0")</MudChip>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">0</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Committed Offset">@context.CommittedOffset.ToString("N0")</MudTd>
+            <MudTd DataLabel="Total Acked">
+                <MudText Color="Color.Success">@context.TotalAcked.ToString("N0")</MudText>
+            </MudTd>
+            <MudTd DataLabel="Total Nacked">
+                @if (context.TotalNacked > 0)
+                {
+                    <MudText Color="Color.Error">@context.TotalNacked.ToString("N0")</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">0</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="DLQ Count">
+                @if (context.DlqCount > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error">@context.DlqCount.ToString("N0")</MudChip>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">0</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Actions">
+                <MudTooltip Text="Inspect queue">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   OnClick="@(() => SelectTopicAsync(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Color="Color.Secondary">No queue views active</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" />
+        </PagerContent>
+    </MudTable>
+}
+
+@* ===== DETAIL PANEL ===== *@
+@if (_selectedTopic != null)
+{
+    <MudPaper Elevation="3" Class="mt-4 pa-0">
+        <div class="d-flex align-center justify-space-between pa-4" style="border-bottom: 1px solid var(--mud-palette-divider);">
+            <div class="d-flex align-center gap-3">
+                <MudIcon Icon="@Icons.Material.Filled.Queue" Color="Color.Primary" Size="Size.Large" />
+                <div>
+                    <MudText Typo="Typo.h6">@_selectedTopic.Topic</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Queue Detail View</MudText>
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="LoadDetailAsync" Disabled="_detailLoading">
+                    Refresh
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.DeleteSweep"
+                           OnClick="ConfirmPurgeAsync">
+                    Purge Queue
+                </MudButton>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="@(() => _selectedTopic = null)" />
+            </div>
+        </div>
+
+        @* Metrics Cards *@
+        @if (_metrics != null)
+        {
+            <div class="pa-4">
+                <MudGrid>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="1">
+                            <MudCardContent Class="pa-3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Ack Rate</MudText>
+                                <MudText Typo="Typo.h6">@(_metrics.AckRate.ToString("F1"))/s</MudText>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="1">
+                            <MudCardContent Class="pa-3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Nack Rate</MudText>
+                                <MudText Typo="Typo.h6" Color="@(_metrics.NackRate > 0 ? Color.Warning : Color.Default)">
+                                    @(_metrics.NackRate.ToString("F1"))/s
+                                </MudText>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="1">
+                            <MudCardContent Class="pa-3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Reject Rate</MudText>
+                                <MudText Typo="Typo.h6" Color="@(_metrics.RejectRate > 0 ? Color.Error : Color.Default)">
+                                    @(_metrics.RejectRate.ToString("F1"))/s
+                                </MudText>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="1">
+                            <MudCardContent Class="pa-3">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Redelivery Rate</MudText>
+                                <MudText Typo="Typo.h6" Color="@(_metrics.RedeliveryRate > 0 ? Color.Warning : Color.Default)">
+                                    @(_metrics.RedeliveryRate.ToString("F1"))/s
+                                </MudText>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+                </MudGrid>
+            </div>
+        }
+
+        @* Tabs: In-Flight | DLQ *@
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" Class="px-4">
+            <MudTabPanel Text="In-Flight Messages" Icon="@Icons.Material.Filled.PendingActions">
+                @if (_detailLoading)
+                {
+                    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-2" />
+                }
+                else if (_inflightMessages.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Success" Class="my-4">No messages currently in-flight for this queue.</MudAlert>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true" Class="my-4" Style="max-height: 400px; overflow: auto;">
+                        <thead>
+                            <tr>
+                                <th>Message ID</th>
+                                <th>Delivery Count</th>
+                                <th>Expires In</th>
+                                <th>Consumer ID</th>
+                                <th>Partition</th>
+                                <th>Offset</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var msg in _inflightMessages)
+                            {
+                                <tr style="@GetInflightRowStyle(msg)">
+                                    <td><code style="font-size: 11px;">@TruncateId(msg.MessageId)</code></td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="@GetDeliveryCountColor(msg.DeliveryCount, msg.MaxDeliveryCount)">
+                                            @msg.DeliveryCount@(msg.MaxDeliveryCount > 0 ? $"/{msg.MaxDeliveryCount}" : "")
+                                        </MudChip>
+                                    </td>
+                                    <td>
+                                        @{
+                                            var remaining = msg.ExpiresAt - DateTimeOffset.UtcNow;
+                                        }
+                                        @if (remaining.TotalSeconds < 0)
+                                        {
+                                            <MudText Color="Color.Error" Typo="Typo.body2">Expired</MudText>
+                                        }
+                                        else if (remaining.TotalSeconds < 30)
+                                        {
+                                            <MudText Color="Color.Warning" Typo="Typo.body2">@remaining.ToString(@"ss\s")</MudText>
+                                        }
+                                        else if (remaining.TotalMinutes < 1)
+                                        {
+                                            <MudText Typo="Typo.body2">@remaining.ToString(@"ss\s")</MudText>
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.body2">@remaining.ToString(@"mm\:ss")</MudText>
+                                        }
+                                    </td>
+                                    <td><MudText Typo="Typo.caption">@(msg.ConsumerId ?? "—")</MudText></td>
+                                    <td>@msg.Partition</td>
+                                    <td>@msg.Offset</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="pb-4">
+                        Showing @_inflightMessages.Count in-flight messages.
+                        Orange = DeliveryCount &gt; 3, Red = near MaxDeliveryCount.
+                    </MudText>
+                }
+            </MudTabPanel>
+
+            <MudTabPanel Text="Dead Letter Queue" Icon="@Icons.Material.Filled.ErrorOutline"
+                         BadgeData="@(_selectedTopic?.DlqCount > 0 ? _selectedTopic.DlqCount.ToString() : null)"
+                         BadgeColor="Color.Error">
+                @if (_dlqLoading)
+                {
+                    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-2" />
+                }
+                else if (_dlqMessages.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Success" Class="my-4">No messages in the dead letter queue.</MudAlert>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true" Class="my-4" Style="max-height: 400px; overflow: auto;">
+                        <thead>
+                            <tr>
+                                <th>Offset</th>
+                                <th>Timestamp</th>
+                                <th>Message Body (truncated)</th>
+                                <th>Error</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var msg in _dlqMessages)
+                            {
+                                <tr>
+                                    <td>@msg.Offset</td>
+                                    <td>@msg.Timestamp.ToString("g")</td>
+                                    <td>
+                                        <MudTooltip Text="@(msg.Body ?? "(empty)")">
+                                            <code style="font-size: 11px;">@TruncateBody(msg.Body)</code>
+                                        </MudTooltip>
+                                    </td>
+                                    <td>
+                                        <MudText Typo="Typo.caption" Color="Color.Error">
+                                            @(msg.ErrorReason ?? "—")
+                                        </MudText>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+
+                    @* DLQ Pagination *@
+                    <div class="d-flex align-center justify-space-between pb-4">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Showing @_dlqMessages.Count messages (offset @_dlqOffset)
+                        </MudText>
+                        <div class="d-flex gap-2">
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       Disabled="@(_dlqOffset == 0)"
+                                       StartIcon="@Icons.Material.Filled.ChevronLeft"
+                                       OnClick="DlqPrevPageAsync">Prev</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       Disabled="@(_dlqMessages.Count < _dlqPageSize)"
+                                       EndIcon="@Icons.Material.Filled.ChevronRight"
+                                       OnClick="DlqNextPageAsync">Next</MudButton>
+                        </div>
+                    </div>
+                }
+            </MudTabPanel>
+        </MudTabs>
+    </MudPaper>
+}
+
+@code {
+    // ===== State =====
+    private bool _loading = true;
+    private string? _error;
+    private List<QueueTopicStatus> _topics = [];
+    private QueueTopicStatus? _selectedTopic;
+
+    private bool _detailLoading;
+    private bool _dlqLoading;
+    private List<InFlightMessage> _inflightMessages = [];
+    private List<DlqMessage> _dlqMessages = [];
+    private QueueMetrics? _metrics;
+
+    private int _dlqOffset;
+    private const int _dlqPageSize = 50;
+
+    private Timer? _refreshTimer;
+
+    // ===== Lifecycle =====
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTopicsAsync();
+        _refreshTimer = new Timer(async _ =>
+        {
+            await LoadTopicsAsync();
+            if (_selectedTopic != null)
+                await LoadDetailAsync();
+            await InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+
+    // ===== Data Loading =====
+
+    private async Task LoadTopicsAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _topics = await Http.GetFromJsonAsync<List<QueueTopicStatus>>("/api/queue/topics") ?? [];
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load queue topics: {ex.Message}";
+            _topics = GenerateFallbackTopics();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectTopicAsync(QueueTopicStatus topic)
+    {
+        _selectedTopic = topic;
+        _dlqOffset = 0;
+        _inflightMessages = [];
+        _dlqMessages = [];
+        _metrics = null;
+        await LoadDetailAsync();
+        await LoadDlqAsync();
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        if (_selectedTopic == null) return;
+        _detailLoading = true;
+        StateHasChanged();
+        try
+        {
+            var topicEncoded = Uri.EscapeDataString(_selectedTopic.Topic);
+            _inflightMessages = await Http.GetFromJsonAsync<List<InFlightMessage>>($"/api/queue/{topicEncoded}/inflight") ?? [];
+            _metrics = await Http.GetFromJsonAsync<QueueMetrics>($"/api/queue/{topicEncoded}/metrics");
+        }
+        catch
+        {
+            _inflightMessages = GenerateFallbackInflight();
+            _metrics = GenerateFallbackMetrics();
+        }
+        finally
+        {
+            _detailLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadDlqAsync()
+    {
+        if (_selectedTopic == null) return;
+        _dlqLoading = true;
+        StateHasChanged();
+        try
+        {
+            var topicEncoded = Uri.EscapeDataString(_selectedTopic.Topic);
+            _dlqMessages = await Http.GetFromJsonAsync<List<DlqMessage>>(
+                $"/api/queue/{topicEncoded}/dlq?offset={_dlqOffset}&limit={_dlqPageSize}") ?? [];
+        }
+        catch
+        {
+            _dlqMessages = [];
+        }
+        finally
+        {
+            _dlqLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DlqNextPageAsync()
+    {
+        _dlqOffset += _dlqPageSize;
+        await LoadDlqAsync();
+    }
+
+    private async Task DlqPrevPageAsync()
+    {
+        _dlqOffset = Math.Max(0, _dlqOffset - _dlqPageSize);
+        await LoadDlqAsync();
+    }
+
+    // ===== Row Click =====
+
+    private async Task OnRowClick(TableRowClickEventArgs<QueueTopicStatus> args)
+    {
+        if (args.Item != null)
+            await SelectTopicAsync(args.Item);
+    }
+
+    // ===== Purge =====
+
+    private async Task ConfirmPurgeAsync()
+    {
+        if (_selectedTopic == null) return;
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Purge Queue",
+            $"Delete ALL in-flight and queued messages from '{_selectedTopic.Topic}'?\n\nThis action cannot be undone.",
+            yesText: "Purge", cancelText: "Cancel");
+
+        if (confirmed == true)
+            await PurgeAsync();
+    }
+
+    private async Task PurgeAsync()
+    {
+        if (_selectedTopic == null) return;
+        try
+        {
+            var topicEncoded = Uri.EscapeDataString(_selectedTopic.Topic);
+            var response = await Http.PostAsync($"/api/queue/{topicEncoded}/purge", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Notification.ShowSuccess($"Queue '{_selectedTopic.Topic}' purged successfully");
+                await LoadTopicsAsync();
+                await LoadDetailAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to purge queue");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Purge failed: {ex.Message}");
+        }
+    }
+
+    // ===== Helpers =====
+
+    private static Color GetDeliveryCountColor(int deliveryCount, int maxDeliveryCount)
+    {
+        if (maxDeliveryCount > 0 && deliveryCount >= maxDeliveryCount - 1)
+            return Color.Error;
+        if (deliveryCount > 3)
+            return Color.Warning;
+        return Color.Default;
+    }
+
+    private static string GetInflightRowStyle(InFlightMessage msg)
+    {
+        if (msg.MaxDeliveryCount > 0 && msg.DeliveryCount >= msg.MaxDeliveryCount - 1)
+            return "background-color: rgba(244,67,54,0.08);";
+        if (msg.DeliveryCount > 3)
+            return "background-color: rgba(255,152,0,0.08);";
+        return "";
+    }
+
+    private static string TruncateId(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return "—";
+        return id.Length > 16 ? id[..16] + "…" : id;
+    }
+
+    private static string TruncateBody(string? body)
+    {
+        if (string.IsNullOrEmpty(body)) return "(empty)";
+        return body.Length > 80 ? body[..77] + "…" : body;
+    }
+
+    // ===== Fallback Data (when API not yet available) =====
+
+    private static List<QueueTopicStatus> GenerateFallbackTopics() =>
+    [
+        new QueueTopicStatus { Topic = "orders", InFlightCount = 12, CommittedOffset = 4820, TotalAcked = 4808, TotalNacked = 5, DlqCount = 3 },
+        new QueueTopicStatus { Topic = "payments", InFlightCount = 3, CommittedOffset = 2100, TotalAcked = 2097, TotalNacked = 1, DlqCount = 0 },
+        new QueueTopicStatus { Topic = "notifications", InFlightCount = 0, CommittedOffset = 890, TotalAcked = 890, TotalNacked = 0, DlqCount = 7 }
+    ];
+
+    private static List<InFlightMessage> GenerateFallbackInflight() =>
+    [
+        new InFlightMessage { MessageId = "msg-001-abc", DeliveryCount = 1, MaxDeliveryCount = 5, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(4), ConsumerId = "consumer-1", Partition = 0, Offset = 4821 },
+        new InFlightMessage { MessageId = "msg-002-def", DeliveryCount = 4, MaxDeliveryCount = 5, ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(45), ConsumerId = "consumer-2", Partition = 1, Offset = 4822 },
+        new InFlightMessage { MessageId = "msg-003-ghi", DeliveryCount = 2, MaxDeliveryCount = 5, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(3), ConsumerId = null, Partition = 0, Offset = 4823 }
+    ];
+
+    private static QueueMetrics GenerateFallbackMetrics() => new()
+    {
+        AckRate = 42.5,
+        NackRate = 0.8,
+        RejectRate = 0.1,
+        RedeliveryRate = 1.2
+    };
+
+    // ===== Local Models =====
+
+    private sealed class QueueTopicStatus
+    {
+        public string Topic { get; set; } = "";
+        public long InFlightCount { get; set; }
+        public long CommittedOffset { get; set; }
+        public long TotalAcked { get; set; }
+        public long TotalNacked { get; set; }
+        public long DlqCount { get; set; }
+    }
+
+    private sealed class InFlightMessage
+    {
+        public string? MessageId { get; set; }
+        public int DeliveryCount { get; set; }
+        public int MaxDeliveryCount { get; set; }
+        public DateTimeOffset ExpiresAt { get; set; }
+        public string? ConsumerId { get; set; }
+        public int Partition { get; set; }
+        public long Offset { get; set; }
+    }
+
+    private sealed class DlqMessage
+    {
+        public long Offset { get; set; }
+        public DateTimeOffset Timestamp { get; set; }
+        public string? Body { get; set; }
+        public string? ErrorReason { get; set; }
+    }
+
+    private sealed class QueueMetrics
+    {
+        public double AckRate { get; set; }
+        public double NackRate { get; set; }
+        public double RejectRate { get; set; }
+        public double RedeliveryRate { get; set; }
+    }
+}

@@ -1,0 +1,200 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service TransactionService {
+  rpc InitProducerId(InitProducerIdRequest) returns (InitProducerIdResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/transactions/producer-id"
+      body: "*"
+      additional_bindings {
+        post: "/v3/transactions/producer-id"
+        body: "*"
+      }
+    };
+  }
+  rpc AddPartitionsToTxn(AddPartitionsToTxnRequest) returns (AddPartitionsToTxnResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/transactions/{transactional_id}/partitions"
+      body: "*"
+      additional_bindings {
+        post: "/v3/transactions/{transactional_id}/partitions"
+        body: "*"
+      }
+    };
+  }
+  rpc AddOffsetsToTxn(AddOffsetsToTxnRequest) returns (AddOffsetsToTxnResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/transactions/{transactional_id}/offsets"
+      body: "*"
+      additional_bindings {
+        post: "/v3/transactions/{transactional_id}/offsets"
+        body: "*"
+      }
+    };
+  }
+  rpc TxnOffsetCommit(TxnOffsetCommitRequest) returns (TxnOffsetCommitResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/transactions/{transactional_id}/offset-commit"
+      body: "*"
+      additional_bindings {
+        post: "/v3/transactions/{transactional_id}/offset-commit"
+        body: "*"
+      }
+    };
+  }
+  rpc EndTxn(EndTxnRequest) returns (EndTxnResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/transactions/{transactional_id}/end"
+      body: "*"
+      additional_bindings {
+        post: "/v3/transactions/{transactional_id}/end"
+        body: "*"
+      }
+    };
+  }
+  rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/transactions"
+      additional_bindings {
+        get: "/v3/transactions"
+      }
+    };
+  }
+  rpc DescribeTransactions(DescribeTransactionsRequest) returns (DescribeTransactionsResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/transactions/describe"
+      body: "*"
+      additional_bindings {
+        post: "/v3/transactions/describe"
+        body: "*"
+      }
+    };
+  }
+}
+
+message InitProducerIdRequest {
+  string cluster_id = 1;
+  string transactional_id = 2;
+  int32 transaction_timeout_ms = 3;
+  int64 producer_id = 4;
+  int32 producer_epoch = 5;
+}
+
+message InitProducerIdResponse {
+  int64 producer_id = 1;
+  int32 producer_epoch = 2;
+  ResponseStatus status = 3;
+}
+
+message AddPartitionsToTxnRequest {
+  string cluster_id = 1;
+  string transactional_id = 2;
+  int64 producer_id = 3;
+  int32 producer_epoch = 4;
+  repeated TopicPartition partitions = 5;
+}
+
+message AddPartitionsToTxnResponse {
+  repeated TopicPartitionResult results = 1;
+}
+
+message TopicPartitionResult {
+  string topic = 1;
+  int32 partition = 2;
+  ResponseStatus status = 3;
+}
+
+message AddOffsetsToTxnRequest {
+  string cluster_id = 1;
+  string transactional_id = 2;
+  int64 producer_id = 3;
+  int32 producer_epoch = 4;
+  string group_id = 5;
+}
+
+message AddOffsetsToTxnResponse {
+  ResponseStatus status = 1;
+}
+
+message TxnOffsetCommitRequest {
+  string cluster_id = 1;
+  string transactional_id = 2;
+  string group_id = 3;
+  int64 producer_id = 4;
+  int32 producer_epoch = 5;
+  int32 generation_id = 6;
+  string member_id = 7;
+  repeated TxnOffsetCommit offsets = 8;
+}
+
+message TxnOffsetCommit {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  string metadata = 4;
+}
+
+message TxnOffsetCommitResponse {
+  repeated TxnOffsetCommitResult results = 1;
+}
+
+message TxnOffsetCommitResult {
+  string topic = 1;
+  int32 partition = 2;
+  ResponseStatus status = 3;
+}
+
+message EndTxnRequest {
+  string cluster_id = 1;
+  string transactional_id = 2;
+  int64 producer_id = 3;
+  int32 producer_epoch = 4;
+  bool commit = 5;
+}
+
+message EndTxnResponse {
+  ResponseStatus status = 1;
+}
+
+message ListTransactionsRequest {
+  string cluster_id = 1;
+  repeated string states_filter = 2;
+  repeated int64 producer_id_filter = 3;
+}
+
+message ListTransactionsResponse {
+  repeated TransactionListing transactions = 1;
+  ResponseStatus status = 2;
+}
+
+message TransactionListing {
+  string transactional_id = 1;
+  int64 producer_id = 2;
+  string state = 3;
+}
+
+message DescribeTransactionsRequest {
+  string cluster_id = 1;
+  repeated string transactional_ids = 2;
+}
+
+message DescribeTransactionsResponse {
+  repeated TransactionDescription transactions = 1;
+}
+
+message TransactionDescription {
+  string transactional_id = 1;
+  string state = 2;
+  int64 producer_id = 3;
+  int32 producer_epoch = 4;
+  int64 transaction_timeout_ms = 5;
+  int64 transaction_start_time_ms = 6;
+  repeated TopicPartition partitions = 7;
+  ResponseStatus status = 8;
+}

@@ -1,0 +1,566 @@
+@page "/consumer-lag"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Consumer Lag - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Consumer Lag Dashboard</MudText>
+
+@* Controls *@
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudSelect @bind-Value="_refreshInterval" Label="Refresh Interval" Variant="Variant.Outlined"
+                       @bind-Value:after="OnRefreshIntervalChanged">
+                <MudSelectItem Value="0">Manual</MudSelectItem>
+                <MudSelectItem Value="5">5 seconds</MudSelectItem>
+                <MudSelectItem Value="10">10 seconds</MudSelectItem>
+                <MudSelectItem Value="30">30 seconds</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudTextField @bind-Value="_searchFilter" Label="Filter Groups" Variant="Variant.Outlined"
+                          Placeholder="Search by group ID..." Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true"
+                          DebounceInterval="300" />
+        </MudItem>
+        <MudItem xs="12" md="4" Class="d-flex align-center justify-end gap-2">
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Last updated: @_lastUpdated.ToString("HH:mm:ss")
+            </MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="RefreshAsync" Disabled="@_loading">
+                Refresh
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading && _groups.Count == 0)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="RefreshAsync" Class="ml-4">Retry</MudButton>
+    </MudAlert>
+}
+else
+{
+    @* Summary Cards *@
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Group" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Consumer Groups</MudText>
+                            <MudText Typo="Typo.h5">@_groups.Count</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.TrendingDown" Color="@(_totalLag > 10000 ? Color.Error : _totalLag > 1000 ? Color.Warning : Color.Success)" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Lag</MudText>
+                            <MudText Typo="Typo.h5">@_totalLag.ToString("N0")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="@(_groupsWithLag > 0 ? Color.Warning : Color.Success)" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Groups with Lag</MudText>
+                            <MudText Typo="Typo.h5">@_groupsWithLag / @_groups.Count</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Max Lag</MudText>
+                            <MudText Typo="Typo.h5">@_maxLag.ToString("N0")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+
+    @* Lag Trend Chart *@
+    @if (_lagTrendPoints.Count > 1)
+    {
+        <MudCard Elevation="2" Class="mb-4">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Total Lag Trend</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent Style="height: 250px;">
+                <MudChart ChartType="ChartType.Line" ChartSeries="@_lagTrendSeries"
+                          XAxisLabels="@_lagTrendLabels" Width="100%" Height="220px"
+                          ChartOptions="@_chartOptions" />
+            </MudCardContent>
+        </MudCard>
+    }
+
+    @* Lag Heatmap *@
+    @if (FilteredGroups.Any(g => g.TotalLag > 0))
+    {
+        <MudCard Elevation="2" Class="mb-4">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Lag Heatmap</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var group in FilteredGroups.Where(g => g.TotalLag > 0).OrderByDescending(g => g.TotalLag))
+                    {
+                        <MudTooltip Text="@($"{group.GroupId}: {group.TotalLag:N0} lag across {group.Partitions.Count} partitions")">
+                            <MudPaper Elevation="1" Class="pa-2"
+                                      Style="@($"background-color: {GetHeatColor(group.TotalLag)}; min-width: 80px; text-align: center; cursor: pointer;")"
+                                      @onclick="@(() => ExpandGroup(group.GroupId))">
+                                <MudText Typo="Typo.caption" Style="color: white; font-weight: bold;">
+                                    @Truncate(group.GroupId, 15)
+                                </MudText>
+                                <MudText Typo="Typo.body2" Style="color: white;">
+                                    @FormatLag(group.TotalLag)
+                                </MudText>
+                            </MudPaper>
+                        </MudTooltip>
+                    }
+                </div>
+            </MudCardContent>
+        </MudCard>
+    }
+
+    @* Consumer Group Lag Table *@
+    <MudCard Elevation="2" Class="mb-4">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudText Typo="Typo.h6">Consumer Groups</MudText>
+            </CardHeaderContent>
+        </MudCardHeader>
+        <MudCardContent>
+            <MudTable Items="@FilteredGroups" Dense="true" Hover="true" Striped="true"
+                      T="ConsumerGroupLag" SortLabel="Sort By">
+                <HeaderContent>
+                    <MudTh><MudTableSortLabel SortBy="@(new Func<ConsumerGroupLag, object>(x => x.GroupId))">Group ID</MudTableSortLabel></MudTh>
+                    <MudTh>State</MudTh>
+                    <MudTh><MudTableSortLabel SortBy="@(new Func<ConsumerGroupLag, object>(x => x.TotalLag))" InitialDirection="SortDirection.Descending">Total Lag</MudTableSortLabel></MudTh>
+                    <MudTh>Partitions</MudTh>
+                    <MudTh>Lag Distribution</MudTh>
+                    <MudTh Style="width: 120px;">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Group ID">
+                        <MudLink Href="@($"/consumer-groups/{context.GroupId}")">@context.GroupId</MudLink>
+                    </MudTd>
+                    <MudTd DataLabel="State">
+                        <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)">@context.State</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Total Lag">
+                        <MudChip T="string" Size="Size.Small" Color="@GetLagColor(context.TotalLag)">
+                            @context.TotalLag.ToString("N0")
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Partitions">@context.Partitions.Count</MudTd>
+                    <MudTd DataLabel="Distribution">
+                        @if (context.Partitions.Count > 0 && context.TotalLag > 0)
+                        {
+                            <div class="d-flex gap-1 align-center" style="max-width: 200px;">
+                                @foreach (var p in context.Partitions.Take(10))
+                                {
+                                    var pct = context.TotalLag > 0 ? (double)p.Lag / context.TotalLag * 100 : 0;
+                                    <MudTooltip Text="@($"{p.Topic}[{p.Partition}]: {p.Lag:N0}")">
+                                        <div style="@($"width: {Math.Max(4, pct * 2)}px; height: 16px; background-color: {GetHeatColor(p.Lag)}; border-radius: 2px;")" />
+                                    </MudTooltip>
+                                }
+                                @if (context.Partitions.Count > 10)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">+@(context.Partitions.Count - 10)</MudText>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">No lag</MudText>
+                        }
+                    </MudTd>
+                    <MudTd>
+                        <MudTooltip Text="View Details">
+                            <MudIconButton Icon="@Icons.Material.Filled.Expand" Size="Size.Small"
+                                           OnClick="@(() => ExpandGroup(context.GroupId))" />
+                        </MudTooltip>
+                        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage" Context="authContext">
+                            <MudTooltip Text="Reset Offsets">
+                                <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small"
+                                               Color="Color.Warning"
+                                               OnClick="@(() => OpenResetDialog(context))" />
+                            </MudTooltip>
+                        </AuthorizeView>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudCardContent>
+    </MudCard>
+
+    @* Expanded Group Detail *@
+    @if (_expandedGroup != null)
+    {
+        <MudCard Elevation="2" Class="mb-4">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">@_expandedGroup.GroupId - Partition Lag Breakdown</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@(() => _expandedGroup = null)" />
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_expandedGroup.Partitions.Count > 0)
+                {
+                    <div style="height: 300px;" class="mb-4">
+                        <MudChart ChartType="ChartType.Bar" ChartSeries="@_partitionLagSeries"
+                                  XAxisLabels="@_partitionLagLabels" Width="100%" Height="280px"
+                                  ChartOptions="@_chartOptions" />
+                    </div>
+                }
+
+                <MudTable Items="@_expandedGroup.Partitions" Dense="true" Hover="true" Striped="true" T="TopicPartitionLag">
+                    <HeaderContent>
+                        <MudTh>Topic</MudTh>
+                        <MudTh>Partition</MudTh>
+                        <MudTh>Current Offset</MudTh>
+                        <MudTh>End Offset</MudTh>
+                        <MudTh>Lag</MudTh>
+                        <MudTh>Consumer</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Topic">
+                            <MudLink Href="@($"/topics/{context.Topic}")">@context.Topic</MudLink>
+                        </MudTd>
+                        <MudTd DataLabel="Partition">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.Partition</MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Current Offset">@context.CurrentOffset.ToString("N0")</MudTd>
+                        <MudTd DataLabel="End Offset">@context.EndOffset.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Lag">
+                            <MudChip T="string" Size="Size.Small" Color="@GetLagColor(context.Lag)">
+                                @context.Lag.ToString("N0")
+                            </MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Consumer">
+                            @if (context.ConsumerId != null)
+                            {
+                                <MudText Typo="Typo.caption">@Truncate(context.ConsumerId, 30)</MudText>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">Unassigned</MudChip>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudCardContent>
+        </MudCard>
+    }
+}
+
+@* Offset Reset Dialog *@
+<MudDialog @bind-Visible="_showResetDialog" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Reset Consumer Offsets</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_resetTarget != null)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mb-3">
+                This will reset offsets for consumer group <strong>@_resetTarget.GroupId</strong>.
+                The group must be in Empty or Dead state.
+            </MudAlert>
+
+            <MudSelect @bind-Value="_resetTopic" Label="Topic" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var topic in _resetTarget.Partitions.Select(p => p.Topic).Distinct())
+                {
+                    <MudSelectItem Value="@topic">@topic</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect @bind-Value="_resetStrategy" Label="Reset Strategy" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="@("earliest")">To Earliest</MudSelectItem>
+                <MudSelectItem Value="@("latest")">To Latest</MudSelectItem>
+                <MudSelectItem Value="@("timestamp")">To Timestamp</MudSelectItem>
+            </MudSelect>
+
+            @if (_resetStrategy == "timestamp")
+            {
+                <MudGrid Class="mb-3">
+                    <MudItem xs="6">
+                        <MudDatePicker @bind-Date="_resetDate" Label="Date" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTimePicker @bind-Time="_resetTime" Label="Time" Variant="Variant.Outlined" />
+                    </MudItem>
+                </MudGrid>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showResetDialog = false)">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RestartAlt"
+                   OnClick="ExecuteResetAsync" Disabled="@(_resetting || string.IsNullOrEmpty(_resetTopic))">
+            @if (_resetting)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Reset Offsets
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private int _refreshInterval = 10;
+    private DateTime _lastUpdated = DateTime.Now;
+    private Timer? _timer;
+    private string? _searchFilter;
+
+    private List<ConsumerGroupLag> _groups = [];
+    private ConsumerGroupLag? _expandedGroup;
+    private long _totalLag;
+    private long _maxLag;
+    private int _groupsWithLag;
+
+    // Lag trend
+    private List<LagPoint> _lagTrendPoints = [];
+
+    // MudChart series
+    private List<ChartSeries> _lagTrendSeries = [];
+    private string[] _lagTrendLabels = [];
+    private List<ChartSeries> _partitionLagSeries = [];
+    private string[] _partitionLagLabels = [];
+
+    private ChartOptions _chartOptions = new() { YAxisLines = true, XAxisLines = true };
+
+    // Offset reset
+    private bool _showResetDialog;
+    private ConsumerGroupLag? _resetTarget;
+    private string? _resetTopic;
+    private string _resetStrategy = "latest";
+    private DateTime? _resetDate;
+    private TimeSpan? _resetTime;
+    private bool _resetting;
+
+    private IEnumerable<ConsumerGroupLag> FilteredGroups =>
+        string.IsNullOrWhiteSpace(_searchFilter)
+            ? _groups
+            : _groups.Where(g => g.GroupId.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClusterState.OnChange += async () =>
+        {
+            await RefreshAsync();
+            StateHasChanged();
+        };
+        await RefreshAsync();
+        StartTimer();
+    }
+
+    private void StartTimer()
+    {
+        _timer?.Dispose();
+        if (_refreshInterval > 0)
+        {
+            _timer = new Timer(async _ =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+            }, null, TimeSpan.FromSeconds(_refreshInterval), TimeSpan.FromSeconds(_refreshInterval));
+        }
+    }
+
+    private async Task OnRefreshIntervalChanged()
+    {
+        StartTimer();
+        await Task.CompletedTask;
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            _groups = (await ApiClient.GetAllConsumerLagsAsync(ClusterState.SelectedClusterId)).ToList();
+            _totalLag = _groups.Sum(g => g.TotalLag);
+            _maxLag = _groups.Count > 0 ? _groups.Max(g => g.TotalLag) : 0;
+            _groupsWithLag = _groups.Count(g => g.TotalLag > 0);
+
+            // Add to trend
+            _lagTrendPoints.Add(new LagPoint(DateTime.Now, _totalLag));
+            if (_lagTrendPoints.Count > 60) _lagTrendPoints.RemoveAt(0);
+
+            // Update expanded group if still selected
+            if (_expandedGroup != null)
+            {
+                _expandedGroup = _groups.FirstOrDefault(g => g.GroupId == _expandedGroup.GroupId);
+                RebuildPartitionChart();
+            }
+
+            _lastUpdated = DateTime.Now;
+            RebuildLagTrendChart();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void RebuildLagTrendChart()
+    {
+        var labelStep = Math.Max(1, _lagTrendPoints.Count / 10);
+        _lagTrendSeries = [new ChartSeries { Name = "Total Lag", Data = _lagTrendPoints.Select(p => p.Value).ToArray() }];
+        _lagTrendLabels = _lagTrendPoints.Select((p, i) => i % labelStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
+    }
+
+    private void RebuildPartitionChart()
+    {
+        if (_expandedGroup is null) return;
+        var partitions = _expandedGroup.Partitions.OrderBy(p => p.Partition).ToList();
+        _partitionLagLabels = partitions.Select(p => $"{p.Topic}[{p.Partition}]").ToArray();
+        _partitionLagSeries = [new ChartSeries { Name = "Lag", Data = partitions.Select(p => (double)p.Lag).ToArray() }];
+    }
+
+    private void ExpandGroup(string groupId)
+    {
+        _expandedGroup = _groups.FirstOrDefault(g => g.GroupId == groupId);
+        RebuildPartitionChart();
+    }
+
+    private void OpenResetDialog(ConsumerGroupLag group)
+    {
+        _resetTarget = group;
+        _resetTopic = group.Partitions.Select(p => p.Topic).FirstOrDefault();
+        _resetStrategy = "latest";
+        _showResetDialog = true;
+    }
+
+    private async Task ExecuteResetAsync()
+    {
+        if (_resetTarget == null || string.IsNullOrEmpty(_resetTopic)) return;
+
+        _resetting = true;
+        StateHasChanged();
+
+        try
+        {
+            DateTimeOffset? timestamp = null;
+            if (_resetStrategy == "timestamp" && _resetDate != null)
+            {
+                var dt = _resetDate.Value;
+                if (_resetTime != null) dt = dt.Add(_resetTime.Value);
+                timestamp = new DateTimeOffset(dt, TimeZoneInfo.Local.GetUtcOffset(dt));
+            }
+
+            var success = await ApiClient.ResetConsumerGroupOffsetsAsync(
+                _resetTarget.GroupId, _resetTopic, _resetStrategy,
+                timestamp, clusterId: ClusterState.SelectedClusterId);
+
+            if (success)
+            {
+                Notification.ShowSuccess($"Offsets reset for {_resetTarget.GroupId} on {_resetTopic}");
+                _showResetDialog = false;
+                await RefreshAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to reset offsets. The group must be in Empty or Dead state.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Error resetting offsets: {ex.Message}");
+        }
+        finally
+        {
+            _resetting = false;
+            StateHasChanged();
+        }
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Stable" => Color.Success,
+        "PreparingRebalance" or "CompletingRebalance" => Color.Warning,
+        "Empty" => Color.Default,
+        "Dead" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static Color GetLagColor(long lag) => lag switch
+    {
+        0 => Color.Success,
+        < 100 => Color.Info,
+        < 1000 => Color.Warning,
+        _ => Color.Error
+    };
+
+    private static string GetHeatColor(long lag) => lag switch
+    {
+        0 => "#4caf50",
+        < 100 => "#8bc34a",
+        < 500 => "#ffeb3b",
+        < 1000 => "#ff9800",
+        < 5000 => "#f44336",
+        _ => "#b71c1c"
+    };
+
+    private static string FormatLag(long lag)
+    {
+        if (lag < 1000) return lag.ToString();
+        if (lag < 1_000_000) return $"{lag / 1000.0:N1}K";
+        return $"{lag / 1_000_000.0:N1}M";
+    }
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength] + "...";
+
+    public void Dispose() => _timer?.Dispose();
+
+    private record LagPoint(DateTime Timestamp, double Value);
+}

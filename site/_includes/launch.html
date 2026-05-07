@@ -1,0 +1,60 @@
+{%- comment -%}
+Launch — vertical numbered timeline. Big accent-coloured number circles
+on a continuous vertical guideline, content blocks to the right of each
+circle. Replaces the previous 3-card grid: reads as an ordered "do this,
+then this, then this" walkthrough rather than three parallel cards.
+{%- endcomment -%}
+<section class="launch" id="launch">
+  <div class="container">
+    <h2 class="section-title">Up and running in three commands</h2>
+    <p class="section-lede">Boot the broker, open the Control UI, send your first message. No cluster bring-up, no ZooKeeper, no waiting.</p>
+
+    <ol class="launch-timeline">
+      <li class="launch-tl-step">
+        <div class="launch-tl-num">1</div>
+        <div class="launch-tl-body">
+          <h3>Start the broker</h3>
+          <pre class="install-panel"><code><span class="install-comment"># Listens on :9092 (Kafka wire) and :9093 (Native)</span>
+surgewave broker start</code></pre>
+        </div>
+      </li>
+
+      <li class="launch-tl-step">
+        <div class="launch-tl-num">2</div>
+        <div class="launch-tl-body">
+          <h3>Open the Control UI</h3>
+          <pre class="install-panel"><code><span class="install-comment"># Topic browser, consumer groups, schema registry, plugins</span>
+surgewave control --urls http://localhost:5050</code></pre>
+        </div>
+      </li>
+
+      <li class="launch-tl-step">
+        <div class="launch-tl-num">3</div>
+        <div class="launch-tl-body">
+          <h3>Produce a message</h3>
+          <pre class="install-panel"><code><span class="install-comment"># Any Kafka client works &mdash; here's the Surgewave CLI</span>
+surgewave produce --topic orders --value '{"id":1,"total":42.99}'</code></pre>
+        </div>
+      </li>
+
+      <li class="launch-tl-step launch-tl-finish">
+        <div class="launch-tl-num" aria-label="Done">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+            <line x1="4" y1="22" x2="4" y2="15"/>
+          </svg>
+        </div>
+        <div class="launch-tl-body">
+          <h3>You're live</h3>
+          <p>Single-node Surgewave broker on <code>:9092</code> (Kafka wire) and <code>:9093</code> (native), Control UI on <code>:5050</code>, your first message on <code>orders</code>. From here: <a href="{{ '/docs/quickstart/index.html' | relative_url }}">.NET quickstart</a>, <a href="{{ '/docs/cookbook/index.html' | relative_url }}">cookbook recipes</a>, or <a href="{{ '/docs/clustering/index.html' | relative_url }}">scale to a cluster</a>.</p>
+        </div>
+      </li>
+    </ol>
+
+    <p class="launch-footnote">
+      Prefer code? Open the
+      <a href="{{ '/docs/quickstart/index.html' | relative_url }}">5-minute quickstart</a>
+      with the .NET, Go, and Python client SDKs.
+    </p>
+  </div>
+</section>

@@ -1,0 +1,175 @@
+@page "/Account/Login"
+@using Kuestenlogik.Surgewave.Control.Security
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.Extensions.Options
+@using MudBlazor
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject IOptions<SurgewaveAuthConfig> AuthOptions
+
+@if (_showLdapForm && _ldapProvider is not null)
+{
+    <MudContainer MaxWidth="MaxWidth.Small" Class="mt-16">
+        <MudPaper Elevation="4" Class="pa-8">
+            <MudText Typo="Typo.h4" Align="Align.Center" Class="mb-6">@_ldapProvider.EffectiveDisplayName</MudText>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4">@_errorMessage</MudAlert>
+            }
+
+            <form method="post" action="/ldap/@(Uri.EscapeDataString(_ldapProvider.Name))/login">
+                <input type="hidden" name="returnUrl" value="@_returnUrl" />
+                <input type="hidden" name="__RequestVerificationToken" value="@_antiforgeryToken" />
+                <MudStack Spacing="3">
+                    <MudTextField T="string" Label="Username" name="username"
+                                  Required="true" RequiredError="Username is required"
+                                  Variant="Variant.Outlined" Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Person" />
+                    <MudTextField T="string" Label="Password" name="password"
+                                  InputType="InputType.Password"
+                                  Required="true" RequiredError="Password is required"
+                                  Variant="Variant.Outlined" Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Lock" />
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled"
+                               Color="Color.Primary" Size="Size.Large" FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.Login">
+                        Sign In
+                    </MudButton>
+                </MudStack>
+            </form>
+
+            @if (AuthOptions.Value.Providers.Length > 1)
+            {
+                <MudDivider Class="my-4" />
+                <MudButton Variant="Variant.Text" FullWidth="true"
+                           Href="@($"/Account/Login?returnUrl={Uri.EscapeDataString(_returnUrl)}")"
+                           Class="text-transform-none">
+                    Back to provider selection
+                </MudButton>
+            }
+        </MudPaper>
+    </MudContainer>
+}
+else if (_showProviderSelection)
+{
+    <MudContainer MaxWidth="MaxWidth.Small" Class="mt-16">
+        <MudPaper Elevation="4" Class="pa-8">
+            <MudText Typo="Typo.h4" Align="Align.Center" Class="mb-6">Sign in to Surgewave</MudText>
+            <MudStack Spacing="3">
+                @foreach (var provider in AuthOptions.Value.Providers)
+                {
+                    var p = provider;
+                    <MudButton Variant="Variant.Outlined"
+                               Size="Size.Large"
+                               FullWidth="true"
+                               StartIcon="@GetProviderIcon(p)"
+                               Href="@($"/Account/Login?provider={Uri.EscapeDataString(p.Name)}&returnUrl={Uri.EscapeDataString(_returnUrl)}")"
+                               Class="justify-start text-transform-none">
+                        @p.EffectiveDisplayName
+                    </MudButton>
+                }
+            </MudStack>
+        </MudPaper>
+    </MudContainer>
+}
+
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+
+@code {
+    [CascadingParameter]
+    public HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "provider")]
+    public string? ProviderName { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private bool _showProviderSelection;
+    private bool _showLdapForm;
+    private IdpProviderConfig? _ldapProvider;
+    private string _returnUrl = "/";
+    private string _antiforgeryToken = string.Empty;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContext is null)
+            return;
+
+        _returnUrl = ReturnUrl ?? "/";
+        var authConfig = AuthOptions.Value;
+
+        // Handle error from LDAP login redirect
+        if (string.Equals(Error, "invalid_credentials", StringComparison.OrdinalIgnoreCase))
+            _errorMessage = "Invalid username or password. Please try again.";
+
+        // Determine which provider to use
+        IdpProviderConfig? targetProvider = null;
+
+        if (!string.IsNullOrEmpty(ProviderName))
+        {
+            // Explicit provider requested via query parameter
+            targetProvider = authConfig.Providers
+                .FirstOrDefault(p => string.Equals(p.Name, ProviderName, StringComparison.OrdinalIgnoreCase));
+        }
+        else if (authConfig.IsSingleProvider)
+        {
+            // Single provider — auto-redirect
+            targetProvider = authConfig.Providers[0];
+        }
+
+        if (targetProvider is not null)
+        {
+            await ChallengeProvider(targetProvider);
+        }
+        else
+        {
+            // Multiple providers — show selection page
+            _showProviderSelection = true;
+        }
+    }
+
+    private async Task ChallengeProvider(IdpProviderConfig provider)
+    {
+        if (provider.Type == AuthProviderType.Ldap)
+        {
+            // LDAP shows inline username/password form
+            _showLdapForm = true;
+            _ldapProvider = provider;
+            var tokenSet = Antiforgery.GetAndStoreTokens(HttpContext!);
+            _antiforgeryToken = tokenSet.RequestToken ?? string.Empty;
+        }
+        else if (provider.Type == AuthProviderType.Saml)
+        {
+            // SAML uses its own controller endpoints
+            var samlLoginUrl = $"/saml/{Uri.EscapeDataString(provider.Name)}/login?returnUrl={Uri.EscapeDataString(_returnUrl)}";
+            HttpContext!.Response.Redirect(samlLoginUrl);
+        }
+        else
+        {
+            // OIDC providers use named challenge scheme
+            var schemeName = SchemeNames.OidcScheme(provider.Name);
+            await HttpContext!.ChallengeAsync(
+                schemeName,
+                new AuthenticationProperties { RedirectUri = _returnUrl });
+        }
+    }
+
+    private static string GetProviderIcon(IdpProviderConfig provider)
+    {
+        if (!string.IsNullOrEmpty(provider.Icon))
+            return provider.Icon;
+
+        return provider.Type switch
+        {
+            AuthProviderType.EntraId => Icons.Custom.Brands.Microsoft,
+            AuthProviderType.Google => Icons.Custom.Brands.Google,
+            AuthProviderType.Ldap => Icons.Material.Filled.Domain,
+            _ => Icons.Material.Filled.Login
+        };
+    }
+}

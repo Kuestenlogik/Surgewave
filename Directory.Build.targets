@@ -1,0 +1,119 @@
+<Project>
+  <!-- Auto-generate NuGet packages on build (only for packable projects).
+       Evaluated in targets so IsPackable from csproj and SDK is already resolved. -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <!--
+    Surgewave Plugin Package Creation Target
+    Usage: dotnet build -p:CreateSurgewavePackage=true
+  -->
+
+  <PropertyGroup>
+    <!-- Enable with -p:CreateSurgewavePackage=true -->
+    <CreateSurgewavePackage>false</CreateSurgewavePackage>
+    <!-- Output directory for .surgewavepackage files -->
+    <SurgewavePackageOutputDir>$(ArtifactsPath)pkg\</SurgewavePackageOutputDir>
+  </PropertyGroup>
+
+  <!--
+    Create .surgewavepackage after build for connector projects
+    Only runs when:
+    - CreateSurgewavePackage is true
+    - Project name starts with Kuestenlogik.Surgewave.Connector.
+    - Project is not a test project
+  -->
+  <Target Name="CreateSurgewavePackage"
+          AfterTargets="Build"
+          Condition="'$(CreateSurgewavePackage)' == 'true' AND
+                     $(MSBuildProjectName.StartsWith('Kuestenlogik.Surgewave.Connector.')) AND
+                     !$(MSBuildProjectName.EndsWith('.Tests'))">
+
+    <PropertyGroup>
+      <!-- Connector assembly paths -->
+      <_ConnectorDll>$(OutputPath)$(AssemblyName).dll</_ConnectorDll>
+      <_ConnectorDeps>$(OutputPath)$(AssemblyName).deps.json</_ConnectorDeps>
+      <_PackageName>$(AssemblyName)-$(Version).surgewavepackage</_PackageName>
+      <_PackagePath>$(SurgewavePackageOutputDir)$(_PackageName)</_PackagePath>
+      <_TempPackageDir>$(IntermediateOutputPath)surgewavepackage\</_TempPackageDir>
+    </PropertyGroup>
+
+    <!-- Create temp directories -->
+    <MakeDir Directories="$(SurgewavePackageOutputDir)" Condition="!Exists('$(SurgewavePackageOutputDir)')" />
+    <MakeDir Directories="$(_TempPackageDir)" />
+    <MakeDir Directories="$(_TempPackageDir)lib" />
+    <MakeDir Directories="$(_TempPackageDir)deps" />
+
+    <!-- Copy main connector DLL to lib/ -->
+    <Copy SourceFiles="$(_ConnectorDll)"
+          DestinationFolder="$(_TempPackageDir)lib"
+          SkipUnchangedFiles="false" />
+
+    <!-- Copy deps.json to lib/ if exists -->
+    <Copy SourceFiles="$(_ConnectorDeps)"
+          DestinationFolder="$(_TempPackageDir)lib"
+          SkipUnchangedFiles="false"
+          Condition="Exists('$(_ConnectorDeps)')" />
+
+    <!-- Find and copy external dependencies (non-Kuestenlogik.Surgewave DLLs) -->
+    <ItemGroup>
+      <_AllDlls Include="$(OutputPath)*.dll" />
+      <_ExternalDeps Include="@(_AllDlls)"
+                     Condition="!$([System.String]::Copy('%(Filename)').StartsWith('Kuestenlogik.Surgewave.'))" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_ExternalDeps)"
+          DestinationFolder="$(_TempPackageDir)deps"
+          SkipUnchangedFiles="false" />
+
+    <!-- Generate plugin.json manifest with extended metadata fields -->
+    <PropertyGroup>
+      <_ConnectorDisplayName>$(AssemblyName.Replace('Kuestenlogik.Surgewave.Connector.', '').Replace('.', ' '))</_ConnectorDisplayName>
+      <_ConnectorDescription>$(Description)</_ConnectorDescription>
+      <_ConnectorCategory Condition="'$(PackageTags)' != ''">Integration</_ConnectorCategory>
+      <_ConnectorCategory Condition="'$(_ConnectorCategory)' == ''">Integration</_ConnectorCategory>
+      <_ManifestContent>
+{
+  "id": "$(AssemblyName)",
+  "name": "$(_ConnectorDisplayName)",
+  "version": "$(Version)",
+  "description": "$(_ConnectorDescription)",
+  "authors": ["$(Authors)"],
+  "license": "$(PackageLicenseExpression)",
+  "connectors": []
+}
+      </_ManifestContent>
+    </PropertyGroup>
+
+    <WriteLinesToFile File="$(_TempPackageDir)plugin.json"
+                      Lines="$(_ManifestContent)"
+                      Overwrite="true" />
+
+    <!-- Copy README.md if exists -->
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\README.md"
+          DestinationFolder="$(_TempPackageDir)"
+          SkipUnchangedFiles="false"
+          Condition="Exists('$(MSBuildProjectDirectory)\README.md')" />
+
+    <!-- Copy LICENSE if exists -->
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\LICENSE"
+          DestinationFolder="$(_TempPackageDir)"
+          SkipUnchangedFiles="false"
+          Condition="Exists('$(MSBuildProjectDirectory)\LICENSE')" />
+
+    <!-- Delete existing package if present -->
+    <Delete Files="$(_PackagePath)" Condition="Exists('$(_PackagePath)')" />
+
+    <!-- Create ZIP archive -->
+    <ZipDirectory SourceDirectory="$(_TempPackageDir)"
+                  DestinationFile="$(_PackagePath)"
+                  Overwrite="true" />
+
+    <!-- Clean up temp directory -->
+    <RemoveDir Directories="$(_TempPackageDir)" />
+
+    <Message Text="Created Surgewave package: $(_PackagePath)" Importance="high" />
+  </Target>
+
+</Project>

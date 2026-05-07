@@ -1,0 +1,43 @@
+@using Blazor.Diagrams.Core.Geometry
+
+<svg class="alignment-guide-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000;">
+    @foreach (var guide in HorizontalGuides)
+    {
+        <line x1="0" y1="@guide.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+              x2="100%" y2="@guide.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+              class="alignment-guide horizontal" />
+    }
+    @foreach (var guide in VerticalGuides)
+    {
+        <line x1="@guide.X.ToString(System.Globalization.CultureInfo.InvariantCulture)" y1="0"
+              x2="@guide.X.ToString(System.Globalization.CultureInfo.InvariantCulture)" y2="100%"
+              class="alignment-guide vertical" />
+    }
+</svg>
+
+@code {
+    [Parameter]
+    public List<AlignmentGuide> HorizontalGuides { get; set; } = [];
+
+    [Parameter]
+    public List<AlignmentGuide> VerticalGuides { get; set; } = [];
+}
+
+<style>
+    .alignment-guide-overlay {
+        overflow: visible;
+    }
+
+    .alignment-guide {
+        stroke-width: 1;
+        stroke-dasharray: 5, 3;
+    }
+
+    .alignment-guide.horizontal {
+        stroke: #ff4444;
+    }
+
+    .alignment-guide.vertical {
+        stroke: #4444ff;
+    }
+</style>

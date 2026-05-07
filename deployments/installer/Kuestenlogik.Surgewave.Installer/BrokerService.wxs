@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Windows Service registration for Storm Broker -->
+    <Component Id="BrokerServiceComponent" Directory="BrokerDir" Guid="F6A7B8C9-D0E1-2345-FABC-456789012345">
+      <File Id="BrokerExe" Source="$(var.BrokerPublishDir)\Kuestenlogik.Storm.Broker.exe" KeyPath="yes" />
+
+      <ServiceInstall
+        Id="StormBrokerService"
+        Name="StormBroker"
+        DisplayName="Storm Broker"
+        Description="Storm - High-performance event streaming platform. Ports: 9092 (Kafka), 9093 (gRPC), 1883 (MQTT)."
+        Type="ownProcess"
+        Start="auto"
+        ErrorControl="normal"
+        Account="LocalSystem">
+        <!-- Delayed auto-start so networking is available -->
+        <ServiceConfig DelayedAutoStart="yes" />
+      </ServiceInstall>
+
+      <ServiceControl
+        Id="StormBrokerServiceControl"
+        Name="StormBroker"
+        Start="install"
+        Stop="both"
+        Remove="uninstall"
+        Wait="yes" />
+    </Component>
+
+    <!-- Production appsettings installed alongside broker -->
+    <Component Id="BrokerConfigComponent" Directory="BrokerDir" Guid="A7B8C9D0-E1F2-3456-ABCD-567890123456">
+      <File Id="AppSettings" Source="$(var.BrokerPublishDir)\appsettings.json" KeyPath="yes" />
+      <File Id="AppSettingsProd" Source="$(var.BrokerPublishDir)\appsettings.Production.json" />
+    </Component>
+  </Fragment>
+
+</Wix>
