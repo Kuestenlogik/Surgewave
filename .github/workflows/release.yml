@@ -1,0 +1,191 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore Kuestenlogik.Surgewave.slnx
+
+      - name: Build
+        run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Test
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal
+
+      - name: Pack NuGet
+        run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Broker Container
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer \
+            -p:ContainerImageTag=${{ steps.version.outputs.VERSION }} \
+            -p:ContainerRegistry=ghcr.io/${{ github.repository_owner }}
+
+      - name: Publish Control Container
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer \
+            -p:ContainerImageTag=${{ steps.version.outputs.VERSION }} \
+            -p:ContainerRegistry=ghcr.io/${{ github.repository_owner }}
+
+      # Self-contained Broker binaries (no .NET SDK needed on target)
+      - name: Publish Broker binaries
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r linux-x64 --self-contained -o ./publish/surgewave-broker-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-broker-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r win-x64 --self-contained -o ./publish/surgewave-broker-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r osx-x64 --self-contained -o ./publish/surgewave-broker-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-broker-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Self-contained Control UI binaries
+      - name: Publish Control binaries
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r linux-x64 --self-contained -o ./publish/surgewave-control-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r win-x64 --self-contained -o ./publish/surgewave-control-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Self-contained CLI binaries
+      - name: Publish CLI binaries
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r linux-x64 --self-contained -o ./publish/surgewave-cli-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r win-x64 --self-contained -o ./publish/surgewave-cli-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Build Windows MSI Installer (WiX v5)
+      - name: Build Windows MSI Installer
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          # Reuse already-published win-x64 binaries
+          mkdir -p installer/publish
+          cp -r ./publish/surgewave-broker-win-x64 installer/publish/broker
+          cp -r ./publish/surgewave-cli-win-x64 installer/publish/cli
+          cp -r ./publish/surgewave-control-win-x64 installer/publish/control
+          # Copy production config into broker
+          cp installer/config/appsettings.json installer/publish/broker/
+          cp installer/config/appsettings.Production.json installer/publish/broker/
+          # Generate icon placeholder if missing
+          if [ ! -f installer/Kuestenlogik.Surgewave.Installer/surgewave.ico ]; then
+            pwsh -NoProfile -File installer/Kuestenlogik.Surgewave.Installer/generate-icon.ps1
+          fi
+          # Build MSI
+          dotnet build installer/Kuestenlogik.Surgewave.Installer/Kuestenlogik.Surgewave.Installer.wixproj \
+            -c Release \
+            -p:Version=$VERSION \
+            -p:BrokerPublishDir="$(pwd)/installer/publish/broker" \
+            -p:CliPublishDir="$(pwd)/installer/publish/cli" \
+            -p:ControlPublishDir="$(pwd)/installer/publish/control" || true
+          # Copy MSI to publish directory if built
+          find installer -name '*.msi' -exec cp {} ./publish/surgewave-$VERSION-win-x64.msi \; 2>/dev/null || true
+
+      # Build .deb and .rpm packages
+      - name: Build Linux packages
+        run: |
+          chmod +x installer/linux/build-packages.sh
+          cd installer/linux
+          bash build-packages.sh ${{ steps.version.outputs.VERSION }} amd64
+          cp build/*.deb ../../publish/ 2>/dev/null || true
+          cp build/*.rpm ../../publish/ 2>/dev/null || true
+
+      # OCI container image archives (load with: podman load < file.tar.gz)
+      - name: Export OCI container images
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer \
+            -p:ContainerImageTag=${{ steps.version.outputs.VERSION }} \
+            -p:ContainerArchiveOutputPath=./publish/surgewave-broker-oci-${{ steps.version.outputs.VERSION }}.tar.gz || true
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer \
+            -p:ContainerImageTag=${{ steps.version.outputs.VERSION }} \
+            -p:ContainerArchiveOutputPath=./publish/surgewave-control-oci-${{ steps.version.outputs.VERSION }}.tar.gz || true
+
+      # Create tar.gz/zip archives
+      - name: Create archives
+        run: |
+          cd publish
+          for dir in surgewave-broker-linux-* surgewave-broker-osx-* surgewave-control-linux-*; do
+            [ -d "$dir" ] && tar -czvf "${dir}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" .
+          done
+          for dir in surgewave-broker-win-* surgewave-control-win-* surgewave-cli-win-*; do
+            [ -d "$dir" ] && zip -r "${dir}-${{ steps.version.outputs.VERSION }}.zip" "$dir"
+          done
+          for dir in surgewave-cli-linux-*; do
+            [ -d "$dir" ] && tar -czvf "${dir}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" .
+          done
+
+      - name: Publish NuGet to GitHub Packages
+        run: dotnet nuget push ./artifacts/packages/*.nupkg --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-packages-${{ steps.version.outputs.VERSION }}
+          path: artifacts/packages/*.nupkg
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/packages/*.nupkg
+            publish/*.tar.gz
+            publish/*.zip
+            publish/*.msi
+            publish/*.deb
+            publish/*.rpm
+          body: |
+            ## Surgewave ${{ github.ref_name }}
+
+            ### Installation
+
+            **NuGet:**
+            ```bash
+            dotnet add package Kuestenlogik.Surgewave.Client --version ${{ steps.version.outputs.VERSION }}
+            ```
+
+            **Container:**
+            ```bash
+            dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer
+            ```
+
+            **Windows MSI (silent install):**
+            ```powershell
+            msiexec /i surgewave-${{ steps.version.outputs.VERSION }}-win-x64.msi /qn
+            ```
+
+            **Linux:**
+            ```bash
+            sudo bash install.sh
+            ```
+
+            **Helm:**
+            ```bash
+            helm install surgewave deploy/helm/surgewave/ --set broker.image.tag=${{ steps.version.outputs.VERSION }}
+            ```

@@ -1,0 +1,44 @@
+name: Performance Regression Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'benchmarks/**'
+
+jobs:
+  benchmark-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build benchmarks
+        run: dotnet build benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release
+
+      - name: Run unit benchmarks
+        run: dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release -- --filter '*' --exporters json --job short --artifacts artifacts/benchmarks
+
+      - name: Check for regressions
+        run: |
+          REPORT=$(find artifacts/benchmarks -name '*-report-full.json' -type f | head -1)
+          if [ -z "$REPORT" ]; then
+            echo "No benchmark report found"
+            exit 1
+          fi
+          dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Regression -c Release -- \
+            compare "$REPORT" \
+            benchmarks/baselines/unit-baseline.json \
+            -o artifacts/benchmarks/regression-report.md \
+            --config benchmarks/regression-config.json \
+            --fail-on-regression
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-report
+          path: artifacts/benchmarks/regression-report.md
