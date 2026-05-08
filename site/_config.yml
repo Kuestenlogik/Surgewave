@@ -1,7 +1,7 @@
 title: Surgewave
 description: The complete event streaming platform for .NET 10. Native low-latency transport, signed plugin marketplace, AI pipelines, embedded broker — plus full Kafka 4.x wire compatibility for an instant migration path.
-url: "https://kuestenlogik.github.io"
-baseurl: "/Surgewave"
+url: "https://didactic-adventure-mvjqzew.pages.github.io"
+baseurl: ""
 
 markdown: kramdown
 kramdown:
