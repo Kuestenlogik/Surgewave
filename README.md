@@ -7,7 +7,7 @@
 
 **The complete event streaming platform for .NET 10.**
 
-> *Named after [Theodor Surgewave](https://en.wikipedia.org/wiki/Theodor_Surgewave), the North German writer, just as Apache Kafka was named after [Franz Kafka](https://en.wikipedia.org/wiki/Franz_Kafka). Taming the surgewave of events, at any scale, anywhere.*
+> *Named after the storm surge that haunts the North German coast of [Theodor Storm](https://en.wikipedia.org/wiki/Theodor_Storm), just as Apache Kafka was named after [Franz Kafka](https://en.wikipedia.org/wiki/Franz_Kafka). Taming the surgewave of events, at any scale, anywhere.*
 
 Surgewave is a complete event streaming platform built end-to-end on .NET 10 — native low-latency transport, signed plugin marketplace, built-in AI pipeline nodes, embedded broker for tests and edge. Full Kafka 4.0 wire compatibility ships in the box, so any existing Kafka client (Confluent.Kafka, librdkafka, kafka-go, …) connects on day one. Adopt Surgewave as your streaming platform; keep your existing Kafka producers and consumers working unchanged.
 
