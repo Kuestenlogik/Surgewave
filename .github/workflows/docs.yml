@@ -63,7 +63,7 @@ jobs:
         run: |
           cd site
           bundle install
-          bundle exec jekyll build --baseurl "/Surgewave"
+          bundle exec jekyll build
 
       # Combine: Jekyll at the root, DocFX under /docs/.
       - name: Combine outputs
