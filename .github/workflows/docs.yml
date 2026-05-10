@@ -77,7 +77,7 @@ jobs:
       # already-rendered HTML — marketing + docs in one index. No runtime
       # server, shipped as static JS alongside the site.
       - name: Setup Node for Pagefind
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -85,7 +85,7 @@ jobs:
         run: npx -y pagefind --site _combined --output-path _combined/pagefind
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _combined
 
