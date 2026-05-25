@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Confluent.Kafka API compatibility layer for Surgewave. Enables zero-code-change migration from Kafka to Surgewave.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- CA1707: Confluent.Kafka API compatibility requires matching their naming -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+  </ItemGroup>
+
+</Project>

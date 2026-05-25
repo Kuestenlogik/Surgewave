@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+
+service SecurityService {
+  rpc DescribeAcls(DescribeAclsRequest) returns (DescribeAclsResponse);
+  rpc CreateAcls(CreateAclsRequest) returns (CreateAclsResponse);
+  rpc DeleteAcls(DeleteAclsRequest) returns (DeleteAclsResponse);
+}
+
+enum AclResourceType {
+  RESOURCE_ANY = 0;
+  ACL_TOPIC = 1;
+  ACL_GROUP = 2;
+  ACL_CLUSTER = 3;
+  TRANSACTIONAL_ID = 4;
+  DELEGATION_TOKEN = 5;
+}
+
+enum AclPatternType {
+  PATTERN_ANY = 0;
+  MATCH = 1;
+  LITERAL = 2;
+  PREFIXED = 3;
+}
+
+enum AclOperation {
+  OPERATION_ANY = 0;
+  ALL = 1;
+  READ = 2;
+  WRITE = 3;
+  CREATE = 4;
+  DELETE = 5;
+  ALTER = 6;
+  DESCRIBE = 7;
+  CLUSTER_ACTION = 8;
+  DESCRIBE_CONFIGS = 9;
+  ALTER_CONFIGS = 10;
+  IDEMPOTENT_WRITE = 11;
+}
+
+enum AclPermission {
+  PERMISSION_ANY = 0;
+  ALLOW = 1;
+  DENY = 2;
+}
+
+message AclBinding {
+  AclResourceType resource_type = 1;
+  string resource_name = 2;
+  AclPatternType pattern_type = 3;
+  string principal = 4;
+  string host = 5;
+  AclOperation operation = 6;
+  AclPermission permission = 7;
+}
+
+message DescribeAclsRequest {
+  AclBinding filter = 1;
+}
+
+message DescribeAclsResponse {
+  repeated AclBinding acls = 1;
+  ResponseStatus status = 2;
+}
+
+message CreateAclsRequest {
+  repeated AclBinding acls = 1;
+}
+
+message CreateAclsResponse {
+  repeated AclCreationResult results = 1;
+}
+
+message AclCreationResult {
+  ResponseStatus status = 1;
+}
+
+message DeleteAclsRequest {
+  repeated AclBinding filters = 1;
+}
+
+message DeleteAclsResponse {
+  repeated AclDeletionResult results = 1;
+}
+
+message AclDeletionResult {
+  repeated AclBinding matching_acls = 1;
+  ResponseStatus status = 2;
+}

@@ -1,0 +1,213 @@
+{%- comment -%}
+"See it in action" section — Surgewave.Control UI gallery.
+Modeled on Bowire's screenshots.html pattern.
+
+ASSETS NEEDED (drop into site/assets/images/screenshots/):
+  control-dashboard-{dark,light}.png    — main dashboard with broker health + topic list
+  control-pipeline-editor-{dark,light}.png — visual pipeline editor (drag-drop node graph)
+  control-topic-detail-{dark,light}.png — topic detail view with partitions + offsets
+  control-consumer-groups-{dark,light}.png — consumer group viewer with lag
+  control-schema-registry-{dark,light}.png — schema registry browser
+  control-plugin-marketplace-{dark,light}.png — .swpkg plugin browse + install
+  control-throughput-graph-{dark,light}.png — real-time throughput per topic
+  control-cluster-view-{dark,light}.png — multi-broker cluster topology
+
+Optional demo video:
+  surgewave-demo-{dark,light}.webm — ~20-30s loop showing dashboard -> pipeline -> result
+
+Until assets exist, this section renders placeholder cards. Drop in real PNGs +
+optional WebM, references update automatically.
+{%- endcomment -%}
+<section class="screenshots" id="screenshots">
+  <div class="container">
+    <h2 class="section-title">See it in action</h2>
+    <p class="section-subtitle">Surgewave.Control — the built-in management UI. Browse topics, design pipelines visually, install plugins, and monitor throughput in real time.</p>
+
+    <button class="screenshot-hero demo-video-expand" type="button" aria-label="Expand demo video to full screen">
+      <video
+        class="demo-video theme-video-dark"
+        src="{{ '/assets/videos/surgewave-demo-dark.webm' | relative_url }}"
+        poster="{{ '/assets/images/screenshots/control-dashboard-dark.png' | relative_url }}"
+        autoplay
+        muted
+        loop
+        playsinline
+        disablepictureinpicture
+        controlslist="nodownload nofullscreen noremoteplayback"
+        preload="metadata"
+        aria-label="Surgewave.Control demo — dashboard, pipeline editor, plugin install, live throughput">
+      </video>
+      <video
+        class="demo-video theme-video-light"
+        src="{{ '/assets/videos/surgewave-demo-light.webm' | relative_url }}"
+        poster="{{ '/assets/images/screenshots/control-dashboard-light.png' | relative_url }}"
+        autoplay
+        muted
+        loop
+        playsinline
+        disablepictureinpicture
+        controlslist="nodownload nofullscreen noremoteplayback"
+        preload="metadata"
+        aria-label="Surgewave.Control demo — dashboard, pipeline editor, plugin install, live throughput">
+      </video>
+      <span class="demo-video-hint" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        Click to expand
+      </span>
+    </button>
+
+    <p class="screenshot-caption">
+      One UI for every operation — topic management, consumer groups, schema registry, signed plugin marketplace, visual AI/pipeline editor, real-time throughput. No separate dashboards, no third-party monitoring stack.
+    </p>
+
+    <h3 class="screenshot-grid-title">Every operation, one Surgewave.Control</h3>
+    <p class="screenshot-grid-subtitle">
+      From first connection through pipeline design to production observability — Surgewave.Control shows the right tools at the right moment.
+    </p>
+
+    <div class="screenshot-carousel-wrap">
+
+      <button class="screenshot-nav-btn screenshot-nav-prev" type="button" aria-label="Previous screenshot" data-direction="-1">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+
+      <div class="screenshot-carousel" role="region" aria-label="Surgewave.Control screen gallery" tabindex="0">
+        <div class="screenshot-carousel-track">
+
+          <!-- ===== Dashboard ===== -->
+
+          <a class="screenshot-card" href="{{ '/features.html#dashboard' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-dashboard.png" alt="Surgewave.Control dashboard — broker health, topic list, throughput sparklines" %}
+            <div class="screenshot-card-body">
+              <h4>Unified dashboard</h4>
+              <p>Broker health, topic counts, partition spread, throughput sparklines — all on one screen. Drill into any topic with a click.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#topics' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-topic-detail.png" alt="Topic detail view with per-partition offsets, consumer-group lag, retention settings" %}
+            <div class="screenshot-card-body">
+              <h4>Topic detail &amp; partitions</h4>
+              <p>Per-partition offsets, replica placement, in-flight messages, consumer-group lag. Edit retention and compaction policies inline.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#consumer-groups' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-consumer-groups.png" alt="Consumer group viewer with member list, lag per partition, rebalance history" %}
+            <div class="screenshot-card-body">
+              <h4>Consumer groups &amp; lag</h4>
+              <p>KIP-848 next-gen rebalance protocol visualised — see members, partition assignment, lag per-partition, and rebalance timeline.</p>
+            </div>
+          </a>
+
+          <!-- ===== Pipelines & AI ===== -->
+
+          <a class="screenshot-card" href="{{ '/features.html#pipeline-editor' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-pipeline-editor.png" alt="Visual pipeline editor — drag-drop node graph for stream processing and AI workflows" %}
+            <div class="screenshot-card-body">
+              <h4>Visual pipeline editor</h4>
+              <p>Drag-drop node graph: Source → Filter → Enrich → AI-Node → Sink. With <code>Surgewave.Ai</code> installed, drop in RAG, embedders, agents, MCP tools.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#streams' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-streams-topology.png" alt="Surgewave.Streams topology — KStream / KTable DSL visualised with sources, joins, windows, aggregations, state stores" %}
+            <div class="screenshot-card-body">
+              <h4>Surgewave.Streams topology</h4>
+              <p>KStream / KTable DSL visualised — sources, joins, windows, aggregations, state stores. Hot-reload the topology after edits in C# without restarting the broker.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#ai-agents' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-ai-agents.png" alt="AI agent traces — retrieval hits, prompt tokens, tool calls, A2A hops, ONNX inference latency" %}
+            <div class="screenshot-card-body">
+              <h4>AI agents &amp; RAG traces</h4>
+              <p>Live trace of each agent step: retrieval hits, prompt tokens, tool calls, A2A hops, ONNX inference latency. Drill into a single span like in a tracing UI.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#schema-registry' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-schema-registry.png" alt="Schema registry browser — Avro / JSON / Protobuf schemas with version diff" %}
+            <div class="screenshot-card-body">
+              <h4>Schema registry browser</h4>
+              <p>Avro, JSON-Schema, Protobuf. Version diff, compatibility check, evolution history. Confluent-Schema-Registry-API-compatible.</p>
+            </div>
+          </a>
+
+          <!-- ===== Plugins & extensions ===== -->
+
+          <a class="screenshot-card" href="{{ '/features.html#plugin-marketplace' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-plugin-marketplace.png" alt="Plugin marketplace — browse signed .swpkg packages, view signature chain, one-click install" %}
+            <div class="screenshot-card-body">
+              <h4>Signed plugin marketplace</h4>
+              <p>Browse, verify, install <code>.swpkg</code> plugins. ECDSA-signed packages show a &ldquo;Verified&rdquo; badge. One-click install, isolated AssemblyLoadContext.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#connectors' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-connectors.png" alt="Connector configuration panel — choose a connector, fill in credentials, validate, deploy" %}
+            <div class="screenshot-card-body">
+              <h4>Connector configuration</h4>
+              <p>100+ connectors (Postgres, S3, Snowflake, Kafka, …) configured via UI. Validate creds before deploy, watch state transitions live.</p>
+            </div>
+          </a>
+
+          <!-- ===== Observability ===== -->
+
+          <a class="screenshot-card" href="{{ '/features.html#throughput' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-throughput-graph.png" alt="Live throughput graph — per-topic bytes/sec and messages/sec with P50/P90/P99 percentiles" %}
+            <div class="screenshot-card-body">
+              <h4>Live throughput &amp; latency</h4>
+              <p>Per-topic bytes/sec, messages/sec, P50/P90/P99 latency percentiles. SignalR-driven real-time updates — no Grafana required.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#cluster-view' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-cluster-view.png" alt="Multi-broker cluster topology view — controller, brokers, partition leaders, ISR" %}
+            <div class="screenshot-card-body">
+              <h4>Cluster topology</h4>
+              <p>Controller, brokers, partition leaders, ISR sets. Spot under-replicated partitions instantly. <code>Surgewave.Fleet</code> extends this to multi-cluster view.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#fleet' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-fleet.png" alt="Surgewave.Fleet — multi-cluster control plane with geo-replication links and fleet-wide topic catalogue" %}
+            <div class="screenshot-card-body">
+              <h4>Surgewave.Fleet — multi-cluster</h4>
+              <p>One control plane for every cluster, every region. Geo-replication links, fleet-wide topic catalogue, rolling upgrades, single-sign-on across all of them.</p>
+            </div>
+          </a>
+
+          <!-- ===== Security & compliance ===== -->
+
+          <a class="screenshot-card" href="{{ '/features.html#security' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-acls.png" alt="Identity, ACLs and RBAC editor — OIDC + SASL identity providers, fine-grained ACLs per topic / group / transactional-id" %}
+            <div class="screenshot-card-body">
+              <h4>Identity, ACLs &amp; RBAC</h4>
+              <p>OIDC + SASL identity providers, fine-grained ACLs per topic / group / transactional-id, RBAC roles. Edit live, no broker restart.</p>
+            </div>
+          </a>
+
+          <a class="screenshot-card" href="{{ '/features.html#audit-log' | relative_url }}">
+            {% include themed-img.html src="/assets/images/screenshots/control-audit-log.png" alt="Audit log and compliance trail — auth events, config changes, plugin installs, schema evolution, searchable and exportable" %}
+            <div class="screenshot-card-body">
+              <h4>Audit log &amp; compliance trail</h4>
+              <p>Every auth event, config change, plugin install, schema evolution — searchable, exportable, tamper-evident. SOC&nbsp;2 / ISO&nbsp;27001 ready.</p>
+            </div>
+          </a>
+
+        </div>
+      </div>
+
+      <button class="screenshot-nav-btn screenshot-nav-next" type="button" aria-label="Next screenshot" data-direction="1">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+
+    </div><!-- /.screenshot-carousel-wrap -->
+
+    <div class="screenshot-dots" role="tablist" aria-label="Screenshot indicators">
+      <!-- Filled by main.js — one dot per card, click-to-jump, active state tracks scroll position. -->
+    </div>
+
+  </div>
+</section>

@@ -1,0 +1,137 @@
+@page "/packages/{Id}"
+@inject IPackageMetadataService MetadataService
+@inject IPackageStorageService StorageService
+
+<PageTitle>@(_package?.Name ?? Id) - Surgewave Marketplace</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+}
+else if (_package == null)
+{
+    <MudAlert Severity="Severity.Error">Package "@Id" not found.</MudAlert>
+}
+else
+{
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+               Href="/" Class="mb-2">Back</MudButton>
+
+    <MudGrid>
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="2" Class="pa-4">
+                <div class="d-flex align-center mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Extension" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.h4">@_package.Name</MudText>
+                        <MudText Typo="Typo.subtitle1" Color="Color.Secondary">@_package.Id</MudText>
+                    </div>
+                </div>
+
+                <MudDivider Class="my-3" />
+
+                <MudText Typo="Typo.body1" Class="mb-4">
+                    @(_package.Description ?? "No description available.")
+                </MudText>
+
+                @if (_package.Tags?.Length > 0)
+                {
+                    <div class="d-flex flex-wrap gap-1 mb-3">
+                        @foreach (var tag in _package.Tags)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@tag</MudChip>
+                        }
+                    </div>
+                }
+
+                @* Assemblies *@
+                @if (_package.Assemblies?.Length > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Plugin Assemblies</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        @foreach (var assembly in _package.Assemblies)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">@assembly</MudChip>
+                        }
+                    </div>
+                }
+
+                @* Install command *@
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Install</MudText>
+                <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background: var(--mud-palette-background-dark); font-family: monospace;">
+                    surgewave plugins install @_package.Id
+                </MudPaper>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            @* Sidebar *@
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Info</MudText>
+                <MudSimpleTable Dense="true" Hover="false" Style="border: none;">
+                    <tbody>
+                        <tr><td>Version</td><td><strong>@_package.Version</strong></td></tr>
+                        <tr><td>Downloads</td><td>@_package.DownloadCount</td></tr>
+                        <tr><td>Published</td><td>@_package.PublishedAt.ToString("yyyy-MM-dd")</td></tr>
+                        @if (_package.License != null)
+                        {
+                            <tr><td>License</td><td>@_package.License</td></tr>
+                        }
+                        @if (_package.Authors?.Length > 0)
+                        {
+                            <tr><td>Authors</td><td>@string.Join(", ", _package.Authors)</td></tr>
+                        }
+                        <tr><td>Size</td><td>@FormatSize(_package.PackageSize)</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       StartIcon="@Icons.Material.Filled.CloudDownload"
+                       Href="@($"/api/v1/packages/{_package.Id}/{_package.Version}/download")"
+                       Target="_blank" Class="mb-3">
+                Download .swpkg
+            </MudButton>
+
+            @if (_package.AllVersions.Count > 1)
+            {
+                <MudPaper Elevation="2" Class="pa-4">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">All Versions</MudText>
+                    @foreach (var v in _package.AllVersions.OrderByDescending(x => x))
+                    {
+                        <MudText Typo="Typo.body2">
+                            <MudLink Href="@($"/packages/{_package.Id}")">@v</MudLink>
+                            @if (v == _package.Version)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ml-1">latest</MudChip>
+                            }
+                        </MudText>
+                    }
+                </MudPaper>
+            }
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private PackageMetadata? _package;
+    private bool _loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        var versions = await MetadataService.GetVersionsAsync(Id);
+        var latestVersion = versions.Count > 0 ? versions[^1] : "0.1.0";
+        _package = await MetadataService.GetAsync(Id, latestVersion);
+        _loading = false;
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
+    };
+}

@@ -1,0 +1,235 @@
+<Project>
+  <!-- Central Package Version Management -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Extracted Surgewave modules (external repos) -->
+    <!-- WiX (MSI installer) -->
+    <PackageVersion Include="WixToolset.UI.wixext" Version="5.0.1" />
+    <!-- gRPC -->
+    <PackageVersion Include="Grpc.AspNetCore" Version="2.76.0" />
+    <PackageVersion Include="Grpc.AspNetCore.Server.Reflection" Version="2.76.0" />
+    <PackageVersion Include="Grpc.Net.Client" Version="2.76.0" />
+    <PackageVersion Include="Grpc.Net.Common" Version="2.76.0" />
+    <PackageVersion Include="Grpc.Tools" Version="2.76.0" />
+    <PackageVersion Include="Google.Protobuf" Version="3.33.2" />
+    <PackageVersion Include="Google.Api.CommonProtos" Version="2.17.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Grpc.JsonTranscoding" Version="10.0.2" />
+    <!-- Authentication -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.3" />
+    <PackageVersion Include="ITfoxtec.Identity.Saml2" Version="4.17.0" />
+    <PackageVersion Include="ITfoxtec.Identity.Saml2.MvcCore" Version="4.17.0" />
+    <PackageVersion Include="System.DirectoryServices.Protocols" Version="9.0.4" />
+    <!-- Testing -->
+    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.15.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.15.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.201" />
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <!-- 1.3.1 schliesst GHSA-pggp-6c3x-2xmx — alle vorigen 1.x-Versionen sind verwundbar. -->
+    <PackageVersion Include="Snappier" Version="1.3.1" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3.assert" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="Confluent.Kafka" Version="2.14.0" />
+    <PackageVersion Include="Testcontainers.Kafka" Version="4.11.0" />
+    <PackageVersion Include="Testcontainers.Redpanda" Version="4.11.0" />
+    <!-- Logging for tests -->
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.2" />
+    <!-- OpenAPI / Scalar -->
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.12.35" />
+    <!-- gRPC Browser -->
+    <PackageVersion Include="Kuestenlogik.Bowire" Version="1.5.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
+    <!-- Utilities -->
+    <PackageVersion Include="Cronos" Version="0.11.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.2" />
+    <PackageVersion Include="NuGet.Protocol" Version="6.12.5" />
+    <!-- Compression -->
+    <PackageVersion Include="K4os.Compression.LZ4" Version="1.3.8" />
+    <PackageVersion Include="K4os.Compression.LZ4.Streams" Version="1.3.8" />
+    <PackageVersion Include="Microsoft.Msagl" Version="1.1.6" />
+    <PackageVersion Include="Z.Blazor.Diagrams" Version="3.0.4" />
+    <PackageVersion Include="ZstdSharp.Port" Version="0.8.7" />
+    <!-- Benchmarking -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <!-- CLI -->
+    <PackageVersion Include="System.CommandLine" Version="2.0.1" />
+    <PackageVersion Include="Spectre.Console" Version="0.55.0" />
+    <!-- OpenTelemetry / Metrics -->
+    <PackageVersion Include="OpenTelemetry" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.11.0-beta.1" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <!-- Connectors -->
+    <PackageVersion Include="MySqlConnector" Version="2.5.0" />
+    <PackageVersion Include="MySqlCdc" Version="4.0.1" />
+    <PackageVersion Include="CsvHelper" Version="33.1.0" />
+    <PackageVersion Include="Parquet.Net" Version="5.5.0" />
+    <PackageVersion Include="ClosedXML" Version="0.105.0" />
+    <PackageVersion Include="MQTTnet" Version="5.1.0.1559" />
+    <PackageVersion Include="MQTTnet.Server" Version="5.1.0.1559" />
+    <PackageVersion Include="StackExchange.Redis" Version="2.10.14" />
+    <PackageVersion Include="Elastic.Clients.Elasticsearch" Version="9.3.0" />
+    <PackageVersion Include="Npgsql" Version="10.0.1" />
+    <PackageVersion Include="Pgvector" Version="0.3.2" />
+    <PackageVersion Include="MongoDB.Driver" Version="3.6.0" />
+    <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.4" />
+    <PackageVersion Include="Oracle.ManagedDataAccess.Core" Version="23.26.100" />
+    <!-- Cloud Storage -->
+    <PackageVersion Include="Azure.Storage.Blobs" Version="12.27.0" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.18.2" />
+    <PackageVersion Include="Google.Cloud.Storage.V1" Version="4.14.0" />
+    <PackageVersion Include="Google.Apis.Drive.v3" Version="1.73.0.4045" />
+    <PackageVersion Include="Google.Apis.PhotosLibrary.v1" Version="1.34.0.1223" />
+    <PackageVersion Include="Google.Apis.HomeGraphService.v1" Version="1.70.0.3849" />
+    <PackageVersion Include="Google.Cloud.Firestore" Version="4.1.0" />
+    <PackageVersion Include="Google.Cloud.BigQuery.V2" Version="3.11.0" />
+    <PackageVersion Include="Google.Cloud.Bigtable.V2" Version="3.26.0" />
+    <PackageVersion Include="Google.Cloud.Spanner.Data" Version="5.12.0" />
+    <PackageVersion Include="Snowflake.Data" Version="5.4.0" />
+    <PackageVersion Include="CassandraCSharpDriver" Version="3.22.0" />
+    <PackageVersion Include="TigerBeetle" Version="0.16.70" />
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageVersion Include="InfluxDB.Client" Version="5.0.0" />
+    <PackageVersion Include="Neo4j.Driver" Version="6.0.0" />
+    <PackageVersion Include="GraphQL.Client" Version="6.1.0" />
+    <PackageVersion Include="GraphQL.Client.Serializer.SystemTextJson" Version="6.1.0" />
+    <PackageVersion Include="Ical.Net" Version="5.2.0" />
+    <PackageVersion Include="LibGit2Sharp" Version="0.31.0" />
+    <PackageVersion Include="SSH.NET" Version="2025.1.0" />
+    <PackageVersion Include="MailKit" Version="4.14.1" />
+    <!-- SAP Connectors -->
+    <PackageVersion Include="Sap.Data.Hana.Core.v2.1" Version="2.20.22" />
+    <PackageVersion Include="Simple.OData.Client" Version="6.0.1" />
+    <!-- Actor Framework -->
+    <PackageVersion Include="Akka" Version="1.5.44" />
+    <PackageVersion Include="Akka.Cluster" Version="1.5.44" />
+    <PackageVersion Include="Akka.Cluster.Sharding" Version="1.5.44" />
+    <PackageVersion Include="Akka.Cluster.Tools" Version="1.5.44" />
+    <PackageVersion Include="Akka.Remote" Version="1.5.44" />
+    <PackageVersion Include="Akka.Streams" Version="1.5.44" />
+    <!-- Cloud Messaging -->
+    <PackageVersion Include="NATS.Net" Version="2.7.3" />
+    <PackageVersion Include="RabbitMQ.Client" Version="7.2.1" />
+    <PackageVersion Include="NetMQ" Version="4.0.2.2" />
+    <PackageVersion Include="NNanomsg" Version="0.5.2" />
+    <PackageVersion Include="DotPulsar" Version="5.1.2" />
+    <PackageVersion Include="CloudNative.CloudEvents" Version="2.8.0" />
+    <PackageVersion Include="CloudNative.CloudEvents.SystemTextJson" Version="2.8.0" />
+    <PackageVersion Include="Google.Cloud.PubSub.V1" Version="3.32.0" />
+    <PackageVersion Include="AWSSDK.SQS" Version="4.0.2.11" />
+    <PackageVersion Include="AWSSDK.SimpleNotificationService" Version="4.0.2.13" />
+    <PackageVersion Include="AWSSDK.DynamoDBv2" Version="4.0.5" />
+    <PackageVersion Include="AWSSDK.DynamoDBStreams" Version="4.0.4.11" />
+    <PackageVersion Include="AWSSDK.Kinesis" Version="4.0.7.9" />
+    <PackageVersion Include="AWSSDK.Comprehend" Version="4.0.2.11" />
+    <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.14.6" />
+    <PackageVersion Include="AWSSDK.ElasticFileSystem" Version="4.0.3.3" />
+    <PackageVersion Include="Azure.Messaging.ServiceBus" Version="7.20.1" />
+    <PackageVersion Include="Microsoft.Azure.Cosmos" Version="3.56.0" />
+    <PackageVersion Include="Azure.Data.Tables" Version="12.11.0" />
+    <PackageVersion Include="Azure.Storage.Queues" Version="12.22.0" />
+    <!-- Team Messaging -->
+    <PackageVersion Include="SlackNet" Version="0.17.9" />
+    <PackageVersion Include="Microsoft.Graph" Version="5.102.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.17.1" />
+    <PackageVersion Include="Discord.Net" Version="3.18.0" />
+    <PackageVersion Include="Telegram.Bot" Version="22.8.1" />
+    <PackageVersion Include="XmppDotNet" Version="3.2.8" />
+    <PackageVersion Include="Mattermost.NET" Version="3.0.3" />
+    <PackageVersion Include="Reddit" Version="1.5.2" />
+    <PackageVersion Include="TweetinviAPI" Version="5.0.4" />
+    <PackageVersion Include="NsqSharp.Core" Version="1.0.0" />
+    <PackageVersion Include="Beanstalk.Core" Version="1.1.2" />
+    <PackageVersion Include="AWSSDK.Neptune" Version="3.7.401.31" />
+    <PackageVersion Include="Gremlin.Net" Version="3.7.3" />
+    <PackageVersion Include="XmppDotNet.Transport.Socket" Version="3.2.8" />
+    <PackageVersion Include="XmppDotNet.Srv" Version="3.2.8" />
+    <PackageVersion Include="System.Reactive" Version="6.1.0" />
+    <!-- Smart Home -->
+    <PackageVersion Include="Q42.HueApi" Version="3.24.0" />
+    <!-- Arrow Columnar Storage -->
+    <PackageVersion Include="Apache.Arrow" Version="22.1.0" />
+    <PackageVersion Include="Apache.Arrow.Compression" Version="22.1.0" />
+    <!-- Embedded Databases -->
+    <PackageVersion Include="RocksDb" Version="10.4.2.63147" />
+    <PackageVersion Include="LightningDB" Version="0.21.0" />
+    <PackageVersion Include="DuckDB.NET.Data" Version="1.4.4" />
+    <!-- io_uring for NVMe-Direct -->
+    <PackageVersion Include="IoUring" Version="0.4.0-beta1" />
+    <!-- Schema Registry -->
+    <PackageVersion Include="Chr.Avro" Version="10.12.0" />
+    <PackageVersion Include="Chr.Avro.Json" Version="10.12.0" />
+    <PackageVersion Include="NJsonSchema" Version="11.5.2" />
+    <PackageVersion Include="Google.FlatBuffers" Version="24.3.25" />
+    <PackageVersion Include="Hyperion" Version="0.12.2" />
+    <PackageVersion Include="MessagePack" Version="3.1.4" />
+    <PackageVersion Include="Dahomey.Cbor" Version="1.26.2" />
+    <PackageVersion Include="Bond.CSharp" Version="13.0.1" />
+    <PackageVersion Include="ApacheThrift" Version="0.21.0" />
+    <PackageVersion Include="MemoryPack" Version="1.21.4" />
+    <PackageVersion Include="Microsoft.Orleans.Serialization" Version="10.0.1" />
+    <PackageVersion Include="Capnp.Net.Runtime" Version="1.3.118" />
+    <!-- Kubernetes -->
+    <PackageVersion Include="KubernetesClient" Version="18.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+    <!-- MCP (Model Context Protocol) -->
+    <PackageVersion Include="ModelContextProtocol" Version="0.2.0-preview.1" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="0.2.0-preview.1" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.1.1" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.1.1-preview.1.25612.2" />
+    <!-- AI Connectors -->
+    <PackageVersion Include="DeepL.net" Version="1.19.0" />
+    <PackageVersion Include="Azure.AI.TextAnalytics" Version="5.3.0" />
+    <PackageVersion Include="Azure.AI.OpenAI" Version="2.1.0" />
+    <PackageVersion Include="OpenAI" Version="2.8.0" />
+    <PackageVersion Include="Anthropic" Version="12.1.0" />
+    <PackageVersion Include="Google.Cloud.AIPlatform.V1" Version="3.62.0" />
+    <PackageVersion Include="Google.Cloud.Language.V1" Version="3.8.0" />
+    <PackageVersion Include="OllamaSharp" Version="5.4.16" />
+    <PackageVersion Include="Qdrant.Client" Version="1.16.1" />
+    <!-- Microsoft Agent Framework -->
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Abstractions" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.A2A" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting.A2A" Version="1.0.0-preview.260108.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.0.0-preview.260108.1" />
+    <!-- ML / ONNX Runtime -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.22.0" />
+    <!-- WebAssembly Runtime -->
+    <PackageVersion Include="Wasmtime" Version="34.0.2" />
+    <!-- Scripting -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
+    <!-- GraphQL (HotChocolate) -->
+    <PackageVersion Include="HotChocolate.AspNetCore" Version="15.1.15" />
+    <!-- Admin Web UI (Blazor) -->
+    <PackageVersion Include="BlazorMonaco" Version="3.3.0" />
+    <PackageVersion Include="MudBlazor" Version="8.15.0" />
+    <PackageVersion Include="Blazored.LocalStorage" Version="4.5.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.2" />
+    <!-- MSBuild task authoring -->
+    <PackageVersion Include="Microsoft.Build.Framework" Version="17.14.8" />
+    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="17.14.8" />
+  </ItemGroup>
+</Project>

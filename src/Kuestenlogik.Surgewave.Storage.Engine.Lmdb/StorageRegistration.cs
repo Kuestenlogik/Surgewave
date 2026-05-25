@@ -1,0 +1,41 @@
+using Kuestenlogik.Surgewave.Core.Storage;
+
+namespace Kuestenlogik.Surgewave.Storage.Engine.Lmdb;
+
+/// <summary>
+/// Registers LMDB storage engines with the StorageRegistry.
+/// </summary>
+public static class StorageRegistration
+{
+    private static bool _registered;
+    private static readonly object _lock = new();
+
+    /// <summary>
+    /// Register LMDB storage engines.
+    /// </summary>
+    public static void Register()
+    {
+        if (_registered) return;
+
+        lock (_lock)
+        {
+            if (_registered) return;
+
+            StorageRegistry.Default.Register("lmdb", () => LmdbLogSegmentFactory.Create());
+
+            _registered = true;
+        }
+    }
+}
+
+/// <summary>
+/// Module initializer that auto-registers LMDB storage when assembly loads.
+/// </summary>
+file static class ModuleInitializer
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Initialize()
+    {
+        StorageRegistration.Register();
+    }
+}

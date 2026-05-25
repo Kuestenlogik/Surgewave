@@ -1,0 +1,413 @@
+@page "/pipelines/{Id}/monitor"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+
+<PageTitle>Monitor: @(_pipeline?.Name ?? "Pipeline") - Surgewave Control</PageTitle>
+
+<MudGrid>
+    <MudItem xs="12">
+        <MudPaper Elevation="2" Class="pa-3 mb-3">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.h5">@(_pipeline?.Name ?? "Loading...")</MudText>
+                    @if (!string.IsNullOrEmpty(_pipeline?.Description))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">@_pipeline.Description</MudText>
+                    }
+                </MudItem>
+                <MudItem xs="12" md="6" Class="d-flex align-center justify-end gap-2">
+                    @if (_wsConnected)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="MudBlazor.Size.Small" Icon="@Icons.Material.Filled.Wifi">
+                            Live
+                        </MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Warning" Size="MudBlazor.Size.Small" Icon="@Icons.Material.Filled.WifiOff">
+                            Polling
+                        </MudChip>
+                    }
+                    @if (_pipeline != null)
+                    {
+                        <MudChip T="string" Color="@GetStatusColor(_pipeline.Status)" Size="MudBlazor.Size.Small">
+                            @_pipeline.Status
+                        </MudChip>
+                    }
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                               Href="@($"/pipelines/{Id}/edit")"
+                               Disabled="@(_pipeline?.Status == PipelineStatus.Running)">
+                        Edit
+                    </MudButton>
+                    <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage">
+                        @if (_pipeline?.Status == PipelineStatus.Running)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                                       StartIcon="@Icons.Material.Filled.Stop" OnClick="StopPipelineAsync">
+                                Stop
+                            </MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Success"
+                                       StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartPipelineAsync">
+                                Start
+                            </MudButton>
+                        }
+                    </AuthorizeView>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+    </MudItem>
+
+    @if (_loading)
+    {
+        <MudItem xs="12">
+            <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+        </MudItem>
+    }
+    else if (_error != null)
+    {
+        <MudItem xs="12">
+            <MudAlert Severity="Severity.Error">
+                @_error
+                <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadStatusAsync" Class="ml-4">
+                    Retry
+                </MudButton>
+            </MudAlert>
+        </MudItem>
+    }
+    else if (_status != null)
+    {
+        <MudItem xs="12">
+            <MudText Typo="Typo.h6" Class="mb-3">Node Status</MudText>
+        </MudItem>
+
+        @foreach (var node in _status.Nodes)
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            <MudAvatar Color="@GetNodeStateColor(node.State)" Size="MudBlazor.Size.Small">
+                                <MudIcon Icon="@GetNodeStateIcon(node.State)" Size="MudBlazor.Size.Small" />
+                            </MudAvatar>
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.body1">@GetNodeLabel(node.NodeId)</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">@node.ConnectorName</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudGrid>
+                            <MudItem xs="6">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">State</MudText>
+                                <MudText Typo="Typo.body2">@node.State</MudText>
+                            </MudItem>
+                            <MudItem xs="6">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Tasks</MudText>
+                                <MudText Typo="Typo.body2">@node.TaskCount</MudText>
+                            </MudItem>
+                        </MudGrid>
+                        @if (!string.IsNullOrEmpty(node.Error))
+                        {
+                            <MudAlert Severity="Severity.Error" Class="mt-2">
+                                @node.Error
+                            </MudAlert>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+
+        @if (_pipeline?.Connections.Count > 0)
+        {
+            <MudItem xs="12" Class="mt-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Message Flow</MudText>
+                <MudTable Items="@_pipeline.Connections" Hover="true" Elevation="2">
+                    <HeaderContent>
+                        <MudTh>Source</MudTh>
+                        <MudTh>Target</MudTh>
+                        <MudTh>Internal Topic</MudTh>
+                        <MudTh Style="text-align: right">Messages</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@GetNodeLabel(context.SourceNodeId)</MudTd>
+                        <MudTd>@GetNodeLabel(context.TargetNodeId)</MudTd>
+                        <MudTd>
+                            <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Outlined">
+                                @context.InternalTopic
+                            </MudChip>
+                        </MudTd>
+                        <MudTd Style="text-align: right">
+                            @{
+                                var count = GetMessageCount(context.InternalTopic);
+                            }
+                            <MudBadge Content="@count" Color="@(count > 0 ? Color.Primary : Color.Default)" Overlap="false">
+                                <MudIcon Icon="@Icons.Material.Filled.Message" Size="MudBlazor.Size.Small" />
+                            </MudBadge>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudItem>
+
+            @if (_recentMessages.Count > 0)
+            {
+                <MudItem xs="12" Class="mt-4">
+                    <MudText Typo="Typo.h6" Class="mb-3">Recent Messages</MudText>
+                    <MudPaper Elevation="2" Class="pa-3" Style="max-height: 300px; overflow-y: auto;">
+                        @foreach (var msg in _recentMessages.TakeLast(20).Reverse())
+                        {
+                            <div class="d-flex align-center mb-2">
+                                <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Primary" Class="mr-2">
+                                    @GetTopicShortName(msg.Topic)
+                                </MudChip>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mr-2">
+                                    @DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp).ToLocalTime().ToString("HH:mm:ss.fff")
+                                </MudText>
+                                <MudText Typo="Typo.body2" Style="word-break: break-all;">
+                                    @(msg.Value?.Length > 100 ? msg.Value[..100] + "..." : msg.Value)
+                                </MudText>
+                            </div>
+                        }
+                    </MudPaper>
+                </MudItem>
+            }
+        }
+    }
+</MudGrid>
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = null!;
+
+    private PipelineDefinition? _pipeline;
+    private PipelineRuntimeStatus? _status;
+    private bool _loading = true;
+    private string? _error;
+    private Timer? _refreshTimer;
+
+    // WebSocket streaming
+    private ISurgewaveWebSocketService? _wsService;
+    private bool _wsConnected;
+    private readonly Dictionary<string, long> _messageCounts = new();
+    private readonly List<WebSocketMessageEventArgs> _recentMessages = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPipelineAsync();
+        await LoadStatusAsync();
+
+        // Try to connect WebSocket for real-time updates
+        await ConnectWebSocketAsync();
+
+        // Fallback: Auto-refresh every 5 seconds when running
+        _refreshTimer = new Timer(async _ =>
+        {
+            if (_pipeline?.Status == PipelineStatus.Running)
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadStatusAsync();
+                    StateHasChanged();
+                });
+            }
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task ConnectWebSocketAsync()
+    {
+        try
+        {
+            var gatewayUrl = Configuration["Gateway:BaseUrl"] ?? "http://localhost:5002";
+            _wsService = new SurgewaveWebSocketService(gatewayUrl);
+            _wsService.MessageReceived += OnMessageReceived;
+            _wsService.ConnectionStateChanged += OnConnectionStateChanged;
+
+            await _wsService.ConnectAsync();
+            _wsConnected = true;
+
+            // Subscribe to internal topics for message flow
+            if (_pipeline?.Connections != null)
+            {
+                foreach (var connection in _pipeline.Connections)
+                {
+                    if (!string.IsNullOrEmpty(connection.InternalTopic))
+                    {
+                        await _wsService.SubscribeAsync(connection.InternalTopic);
+                        _messageCounts[connection.InternalTopic] = 0;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"WebSocket connection failed: {ex.Message}");
+            _wsConnected = false;
+        }
+    }
+
+    private void OnMessageReceived(object? sender, WebSocketMessageEventArgs e)
+    {
+        InvokeAsync(() =>
+        {
+            if (_messageCounts.ContainsKey(e.Topic))
+            {
+                _messageCounts[e.Topic]++;
+            }
+
+            _recentMessages.Add(e);
+            if (_recentMessages.Count > 100)
+            {
+                _recentMessages.RemoveAt(0);
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private void OnConnectionStateChanged(object? sender, bool connected)
+    {
+        InvokeAsync(() =>
+        {
+            _wsConnected = connected;
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadPipelineAsync()
+    {
+        try
+        {
+            _pipeline = await ApiClient.GetPipelineAsync(Id);
+            if (_pipeline == null)
+            {
+                Navigation.NavigateTo("/pipelines");
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task LoadStatusAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            _status = await ApiClient.GetPipelineStatusAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task StartPipelineAsync()
+    {
+        try
+        {
+            await ApiClient.StartPipelineAsync(Id);
+            Notification.ShowSuccess("Pipeline started");
+            await LoadPipelineAsync();
+            await LoadStatusAsync();
+
+            // Reconnect WebSocket to subscribe to new topics
+            if (_wsService != null)
+            {
+                await _wsService.DisconnectAsync();
+            }
+            await ConnectWebSocketAsync();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to start pipeline: {ex.Message}");
+        }
+    }
+
+    private async Task StopPipelineAsync()
+    {
+        try
+        {
+            await ApiClient.StopPipelineAsync(Id);
+            Notification.ShowSuccess("Pipeline stopped");
+            await LoadPipelineAsync();
+            await LoadStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to stop pipeline: {ex.Message}");
+        }
+    }
+
+    private string GetNodeLabel(string nodeId)
+    {
+        var node = _pipeline?.Nodes.FirstOrDefault(n => n.Id == nodeId);
+        return node?.Label ?? (nodeId.Length > 8 ? nodeId[..8] : nodeId);
+    }
+
+    private long GetMessageCount(string? topic)
+    {
+        if (string.IsNullOrEmpty(topic))
+        {
+            return 0;
+        }
+        return _messageCounts.GetValueOrDefault(topic, 0);
+    }
+
+    private string GetTopicShortName(string topic)
+    {
+        // Extract just the connection ID part from _pipeline-{pipelineId}-{connectionId}
+        var parts = topic.Split('-');
+        return parts.Length > 2 ? parts[^1][..Math.Min(8, parts[^1].Length)] : topic;
+    }
+
+    private Color GetStatusColor(PipelineStatus status) => status switch
+    {
+        PipelineStatus.Draft => Color.Default,
+        PipelineStatus.Running => Color.Success,
+        PipelineStatus.Stopped => Color.Warning,
+        PipelineStatus.Failed => Color.Error,
+        _ => Color.Default
+    };
+
+    private Color GetNodeStateColor(string state) => state.ToUpperInvariant() switch
+    {
+        "RUNNING" => Color.Success,
+        "PAUSED" => Color.Warning,
+        "FAILED" => Color.Error,
+        _ => Color.Default
+    };
+
+    private string GetNodeStateIcon(string state) => state.ToUpperInvariant() switch
+    {
+        "RUNNING" => Icons.Material.Filled.CheckCircle,
+        "PAUSED" => Icons.Material.Filled.PauseCircle,
+        "FAILED" => Icons.Material.Filled.Error,
+        _ => Icons.Material.Filled.HelpOutline
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        _refreshTimer?.Dispose();
+        if (_wsService != null)
+        {
+            _wsService.MessageReceived -= OnMessageReceived;
+            _wsService.ConnectionStateChanged -= OnConnectionStateChanged;
+            await _wsService.DisposeAsync();
+        }
+    }
+}

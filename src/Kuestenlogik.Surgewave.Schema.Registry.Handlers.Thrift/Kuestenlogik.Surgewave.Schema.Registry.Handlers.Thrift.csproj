@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Kuestenlogik.Surgewave.Schema.Registry.Handlers</RootNamespace>
+    <Description>Thrift schema handler for Surgewave Schema Registry</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ApacheThrift" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry\Kuestenlogik.Surgewave.Schema.Registry.csproj" />
+  </ItemGroup>
+</Project>

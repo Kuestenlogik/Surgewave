@@ -1,0 +1,342 @@
+{%- comment -%}
+Up-and-running wizard — Bowire-pattern horizontal stepper.
+
+Step 1: pick the components you need (Broker is required, the rest are
+optional add-ons). Step 2: install snippet, built dynamically from the
+checked components. Step 3: run + next-steps, also component-aware.
+
+The dynamic snippet logic lives inline at the bottom of this file
+(small enough that a separate JS module would be over-engineered).
+State is held in a single Set<componentId> mutated on checkbox change.
+{%- endcomment -%}
+<section class="launch" id="launch">
+  <div class="container">
+    <h2 class="section-title">Up and running in three commands</h2>
+    <p class="section-lede">Pick what you need. We'll show the exact lines for your setup.</p>
+
+    <div class="launch-stepper" data-launch>
+
+      <!-- Step indicators -->
+      <div class="launch-steps" role="tablist" aria-label="Quickstart steps">
+        <button type="button" class="launch-step is-active" data-step-indicator="1" role="tab" aria-selected="true">
+          <span class="launch-step-num"><span class="launch-step-num-digit">1</span></span>
+          <span class="launch-step-label">Choose</span>
+        </button>
+        <span class="launch-step-connector"></span>
+        <button type="button" class="launch-step" data-step-indicator="2" role="tab" aria-selected="false" aria-disabled="true">
+          <span class="launch-step-num"><span class="launch-step-num-digit">2</span></span>
+          <span class="launch-step-label">Install</span>
+        </button>
+        <span class="launch-step-connector"></span>
+        <button type="button" class="launch-step" data-step-indicator="3" role="tab" aria-selected="false" aria-disabled="true">
+          <span class="launch-step-num"><span class="launch-step-num-digit">3</span></span>
+          <span class="launch-step-label">Run</span>
+        </button>
+      </div>
+
+      <!-- Step 1: pick components -->
+      <div class="launch-panel is-active" data-step-panel="1" role="tabpanel">
+        <p class="launch-prompt">Which components do you need?</p>
+
+        <ul class="launch-components">
+          <li class="launch-component is-required">
+            <label>
+              <input type="checkbox" data-component="broker" checked disabled>
+              <span class="launch-component-body">
+                <span class="launch-component-title">Surgewave Broker <span class="launch-component-badge">Required</span></span>
+                <span class="launch-component-desc">Kafka-wire-compatible message broker. The core service.</span>
+              </span>
+            </label>
+          </li>
+          <li class="launch-component">
+            <label>
+              <input type="checkbox" data-component="control">
+              <span class="launch-component-body">
+                <span class="launch-component-title">Control UI</span>
+                <span class="launch-component-desc">Blazor web UI for topic browser, consumer groups, schemas, plugins.</span>
+              </span>
+            </label>
+          </li>
+          <li class="launch-component">
+            <label>
+              <input type="checkbox" data-component="pipelines">
+              <span class="launch-component-body">
+                <span class="launch-component-title">Pipeline Designer</span>
+                <span class="launch-component-desc">Visual stream-processing workflow editor. Drag-and-drop nodes, deploy to the broker as a pipeline.</span>
+              </span>
+            </label>
+          </li>
+          <li class="launch-component">
+            <label>
+              <input type="checkbox" data-component="ai">
+              <span class="launch-component-body">
+                <span class="launch-component-title">AI Pipeline Nodes</span>
+                <span class="launch-component-desc">Built-in RAG, agent, retrieval, and ONNX-runtime nodes. Composable into pipelines.</span>
+              </span>
+            </label>
+          </li>
+          <li class="launch-component">
+            <label>
+              <input type="checkbox" data-component="cluster">
+              <span class="launch-component-body">
+                <span class="launch-component-title">Cluster Mode (3 brokers)</span>
+                <span class="launch-component-desc">Multi-broker production setup with Raft consensus. Single binary, no ZooKeeper.</span>
+              </span>
+            </label>
+          </li>
+        </ul>
+
+        <div class="launch-nav launch-nav-end">
+          <button type="button" class="launch-nav-btn launch-nav-next" data-step-next>
+            Next: Install
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: install snippet -->
+      <div class="launch-panel" data-step-panel="2" role="tabpanel" aria-hidden="true">
+        <p class="launch-prompt" data-launch-prompt-2>Install the pieces you picked.</p>
+        <div class="launch-snippet">
+          <div class="launch-snippet-header">
+            <span class="launch-snippet-lang">bash</span>
+            <button type="button" class="launch-snippet-copy" data-snippet-copy="install" aria-label="Copy">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+          <pre><code data-snippet-target="install"># Loading...</code></pre>
+        </div>
+
+        <div class="launch-nav">
+          <button type="button" class="launch-nav-btn launch-nav-back" data-step-back>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            Back
+          </button>
+          <button type="button" class="launch-nav-btn launch-nav-next" data-step-next>
+            Next: Run
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: run -->
+      <div class="launch-panel" data-step-panel="3" role="tabpanel" aria-hidden="true">
+        <p class="launch-prompt" data-launch-prompt-3>Boot it up.</p>
+        <div class="launch-snippet">
+          <div class="launch-snippet-header">
+            <span class="launch-snippet-lang">bash</span>
+            <button type="button" class="launch-snippet-copy" data-snippet-copy="run" aria-label="Copy">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+          <pre><code data-snippet-target="run"># Loading...</code></pre>
+        </div>
+
+        <div class="launch-next-steps" data-next-steps>
+          <p class="launch-next-steps-title">Then:</p>
+          <ul data-next-steps-list></ul>
+        </div>
+
+        <div class="launch-nav">
+          <button type="button" class="launch-nav-btn launch-nav-back" data-step-back>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            Back
+          </button>
+          <button type="button" class="launch-nav-btn launch-nav-restart" data-step-restart>
+            Change selection
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="launch-footnote">
+      Prefer code? Open the
+      <a href="{{ '/docs/quickstart/' | relative_url }}">5-minute quickstart</a>
+      with the .NET, Go, and Python client SDKs.
+    </p>
+  </div>
+</section>
+
+<script>
+  // Up-and-running wizard — state machine + dynamic snippet renderer.
+  //
+  // State: a Set of selected component IDs. Broker is always present.
+  // On checkbox change we re-render both Step 2 (install) and Step 3 (run)
+  // snippets plus the "Then:" follow-up list.
+  //
+  // Step navigation is plain "active class on one panel at a time" — no
+  // animation library, no router. Indicator buttons up top jump directly
+  // to any step (after step 1 has been seen, since we treat the picker
+  // as always-reachable).
+  (function () {
+    var root = document.querySelector('[data-launch]');
+    if (!root) return;
+
+    // ---- State -------------------------------------------------------
+    var selected = new Set(['broker']);
+    var currentStep = 1;
+
+    // ---- DOM lookups -------------------------------------------------
+    var indicators = Array.from(root.querySelectorAll('.launch-step'));
+    var panels     = Array.from(root.querySelectorAll('.launch-panel'));
+    var installEl  = root.querySelector('[data-snippet-target="install"]');
+    var runEl      = root.querySelector('[data-snippet-target="run"]');
+    var nextStepsList = root.querySelector('[data-next-steps-list]');
+    var checkboxes = Array.from(root.querySelectorAll('input[data-component]'));
+
+    // ---- Snippet templates ------------------------------------------
+    // Each line is rendered as-is; '#' lines are styled as comments via CSS.
+    function buildInstall(set) {
+      var lines = [];
+      var hasCluster = set.has('cluster');
+
+      if (hasCluster) {
+        lines.push('# 3-broker cluster via docker-compose');
+        lines.push('curl -sSL https://surgewave.io/docker-compose.yml -o docker-compose.yml');
+        var profiles = [];
+        if (set.has('control')) profiles.push('control');
+        if (set.has('pipelines') || set.has('ai')) profiles.push('plugins');
+        if (profiles.length) lines.push('docker compose --profile ' + profiles.join(' --profile ') + ' up -d');
+        else lines.push('docker compose up -d');
+      } else {
+        lines.push('# Install Surgewave CLI as a .NET global tool');
+        lines.push('dotnet tool install -g Kuestenlogik.Surgewave.Cli');
+      }
+
+      if (set.has('pipelines') && !hasCluster) {
+        lines.push('');
+        lines.push('# Install Pipeline Designer plugin');
+        lines.push('surgewave plugins install Kuestenlogik.Surgewave.Pipelines');
+      }
+      if (set.has('ai') && !hasCluster) {
+        lines.push('');
+        lines.push('# Install AI Pipeline Nodes plugin pack');
+        lines.push('surgewave plugins install Kuestenlogik.Surgewave.AI');
+      }
+      return lines.join('\n');
+    }
+
+    function buildRun(set) {
+      var lines = [];
+      var hasCluster = set.has('cluster');
+
+      if (hasCluster) {
+        lines.push('# Cluster is already running from docker compose up.');
+        lines.push('# Verify three brokers are healthy:');
+        lines.push('surgewave cluster health');
+      } else {
+        lines.push('# 1. Start the broker');
+        lines.push('surgewave broker start');
+      }
+
+      if (set.has('control')) {
+        lines.push('');
+        lines.push('# 2. Open the Control UI');
+        lines.push('surgewave control');
+      }
+
+      // Last line: always produce a first message (independent of mode).
+      lines.push('');
+      var nextNum = (hasCluster ? 2 : (set.has('control') ? 3 : 2));
+      lines.push('# ' + nextNum + '. Send your first message');
+      lines.push('surgewave produce --topic orders --value \'{"id":1,"total":42.99}\'');
+
+      return lines.join('\n');
+    }
+
+    function buildNextSteps(set) {
+      var items = [
+        { href: '/docs/quickstart/', text: '.NET quickstart — point a Confluent.Kafka producer at the broker' }
+      ];
+      if (set.has('pipelines') || set.has('ai')) {
+        items.push({ href: '/docs/pipelines/', text: 'Build your first pipeline in the Designer' });
+      }
+      if (set.has('cluster')) {
+        items.push({ href: '/docs/clustering/', text: 'Tune partition + replication strategy for production' });
+      }
+      if (set.has('control')) {
+        items.push({ href: '/docs/control/', text: 'Walk through the Control UI (topics, consumer groups, schemas)' });
+      }
+      items.push({ href: '/docs/cookbook/', text: 'Cookbook — recipes for the common patterns' });
+      return items;
+    }
+
+    // ---- Render ------------------------------------------------------
+    function render() {
+      installEl.textContent = buildInstall(selected);
+      runEl.textContent = buildRun(selected);
+
+      nextStepsList.innerHTML = '';
+      buildNextSteps(selected).forEach(function (item) {
+        var li = document.createElement('li');
+        var a = document.createElement('a');
+        a.href = item.href; a.textContent = item.text;
+        li.appendChild(a);
+        nextStepsList.appendChild(li);
+      });
+    }
+
+    function goToStep(n) {
+      currentStep = Math.max(1, Math.min(3, n));
+      indicators.forEach(function (btn, i) {
+        var step = i + 1;
+        btn.classList.toggle('is-active', step === currentStep);
+        btn.classList.toggle('is-completed', step < currentStep);
+        btn.setAttribute('aria-selected', step === currentStep ? 'true' : 'false');
+        // Steps 2+ are reachable only once we've seen step 1 (always true here).
+        btn.removeAttribute('aria-disabled');
+      });
+      panels.forEach(function (panel, i) {
+        var step = i + 1;
+        panel.classList.toggle('is-active', step === currentStep);
+        panel.setAttribute('aria-hidden', step === currentStep ? 'false' : 'true');
+      });
+      // Re-render snippets when entering step 2 or 3 in case the user
+      // tweaked the picker after first reaching them.
+      if (currentStep >= 2) render();
+    }
+
+    // ---- Wire events -------------------------------------------------
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var id = cb.getAttribute('data-component');
+        if (cb.checked) selected.add(id); else selected.delete(id);
+        if (id === 'broker') selected.add('broker'); // never let broker be unselected
+        // Live-update snippets even if user is still on step 1
+        render();
+      });
+    });
+
+    indicators.forEach(function (btn, i) {
+      btn.addEventListener('click', function () { goToStep(i + 1); });
+    });
+
+    root.querySelectorAll('[data-step-next]').forEach(function (btn) {
+      btn.addEventListener('click', function () { goToStep(currentStep + 1); });
+    });
+    root.querySelectorAll('[data-step-back]').forEach(function (btn) {
+      btn.addEventListener('click', function () { goToStep(currentStep - 1); });
+    });
+    root.querySelectorAll('[data-step-restart]').forEach(function (btn) {
+      btn.addEventListener('click', function () { goToStep(1); });
+    });
+
+    // Copy-to-clipboard for snippets — uses the modern clipboard API,
+    // flashes the button green for 1.2 s on success.
+    root.querySelectorAll('[data-snippet-copy]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = btn.getAttribute('data-snippet-copy');
+        var code = root.querySelector('[data-snippet-target="' + target + '"]');
+        if (!code) return;
+        navigator.clipboard.writeText(code.textContent).then(function () {
+          btn.classList.add('is-copied');
+          setTimeout(function () { btn.classList.remove('is-copied'); }, 1200);
+        });
+      });
+    });
+
+    // Initial paint
+    render();
+  })();
+</script>

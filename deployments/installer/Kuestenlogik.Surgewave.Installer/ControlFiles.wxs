@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Control UI runtime files (harvested from publish output) -->
+    <ComponentGroup Id="ControlFiles" Directory="ControlDir">
+      <Files Include="$(var.ControlPublishDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

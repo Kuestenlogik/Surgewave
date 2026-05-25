@@ -1,0 +1,106 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+<MudPaper Elevation="0" Class="pa-3" Style="border: 1px solid var(--mud-palette-lines-default); border-radius: 4px;">
+    <div class="d-flex align-center justify-space-between mb-2">
+        <MudText Typo="Typo.subtitle2">Pipeline Schedule</MudText>
+        <MudSwitch T="bool" Value="@_enabled" ValueChanged="OnEnabledChanged" Color="Color.Primary" />
+    </div>
+
+    @if (_enabled)
+    {
+        <CronBuilder Label="CRON Expression"
+                     Value="@_cronExpression"
+                     ValueChanged="OnCronChanged" />
+
+        <MudSelect T="string" Value="@_timezone" ValueChanged="OnTimezoneChanged"
+                   Label="Timezone" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2 mb-2">
+            @foreach (var tz in TimeZoneInfo.GetSystemTimeZones().Take(50))
+            {
+                <MudSelectItem Value="@tz.Id">@tz.DisplayName</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudNumericField T="int?" Value="@_maxRunMinutes" ValueChanged="OnMaxRunChanged"
+                         Label="Max Run Duration (minutes)" Variant="Variant.Outlined"
+                         Margin="Margin.Dense" Class="mb-2" Min="1" Max="10080"
+                         HelperText="Leave empty for unlimited" />
+
+        @if (Schedule?.NextRunAt != null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Next run: @Schedule.NextRunAt.Value.LocalDateTime.ToString("g")
+            </MudText>
+        }
+        @if (Schedule?.LastRunAt != null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Last run: @Schedule.LastRunAt.Value.LocalDateTime.ToString("g")
+            </MudText>
+        }
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public ScheduleConfig? Schedule { get; set; }
+
+    [Parameter]
+    public EventCallback<ScheduleConfig?> ScheduleChanged { get; set; }
+
+    private bool _enabled;
+    private string _cronExpression = "*/5 * * * *";
+    private string _timezone = "UTC";
+    private int? _maxRunMinutes;
+
+    protected override void OnParametersSet()
+    {
+        if (Schedule != null)
+        {
+            _enabled = Schedule.Enabled;
+            _cronExpression = Schedule.CronExpression ?? "*/5 * * * *";
+            _timezone = Schedule.Timezone;
+            _maxRunMinutes = Schedule.MaxRunDurationMinutes;
+        }
+    }
+
+    private async Task OnEnabledChanged(bool value)
+    {
+        _enabled = value;
+        await EmitChange();
+    }
+
+    private async Task OnCronChanged(string value)
+    {
+        _cronExpression = value;
+        await EmitChange();
+    }
+
+    private async Task OnTimezoneChanged(string value)
+    {
+        _timezone = value;
+        await EmitChange();
+    }
+
+    private async Task OnMaxRunChanged(int? value)
+    {
+        _maxRunMinutes = value;
+        await EmitChange();
+    }
+
+    private async Task EmitChange()
+    {
+        var schedule = _enabled
+            ? new ScheduleConfig
+            {
+                CronExpression = _cronExpression,
+                Timezone = _timezone,
+                Enabled = true,
+                MaxRunDurationMinutes = _maxRunMinutes,
+                LastRunAt = Schedule?.LastRunAt,
+                NextRunAt = Schedule?.NextRunAt,
+                LastCompletedAt = Schedule?.LastCompletedAt
+            }
+            : null;
+        await ScheduleChanged.InvokeAsync(schedule);
+    }
+}

@@ -1,0 +1,575 @@
+@using Kuestenlogik.Surgewave.Control.Services
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@inject IJSRuntime JS
+
+<MudPaper Elevation="2" Class="pa-3" Style="height: 100%; display: flex; flex-direction: column; overflow: hidden;">
+    <MudText Typo="Typo.h6" Class="mb-2">Connectors</MudText>
+
+    <MudTextField @bind-Value="_searchText" Label="Search" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" Class="mb-2" />
+
+    @* Category Filter Chips *@
+    <div class="d-flex flex-wrap gap-1 mb-2">
+        <MudChip T="string" Size="Size.Small"
+                 Color="@(_selectedCategory == null ? Color.Primary : Color.Default)"
+                 Variant="@(_selectedCategory == null ? Variant.Filled : Variant.Outlined)"
+                 OnClick="@(() => SelectCategory(null))">
+            All
+        </MudChip>
+        <MudChip T="string" Size="Size.Small"
+                 Color="@(_selectedCategory == "Favorites" ? Color.Warning : Color.Default)"
+                 Variant="@(_selectedCategory == "Favorites" ? Variant.Filled : Variant.Outlined)"
+                 Icon="@Icons.Material.Filled.Star"
+                 OnClick="@(() => SelectCategory("Favorites"))">
+            Favorites
+        </MudChip>
+        @foreach (var category in GetAllCategories())
+        {
+            <MudChip T="string" Size="Size.Small"
+                     Color="@(_selectedCategory == category ? GetCategoryChipColor(category) : Color.Default)"
+                     Variant="@(_selectedCategory == category ? Variant.Filled : Variant.Outlined)"
+                     Icon="@GetCategoryIcon(category)"
+                     OnClick="@(() => SelectCategory(category))">
+                @category
+            </MudChip>
+        }
+    </div>
+
+    <div class="connector-list">
+        @if (_loading)
+        {
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="MudBlazor.Size.Small" />
+        }
+        else if (ConnectorTypes.Count == 0)
+        {
+            <MudText Color="Color.Secondary">No connectors available</MudText>
+        }
+        else
+        {
+            @* Show favorites section if selected *@
+            @if (_selectedCategory == "Favorites")
+            {
+                var favorites = GetFavoriteConnectors();
+                @if (favorites.Any())
+                {
+                    @foreach (var connector in favorites)
+                    {
+                        @RenderConnectorItem(connector, true)
+                    }
+                }
+                else
+                {
+                    <MudText Color="Color.Secondary" Typo="Typo.body2" Class="mt-2">
+                        No favorites yet. Click the star icon on any connector to add it.
+                    </MudText>
+                }
+            }
+            else
+            {
+                @foreach (var category in GetFilteredCategories())
+                {
+                    <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mt-2 mb-1">@category</MudText>
+
+                    @foreach (var connector in GetConnectorsInCategory(category))
+                    {
+                        @RenderConnectorItem(connector, IsFavorite(connector))
+                    }
+                }
+
+                @* Sub-Pipeline nodes *@
+                @if (AvailablePipelines.Count > 0 && (_selectedCategory == null || _selectedCategory == "Pipelines"))
+                {
+                    var filteredPipelines = GetFilteredPipelines();
+                    if (filteredPipelines.Any())
+                    {
+                        <MudText Typo="Typo.subtitle2" Color="Color.Tertiary" Class="mt-2 mb-1">Pipelines</MudText>
+                        @foreach (var pipeline in filteredPipelines)
+                        {
+                            <MudTooltip Text="@(pipeline.Description ?? $"{pipeline.NodeCount} nodes")" Placement="Placement.Right" Arrow="true">
+                                <div class="connector-item pipeline-item" @onclick="@(() => OnPipelineNodeSelected.InvokeAsync(pipeline))">
+                                    <MudIcon Icon="@Icons.Material.Filled.AccountTree" Size="MudBlazor.Size.Small" Class="mr-2" Color="Color.Tertiary" />
+                                    <div class="connector-info">
+                                        <span class="connector-name">@pipeline.Name</span>
+                                        <span class="connector-tags">@pipeline.NodeCount nodes</span>
+                                    </div>
+                                </div>
+                            </MudTooltip>
+                        }
+                    }
+                }
+            }
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public List<ConnectorTypeInfo> ConnectorTypes { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<ConnectorTypeInfo> OnConnectorSelected { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorTypeInfo> OnConnectorDragStart { get; set; }
+
+    [Parameter]
+    public List<PipelineSummary> AvailablePipelines { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<PipelineSummary> OnPipelineNodeSelected { get; set; }
+
+    private string _searchText = "";
+    private bool _loading = false;
+    private string? _selectedCategory = null;
+    private HashSet<string> _favorites = new();
+    private const string FavoritesStorageKey = "surgewave_connector_favorites";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadFavoritesAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadFavoritesAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", FavoritesStorageKey);
+            if (!string.IsNullOrEmpty(json))
+            {
+                var favorites = System.Text.Json.JsonSerializer.Deserialize<string[]>(json);
+                if (favorites != null)
+                {
+                    _favorites = new HashSet<string>(favorites);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore localStorage errors
+        }
+    }
+
+    private async Task SaveFavoritesAsync()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(_favorites.ToArray());
+            await JS.InvokeVoidAsync("localStorage.setItem", FavoritesStorageKey, json);
+        }
+        catch
+        {
+            // Ignore localStorage errors
+        }
+    }
+
+    private void SelectCategory(string? category)
+    {
+        _selectedCategory = category;
+    }
+
+    private static int CategorySortOrder(string c) => c switch
+    {
+        "Sources" => 0,
+        "Sinks" => 1,
+        "Streams" => 2,
+        "Logic" => 3,
+        "Transform" => 4,
+        "AI" => 5,
+        "Workflow" => 6,
+        _ => 7
+    };
+
+    private IEnumerable<string> GetAllCategories()
+    {
+        var categories = ConnectorTypes
+            .Select(c => c.Category)
+            .Distinct()
+            .OrderBy(CategorySortOrder)
+            .ToList();
+
+        if (AvailablePipelines.Count > 0 && !categories.Contains("Pipelines"))
+        {
+            categories.Add("Pipelines");
+        }
+
+        return categories;
+    }
+
+    private IEnumerable<string> GetFilteredCategories()
+    {
+        var connectors = ConnectorTypes.Where(c => MatchesSearch(c) && MatchesCategory(c));
+        return connectors
+            .Select(c => c.Category)
+            .Distinct()
+            .OrderBy(CategorySortOrder);
+    }
+
+    private IEnumerable<ConnectorTypeInfo> GetConnectorsInCategory(string category)
+    {
+        return ConnectorTypes
+            .Where(c => c.Category == category && MatchesSearch(c) && MatchesCategory(c))
+            .OrderBy(c => c.Name);
+    }
+
+    private IEnumerable<ConnectorTypeInfo> GetFavoriteConnectors()
+    {
+        return ConnectorTypes
+            .Where(c => _favorites.Contains(c.Type) && MatchesSearch(c))
+            .OrderBy(c => c.Name);
+    }
+
+    private bool MatchesCategory(ConnectorTypeInfo connector)
+    {
+        if (_selectedCategory == null || _selectedCategory == "Favorites")
+            return true;
+        return connector.Category == _selectedCategory;
+    }
+
+    private bool MatchesSearch(ConnectorTypeInfo connector)
+    {
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            return true;
+        }
+
+        var search = _searchText;
+        if (connector.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            connector.Type.Contains(search, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (connector.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+
+        if (connector.Tags?.Any(t => t.Contains(search, StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            return true;
+        }
+
+        if (connector.Author?.Contains(search, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private IEnumerable<PipelineSummary> GetFilteredPipelines()
+    {
+        if (string.IsNullOrWhiteSpace(_searchText))
+            return AvailablePipelines.OrderBy(p => p.Name);
+
+        return AvailablePipelines
+            .Where(p => p.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                        (p.Description?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderBy(p => p.Name);
+    }
+
+    private bool IsFavorite(ConnectorTypeInfo connector) => _favorites.Contains(connector.Type);
+
+    private async Task ToggleFavorite(ConnectorTypeInfo connector)
+    {
+        if (_favorites.Contains(connector.Type))
+        {
+            _favorites.Remove(connector.Type);
+        }
+        else
+        {
+            _favorites.Add(connector.Type);
+        }
+        await SaveFavoritesAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnConnectorClick(ConnectorTypeInfo connector)
+    {
+        await OnConnectorSelected.InvokeAsync(connector);
+    }
+
+    private static Color GetCategoryChipColor(string category) => category switch
+    {
+        "AI" => Color.Secondary,
+        "Workflow" => Color.Tertiary,
+        _ => Color.Primary
+    };
+
+    private static string? GetCategoryIcon(string category) => category switch
+    {
+        "Sources" => Icons.Material.Filled.Output,
+        "Sinks" => Icons.Material.Filled.Input,
+        "Streams" => Icons.Material.Filled.Stream,
+        "Logic" => Icons.Material.Filled.Rule,
+        "Transform" => Icons.Material.Filled.Transform,
+        "AI" => Icons.Material.Filled.Psychology,
+        "Workflow" => Icons.Material.Filled.AccountTree,
+        "Pipelines" => Icons.Material.Filled.AccountTree,
+        _ => null
+    };
+
+    private string GetConnectorIcon(ConnectorTypeInfo connector)
+    {
+        // AI node icon mapping
+        if (connector.Category == "AI")
+        {
+            return GetAiNodeIcon(connector);
+        }
+
+        // Workflow node icon mapping
+        if (connector.Category == "Workflow")
+        {
+            return GetWorkflowNodeIcon(connector);
+        }
+
+        // Map common MDI icon names to MudBlazor Material icons
+        if (!string.IsNullOrEmpty(connector.Icon))
+        {
+            return connector.Icon switch
+            {
+                "FileDocumentOutline" => Icons.Material.Outlined.Description,
+                "FileExportOutline" => Icons.Material.Outlined.FileDownload,
+                "Console" => Icons.Material.Filled.Terminal,
+                "ConsoleLine" => Icons.Material.Outlined.Terminal,
+                "Cog" => Icons.Material.Filled.Settings,
+                "Database" => Icons.Material.Filled.Storage,
+                "Cloud" => Icons.Material.Filled.Cloud,
+                "CloudUpload" => Icons.Material.Filled.CloudUpload,
+                "CloudDownload" => Icons.Material.Filled.CloudDownload,
+                "Api" => Icons.Material.Filled.Api,
+                "Web" => Icons.Material.Filled.Web,
+                "Email" => Icons.Material.Filled.Email,
+                "Message" => Icons.Material.Filled.Message,
+                "Code" => Icons.Material.Filled.Code,
+                "Shield" => Icons.Material.Filled.Shield,
+                _ => GetDefaultIcon(connector)
+            };
+        }
+
+        return GetDefaultIcon(connector);
+    }
+
+    private static string GetAiNodeIcon(ConnectorTypeInfo connector)
+    {
+        var type = connector.Type;
+        if (type.Contains("LlmNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Psychology;
+        if (type.Contains("EmbedderNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.DataArray;
+        if (type.Contains("DocumentParserNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Description;
+        if (type.Contains("RetrieverNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Search;
+        if (type.Contains("PromptBuilderNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.EditNote;
+        if (type.Contains("RerankerNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Sort;
+        if (type.Contains("AgentNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.SmartToy;
+        if (type.Contains("ChatEndpointNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Chat;
+        if (type.Contains("ChatResponseNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.ChatBubble;
+        return Icons.Material.Filled.Psychology;
+    }
+
+    private static string GetWorkflowNodeIcon(ConnectorTypeInfo connector)
+    {
+        var type = connector.Type;
+        if (type.Contains("LoopNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Loop;
+        if (type.Contains("WaitForInputNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.PauseCircle;
+        if (type.Contains("GateNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.DoorSliding;
+        if (type.Contains("AccumulatorNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Inventory2;
+        if (type.Contains("MultiOutputNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.AccountTree;
+        if (type.Contains("StateNode", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Storage;
+        return Icons.Material.Filled.AccountTree;
+    }
+
+    private string GetDefaultIcon(ConnectorTypeInfo connector)
+    {
+        if (connector.IsSource)
+        {
+            return Icons.Material.Filled.Output;
+        }
+        if (connector.IsSink)
+        {
+            return Icons.Material.Filled.Input;
+        }
+        return Icons.Material.Filled.Transform;
+    }
+
+    private static string GetConnectorTooltip(ConnectorTypeInfo connector)
+    {
+        var tooltip = connector.Description ?? "";
+        if (connector.AvailableOnWorkers?.Length > 0)
+        {
+            var workerInfo = $"Workers: {string.Join(", ", connector.AvailableOnWorkers)}";
+            tooltip = string.IsNullOrEmpty(tooltip)
+                ? workerInfo
+                : $"{tooltip}\n{workerInfo}";
+        }
+        return tooltip;
+    }
+
+    private static string GetAvailabilityClass(ConnectorTypeInfo connector)
+    {
+        return connector.AvailabilityLabel switch
+        {
+            "Local + Remote" => "availability-both",
+            "Remote" => "availability-remote",
+            _ => "availability-local"
+        };
+    }
+}
+
+@* Sub-component for connector item *@
+@{
+    RenderFragment RenderConnectorItem(ConnectorTypeInfo connector, bool isFavorite) =>
+    @<MudTooltip Text="@GetConnectorTooltip(connector)" Placement="Placement.Right" Arrow="true">
+        <div class="connector-item @GetConnectorItemClass(connector)" draggable="true" @ondragstart="@(() => OnConnectorDragStart.InvokeAsync(connector))">
+            <MudIcon Icon="@GetConnectorIcon(connector)" Size="MudBlazor.Size.Small" Class="mr-2"
+                     Style="@GetConnectorIconStyle(connector)" />
+            <div class="connector-info" @onclick="@(() => OnConnectorClick(connector))">
+                <span class="connector-name">@connector.Name</span>
+                <div class="d-flex align-center gap-1">
+                    @if (connector.Tags?.Length > 0)
+                    {
+                        <span class="connector-tags">@string.Join(", ", connector.Tags.Take(3))</span>
+                    }
+                    @if (connector.AvailableOnWorkers?.Length > 0)
+                    {
+                        <span class="worker-availability-badge @GetAvailabilityClass(connector)">@connector.AvailabilityLabel</span>
+                    }
+                </div>
+            </div>
+            <MudIconButton Icon="@(isFavorite ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                           Size="MudBlazor.Size.Small"
+                           Color="@(isFavorite ? Color.Warning : Color.Default)"
+                           OnClick="@(() => ToggleFavorite(connector))"
+                           Class="ml-auto favorite-btn" />
+        </div>
+    </MudTooltip>;
+
+    string GetConnectorItemClass(ConnectorTypeInfo connector) => connector.Category switch
+    {
+        "AI" => "ai-connector-item",
+        "Workflow" => "workflow-connector-item",
+        _ => ""
+    };
+
+    string GetConnectorIconStyle(ConnectorTypeInfo connector) => connector.Category switch
+    {
+        "AI" => "color: #AB47BC;",
+        "Workflow" => "color: #26A69A;",
+        _ => ""
+    };
+}
+
+<style>
+    .connector-list {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .connector-item {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        margin: 4px 0;
+        background-color: var(--mud-palette-surface);
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .connector-item:hover {
+        background-color: var(--mud-palette-action-default-hover);
+        border-color: var(--mud-palette-primary);
+    }
+
+    .connector-info {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        flex: 1;
+    }
+
+    .connector-name {
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .connector-tags {
+        font-size: 0.75rem;
+        color: var(--mud-palette-text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .favorite-btn {
+        opacity: 0.5;
+        transition: opacity 0.2s;
+    }
+
+    .connector-item:hover .favorite-btn {
+        opacity: 1;
+    }
+
+    .ai-connector-item {
+        border-left: 3px solid #AB47BC;
+    }
+
+    .ai-connector-item:hover {
+        border-color: #AB47BC;
+        background-color: rgba(171, 71, 188, 0.06);
+    }
+
+    .workflow-connector-item {
+        border-left: 3px solid #26A69A;
+    }
+
+    .workflow-connector-item:hover {
+        border-color: #26A69A;
+        background-color: rgba(38, 166, 154, 0.06);
+    }
+
+    .worker-availability-badge {
+        font-size: 9px;
+        padding: 1px 5px;
+        border-radius: 8px;
+        white-space: nowrap;
+        font-weight: 500;
+    }
+
+    .availability-local {
+        background: rgba(var(--mud-palette-success-rgb), 0.15);
+        color: var(--mud-palette-success);
+    }
+
+    .availability-remote {
+        background: rgba(var(--mud-palette-info-rgb), 0.15);
+        color: var(--mud-palette-info);
+    }
+
+    .availability-both {
+        background: rgba(var(--mud-palette-tertiary-rgb), 0.15);
+        color: var(--mud-palette-tertiary);
+    }
+</style>

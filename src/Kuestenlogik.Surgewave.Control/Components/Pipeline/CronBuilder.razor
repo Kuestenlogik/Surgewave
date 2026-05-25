@@ -1,0 +1,187 @@
+@* Visual Cron Expression Builder *@
+
+<MudPaper Elevation="0" Class="pa-2" Style="border: 1px solid var(--mud-palette-lines-default); border-radius: 4px;">
+    <MudText Typo="Typo.caption" Color="Color.Primary" Class="mb-2">@Label</MudText>
+
+    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-2">
+        <MudTabPanel Text="Preset">
+            <MudList T="string" Dense="true" Class="py-0">
+                @foreach (var preset in _presets)
+                {
+                    <MudListItem @onclick="@(async () => await SelectPreset(preset.Expression))"
+                                 Dense="true"
+                                 Style="cursor: pointer;"
+                                 Class="@(_value == preset.Expression ? "mud-primary-text" : "")">
+                        <div class="d-flex justify-space-between align-center" style="width: 100%;">
+                            <span>@preset.Name</span>
+                            <code style="font-size: 11px; color: var(--mud-palette-text-secondary);">@preset.Expression</code>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Custom">
+            <MudGrid Spacing="1" Class="mb-2">
+                <MudItem xs="2">
+                    <MudTextField @bind-Value="_minute" Label="Minute" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="*" Style="font-size: 12px;" @bind-Value:after="BuildExpression" />
+                </MudItem>
+                <MudItem xs="2">
+                    <MudTextField @bind-Value="_hour" Label="Hour" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="*" Style="font-size: 12px;" @bind-Value:after="BuildExpression" />
+                </MudItem>
+                <MudItem xs="2">
+                    <MudTextField @bind-Value="_dayOfMonth" Label="Day" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="*" Style="font-size: 12px;" @bind-Value:after="BuildExpression" />
+                </MudItem>
+                <MudItem xs="2">
+                    <MudTextField @bind-Value="_month" Label="Month" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="*" Style="font-size: 12px;" @bind-Value:after="BuildExpression" />
+                </MudItem>
+                <MudItem xs="2">
+                    <MudTextField @bind-Value="_dayOfWeek" Label="Weekday" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="*" Style="font-size: 12px;" @bind-Value:after="BuildExpression" />
+                </MudItem>
+            </MudGrid>
+
+            <MudExpansionPanels Elevation="0" Dense="true">
+                <MudExpansionPanel Text="Cron Syntax Help" Dense="true" Style="font-size: 12px;">
+                    <MudSimpleTable Dense="true" Style="font-size: 11px;">
+                        <thead>
+                            <tr><th>Symbol</th><th>Meaning</th><th>Example</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>*</code></td><td>Any value</td><td><code>* * * * *</code> = every minute</td></tr>
+                            <tr><td><code>,</code></td><td>List</td><td><code>1,15 * * * *</code> = at minute 1 and 15</td></tr>
+                            <tr><td><code>-</code></td><td>Range</td><td><code>1-5 * * * *</code> = minutes 1-5</td></tr>
+                            <tr><td><code>/</code></td><td>Step</td><td><code>*/5 * * * *</code> = every 5 minutes</td></tr>
+                        </tbody>
+                    </MudSimpleTable>
+
+                    <MudText Typo="Typo.caption" Class="mt-2">Field order: Minute Hour Day Month Weekday</MudText>
+                    <MudText Typo="Typo.caption">Weekday: 0=Sun, 1=Mon, ..., 6=Sat</MudText>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Manual">
+            <MudTextField @bind-Value="_value"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Placeholder="* * * * *"
+                          Style="font-family: monospace;"
+                          @bind-Value:after="OnValueChanged" />
+        </MudTabPanel>
+    </MudTabs>
+
+    <MudPaper Elevation="0" Class="pa-2 mt-2" Style="background: var(--mud-palette-background-grey); border-radius: 4px;">
+        <div class="d-flex justify-space-between align-center">
+            <div>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Current Expression:</MudText>
+                <code style="font-size: 14px; font-weight: 500;">@_value</code>
+            </div>
+            <div>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Next Run:</MudText>
+                <MudText Typo="Typo.body2">@GetNextRun()</MudText>
+            </div>
+        </div>
+    </MudPaper>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public string Label { get; set; } = "Cron Expression";
+
+    [Parameter]
+    public string Value { get; set; } = "* * * * *";
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    private string _value = "* * * * *";
+    private string _minute = "*";
+    private string _hour = "*";
+    private string _dayOfMonth = "*";
+    private string _month = "*";
+    private string _dayOfWeek = "*";
+
+    private readonly List<CronPreset> _presets =
+    [
+        new("Every minute", "* * * * *"),
+        new("Every 5 minutes", "*/5 * * * *"),
+        new("Every 15 minutes", "*/15 * * * *"),
+        new("Every 30 minutes", "*/30 * * * *"),
+        new("Every hour", "0 * * * *"),
+        new("Every 6 hours", "0 */6 * * *"),
+        new("Every day at midnight", "0 0 * * *"),
+        new("Every day at 6am", "0 6 * * *"),
+        new("Every Monday at 9am", "0 9 * * 1"),
+        new("First day of month", "0 0 1 * *"),
+        new("Weekdays at 8am", "0 8 * * 1-5"),
+        new("Weekends at noon", "0 12 * * 0,6")
+    ];
+
+    protected override void OnParametersSet()
+    {
+        _value = Value;
+        ParseExpression();
+    }
+
+    private void ParseExpression()
+    {
+        var parts = _value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 5)
+        {
+            _minute = parts[0];
+            _hour = parts[1];
+            _dayOfMonth = parts[2];
+            _month = parts[3];
+            _dayOfWeek = parts[4];
+        }
+    }
+
+    private async Task SelectPreset(string expression)
+    {
+        _value = expression;
+        ParseExpression();
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private async Task BuildExpression()
+    {
+        _value = $"{_minute} {_hour} {_dayOfMonth} {_month} {_dayOfWeek}";
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private async Task OnValueChanged()
+    {
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private string GetNextRun()
+    {
+        try
+        {
+            var cron = Cronos.CronExpression.Parse(_value);
+            var next = cron.GetNextOccurrence(DateTimeOffset.UtcNow, TimeZoneInfo.Local);
+            if (next.HasValue)
+            {
+                var diff = next.Value - DateTimeOffset.Now;
+                var timeStr = next.Value.LocalDateTime.ToString("ddd, MMM d HH:mm");
+                if (diff.TotalMinutes < 60)
+                    return $"{timeStr} (in {(int)diff.TotalMinutes}m)";
+                if (diff.TotalHours < 24)
+                    return $"{timeStr} (in {(int)diff.TotalHours}h)";
+                return $"{timeStr} (in {(int)diff.TotalDays}d)";
+            }
+        }
+        catch
+        {
+            // Invalid expression
+        }
+        return "Invalid expression";
+    }
+
+    private record CronPreset(string Name, string Expression);
+}

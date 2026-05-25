@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>annotations</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Streams</RootNamespace>
+    <!-- CS: nullable covariance warnings specific to Streams generic variance -->
+    <!-- CS0419: ambiguous cref in XML doc (compiler false-positive on <c> tags in .NET 10) -->
+    <NoWarn>$(NoWarn);CS8714;CS8633;CS8978;CS0419</NoWarn>
+    <Description>Surgewave Streams library for real-time stream processing. Supports transformations, aggregations, joins, and windowing.</Description>
+    <PackageTags>surgewave;kafka;streams;stream-processing;real-time;aggregation;windowing</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Streams.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="RocksDb" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

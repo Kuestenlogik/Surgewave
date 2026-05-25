@@ -1,0 +1,4 @@
+- name: Tools Overview
+  href: index.md
+- name: CLI Reference
+  href: cli-reference.md

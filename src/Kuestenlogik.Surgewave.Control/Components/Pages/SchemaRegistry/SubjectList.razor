@@ -1,0 +1,240 @@
+@page "/schemas"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISchemaRegistryClient SchemaClient
+@inject NotificationState Notification
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+
+<PageTitle>Schema Registry - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Schema Registry</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_searchText" Label="Search Subjects" Variant="Variant.Outlined"
+                          Placeholder="Filter by subject name..." Clearable="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" DebounceInterval="300" />
+        </MudItem>
+        <MudItem xs="12" md="6" Class="d-flex align-center justify-end gap-2">
+            <MudButton Variant="Variant.Outlined" OnClick="LoadSubjectsAsync"
+                       StartIcon="@Icons.Material.Filled.Refresh">
+                Refresh
+            </MudButton>
+            <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ShowRegisterDialogAsync"
+                           StartIcon="@Icons.Material.Filled.Add">
+                    Register Schema
+                </MudButton>
+            </AuthorizeView>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Global Configuration</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Compatibility Level:</MudText>
+            <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+                <Authorized>
+                    <MudSelect T="string" Value="_globalCompatibility" ValueChanged="SetGlobalCompatibilityAsync"
+                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var level in _compatibilityLevels)
+                        {
+                            <MudSelectItem Value="@level">@level</MudSelectItem>
+                        }
+                    </MudSelect>
+                </Authorized>
+                <NotAuthorized>
+                    <MudText Typo="Typo.body1">@_globalCompatibility</MudText>
+                </NotAuthorized>
+            </AuthorizeView>
+            <MudText Typo="Typo.caption" Class="mt-2">
+                Supported types: @string.Join(", ", _schemaTypes)
+            </MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="8">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">Subjects (@_filteredSubjects.Count())</MudText>
+
+            @if (_subjects.Count == 0 && !_loading)
+            {
+                <MudAlert Severity="Severity.Info">No schemas registered</MudAlert>
+            }
+            else
+            {
+                <MudList T="SubjectInfoModel" Dense="true">
+                    @foreach (var subject in _filteredSubjects)
+                    {
+                        <MudListItem OnClick="@(() => Navigation.NavigateTo($"/schemas/{Uri.EscapeDataString(subject.Subject)}"))">
+                            <div class="d-flex align-center justify-space-between" style="width: 100%">
+                                <div>
+                                    <MudText Typo="Typo.body1">@subject.Subject</MudText>
+                                    <MudText Typo="Typo.caption">
+                                        @subject.VersionCount version(s)
+                                        @if (subject.LatestSchemaType != null)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Class="ml-2">@subject.LatestSchemaType</MudChip>
+                                        }
+                                    </MudText>
+                                </div>
+                                <div>
+                                    <span @onclick:stopPropagation="true">
+                                    <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                                       OnClick="@(async () => await DeleteSubjectAsync(subject.Subject))" />
+                                    </AuthorizeView>
+                                </span>
+                                </div>
+                            </div>
+                        </MudListItem>
+                        <MudDivider />
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string? _searchText;
+    private string? _globalCompatibility;
+    private List<SubjectInfoModel> _subjects = [];
+    private List<string> _schemaTypes = [];
+
+    private static readonly string[] _compatibilityLevels =
+        ["NONE", "BACKWARD", "BACKWARD_TRANSITIVE", "FORWARD", "FORWARD_TRANSITIVE", "FULL", "FULL_TRANSITIVE"];
+
+    private IEnumerable<SubjectInfoModel> _filteredSubjects => string.IsNullOrWhiteSpace(_searchText)
+        ? _subjects
+        : _subjects.Where(s => s.Subject.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            await Task.WhenAll(
+                LoadSubjectsAsync(),
+                LoadGlobalConfigAsync(),
+                LoadSchemaTypesAsync());
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load data: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadSubjectsAsync()
+    {
+        var subjectNames = await SchemaClient.GetSubjectsAsync();
+        var subjects = new List<SubjectInfoModel>();
+
+        foreach (var name in subjectNames)
+        {
+            var versions = await SchemaClient.GetVersionsAsync(name);
+            var latest = await SchemaClient.GetLatestSchemaAsync(name);
+            var compat = await SchemaClient.GetSubjectCompatibilityAsync(name);
+
+            subjects.Add(new SubjectInfoModel
+            {
+                Subject = name,
+                VersionCount = versions.Count,
+                LatestSchemaType = latest?.SchemaType,
+                CompatibilityLevel = compat
+            });
+        }
+
+        _subjects = subjects.OrderBy(s => s.Subject).ToList();
+        StateHasChanged();
+    }
+
+    private async Task LoadGlobalConfigAsync()
+    {
+        _globalCompatibility = await SchemaClient.GetGlobalCompatibilityAsync() ?? "BACKWARD";
+    }
+
+    private async Task LoadSchemaTypesAsync()
+    {
+        _schemaTypes = (await SchemaClient.GetSchemaTypesAsync()).ToList();
+    }
+
+    private async Task SetGlobalCompatibilityAsync(string compatibility)
+    {
+        var success = await SchemaClient.SetGlobalCompatibilityAsync(compatibility);
+        if (success)
+        {
+            _globalCompatibility = compatibility;
+            Notification.ShowSuccess($"Global compatibility set to {compatibility}");
+        }
+        else
+        {
+            Notification.ShowError("Failed to update global compatibility");
+        }
+    }
+
+    private async Task ShowRegisterDialogAsync()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<SchemaRegisterDialog>("Register Schema", options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await LoadSubjectsAsync();
+            Notification.ShowSuccess("Schema registered successfully");
+        }
+    }
+
+    private async Task DeleteSubjectAsync(string subject)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Subject",
+            $"Are you sure you want to delete subject '{subject}' and all its versions?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var result = await SchemaClient.DeleteSubjectAsync(subject);
+            if (result != null)
+            {
+                Notification.ShowSuccess($"Deleted subject '{subject}' with {result.Count} version(s)");
+                await LoadSubjectsAsync();
+            }
+            else
+            {
+                Notification.ShowError($"Failed to delete subject '{subject}'");
+            }
+        }
+    }
+}

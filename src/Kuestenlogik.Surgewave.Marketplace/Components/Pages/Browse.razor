@@ -1,0 +1,133 @@
+@page "/"
+@inject IPackageMetadataService MetadataService
+
+<PageTitle>Surgewave Marketplace</PageTitle>
+
+@* Statistics *@
+<MudGrid Class="mb-4">
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Extension" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+            <div>
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Packages</MudText>
+                <MudText Typo="Typo.h5">@_stats.TotalPackages</MudText>
+            </div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+            <div>
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Downloads</MudText>
+                <MudText Typo="Typo.h5">@_stats.TotalDownloads</MudText>
+            </div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+            <div>
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Versions</MudText>
+                <MudText Typo="Typo.h5">@_stats.TotalVersions</MudText>
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* Search *@
+<MudTextField @bind-Value="_query" Label="Search plugins..."
+              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-4"
+              Immediate="true" DebounceInterval="300"
+              OnDebounceIntervalElapsed="SearchAsync" />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* Results *@
+<MudGrid>
+    @foreach (var pkg in _packages)
+    {
+        <MudItem xs="12" md="6" lg="4">
+            <MudCard Elevation="2" Class="cursor-pointer" @onclick="() => GoToPackage(pkg.Id)">
+                <MudCardContent>
+                    <div class="d-flex align-center mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Extension" Color="Color.Primary" Class="mr-2" />
+                        <MudText Typo="Typo.h6">@pkg.Name</MudText>
+                        @if (pkg.IsSigned)
+                        {
+                            <MudTooltip Text="@($"Verified signature: {pkg.SignerIdentity} ({pkg.SignerProvider})")">
+                                <MudIcon Icon="@Icons.Material.Filled.VerifiedUser"
+                                         Color="Color.Success"
+                                         Size="Size.Small"
+                                         Class="ml-2" />
+                            </MudTooltip>
+                        }
+                    </div>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2"
+                             Style="height: 40px; overflow: hidden;">
+                        @(pkg.Description ?? "No description")
+                    </MudText>
+                    <div class="d-flex justify-space-between align-center">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">v@(pkg.Version)</MudChip>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @@pkg.DownloadCount downloads
+                        </MudText>
+                    </div>
+                    @if (pkg.Tags?.Length > 0)
+                    {
+                        <div class="mt-2 d-flex flex-wrap gap-1">
+                            @foreach (var tag in pkg.Tags.Take(4))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">@tag</MudChip>
+                            }
+                        </div>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@if (!_loading && _packages.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Class="mt-4">
+        @if (string.IsNullOrWhiteSpace(_query))
+        {
+            <text>No plugins published yet. Use the upload button to publish your first .swpkg package.</text>
+        }
+        else
+        {
+            <text>No plugins found matching "@_query".</text>
+        }
+    </MudAlert>
+}
+
+@code {
+    [Inject] private NavigationManager Nav { get; set; } = null!;
+
+    private string _query = "";
+    private bool _loading = true;
+    private IReadOnlyList<PackageMetadata> _packages = [];
+    private PackageStatistics _stats = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _stats = await MetadataService.GetStatisticsAsync();
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        _packages = await MetadataService.SearchAsync(_query, 0, 50);
+
+        _loading = false;
+    }
+
+    private void GoToPackage(string id) => Nav.NavigateTo($"/packages/{id}");
+}

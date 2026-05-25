@@ -1,0 +1,139 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+
+jobs:
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore NuGet cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Run tests with coverage
+        run: |
+          dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build \
+            --collect:"XPlat Code Coverage" \
+            --results-directory artifacts/coverage/raw \
+            --settings coverlet.runsettings \
+            --filter "FullyQualifiedName!~IntegrationTests" \
+            --verbosity minimal
+
+      - name: Generate coverage report
+        uses: danielpalme/ReportGenerator-GitHub-Action@5
+        with:
+          reports: 'artifacts/coverage/raw/**/coverage.cobertura.xml'
+          targetdir: 'artifacts/coverage/report'
+          reporttypes: 'Html;Badges;TextSummary;MarkdownSummaryGithub'
+          assemblyfilters: '+Kuestenlogik.Surgewave.*;-*.Tests;-*.Benchmarks'
+          classfilters: '-*.Program;-*.Startup'
+
+      - name: Print coverage summary
+        if: always()
+        run: |
+          if [ -f "artifacts/coverage/report/Summary.txt" ]; then
+            echo "## Coverage Summary"
+            cat artifacts/coverage/report/Summary.txt
+          fi
+
+      # Enforce a coverage floor on the whole solution. The Plugins subsystem
+      # sits much higher (Plugins-Base ~50 %, Packaging ~89 %, Repository
+      # ~78 %), but the broker / streams / clustering / connect codebases
+      # pull the cross-solution numbers down to roughly 30 % line / 30 %
+      # branch. The thresholds below are set just under that floor so a
+      # regression of more than a few points fails CI; raising them is a
+      # follow-on coverage-push project.
+      - name: Enforce coverage thresholds
+        if: always()
+        run: |
+          set -euo pipefail
+          SUMMARY=artifacts/coverage/report/Summary.txt
+          if [ ! -f "$SUMMARY" ]; then
+            echo "::error::Coverage summary not found at $SUMMARY — did ReportGenerator run?"
+            exit 1
+          fi
+          LINE=$(grep -E '^\s*Line coverage:' "$SUMMARY" | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
+          BRANCH=$(grep -E '^\s*Branch coverage:' "$SUMMARY" | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
+          if [ -z "$LINE" ] || [ -z "$BRANCH" ]; then
+            echo "::error::Could not parse Line/Branch percentages from $SUMMARY"
+            cat "$SUMMARY"
+            exit 1
+          fi
+          MIN_LINE=30
+          MIN_BRANCH=28
+          echo "Line coverage:   ${LINE}% (min ${MIN_LINE}%)"
+          echo "Branch coverage: ${BRANCH}% (min ${MIN_BRANCH}%)"
+          # awk for float comparison — bash's [[ ]] can't compare decimals.
+          BAD=0
+          if awk "BEGIN { exit !($LINE < $MIN_LINE) }"; then
+            echo "::error::Line coverage ${LINE}% is below the ${MIN_LINE}% threshold."
+            BAD=1
+          fi
+          if awk "BEGIN { exit !($BRANCH < $MIN_BRANCH) }"; then
+            echo "::error::Branch coverage ${BRANCH}% is below the ${MIN_BRANCH}% threshold."
+            BAD=1
+          fi
+          if [ "$BAD" -eq 1 ]; then exit 1; fi
+          echo "OK — both thresholds met."
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-report
+          path: artifacts/coverage/report/
+          retention-days: 30
+
+      - name: Upload coverage badges
+        uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: coverage-badges
+          path: |
+            artifacts/coverage/report/badge_combined.svg
+            artifacts/coverage/report/badge_linecoverage.svg
+            artifacts/coverage/report/badge_branchcoverage.svg
+            artifacts/coverage/report/badge_methodcoverage.svg
+          retention-days: 90
+
+      - name: Add coverage to PR comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: coverage
+          path: artifacts/coverage/report/SummaryGithub.md

@@ -1,0 +1,396 @@
+/* =========================================================================
+ * Surgewave-Brand-Skin fuer MudBlazor 8
+ * -------------------------------------------------------------------------
+ * Aufbau:
+ *   1. Custom Properties — Brand-Tokens analog site/assets/css/style.css
+ *   2. MudBlazor-CSS-Variablen-Overrides — Spacing, Shadows, Radii
+ *   3. Component-Class-Overrides — AppBar, Drawer, Cards, Tables, Buttons
+ *   4. Custom Scrollbars
+ *   5. Density / Compactness
+ *   6. PageHeader-Pattern (Helper-Klassen statt Per-Page-H4-Block)
+ *
+ * Wird in App.razor NACH MudBlazor.min.css eingebunden.
+ * ========================================================================= */
+
+/* 1. Brand-Tokens ========================================================= */
+:root {
+  --sw-wave: #33bcff;           /* Surgewave Wave / Brand Cyan */
+  --sw-wave-light: #66cfff;     /* Dark-Mode Hero-Glow */
+  --sw-ink: #003e60;            /* Surgewave Navy */
+  --sw-accent: #0ea5e9;         /* sky-500 — Light-Mode Primary */
+  --sw-accent-strong: #0369a1;  /* sky-700 */
+  --sw-accent-light: #7dd3fc;   /* sky-300 */
+  --sw-secondary: #a78bfa;      /* Violet */
+  --sw-success: #22c55e;
+  --sw-warning: #f59e0b;
+  --sw-error: #ef4444;
+  --sw-border-light: #e2e8f0;
+  --sw-border-dark: #1e293b;
+  --sw-surface-light: #ffffff;
+  --sw-surface-dark: #0f172a;
+  --sw-bg-light: #fafaff;
+  --sw-bg-dark: #0b1020;
+  --sw-text-light: #0f172a;
+  --sw-text-dark: #e2e8f0;
+  --sw-muted-light: #475569;
+  --sw-muted-dark: #94a3b8;
+}
+
+/* 2. MudBlazor-Variable-Overrides ========================================= */
+.mud-application-layout,
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "cv11", "ss01";  /* Inter typographic niceties */
+  letter-spacing: -0.005em;
+}
+
+/* MudBlazor Schatten-Stack subtiler — Marketing-Site nutzt 0 6px 18px-6px
+ * Pattern. Material-Default ist zu hart fuer eine moderne Web-App. */
+.mud-elevation-1  { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06) !important; }
+.mud-elevation-2  { box-shadow: 0 2px 4px -1px rgba(15, 23, 42, 0.06), 0 2px 6px rgba(15, 23, 42, 0.05) !important; }
+.mud-elevation-4  { box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 4px 16px rgba(15, 23, 42, 0.06) !important; }
+.mud-elevation-8  { box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.12), 0 12px 28px rgba(15, 23, 42, 0.08) !important; }
+.mud-elevation-12 { box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.16), 0 16px 32px rgba(15, 23, 42, 0.10) !important; }
+
+.mud-theme-dark .mud-elevation-1  { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3) !important; }
+.mud-theme-dark .mud-elevation-2  { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important; }
+.mud-theme-dark .mud-elevation-4  { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important; }
+.mud-theme-dark .mud-elevation-8  { box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6) !important; }
+.mud-theme-dark .mud-elevation-12 { box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65) !important; }
+
+/* 3. Component-Overrides ================================================== */
+
+/* --- AppBar: schlanker, leichter Bottom-Border statt Material-Elevation */
+.mud-appbar {
+  border-bottom: 1px solid var(--sw-border-light);
+  backdrop-filter: saturate(180%) blur(8px);
+}
+.mud-theme-dark .mud-appbar {
+  border-bottom-color: var(--sw-border-dark);
+  background: rgba(11, 16, 32, 0.85) !important;
+}
+.mud-appbar.mud-elevation-1 {
+  box-shadow: none !important;
+}
+/* AppBar-Title (h5) — kompakter, normales Text-Color statt Gradient. */
+.mud-appbar .mud-typography-h5 {
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+}
+
+/* --- Drawer: schlanker, Brand-Cyan-Linie rechts statt grauer Trenner */
+.mud-drawer {
+  border-right: 1px solid var(--sw-border-light);
+}
+.mud-theme-dark .mud-drawer {
+  border-right-color: var(--sw-border-dark);
+  background: var(--sw-bg-dark) !important;
+}
+.mud-drawer.mud-elevation-2 { box-shadow: none !important; }
+
+/* --- NavMenu: kompakter, Brand-Hover, aktive Items mit Cyan-Akzent-Border */
+.mud-nav-item .mud-nav-link {
+  padding: 7px 14px !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500;
+  border-radius: 6px;
+  margin: 1px 8px;
+  transition: background 0.12s, color 0.12s;
+}
+.mud-nav-item .mud-nav-link:hover {
+  background: rgba(14, 165, 233, 0.08) !important;
+  color: var(--sw-accent) !important;
+}
+.mud-theme-dark .mud-nav-item .mud-nav-link:hover {
+  background: rgba(102, 207, 255, 0.10) !important;
+  color: var(--sw-wave-light) !important;
+}
+.mud-nav-item .mud-nav-link.active,
+.mud-nav-item .mud-nav-link.mud-nav-link-active {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0.04)) !important;
+  color: var(--sw-accent) !important;
+  font-weight: 600;
+  position: relative;
+}
+.mud-nav-item .mud-nav-link.active::before,
+.mud-nav-item .mud-nav-link.mud-nav-link-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--sw-accent);
+  border-radius: 3px;
+}
+.mud-theme-dark .mud-nav-item .mud-nav-link.active,
+.mud-theme-dark .mud-nav-item .mud-nav-link.mud-nav-link-active {
+  background: linear-gradient(90deg, rgba(102, 207, 255, 0.14), rgba(102, 207, 255, 0.04)) !important;
+  color: var(--sw-wave-light) !important;
+}
+.mud-theme-dark .mud-nav-item .mud-nav-link.active::before,
+.mud-theme-dark .mud-nav-item .mud-nav-link.mud-nav-link-active::before {
+  background: var(--sw-wave-light);
+}
+.mud-nav-group .mud-nav-link {
+  font-size: 0.8125rem !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* --- Cards: weicherer Look, dezente Borders, Hover-Lift wie auf der Site.
+       Aber: nur EIN Container darf eine Border tragen — Nesting (Card in
+       Card, Paper in Paper, Table in Card) flacht die inneren raus damit
+       kein "Rahmen im Rahmen im Rahmen"-Effekt entsteht. */
+.mud-card,
+.mud-paper {
+  border: 1px solid var(--sw-border-light);
+  border-radius: 10px !important;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.mud-theme-dark .mud-card,
+.mud-theme-dark .mud-paper {
+  border-color: var(--sw-border-dark);
+}
+
+/* MudPaper als reiner Layout-Helper (elevation=0) traegt oft eine Border
+   die im Layout-Kontext stoert — flach machen. */
+.mud-paper.mud-elevation-0 {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* Nested Container: innere Paper/Cards verlieren Border + Shadow, weil
+   der aeussere Container die Abgrenzung schon liefert. Verhindert das
+   verschachtelte-Rahmen-Pattern. */
+.mud-card .mud-paper,
+.mud-paper .mud-paper,
+.mud-card .mud-card,
+.mud-paper .mud-card {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* MudTable in einer Card: Tabelle ist transparent, die Card-Border
+   uebernimmt die Abgrenzung. Innere Tabelle-Schatten weg. */
+.mud-card .mud-table,
+.mud-paper .mud-table,
+.mud-card .mud-table-root,
+.mud-paper .mud-table-root {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* MudExpansionPanel: keine eigene Border, nur subtile Trennlinie
+   zwischen benachbarten Panels — sonst sieht es aus wie ein Stapel
+   Karteikarten in einer Karteikarte. */
+.mud-expand-panel {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+.mud-expand-panel + .mud-expand-panel {
+  border-top: 1px solid var(--sw-border-light);
+}
+.mud-theme-dark .mud-expand-panel + .mud-expand-panel {
+  border-top-color: var(--sw-border-dark);
+}
+.mud-expansion-panels {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 1px solid var(--sw-border-light);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.mud-theme-dark .mud-expansion-panels {
+  border-color: var(--sw-border-dark);
+}
+
+/* MainContent + Container: weniger Padding-Stacking. AppBar-Hoehe
+   bleibt 56px, dann gleich 16px Container statt 20px MainContent + 24px
+   Container. */
+.mud-main-content {
+  padding: 0 !important;
+}
+.mud-main-content > .mud-container {
+  padding: 16px 20px !important;
+  max-width: none !important;
+}
+
+/* --- Tables: kompakter, Brand-tinted Striped + Hover */
+.mud-table .mud-table-cell,
+.mud-table .mud-table-head-cell {
+  padding: 8px 12px !important;
+  font-size: 0.8125rem;
+}
+.mud-table .mud-table-head-cell {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--sw-bg-light);
+  border-bottom: 2px solid var(--sw-border-light);
+}
+.mud-theme-dark .mud-table .mud-table-head-cell {
+  background: var(--sw-bg-dark);
+  border-bottom-color: var(--sw-border-dark);
+}
+
+/* --- Buttons: Marketing-Site-Look (kompakter, font-weight 600, Hover-Lift) */
+.mud-button-root {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  transition: transform 0.12s, box-shadow 0.12s, background-color 0.12s !important;
+}
+.mud-button-filled.mud-button-filled-primary {
+  background: var(--sw-accent) !important;
+  box-shadow: 0 2px 8px -2px rgba(14, 165, 233, 0.5) !important;
+}
+.mud-button-filled.mud-button-filled-primary:hover {
+  background: var(--sw-accent-strong) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -2px rgba(14, 165, 233, 0.6) !important;
+}
+.mud-theme-dark .mud-button-filled.mud-button-filled-primary {
+  background: var(--sw-wave-light) !important;
+  color: var(--sw-bg-dark) !important;
+}
+.mud-icon-button { transition: background 0.12s; }
+
+/* --- Chips: Pill-Look mit Brand */
+.mud-chip {
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  border-radius: 999px !important;
+}
+
+/* --- Tabs: dezenter Indicator + Brand-Cyan */
+.mud-tabs .mud-tab {
+  text-transform: none !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  min-width: auto !important;
+  padding: 8px 16px !important;
+  font-size: 0.875rem;
+}
+.mud-tabs .mud-tab-slider {
+  background: var(--sw-accent) !important;
+  height: 2px !important;
+}
+.mud-theme-dark .mud-tabs .mud-tab-slider {
+  background: var(--sw-wave-light) !important;
+}
+
+/* --- Inputs: subtilere Borders, Brand-Focus */
+.mud-input-control .mud-input-outlined-border {
+  border-color: var(--sw-border-light);
+  transition: border-color 0.12s;
+}
+.mud-input-control:focus-within .mud-input-outlined-border {
+  border-color: var(--sw-accent) !important;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+.mud-theme-dark .mud-input-control:focus-within .mud-input-outlined-border {
+  border-color: var(--sw-wave-light) !important;
+  box-shadow: 0 0 0 3px rgba(102, 207, 255, 0.18);
+}
+
+/* --- Dividers: dezenter */
+.mud-divider {
+  border-color: var(--sw-border-light);
+}
+.mud-theme-dark .mud-divider {
+  border-color: var(--sw-border-dark);
+}
+
+/* 4. Custom Scrollbars ==================================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sw-border-light) transparent;
+}
+.mud-theme-dark * {
+  scrollbar-color: var(--sw-border-dark) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--sw-border-light);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--sw-accent-light);
+  background-clip: padding-box;
+}
+.mud-theme-dark *::-webkit-scrollbar-thumb {
+  background: var(--sw-border-dark);
+  background-clip: padding-box;
+}
+.mud-theme-dark *::-webkit-scrollbar-thumb:hover {
+  background: var(--sw-wave-light);
+  background-clip: padding-box;
+}
+
+/* 5. Density / Compactness =============================================== */
+.mud-main-content { padding-top: 56px !important; }  /* matches AppbarHeight */
+.mud-container { padding-left: 20px !important; padding-right: 20px !important; }
+
+/* MudDialog kompakter */
+.mud-dialog-content { padding: 16px 20px !important; }
+.mud-dialog-actions { padding: 8px 20px 16px !important; }
+
+/* MudAlert kompakter */
+.mud-alert { padding: 8px 14px !important; border-radius: 8px !important; }
+
+/* MudExpansionPanel kompakter */
+.mud-expand-panel-header { padding: 10px 16px !important; }
+.mud-expand-panel-content { padding: 12px 16px !important; }
+
+/* 6. PageHeader-Pattern ================================================== *
+ * Statt MudText Typo.h4 + MudText Typo.body2 fuer JEDEN Page-Block,
+ * koennen Pages diese .surgewave-page-head-Klasse auf einem div nutzen
+ * und damit Title + Subtitle + optionale Action-Slot in einer kompakten
+ * Reihe darstellen. Liest sich wie ein PageHeader-Bar statt einer
+ * H1-Heading-Section.                                                       */
+.surgewave-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--sw-border-light);
+}
+.mud-theme-dark .surgewave-page-head {
+  border-bottom-color: var(--sw-border-dark);
+}
+.surgewave-page-head-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--sw-text-light);
+}
+.mud-theme-dark .surgewave-page-head-title {
+  color: var(--sw-text-dark);
+}
+.surgewave-page-head-subtitle {
+  font-size: 0.8125rem;
+  color: var(--sw-muted-light);
+  margin: 2px 0 0;
+  line-height: 1.4;
+}
+.mud-theme-dark .surgewave-page-head-subtitle {
+  color: var(--sw-muted-dark);
+}
+.surgewave-page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

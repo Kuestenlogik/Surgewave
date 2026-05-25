@@ -1,0 +1,186 @@
+groups:
+  - name: surgewave-broker-alerts
+    rules:
+      # Broker Health
+      - alert: SurgewaveBrokerDown
+        expr: up{job="surgewave"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Surgewave broker {{ $labels.instance }} is down"
+          description: "Surgewave broker has been unreachable for more than 1 minute."
+          runbook_url: "https://docs.surgewave.kl.io/troubleshooting/broker-down"
+
+      - alert: SurgewaveBrokerHighCpuUsage
+        expr: rate(process_cpu_seconds_total{job="surgewave"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Surgewave broker {{ $labels.instance }} has high CPU usage"
+          description: "CPU usage has been above 80% for more than 5 minutes."
+
+      # Connection Alerts
+      - alert: SurgewaveNoActiveConnections
+        expr: surgewave_connections_active == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Surgewave broker {{ $labels.instance }} has no active connections"
+          description: "No clients connected for more than 5 minutes."
+
+      - alert: SurgewaveConnectionSpike
+        expr: rate(surgewave_connections_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual connection rate on {{ $labels.instance }}"
+          description: "Connection rate is unusually high (>100/5m). Check for connection surgewaves."
+
+      # Replication Alerts
+      - alert: SurgewaveUnderReplicatedPartitions
+        expr: surgewave_isr_count < 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Under-replicated partitions on {{ $labels.instance }}"
+          description: "Topic {{ $labels.topic }} partition {{ $labels.partition }} has ISR count {{ $value }}."
+          runbook_url: "https://docs.surgewave.kl.io/troubleshooting/under-replicated"
+
+      - alert: SurgewaveHighReplicationLag
+        expr: surgewave_replication_lag_ms > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High replication lag on {{ $labels.instance }}"
+          description: "Replication lag is {{ $value }}ms, exceeding 10 second threshold."
+
+      # Latency Alerts
+      - alert: SurgewaveHighProduceLatency
+        expr: histogram_quantile(0.99, rate(surgewave_produce_latency_ms_bucket[5m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High produce latency on {{ $labels.instance }}"
+          description: "P99 produce latency is {{ $value }}ms, exceeding 100ms threshold."
+
+      - alert: SurgewaveHighFetchLatency
+        expr: histogram_quantile(0.99, rate(surgewave_fetch_latency_ms_bucket[5m])) > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High fetch latency on {{ $labels.instance }}"
+          description: "P99 fetch latency is {{ $value }}ms, exceeding 500ms threshold."
+
+      - alert: SurgewaveHighRequestLatency
+        expr: histogram_quantile(0.99, rate(surgewave_request_duration_ms_bucket[5m])) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request latency for {{ $labels.api }} on {{ $labels.instance }}"
+          description: "P99 request latency is {{ $value }}ms."
+
+      # Error Alerts
+      - alert: SurgewaveHighErrorRate
+        expr: rate(surgewave_errors_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.instance }}"
+          description: "Error rate is {{ $value }}/sec for {{ $labels.error_type }}."
+
+      - alert: SurgewaveProduceErrors
+        expr: rate(surgewave_produce_errors_total[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Produce errors on {{ $labels.instance }}"
+          description: "Produce error rate is {{ $value }}/sec for topic {{ $labels.topic }}."
+
+      # Consumer Group Alerts
+      - alert: SurgewaveFrequentRebalances
+        expr: rate(surgewave_consumer_group_rebalances_total[10m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frequent consumer group rebalances on {{ $labels.instance }}"
+          description: "Rebalance rate is {{ $value }}/sec. Check consumer health."
+
+      # Transaction Alerts
+      - alert: SurgewaveTransactionTimeouts
+        expr: rate(surgewave_transaction_timeouts_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Transaction timeouts on {{ $labels.instance }}"
+          description: "Transaction timeout rate is {{ $value }}/sec."
+
+      - alert: SurgewaveTransactionFencing
+        expr: rate(surgewave_transaction_fencing_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Transaction fencing on {{ $labels.instance }}"
+          description: "Producer fencing rate is {{ $value }}/sec. Check for zombie producers."
+
+      - alert: SurgewaveHighTransactionAbortRate
+        expr: rate(surgewave_transaction_aborts_total[5m]) / rate(surgewave_transactions_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High transaction abort rate on {{ $labels.instance }}"
+          description: "Transaction abort rate is {{ $value | humanizePercentage }}."
+
+      # Throttling Alerts
+      - alert: SurgewaveClientsThrottled
+        expr: rate(surgewave_throttled_requests_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Clients being throttled on {{ $labels.instance }}"
+          description: "Throttle rate is {{ $value }}/sec for {{ $labels.client_id }}."
+
+      # Disk Alerts
+      - alert: SurgewaveLogSizeGrowing
+        expr: rate(surgewave_log_size_bytes[1h]) > 1073741824
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Rapid log growth on {{ $labels.instance }}"
+          description: "Log growing at {{ $value | humanize1024 }}/hour."
+
+  - name: surgewave-shm-alerts
+    rules:
+      - alert: SurgewaveShmHighLatency
+        expr: histogram_quantile(0.99, rate(surgewave_shm_request_latency_us_bucket[5m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High shared memory latency on {{ $labels.instance }}"
+          description: "P99 SHM latency is {{ $value }}µs, exceeding 100µs threshold."
+
+      - alert: SurgewaveShmNoTraffic
+        expr: rate(surgewave_shm_messages_received_total[5m]) == 0 and surgewave_shm_connections_active > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No SHM traffic despite active connections on {{ $labels.instance }}"
+          description: "Shared memory connections exist but no messages flowing."

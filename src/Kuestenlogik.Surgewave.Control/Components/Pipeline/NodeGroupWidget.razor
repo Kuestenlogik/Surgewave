@@ -1,0 +1,123 @@
+@using Blazor.Diagrams.Components.Renderers
+
+<div class="node-group @GetGroupClass()" style="@GetGroupStyle()">
+    <div class="node-group-header" @onclick="ToggleCollapsed">
+        <MudIcon Icon="@(Group.IsCollapsed ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ExpandLess)"
+                 Size="MudBlazor.Size.Small" />
+        <span class="node-group-title">@Group.GroupName</span>
+        <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Text">
+            @Group.Children.Count nodes
+        </MudChip>
+    </div>
+
+    @if (!Group.IsCollapsed)
+    {
+        <div class="node-group-content">
+            @foreach (var child in Group.Children)
+            {
+                <NodeRenderer Node="child" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public NodeGroup Group { get; set; } = null!;
+
+    private void ToggleCollapsed()
+    {
+        Group.IsCollapsed = !Group.IsCollapsed;
+        Group.Refresh();
+    }
+
+    private string GetGroupClass()
+    {
+        var classes = new List<string>();
+
+        if (Group.Selected)
+            classes.Add("selected");
+
+        if (Group.IsCollapsed)
+            classes.Add("collapsed");
+
+        classes.Add($"group-{Group.Color}");
+
+        return string.Join(" ", classes);
+    }
+
+    private string GetGroupStyle()
+    {
+        if (Group.IsCollapsed)
+        {
+            return $"width: 180px; min-height: 50px;";
+        }
+        return "";
+    }
+}
+
+<style>
+    .node-group {
+        background: rgba(var(--mud-palette-primary-rgb), 0.05);
+        border: 2px dashed var(--mud-palette-primary);
+        border-radius: 12px;
+        padding: 8px;
+        min-width: 200px;
+        min-height: 100px;
+    }
+
+    .node-group.selected {
+        border-style: solid;
+        box-shadow: 0 0 0 3px rgba(var(--mud-palette-primary-rgb), 0.2);
+    }
+
+    .node-group.collapsed {
+        min-height: auto;
+    }
+
+    .node-group-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        background: var(--mud-palette-surface);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        cursor: pointer;
+    }
+
+    .node-group.collapsed .node-group-header {
+        margin-bottom: 0;
+    }
+
+    .node-group-title {
+        font-weight: 500;
+        font-size: 13px;
+        flex: 1;
+    }
+
+    .node-group-content {
+        position: relative;
+        min-height: 80px;
+    }
+
+    .group-primary {
+        border-color: var(--mud-palette-primary);
+        background: rgba(var(--mud-palette-primary-rgb), 0.05);
+    }
+
+    .group-secondary {
+        border-color: var(--mud-palette-secondary);
+        background: rgba(var(--mud-palette-secondary-rgb), 0.05);
+    }
+
+    .group-success {
+        border-color: var(--mud-palette-success);
+        background: rgba(var(--mud-palette-success-rgb), 0.05);
+    }
+
+    .group-warning {
+        border-color: var(--mud-palette-warning);
+        background: rgba(var(--mud-palette-warning-rgb), 0.05);
+    }
+</style>

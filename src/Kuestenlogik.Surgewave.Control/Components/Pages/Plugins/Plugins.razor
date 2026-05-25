@@ -1,0 +1,560 @@
+@page "/plugins"
+@using Kuestenlogik.Surgewave.Client.Native.Operations.Plugins
+@using Kuestenlogik.Surgewave.Control.Models.Marketplace
+@inject IConnectorMarketplaceService MarketplaceService
+@inject IReviewService ReviewService
+@inject MarketplaceConfig MarketplaceConfig
+@inject NotificationState Notifications
+@inject IDialogService DialogService
+
+<PageTitle>Plugins - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Installed Plugins</MudText>
+
+@* Summary Cards *@
+<MudGrid>
+    <MudItem xs="12" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Store" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Available</MudText>
+                        <MudText Typo="Typo.h5">@_packages.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Installed</MudText>
+                        <MudText Typo="Typo.h5">@_packages.Count(p => p.IsInstalled)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" md="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Updates Available</MudText>
+                        <MudText Typo="Typo.h5">@_packages.Count(p => p.IsInstalled && p.InstalledVersion != p.Version)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    @if (MarketplaceConfig.ReviewsEnabled)
+    {
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Top Rated</MudText>
+                            <MudText Typo="Typo.h5">@_topRated.Count</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@* Search and Filters *@
+<MudCard Elevation="2" Class="mt-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Browse Connectors</MudText>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            <MudFileUpload T="IBrowserFile" Accept=".swpkg"
+                           FilesChanged="OnPluginFileSelected">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                               StartIcon="@Icons.Material.Filled.Upload"
+                               Disabled="_uploading"
+                               Class="mr-2">
+                        @(_uploading ? "Uploading..." : "Upload .swpkg")
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary"
+                           OnClick="LoadPackagesAsync" Disabled="_loading" />
+        </CardHeaderActions>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_searchQuery"
+                              Placeholder="Search connectors..."
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true"
+                              DebounceInterval="300"
+                              OnDebounceIntervalElapsed="OnSearchChanged" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudSelect T="string" @bind-Value="_filterStatus" Label="Status">
+                    <MudSelectItem Value="@("all")">All</MudSelectItem>
+                    <MudSelectItem Value="@("installed")">Installed</MudSelectItem>
+                    <MudSelectItem Value="@("not-installed")">Not Installed</MudSelectItem>
+                    <MudSelectItem Value="@("updates")">Updates Available</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudSelect T="string" @bind-Value="_filterType" Label="Type">
+                    <MudSelectItem Value="@("all")">All Types</MudSelectItem>
+                    <MudSelectItem Value="@("source")">Sources</MudSelectItem>
+                    <MudSelectItem Value="@("sink")">Sinks</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudSelect T="string" @bind-Value="_sortBy" Label="Sort By">
+                    <MudSelectItem Value="@("name")">Name</MudSelectItem>
+                    <MudSelectItem Value="@("downloads")">Most Downloads</MudSelectItem>
+                    <MudSelectItem Value="@("top-rated")">Top Rated</MudSelectItem>
+                    <MudSelectItem Value="@("most-reviewed")">Most Reviewed</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudSelect T="int" @bind-Value="_minStars" Label="Min Rating">
+                    <MudSelectItem Value="0">Any Rating</MudSelectItem>
+                    <MudSelectItem Value="1">1+ Stars</MudSelectItem>
+                    <MudSelectItem Value="2">2+ Stars</MudSelectItem>
+                    <MudSelectItem Value="3">3+ Stars</MudSelectItem>
+                    <MudSelectItem Value="4">4+ Stars</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+    </MudCardContent>
+</MudCard>
+
+@* Package Grid *@
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadPackagesAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudGrid Class="mt-4">
+        @foreach (var package in FilteredPackages)
+        {
+            <MudItem xs="12" sm="6" md="4" lg="3">
+                <MudCard Elevation="2" Class="package-card" Style="height: 100%;">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            @if (!string.IsNullOrEmpty(package.IconUrl))
+                            {
+                                <MudAvatar Size="Size.Large">
+                                    <MudImage Src="@package.IconUrl" Alt="@package.Name" />
+                                </MudAvatar>
+                            }
+                            else
+                            {
+                                <MudAvatar Color="Color.Primary" Size="Size.Large">
+                                    <MudIcon Icon="@Icons.Material.Filled.Extension" />
+                                </MudAvatar>
+                            }
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <div class="d-flex align-center">
+                                <MudText Typo="Typo.h6" Class="text-truncate" Style="max-width: 180px;">
+                                    @GetDisplayName(package.PackageId)
+                                </MudText>
+                                @if (package.IsSigned)
+                                {
+                                    <MudTooltip Text="@($"Verified signature: {package.SignerIdentity} ({package.SignerProvider})")">
+                                        <MudIcon Icon="@Icons.Material.Filled.VerifiedUser"
+                                                 Color="Color.Success"
+                                                 Size="Size.Small"
+                                                 Class="ml-2" />
+                                    </MudTooltip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                v@(package.Version)
+                                @if (package.IsInstalled && package.InstalledVersion != package.Version)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">
+                                        Update
+                                    </MudChip>
+                                }
+                            </MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            @if (package.IsInstalled)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                            }
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent Style="flex-grow: 1;">
+                        <MudText Typo="Typo.body2" Class="text-truncate-2" Style="height: 40px; overflow: hidden;">
+                            @(package.Description ?? "No description available")
+                        </MudText>
+                        <div class="mt-2">
+                            @foreach (var type in package.ConnectorTypes.Take(3))
+                            {
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(type == "source" ? Color.Success : Color.Warning)"
+                                         Class="mr-1 mb-1">
+                                    @type
+                                </MudChip>
+                            }
+                        </div>
+                        @if (MarketplaceConfig.ReviewsEnabled)
+                        {
+                            var summary = GetRatingSummary(package.PackageId);
+                            <div class="d-flex align-center mt-2">
+                                <RatingStars Value="@summary.AverageRating"
+                                             ReadOnly="true"
+                                             Size="Size.Small"
+                                             ShowValue="@(summary.TotalReviews > 0)"
+                                             ShowCount="true"
+                                             Count="@summary.TotalReviews" />
+                            </div>
+                        }
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                            <MudIcon Icon="@Icons.Material.Filled.Download" Size="Size.Small" Class="mr-1" />
+                            @FormatDownloads(package.DownloadCount) downloads
+                        </MudText>
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                   OnClick="@(() => ShowPackageDetails(package))">
+                            Details
+                        </MudButton>
+                        <AuthorizeView Policy="@SurgewavePolicies.PluginsManage">
+                            @if (!package.IsInstalled)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                           OnClick="@(() => InstallPackage(package))"
+                                           Disabled="_installing">
+                                    Install
+                                </MudButton>
+                            }
+                            else if (package.InstalledVersion != package.Version)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                                           OnClick="@(() => InstallPackage(package))"
+                                           Disabled="_installing">
+                                    Update
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                                           OnClick="@(() => UninstallPackage(package))"
+                                           Disabled="_installing">
+                                    Uninstall
+                                </MudButton>
+                            }
+                        </AuthorizeView>
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+
+    @if (FilteredPackages.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">
+            No connectors found matching your criteria.
+        </MudAlert>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _installing;
+    private bool _uploading;
+    private string? _error;
+    private List<PluginInfo> _packages = [];
+    private string _searchQuery = "";
+    private string _filterStatus = "all";
+    private string _filterType = "all";
+    private string _sortBy = "name";
+    private int _minStars;
+    private Dictionary<string, ConnectorRatingSummary> _ratingSummaries = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<ConnectorRatingSummary> _topRated = [];
+
+    private IReadOnlyList<PluginInfo> FilteredPackages
+    {
+        get
+        {
+            var filtered = _packages.AsEnumerable();
+
+            // Filter by status
+            filtered = _filterStatus switch
+            {
+                "installed" => filtered.Where(p => p.IsInstalled),
+                "not-installed" => filtered.Where(p => !p.IsInstalled),
+                "updates" => filtered.Where(p => p.IsInstalled && p.InstalledVersion != p.Version),
+                _ => filtered
+            };
+
+            // Filter by type
+            if (_filterType != "all")
+            {
+                filtered = filtered.Where(p => p.ConnectorTypes.Contains(_filterType));
+            }
+
+            // Filter by minimum rating
+            if (_minStars > 0)
+            {
+                filtered = filtered.Where(p =>
+                {
+                    var summary = GetRatingSummary(p.PackageId);
+                    return summary.TotalReviews > 0 && summary.AverageRating >= _minStars;
+                });
+            }
+
+            // Sort
+            filtered = _sortBy switch
+            {
+                "downloads" => filtered.OrderByDescending(p => p.DownloadCount),
+                "top-rated" => filtered.OrderByDescending(p => GetRatingSummary(p.PackageId).AverageRating)
+                                       .ThenByDescending(p => GetRatingSummary(p.PackageId).TotalReviews),
+                "most-reviewed" => filtered.OrderByDescending(p => GetRatingSummary(p.PackageId).TotalReviews)
+                                           .ThenByDescending(p => GetRatingSummary(p.PackageId).AverageRating),
+                _ => filtered.OrderBy(p => GetDisplayName(p.PackageId))
+            };
+
+            return filtered.ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPackagesAsync();
+    }
+
+    private async Task LoadPackagesAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await MarketplaceService.SearchAsync(_searchQuery);
+            _packages = result.Plugins.ToList();
+            await LoadRatingSummariesAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadRatingSummariesAsync()
+    {
+        try
+        {
+            _topRated = await ReviewService.GetTopRatedAsync();
+            _ratingSummaries.Clear();
+            foreach (var package in _packages)
+            {
+                var summary = await ReviewService.GetRatingSummaryAsync(package.PackageId);
+                _ratingSummaries[package.PackageId] = summary;
+            }
+        }
+        catch
+        {
+            // Rating summaries are optional; don't fail the page
+        }
+    }
+
+    private ConnectorRatingSummary GetRatingSummary(string packageId)
+    {
+        return _ratingSummaries.TryGetValue(packageId, out var summary)
+            ? summary
+            : new ConnectorRatingSummary { ConnectorId = packageId };
+    }
+
+    private async Task OnSearchChanged()
+    {
+        await LoadPackagesAsync();
+    }
+
+    private async Task ShowPackageDetails(PluginInfo package)
+    {
+        var parameters = new DialogParameters<PackageDetailsDialog>
+        {
+            { x => x.Package, package },
+            { x => x.MarketplaceService, MarketplaceService }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var dialog = await DialogService.ShowAsync<PackageDetailsDialog>(
+            package.Name, parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await LoadPackagesAsync();
+        }
+    }
+
+    private async Task InstallPackage(PluginInfo package)
+    {
+        _installing = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await MarketplaceService.InstallAsync(package.PackageId, package.Version);
+
+            if (result.IsSuccess)
+            {
+                Notifications.ShowSuccess($"Installed {package.Name} v{package.Version}" +
+                    (result.InstalledPackages.Count > 1 ? $" with {result.InstalledPackages.Count - 1} dependencies" : ""));
+                await LoadPackagesAsync();
+            }
+            else if (result.IsPartialSuccess)
+            {
+                Notifications.ShowWarning($"Partially installed {package.Name}: {string.Join(", ", result.Errors)}");
+                await LoadPackagesAsync();
+            }
+            else
+            {
+                Notifications.ShowError($"Failed to install {package.Name}: {string.Join(", ", result.Errors)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Installation failed: {ex.Message}");
+        }
+        finally
+        {
+            _installing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UninstallPackage(PluginInfo package)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Uninstall Connector",
+            $"Are you sure you want to uninstall {package.Name}?",
+            yesText: "Uninstall",
+            cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            var result = await MarketplaceService.UninstallAsync(package.PackageId);
+            if (result.IsSuccess)
+            {
+                Notifications.ShowSuccess($"Uninstalled {package.Name}");
+                await LoadPackagesAsync();
+            }
+            else
+            {
+                Notifications.ShowError($"Failed to uninstall: {result.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Failed to uninstall: {ex.Message}");
+        }
+    }
+
+    private static string GetDisplayName(string packageId)
+    {
+        // Convert "Kuestenlogik.Surgewave.Connector.S3" to "S3"
+        var parts = packageId.Split('.');
+        return parts.Length > 0 ? parts[^1] : packageId;
+    }
+
+    private static string FormatDownloads(long count)
+    {
+        return count switch
+        {
+            >= 1_000_000 => $"{count / 1_000_000.0:F1}M",
+            >= 1_000 => $"{count / 1_000.0:F1}K",
+            _ => count.ToString()
+        };
+    }
+
+    private async Task OnPluginFileSelected(IBrowserFile? file)
+    {
+        if (file == null) return;
+        _uploading = true;
+        StateHasChanged();
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024);
+            var result = await MarketplaceService.UploadPluginAsync(stream, file.Name);
+            if (result.IsSuccess)
+            {
+                Notifications.ShowSuccess($"Plugin {result.PluginId} v{result.Version} installed successfully");
+                await LoadPackagesAsync();
+            }
+            else
+            {
+                Notifications.ShowError($"Upload failed: {result.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Upload failed: {ex.Message}");
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
+    }
+}
+
+<style>
+    .package-card {
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .package-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    }
+
+    .text-truncate-2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+</style>

@@ -1,0 +1,426 @@
+@page "/quotas/bandwidth"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IBandwidthQuotaApiClient BandwidthQuotaApi
+@inject NotificationState Notification
+@implements IDisposable
+
+<PageTitle>Bandwidth Quotas - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Bandwidth Quotas</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Per-client and per-user bandwidth throttling. Prevents any single client from saturating the network.
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+<MudGrid>
+    @* Configuration Card *@
+    <MudItem xs="12" lg="4">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-2" />
+                Configuration
+            </MudText>
+
+            @if (_config != null)
+            {
+                <MudChip T="string" Color="@(_config.Enabled ? Color.Success : Color.Default)" Size="Size.Small">
+                    @(_config.Enabled ? "Enabled" : "Disabled")
+                </MudChip>
+
+                <MudDivider Class="my-3" />
+
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Default Produce Limit</MudText>
+                <MudText Typo="Typo.h6">@FormatRate(_config.DefaultProduceBytesPerSec)</MudText>
+
+                <MudText Typo="Typo.subtitle2" Class="mb-1 mt-3">Default Consume Limit</MudText>
+                <MudText Typo="Typo.h6">@FormatRate(_config.DefaultConsumeBytesPerSec)</MudText>
+
+                <MudDivider Class="my-3" />
+
+                <MudText Typo="Typo.caption">Window: @(_config.EnforcementWindowMs)ms</MudText>
+                <br />
+                <MudText Typo="Typo.caption">Delay Factor: @(_config.ThrottleDelayFactor)x</MudText>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* Metrics Card *@
+    <MudItem xs="12" lg="4">
+        <MudPaper Elevation="2" Class="pa-4">
+            <div class="d-flex align-center justify-space-between mb-4">
+                <MudText Typo="Typo.h6">
+                    <MudIcon Icon="@Icons.Material.Filled.Analytics" Class="mr-2" />
+                    Metrics
+                </MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadDataAsync" />
+            </div>
+
+            @if (_metrics != null)
+            {
+                <MudGrid>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.subtitle2">Clients Tracked</MudText>
+                        <MudText Typo="Typo.h5">@_metrics.TotalClientsTracked</MudText>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.subtitle2">Clients Throttled</MudText>
+                        <MudText Typo="Typo.h5" Color="@(_metrics.TotalClientsThrottled > 0 ? Color.Warning : Color.Default)">
+                            @_metrics.TotalClientsThrottled
+                        </MudText>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.subtitle2">Bytes Throttled</MudText>
+                        <MudText Typo="Typo.h5">@FormatBytes(_metrics.TotalBytesThrottled)</MudText>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.subtitle2">Throttle Events</MudText>
+                        <MudText Typo="Typo.h5">@_metrics.TotalThrottleEvents</MudText>
+                    </MudItem>
+                </MudGrid>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* Set Quota Card *@
+    <MudItem xs="12" lg="4">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.AddCircle" Class="mr-2" />
+                Set Quota Override
+            </MudText>
+
+            <AuthorizeView Policy="@SurgewavePolicies.QuotasManage">
+                <MudRadioGroup @bind-Value="_setQuotaType">
+                    <MudRadio Value="@("client")" Color="Color.Primary">Client</MudRadio>
+                    <MudRadio Value="@("user")" Color="Color.Secondary">User</MudRadio>
+                </MudRadioGroup>
+
+                <MudTextField @bind-Value="_setQuotaEntity" Label="@(_setQuotaType == "client" ? "Client ID" : "Username")"
+                              Variant="Variant.Outlined" Class="mt-2" />
+
+                <MudNumericField @bind-Value="_setProduceBps" Label="Produce Bytes/sec"
+                                 Variant="Variant.Outlined" Class="mt-2"
+                                 HelperText="0 = unlimited"
+                                 Adornment="Adornment.End" AdornmentText="B/s" />
+
+                <MudNumericField @bind-Value="_setConsumeBps" Label="Consume Bytes/sec"
+                                 Variant="Variant.Outlined" Class="mt-2"
+                                 HelperText="0 = unlimited"
+                                 Adornment="Adornment.End" AdornmentText="B/s" />
+
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3"
+                           OnClick="SetQuotaAsync" Disabled="@(string.IsNullOrWhiteSpace(_setQuotaEntity) || _saving)">
+                    @if (_saving)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    Set Quota
+                </MudButton>
+            </AuthorizeView>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* Client Usage Table *@
+<MudPaper Elevation="2" Class="pa-4 mt-4">
+    <div class="d-flex align-center justify-space-between mb-4">
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.People" Class="mr-2" />
+            Client Bandwidth Usage
+        </MudText>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Refresh
+        </MudButton>
+    </div>
+
+    @if (_clients.Count == 0 && !_loading)
+    {
+        <MudAlert Severity="Severity.Info">No active clients</MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable Dense="true" Hover="true" Striped="true">
+            <thead>
+                <tr>
+                    <th>Client ID</th>
+                    <th>Produce Rate</th>
+                    <th>Produce Limit</th>
+                    <th>Produce Util.</th>
+                    <th>Consume Rate</th>
+                    <th>Consume Limit</th>
+                    <th>Consume Util.</th>
+                    <th>Status</th>
+                    <th>Last Activity</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var client in _clients)
+                {
+                    <tr>
+                        <td>
+                            <MudTooltip Text="@client.ClientId">
+                                <code>@TruncateId(client.ClientId)</code>
+                            </MudTooltip>
+                        </td>
+                        <td>@FormatRate(client.ProduceBytesPerSec)</td>
+                        <td>@FormatRate(client.ProduceLimitBytesPerSec)</td>
+                        <td>
+                            <MudProgressLinear Value="@client.ProduceUtilizationPercent" Color="@GetUtilColor(client.ProduceUtilizationPercent)"
+                                               Size="Size.Small" Style="min-width: 80px;" />
+                            <MudText Typo="Typo.caption">@client.ProduceUtilizationPercent.ToString("F1")%</MudText>
+                        </td>
+                        <td>@FormatRate(client.ConsumeBytesPerSec)</td>
+                        <td>@FormatRate(client.ConsumeLimitBytesPerSec)</td>
+                        <td>
+                            <MudProgressLinear Value="@client.ConsumeUtilizationPercent" Color="@GetUtilColor(client.ConsumeUtilizationPercent)"
+                                               Size="Size.Small" Style="min-width: 80px;" />
+                            <MudText Typo="Typo.caption">@client.ConsumeUtilizationPercent.ToString("F1")%</MudText>
+                        </td>
+                        <td>
+                            @if (client.IsThrottled)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error">Throttled</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success">OK</MudChip>
+                            }
+                        </td>
+                        <td>@FormatTimeAgo(client.LastActivityAt)</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</MudPaper>
+
+@* Overrides Tables *@
+@if (_config != null && (_config.ClientOverrides.Count > 0 || _config.UserOverrides.Count > 0))
+{
+    <MudGrid Class="mt-4">
+        @if (_config.ClientOverrides.Count > 0)
+        {
+            <MudItem xs="12" lg="6">
+                <MudPaper Elevation="2" Class="pa-4">
+                    <MudText Typo="Typo.h6" Class="mb-3">Client Overrides</MudText>
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Client ID</th>
+                                <th>Produce Limit</th>
+                                <th>Consume Limit</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var (id, q) in _config.ClientOverrides)
+                            {
+                                <tr>
+                                    <td><code>@id</code></td>
+                                    <td>@FormatRate(q.ProduceBytesPerSec)</td>
+                                    <td>@FormatRate(q.ConsumeBytesPerSec)</td>
+                                    <td>
+                                        <AuthorizeView Policy="@SurgewavePolicies.QuotasManage">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                           Color="Color.Error" OnClick="@(() => RemoveClientQuotaAsync(id))" />
+                                        </AuthorizeView>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+            </MudItem>
+        }
+
+        @if (_config.UserOverrides.Count > 0)
+        {
+            <MudItem xs="12" lg="6">
+                <MudPaper Elevation="2" Class="pa-4">
+                    <MudText Typo="Typo.h6" Class="mb-3">User Overrides</MudText>
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Produce Limit</th>
+                                <th>Consume Limit</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var (user, q) in _config.UserOverrides)
+                            {
+                                <tr>
+                                    <td><code>@user</code></td>
+                                    <td>@FormatRate(q.ProduceBytesPerSec)</td>
+                                    <td>@FormatRate(q.ConsumeBytesPerSec)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private Timer? _refreshTimer;
+
+    private BandwidthQuotaConfigModel? _config;
+    private BandwidthQuotaMetricsModel? _metrics;
+    private List<BandwidthUsageModel> _clients = [];
+
+    // Set quota form
+    private string _setQuotaType = "client";
+    private string _setQuotaEntity = "";
+    private long _setProduceBps;
+    private long _setConsumeBps;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+        _refreshTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadDataAsync();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var configTask = BandwidthQuotaApi.GetConfigAsync();
+            var metricsTask = BandwidthQuotaApi.GetMetricsAsync();
+            var clientsTask = BandwidthQuotaApi.ListAllUsageAsync();
+
+            await Task.WhenAll(configTask, metricsTask, clientsTask);
+
+            _config = await configTask;
+            _metrics = await metricsTask;
+            _clients = (await clientsTask).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load data: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SetQuotaAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_setQuotaEntity)) return;
+
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            bool success;
+            if (_setQuotaType == "client")
+                success = await BandwidthQuotaApi.SetClientQuotaAsync(_setQuotaEntity, _setProduceBps, _setConsumeBps);
+            else
+                success = await BandwidthQuotaApi.SetUserQuotaAsync(_setQuotaEntity, _setProduceBps, _setConsumeBps);
+
+            if (success)
+            {
+                Notification.ShowSuccess($"Bandwidth quota set for {_setQuotaType} '{_setQuotaEntity}'");
+                _setQuotaEntity = "";
+                _setProduceBps = 0;
+                _setConsumeBps = 0;
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to set quota");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to set quota: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RemoveClientQuotaAsync(string clientId)
+    {
+        var success = await BandwidthQuotaApi.RemoveClientQuotaAsync(clientId);
+        if (success)
+        {
+            Notification.ShowSuccess($"Removed bandwidth quota for client '{clientId}'");
+            await LoadDataAsync();
+        }
+        else
+        {
+            Notification.ShowError($"Failed to remove quota for '{clientId}'");
+        }
+    }
+
+    private static string FormatRate(long bytesPerSec)
+    {
+        if (bytesPerSec <= 0) return "Unlimited";
+        if (bytesPerSec < 1024) return $"{bytesPerSec} B/s";
+        if (bytesPerSec < 1024 * 1024) return $"{bytesPerSec / 1024.0:F1} KB/s";
+        if (bytesPerSec < 1024L * 1024 * 1024) return $"{bytesPerSec / (1024.0 * 1024):F1} MB/s";
+        return $"{bytesPerSec / (1024.0 * 1024 * 1024):F1} GB/s";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private static string TruncateId(string id) =>
+        id.Length > 24 ? id[..21] + "..." : id;
+
+    private static string FormatTimeAgo(DateTimeOffset time)
+    {
+        var diff = DateTimeOffset.UtcNow - time;
+        if (diff.TotalSeconds < 60) return $"{(int)diff.TotalSeconds}s ago";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        return $"{(int)diff.TotalDays}d ago";
+    }
+
+    private static Color GetUtilColor(double percent) => percent switch
+    {
+        >= 90 => Color.Error,
+        >= 70 => Color.Warning,
+        _ => Color.Success
+    };
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+}

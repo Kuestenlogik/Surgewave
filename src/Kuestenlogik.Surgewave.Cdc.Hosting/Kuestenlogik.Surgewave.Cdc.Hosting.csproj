@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave CDC — host integration: ASP.NET Core REST endpoint (MapSurgewaveCdc) for inspecting CDC source status. Reference this from a host that runs Surgewave CDC to expose its REST surface.</Description>
+    <PackageTags>surgewave;cdc;hosting;rest;http</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Cdc\Kuestenlogik.Surgewave.Cdc.csproj" />
+  </ItemGroup>
+
+</Project>

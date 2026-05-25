@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service ProducerService {
+  rpc Produce(ProduceRequest) returns (ProduceResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/topics/{topic}/records"
+      body: "*"
+      additional_bindings {
+        post: "/v3/topics/{topic}/records"
+        body: "*"
+      }
+    };
+  }
+  rpc ProduceBatch(stream ProduceRequest) returns (ProduceBatchResponse);
+  rpc ProduceStream(stream ProduceRequest) returns (stream ProduceResponse);
+}
+
+message ProduceRequest {
+  string cluster_id = 1;
+  string topic = 2;
+  int32 partition = 3;
+  Record record = 4;
+  bool acks_required = 5;
+  string transactional_id = 6;
+}
+
+message ProduceResponse {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  int64 timestamp = 4;
+  ResponseStatus status = 5;
+}
+
+message ProduceBatchResponse {
+  int32 total_records = 1;
+  int32 successful_records = 2;
+  int32 failed_records = 3;
+  repeated ProduceResponse responses = 4;
+}

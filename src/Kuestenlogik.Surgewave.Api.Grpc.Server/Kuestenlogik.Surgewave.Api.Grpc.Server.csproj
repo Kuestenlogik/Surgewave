@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Kuestenlogik.Surgewave.Api.Grpc.Server</RootNamespace>
+    <Description>gRPC server implementation for Kuestenlogik.Surgewave broker</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.Grpc\Kuestenlogik.Surgewave.Api.Grpc.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+  </ItemGroup>
+
+</Project>

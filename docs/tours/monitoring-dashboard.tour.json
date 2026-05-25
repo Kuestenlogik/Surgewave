@@ -1,0 +1,31 @@
+{
+    "id": "docs-monitoring-dashboard",
+    "title": "Dashboard Documentation Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "overview",
+            "title": "Control Dashboard",
+            "text": "Surgewave Control provides a customizable Blazor dashboard with 14 widgets organized in three rows: summary metrics at the top, detailed metrics in the middle, and data tables at the bottom.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "widgets",
+            "title": "Dashboard Widgets",
+            "text": "Widgets include Cluster Status, Throughput, Brokers, Topics, Latency charts, Consumer Groups, Partitions, Errors, Pipelines, Connectors, and Cluster Information. Metrics auto-refresh every 5 seconds.",
+            "attachTo": { "element": "#dashboard-widgets", "on": "bottom" }
+        },
+        {
+            "id": "customization",
+            "title": "Widget Customization",
+            "text": "Widgets support drag-and-drop reordering, visibility toggling, and theme switching between dark and light modes. All preferences persist to localStorage and restore on reload.",
+            "attachTo": { "element": "#widget-customization", "on": "bottom" }
+        },
+        {
+            "id": "alerting",
+            "title": "Consumer Lag and Alerting",
+            "text": "The dashboard integrates with Prometheus for alerting on consumer lag, broker downtime, under-replicated partitions, high latency, and error rates. Consumer group detail pages show per-partition lag.",
+            "attachTo": { "element": "#alerting-overview", "on": "bottom" }
+        }
+    ]
+}

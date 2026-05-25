@@ -1,0 +1,587 @@
+@page "/alerts"
+@inject ILocalStorageService LocalStorage
+@inject IMetricsClient MetricsClient
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Alerts - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Alert Management</MudText>
+
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true"
+         PanelClass="pa-4" Class="mb-4">
+    @* Tab 1: Active Alerts *@
+    <MudTabPanel Text="Active Alerts" Icon="@Icons.Material.Filled.NotificationsActive"
+                 BadgeData="@_activeAlerts.Count(a => a.AcknowledgedAt == null)"
+                 BadgeColor="Color.Error">
+        @if (_activeAlerts.Count == 0)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Class="mr-2" />
+                No active alerts. All systems operational.
+            </MudAlert>
+        }
+        else
+        {
+            <div class="d-flex gap-2 mb-3">
+                <MudChip T="string" Color="Color.Error" Size="Size.Small">
+                    @_activeAlerts.Count(a => a.Severity == AlertSeverity.Critical) Critical
+                </MudChip>
+                <MudChip T="string" Color="Color.Warning" Size="Size.Small">
+                    @_activeAlerts.Count(a => a.Severity == AlertSeverity.Warning) Warning
+                </MudChip>
+                <MudChip T="string" Color="Color.Info" Size="Size.Small">
+                    @_activeAlerts.Count(a => a.Severity == AlertSeverity.Info) Info
+                </MudChip>
+                <MudSpacer />
+                <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary"
+                           OnClick="AcknowledgeAllAsync">
+                    Acknowledge All
+                </MudButton>
+            </div>
+
+            @foreach (var alert in _activeAlerts.OrderByDescending(a => a.Severity).ThenByDescending(a => a.FiredAt))
+            {
+                <MudCard Elevation="1" Class="mb-2" Style="@($"border-left: 4px solid {GetSeverityBorderColor(alert.Severity)};")">
+                    <MudCardContent Class="pa-3">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@GetSeverityIcon(alert.Severity)" Color="@GetSeverityColor(alert.Severity)" />
+                            <div style="flex: 1;">
+                                <div class="d-flex align-center gap-2">
+                                    <MudText Typo="Typo.subtitle2">@alert.RuleName</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetAlertTypeColor(alert.Type)">
+                                        @alert.Type
+                                    </MudChip>
+                                    @if (alert.AcknowledgedAt != null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default">
+                                            ACK by @alert.AcknowledgedBy
+                                        </MudChip>
+                                    }
+                                </div>
+                                <MudText Typo="Typo.body2">@alert.Message</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Fired @alert.FiredAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                                    | Value: @alert.CurrentValue.ToString("N1") (Threshold: @alert.Threshold.ToString("N1"))
+                                </MudText>
+                            </div>
+                            @if (alert.AcknowledgedAt == null)
+                            {
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary"
+                                           OnClick="@(() => AcknowledgeAlertAsync(alert))">
+                                    ACK
+                                </MudButton>
+                            }
+                            <MudIconButton Icon="@Icons.Material.Filled.Done" Size="Size.Small" Color="Color.Success"
+                                           OnClick="@(() => ResolveAlertAsync(alert))" />
+                        </div>
+                    </MudCardContent>
+                </MudCard>
+            }
+        }
+    </MudTabPanel>
+
+    @* Tab 2: Alert Rules *@
+    <MudTabPanel Text="Rules" Icon="@Icons.Material.Filled.Rule">
+        <div class="d-flex justify-end gap-2 mb-3">
+            <MudMenu Label="Add from Template" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AutoAwesome"
+                     Color="Color.Secondary">
+                <MudMenuItem OnClick="@(() => AddTemplateRule("High Consumer Lag", AlertRuleType.ConsumerLag, 10000))">
+                    High Consumer Lag (&gt; 10K)
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddTemplateRule("Critical Consumer Lag", AlertRuleType.ConsumerLag, 100000, AlertSeverity.Critical))">
+                    Critical Consumer Lag (&gt; 100K)
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddTemplateRule("High Error Rate", AlertRuleType.ErrorRate, 10))">
+                    High Error Rate (&gt; 10/sec)
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddTemplateRule("High Latency (P99)", AlertRuleType.HighLatency, 100))">
+                    High P99 Latency (&gt; 100ms)
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddTemplateRule("Under-Replicated Partitions", AlertRuleType.UnderReplicatedPartitions, 1, AlertSeverity.Critical))">
+                    Under-Replicated Partitions
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddTemplateRule("Low Throughput", AlertRuleType.LowThroughput, 0))">
+                    Low Throughput (0 msg/s)
+                </MudMenuItem>
+            </MudMenu>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddNewRule">
+                New Rule
+            </MudButton>
+        </div>
+
+        @if (_rules.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">
+                No alert rules configured. Add rules using the templates or create custom rules.
+            </MudAlert>
+        }
+        else
+        {
+            @foreach (var rule in _rules)
+            {
+                <MudCard Elevation="1" Class="mb-2">
+                    <MudCardContent Class="pa-3">
+                        <MudGrid>
+                            <MudItem xs="12" md="3">
+                                <MudTextField @bind-Value="rule.Name" Label="Name" Variant="Variant.Text"
+                                              Margin="Margin.Dense" />
+                            </MudItem>
+                            <MudItem xs="12" md="2">
+                                <MudSelect @bind-Value="rule.Type" Label="Type" Variant="Variant.Text" Margin="Margin.Dense">
+                                    @foreach (AlertRuleType type in Enum.GetValues<AlertRuleType>())
+                                    {
+                                        <MudSelectItem Value="@type">@type</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="2">
+                                <MudSelect @bind-Value="rule.Severity" Label="Severity" Variant="Variant.Text" Margin="Margin.Dense">
+                                    @foreach (AlertSeverity sev in Enum.GetValues<AlertSeverity>())
+                                    {
+                                        <MudSelectItem Value="@sev">@sev</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="2">
+                                <MudNumericField @bind-Value="rule.Threshold" Label="Threshold" Variant="Variant.Text"
+                                                 Margin="Margin.Dense" />
+                            </MudItem>
+                            <MudItem xs="12" md="1">
+                                <MudSwitch T="bool" @bind-Value="rule.Enabled" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" md="2" Class="d-flex align-center justify-end">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                               Color="Color.Error" OnClick="@(() => DeleteRule(rule))" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudCardContent>
+                </MudCard>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3"
+                       OnClick="SaveRulesAsync">
+                Save Rules
+            </MudButton>
+        }
+    </MudTabPanel>
+
+    @* Tab 3: Notification Channels *@
+    <MudTabPanel Text="Channels" Icon="@Icons.Material.Filled.Notifications">
+        <div class="d-flex justify-end mb-3">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddChannel">
+                Add Channel
+            </MudButton>
+        </div>
+
+        @if (_channels.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">
+                No notification channels configured. Alerts will only appear in the UI.
+            </MudAlert>
+        }
+        else
+        {
+            @foreach (var channel in _channels)
+            {
+                <MudCard Elevation="1" Class="mb-2">
+                    <MudCardContent Class="pa-3">
+                        <MudGrid>
+                            <MudItem xs="12" md="3">
+                                <MudTextField @bind-Value="channel.Name" Label="Name" Variant="Variant.Text"
+                                              Margin="Margin.Dense" />
+                            </MudItem>
+                            <MudItem xs="12" md="2">
+                                <MudSelect @bind-Value="channel.Type" Label="Type" Variant="Variant.Text" Margin="Margin.Dense">
+                                    @foreach (NotificationChannelType type in Enum.GetValues<NotificationChannelType>())
+                                    {
+                                        <MudSelectItem Value="@type">@type</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField Value="@GetChannelUrl(channel)" Label="@GetChannelUrlLabel(channel.Type)"
+                                              Variant="Variant.Text" Margin="Margin.Dense"
+                                              Placeholder="@GetChannelPlaceholder(channel.Type)"
+                                              ValueChanged="@((string v) => SetChannelUrl(channel, v))" />
+                            </MudItem>
+                            <MudItem xs="12" md="1">
+                                <MudSwitch T="bool" @bind-Value="channel.Enabled" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" md="2" Class="d-flex align-center justify-end gap-1">
+                                <MudTooltip Text="Send Test">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Send" Size="Size.Small"
+                                                   Color="Color.Info" OnClick="@(() => TestChannel(channel))" />
+                                </MudTooltip>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                               Color="Color.Error" OnClick="@(() => DeleteChannel(channel))" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudCardContent>
+                </MudCard>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3"
+                       OnClick="SaveChannelsAsync">
+                Save Channels
+            </MudButton>
+        }
+    </MudTabPanel>
+
+    @* Tab 4: Alert History *@
+    <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History">
+        @if (_alertHistory.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No alert history.</MudAlert>
+        }
+        else
+        {
+            <MudTable Items="@_alertHistory.OrderByDescending(a => a.FiredAt)" Dense="true" Hover="true" Striped="true"
+                      T="AlertEvent" RowsPerPage="20">
+                <HeaderContent>
+                    <MudTh>Severity</MudTh>
+                    <MudTh>Rule</MudTh>
+                    <MudTh>Type</MudTh>
+                    <MudTh>Message</MudTh>
+                    <MudTh>Fired</MudTh>
+                    <MudTh>Status</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>
+                        <MudIcon Icon="@GetSeverityIcon(context.Severity)" Color="@GetSeverityColor(context.Severity)" Size="Size.Small" />
+                    </MudTd>
+                    <MudTd>@context.RuleName</MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small" Color="@GetAlertTypeColor(context.Type)">@context.Type</MudChip>
+                    </MudTd>
+                    <MudTd>
+                        <MudText Typo="Typo.body2">@Truncate(context.Message, 60)</MudText>
+                    </MudTd>
+                    <MudTd>
+                        <MudText Typo="Typo.caption">@context.FiredAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</MudText>
+                    </MudTd>
+                    <MudTd>
+                        @if (context.IsResolved)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">Resolved</MudChip>
+                        }
+                        else if (context.AcknowledgedAt != null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">Acknowledged</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error">Active</MudChip>
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <PagerContent>
+                    <MudTablePager />
+                </PagerContent>
+            </MudTable>
+
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" Class="mt-3"
+                       OnClick="ClearHistoryAsync" StartIcon="@Icons.Material.Filled.DeleteSweep">
+                Clear History
+            </MudButton>
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private int _activeTab;
+    private Timer? _evaluationTimer;
+
+    private List<AlertRule> _rules = [];
+    private List<AlertEvent> _activeAlerts = [];
+    private List<AlertEvent> _alertHistory = [];
+    private List<NotificationChannel> _channels = [];
+
+    private const string RulesStorageKey = "surgewave-alert-rules";
+    private const string AlertsStorageKey = "surgewave-alert-events";
+    private const string ChannelsStorageKey = "surgewave-alert-channels";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadConfigAsync();
+        StartEvaluationTimer();
+    }
+
+    private async Task LoadConfigAsync()
+    {
+        try
+        {
+            _rules = await LocalStorage.GetItemAsync<List<AlertRule>>(RulesStorageKey) ?? [];
+            _alertHistory = await LocalStorage.GetItemAsync<List<AlertEvent>>(AlertsStorageKey) ?? [];
+            _channels = await LocalStorage.GetItemAsync<List<NotificationChannel>>(ChannelsStorageKey) ?? [];
+            _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
+        }
+        catch
+        {
+            _rules = [];
+            _alertHistory = [];
+            _channels = [];
+            _activeAlerts = [];
+        }
+    }
+
+    private void StartEvaluationTimer()
+    {
+        _evaluationTimer?.Dispose();
+        _evaluationTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await EvaluateRulesAsync();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    private async Task EvaluateRulesAsync()
+    {
+        try
+        {
+            var metrics = await MetricsClient.GetMetricsAsync();
+            var lags = await ApiClient.GetAllConsumerLagsAsync(ClusterState.SelectedClusterId);
+
+            foreach (var rule in _rules.Where(r => r.Enabled))
+            {
+                var (triggered, currentValue, message) = EvaluateRule(rule, metrics, lags);
+                if (!triggered) continue;
+
+                // Check cooldown
+                var lastFired = _alertHistory
+                    .Where(a => a.RuleId == rule.Id)
+                    .OrderByDescending(a => a.FiredAt)
+                    .FirstOrDefault();
+
+                if (lastFired != null && (DateTime.UtcNow - lastFired.FiredAt).TotalMinutes < rule.CooldownMinutes)
+                    continue;
+
+                var alertEvent = new AlertEvent
+                {
+                    RuleId = rule.Id,
+                    RuleName = rule.Name,
+                    Type = rule.Type,
+                    Severity = rule.Severity,
+                    Message = message,
+                    CurrentValue = currentValue,
+                    Threshold = rule.Threshold,
+                    FiredAt = DateTime.UtcNow
+                };
+
+                _alertHistory.Add(alertEvent);
+                _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
+                await SaveAlertsAsync();
+            }
+        }
+        catch
+        {
+            // Silently skip evaluation failures
+        }
+    }
+
+    private static (bool Triggered, double CurrentValue, string Message) EvaluateRule(
+        AlertRule rule, MetricsSnapshot metrics, IReadOnlyList<ConsumerGroupLag> lags)
+    {
+        return rule.Type switch
+        {
+            AlertRuleType.ConsumerLag => EvaluateConsumerLag(rule, lags),
+            AlertRuleType.ErrorRate => (metrics.ErrorsTotal + metrics.ProduceErrorsTotal > rule.Threshold,
+                metrics.ErrorsTotal + metrics.ProduceErrorsTotal,
+                $"Error count {metrics.ErrorsTotal + metrics.ProduceErrorsTotal} exceeds threshold {rule.Threshold}"),
+            AlertRuleType.HighLatency => (metrics.ProduceLatencyP99 > rule.Threshold,
+                metrics.ProduceLatencyP99,
+                $"P99 produce latency {metrics.ProduceLatencyP99:N1}ms exceeds threshold {rule.Threshold}ms"),
+            AlertRuleType.LowThroughput => (metrics.MessagesProducedTotal <= rule.Threshold,
+                metrics.MessagesProducedTotal,
+                $"Throughput is at {metrics.MessagesProducedTotal:N0} messages (threshold: {rule.Threshold})"),
+            _ => (false, 0, "")
+        };
+    }
+
+    private static (bool Triggered, double CurrentValue, string Message) EvaluateConsumerLag(
+        AlertRule rule, IReadOnlyList<ConsumerGroupLag> lags)
+    {
+        if (string.IsNullOrWhiteSpace(rule.Target))
+        {
+            var maxLag = lags.Count > 0 ? lags.Max(g => g.TotalLag) : 0;
+            return (maxLag > rule.Threshold, maxLag,
+                $"Max consumer lag {maxLag:N0} exceeds threshold {rule.Threshold:N0}");
+        }
+
+        var targetGroup = lags.FirstOrDefault(g => g.GroupId == rule.Target);
+        if (targetGroup == null) return (false, 0, "");
+        return (targetGroup.TotalLag > rule.Threshold, targetGroup.TotalLag,
+            $"Consumer group '{rule.Target}' lag {targetGroup.TotalLag:N0} exceeds threshold {rule.Threshold:N0}");
+    }
+
+    private void AddNewRule()
+    {
+        _rules.Add(new AlertRule
+        {
+            Name = $"Rule {_rules.Count + 1}",
+            Type = AlertRuleType.ConsumerLag,
+            Severity = AlertSeverity.Warning,
+            Threshold = 1000,
+            Enabled = true
+        });
+    }
+
+    private void AddTemplateRule(string name, AlertRuleType type, double threshold,
+        AlertSeverity severity = AlertSeverity.Warning)
+    {
+        _rules.Add(new AlertRule
+        {
+            Name = name,
+            Type = type,
+            Severity = severity,
+            Threshold = threshold,
+            Enabled = true
+        });
+    }
+
+    private void DeleteRule(AlertRule rule) => _rules.Remove(rule);
+
+    private async Task SaveRulesAsync()
+    {
+        await LocalStorage.SetItemAsync(RulesStorageKey, _rules);
+        Notification.ShowSuccess("Alert rules saved");
+    }
+
+    private async Task AcknowledgeAlertAsync(AlertEvent alert)
+    {
+        alert.AcknowledgedAt = DateTime.UtcNow;
+        alert.AcknowledgedBy = "admin";
+        await SaveAlertsAsync();
+    }
+
+    private async Task AcknowledgeAllAsync()
+    {
+        foreach (var alert in _activeAlerts.Where(a => a.AcknowledgedAt == null))
+        {
+            alert.AcknowledgedAt = DateTime.UtcNow;
+            alert.AcknowledgedBy = "admin";
+        }
+        await SaveAlertsAsync();
+    }
+
+    private async Task ResolveAlertAsync(AlertEvent alert)
+    {
+        alert.IsResolved = true;
+        alert.ResolvedAt = DateTime.UtcNow;
+        _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
+        await SaveAlertsAsync();
+    }
+
+    private async Task SaveAlertsAsync()
+    {
+        await LocalStorage.SetItemAsync(AlertsStorageKey, _alertHistory);
+    }
+
+    private async Task ClearHistoryAsync()
+    {
+        _alertHistory = _alertHistory.Where(a => !a.IsResolved).ToList();
+        _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
+        await SaveAlertsAsync();
+        Notification.ShowSuccess("Alert history cleared");
+    }
+
+    // --- Notification Channels ---
+
+    private void AddChannel()
+    {
+        _channels.Add(new NotificationChannel
+        {
+            Name = $"Channel {_channels.Count + 1}",
+            Type = NotificationChannelType.Slack,
+            Enabled = true
+        });
+    }
+
+    private void DeleteChannel(NotificationChannel channel) => _channels.Remove(channel);
+
+    private async Task SaveChannelsAsync()
+    {
+        await LocalStorage.SetItemAsync(ChannelsStorageKey, _channels);
+        Notification.ShowSuccess("Notification channels saved");
+    }
+
+    private void TestChannel(NotificationChannel channel)
+    {
+        Notification.ShowInfo($"Test notification sent to '{channel.Name}' ({channel.Type})");
+    }
+
+    private static string GetChannelUrl(NotificationChannel channel) =>
+        channel.Config.GetValueOrDefault("url", "");
+
+    private static void SetChannelUrl(NotificationChannel channel, string value) =>
+        channel.Config["url"] = value;
+
+    private static string GetChannelUrlLabel(NotificationChannelType type) => type switch
+    {
+        NotificationChannelType.Slack => "Webhook URL",
+        NotificationChannelType.MicrosoftTeams => "Webhook URL",
+        NotificationChannelType.PagerDuty => "Integration Key",
+        NotificationChannelType.Email => "SMTP Server / Recipients",
+        NotificationChannelType.Webhook => "Webhook URL",
+        _ => "URL"
+    };
+
+    private static string GetChannelPlaceholder(NotificationChannelType type) => type switch
+    {
+        NotificationChannelType.Slack => "https://hooks.slack.com/services/...",
+        NotificationChannelType.MicrosoftTeams => "https://outlook.office.com/webhook/...",
+        NotificationChannelType.PagerDuty => "your-integration-key",
+        NotificationChannelType.Email => "smtp://host:port;to@example.com",
+        NotificationChannelType.Webhook => "https://your-webhook.example.com/alerts",
+        _ => ""
+    };
+
+    // --- UI Helpers ---
+
+    private static Color GetSeverityColor(AlertSeverity severity) => severity switch
+    {
+        AlertSeverity.Critical => Color.Error,
+        AlertSeverity.Warning => Color.Warning,
+        AlertSeverity.Info => Color.Info,
+        _ => Color.Default
+    };
+
+    private static string GetSeverityBorderColor(AlertSeverity severity) => severity switch
+    {
+        AlertSeverity.Critical => "#f44336",
+        AlertSeverity.Warning => "#ff9800",
+        AlertSeverity.Info => "#2196f3",
+        _ => "#9e9e9e"
+    };
+
+    private static string GetSeverityIcon(AlertSeverity severity) => severity switch
+    {
+        AlertSeverity.Critical => Icons.Material.Filled.Error,
+        AlertSeverity.Warning => Icons.Material.Filled.Warning,
+        AlertSeverity.Info => Icons.Material.Filled.Info,
+        _ => Icons.Material.Filled.Info
+    };
+
+    private static Color GetAlertTypeColor(AlertRuleType type) => type switch
+    {
+        AlertRuleType.ConsumerLag => Color.Warning,
+        AlertRuleType.ErrorRate => Color.Error,
+        AlertRuleType.BrokerDown => Color.Error,
+        AlertRuleType.HighLatency => Color.Warning,
+        AlertRuleType.UnderReplicatedPartitions => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength] + "...";
+
+    public void Dispose() => _evaluationTimer?.Dispose();
+}

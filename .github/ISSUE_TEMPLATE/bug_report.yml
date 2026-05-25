@@ -1,0 +1,28 @@
+name: Bug Report
+description: Report a bug in Surgewave
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+  - type: input
+    attributes:
+      label: Surgewave Version
+      placeholder: "0.1.0"
+  - type: input
+    attributes:
+      label: .NET Version
+      placeholder: "10.0"

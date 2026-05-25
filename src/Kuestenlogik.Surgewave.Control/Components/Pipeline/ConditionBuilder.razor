@@ -1,0 +1,225 @@
+@* Visual Condition Builder for If/Switch nodes *@
+
+<MudPaper Elevation="0" Class="pa-2" Style="border: 1px solid var(--mud-palette-lines-default); border-radius: 4px;">
+    <MudText Typo="Typo.caption" Color="Color.Primary" Class="mb-2">@Label</MudText>
+
+    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-2">
+        <MudTabPanel Text="Visual">
+            <div class="d-flex flex-column gap-2">
+                @for (var i = 0; i < _conditions.Count; i++)
+                {
+                    var index = i;
+                    <MudPaper Elevation="0" Class="pa-2" Style="background: var(--mud-palette-background-grey); border-radius: 4px;">
+                        <MudGrid Spacing="1">
+                            <MudItem xs="3">
+                                <MudSelect T="string" @bind-Value="_conditions[index].Field" Label="Field" Variant="Variant.Outlined"
+                                           Margin="Margin.Dense" @bind-Value:after="BuildExpression">
+                                    <MudSelectItem Value="@("key")">key</MudSelectItem>
+                                    <MudSelectItem Value="@("value")">value</MudSelectItem>
+                                    <MudSelectItem Value="@("json.type")">json.type</MudSelectItem>
+                                    <MudSelectItem Value="@("json.status")">json.status</MudSelectItem>
+                                    <MudSelectItem Value="@("json.priority")">json.priority</MudSelectItem>
+                                    <MudSelectItem Value="@("topic")">topic</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="3">
+                                <MudSelect T="string" @bind-Value="_conditions[index].Operator" Label="Operator" Variant="Variant.Outlined"
+                                           Margin="Margin.Dense" @bind-Value:after="BuildExpression">
+                                    <MudSelectItem Value="@("==")">equals (==)</MudSelectItem>
+                                    <MudSelectItem Value="@("!=")">not equals (!=)</MudSelectItem>
+                                    <MudSelectItem Value="@(">")">greater than (&gt;)</MudSelectItem>
+                                    <MudSelectItem Value="@("<")">less than (&lt;)</MudSelectItem>
+                                    <MudSelectItem Value="@(">=")">greater or equal (&gt;=)</MudSelectItem>
+                                    <MudSelectItem Value="@("<=")">less or equal (&lt;=)</MudSelectItem>
+                                    <MudSelectItem Value="@("contains")">contains</MudSelectItem>
+                                    <MudSelectItem Value="@("startsWith")">starts with</MudSelectItem>
+                                    <MudSelectItem Value="@("endsWith")">ends with</MudSelectItem>
+                                    <MudSelectItem Value="@("isNull")">is null</MudSelectItem>
+                                    <MudSelectItem Value="@("isNotNull")">is not null</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="4">
+                                @if (_conditions[index].Operator != "isNull" && _conditions[index].Operator != "isNotNull")
+                                {
+                                    <MudTextField @bind-Value="_conditions[index].Value" Label="Value" Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" @bind-Value:after="BuildExpression" />
+                                }
+                            </MudItem>
+                            <MudItem xs="2" Class="d-flex align-center">
+                                @if (_conditions.Count > 1)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => RemoveCondition(index))" />
+                                }
+                            </MudItem>
+                        </MudGrid>
+                        @if (index < _conditions.Count - 1)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="mt-2">
+                                @_logicalOperator
+                            </MudChip>
+                        }
+                    </MudPaper>
+                }
+            </div>
+
+            <div class="d-flex gap-2 mt-2">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="AddCondition">
+                    Add Condition
+                </MudButton>
+                @if (_conditions.Count > 1)
+                {
+                    <MudToggleGroup T="string" @bind-Value="_logicalOperator" Color="Color.Primary" Size="Size.Small"
+                                    SelectionMode="SelectionMode.SingleSelection" @bind-Value:after="BuildExpression">
+                        <MudToggleItem Value="@("&&")" Text="AND" />
+                        <MudToggleItem Value="@("||")" Text="OR" />
+                    </MudToggleGroup>
+                }
+            </div>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Expression">
+            <MudTextField @bind-Value="_value"
+                          Variant="Variant.Outlined"
+                          Lines="3"
+                          Placeholder="json.status == &quot;active&quot; && json.priority > 5"
+                          Style="font-family: monospace; font-size: 13px;"
+                          @bind-Value:after="OnValueChanged" />
+
+            <MudExpansionPanels Elevation="0" Dense="true" Class="mt-2">
+                <MudExpansionPanel Text="Examples" Dense="true" Style="font-size: 12px;">
+                    <MudList T="string" Dense="true">
+                        @foreach (var example in _examples)
+                        {
+                            <MudListItem @onclick="@(async () => await UseExample(example.Expression))" Dense="true" Style="cursor: pointer;">
+                                <div class="d-flex flex-column">
+                                    <code style="font-size: 12px;">@example.Expression</code>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@example.Description</MudText>
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        </MudTabPanel>
+    </MudTabs>
+
+    <MudPaper Elevation="0" Class="pa-2 mt-2" Style="background: var(--mud-palette-background-grey); border-radius: 4px;">
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Generated Expression:</MudText>
+        <code style="font-size: 13px; word-break: break-all;">@_value</code>
+    </MudPaper>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public string Label { get; set; } = "Condition";
+
+    [Parameter]
+    public string Value { get; set; } = "";
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    private string _value = "";
+    private string _logicalOperator = "&&";
+    private List<ConditionPart> _conditions = [new()];
+
+    private readonly List<ExampleInfo> _examples =
+    [
+        new("json.type == \"order\"", "Check message type"),
+        new("json.status == \"pending\" && json.priority > 5", "Status and priority check"),
+        new("key?.StartsWith(\"user-\") == true", "Key prefix check"),
+        new("value != null && value.Length > 0", "Non-empty value"),
+        new("headers.ContainsKey(\"urgent\")", "Has urgent header"),
+        new("int.Parse(json.amount ?? \"0\") >= 1000", "Amount threshold")
+    ];
+
+    protected override void OnParametersSet()
+    {
+        _value = Value;
+    }
+
+    private async Task AddCondition()
+    {
+        _conditions.Add(new ConditionPart());
+        await BuildExpression();
+    }
+
+    private async Task RemoveCondition(int index)
+    {
+        if (_conditions.Count > 1)
+        {
+            _conditions.RemoveAt(index);
+            await BuildExpression();
+        }
+    }
+
+    private async Task BuildExpression()
+    {
+        var parts = _conditions
+            .Where(c => !string.IsNullOrEmpty(c.Field))
+            .Select(c => BuildConditionPart(c))
+            .Where(p => !string.IsNullOrEmpty(p))
+            .ToList();
+
+        _value = parts.Count switch
+        {
+            0 => "true",
+            1 => parts[0],
+            _ => string.Join($" {_logicalOperator} ", parts.Select(p => $"({p})"))
+        };
+
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private static string BuildConditionPart(ConditionPart condition)
+    {
+        var field = condition.Field;
+        var op = condition.Operator;
+        var val = condition.Value;
+
+        // Handle null checks
+        if (op == "isNull")
+            return $"{field} == null";
+        if (op == "isNotNull")
+            return $"{field} != null";
+
+        // Determine if value should be quoted
+        var needsQuotes = !long.TryParse(val, out _) &&
+                          !double.TryParse(val, out _) &&
+                          val != "true" && val != "false" &&
+                          val != "null";
+
+        var quotedVal = needsQuotes ? $"\"{val}\"" : val;
+
+        // Handle string methods
+        return op switch
+        {
+            "contains" => $"{field}?.Contains({quotedVal}) == true",
+            "startsWith" => $"{field}?.StartsWith({quotedVal}) == true",
+            "endsWith" => $"{field}?.EndsWith({quotedVal}) == true",
+            _ => $"{field} {op} {quotedVal}"
+        };
+    }
+
+    private async Task OnValueChanged()
+    {
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private async Task UseExample(string expression)
+    {
+        _value = expression;
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private class ConditionPart
+    {
+        public string Field { get; set; } = "json.status";
+        public string Operator { get; set; } = "==";
+        public string Value { get; set; } = "";
+    }
+
+    private record ExampleInfo(string Expression, string Description);
+}

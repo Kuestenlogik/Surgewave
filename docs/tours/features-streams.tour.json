@@ -1,0 +1,31 @@
+{
+    "id": "streams-overview",
+    "title": "Surgewave Streams Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "intro",
+            "title": "Surgewave Streams",
+            "text": "Surgewave Streams is a powerful stream processing library inspired by Kafka Streams. It enables real-time data transformation, aggregation, and joins directly within your .NET application.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "topology",
+            "title": "Stream Topologies",
+            "text": "Streams are defined as topologies: directed graphs of processing nodes. Each node transforms, filters, or aggregates records flowing through the pipeline.",
+            "attachTo": { "element": "article h2", "on": "bottom" }
+        },
+        {
+            "id": "operations",
+            "title": "Processing Operations",
+            "text": "Surgewave Streams supports map, filter, flatMap, groupByKey, aggregate, windowed joins (tumbling, hopping, sliding, session), and stateful processing with built-in state stores.",
+            "attachTo": { "element": "article", "on": "top" }
+        },
+        {
+            "id": "performance",
+            "title": "High Performance",
+            "text": "Surgewave Streams uses System.Threading.Channels for multi-threaded processing with pluggable partition assignment strategies (RoundRobin, Sticky) for optimal throughput.",
+            "attachTo": { "element": "article", "on": "top" }
+        }
+    ]
+}

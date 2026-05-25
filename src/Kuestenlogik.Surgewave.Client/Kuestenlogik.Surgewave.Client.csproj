@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>High-performance Surgewave client library for .NET. Provides producer and consumer APIs with both Kafka and Surgewave native protocol support.</Description>
+    <PackageTags>surgewave;kafka;messaging;producer;consumer;streaming;client</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Client.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol\Kuestenlogik.Surgewave.Protocol.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
+  </ItemGroup>
+
+
+</Project>

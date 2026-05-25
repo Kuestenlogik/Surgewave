@@ -1,0 +1,193 @@
+@using Blazor.Diagrams
+@using Blazor.Diagrams.Core.Geometry
+
+<MudPaper Elevation="2" Class="pipeline-minimap" Style="@GetContainerStyle()">
+    <div class="minimap-header d-flex justify-space-between align-center pa-1">
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Mini Map</MudText>
+        <MudIconButton Icon="@(_collapsed ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                       Size="MudBlazor.Size.Small" OnClick="ToggleCollapse" />
+    </div>
+
+    @if (!_collapsed)
+    {
+        <div class="minimap-content" style="position: relative; width: @(Width)px; height: @(Height)px; background: var(--mud-palette-background-grey);">
+            @if (Diagram != null)
+            {
+                @foreach (var node in Diagram.Nodes.OfType<ConnectorNode>())
+                {
+                    var pos = GetScaledPosition(node);
+                    <div class="minimap-node @(IsSelected(node) ? "selected" : "")"
+                         style="left: @(pos.X)px; top: @(pos.Y)px; width: @(NodeWidth)px; height: @(NodeHeight)px;"
+                         @onclick="@(() => FocusNode(node))"
+                         title="@(node.Label ?? node.DisplayName)">
+                    </div>
+                }
+
+                @foreach (var link in Diagram.Links.OfType<PipelineLink>())
+                {
+                    var sourceNode = link.Source?.Model as ConnectorNode;
+                    var targetNode = link.Target?.Model as ConnectorNode;
+                    if (sourceNode != null && targetNode != null)
+                    {
+                        var sourcePos = GetScaledPosition(sourceNode);
+                        var targetPos = GetScaledPosition(targetNode);
+                        <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+                            <line x1="@(sourcePos.X + NodeWidth / 2)"
+                                  y1="@(sourcePos.Y + NodeHeight / 2)"
+                                  x2="@(targetPos.X + NodeWidth / 2)"
+                                  y2="@(targetPos.Y + NodeHeight / 2)"
+                                  stroke="var(--mud-palette-lines-default)"
+                                  stroke-width="1" />
+                        </svg>
+                    }
+                }
+
+                @* Viewport indicator *@
+                <div class="minimap-viewport"
+                     style="left: @(_viewportX)px; top: @(_viewportY)px; width: @(_viewportWidth)px; height: @(_viewportHeight)px;">
+                </div>
+            }
+        </div>
+    }
+</MudPaper>
+
+<style>
+    .pipeline-minimap {
+        position: absolute;
+        bottom: 16px;
+        right: 16px;
+        z-index: 100;
+        overflow: hidden;
+        border-radius: 4px;
+    }
+
+    .minimap-header {
+        background: var(--mud-palette-surface);
+        border-bottom: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .minimap-node {
+        position: absolute;
+        background: var(--mud-palette-primary);
+        border-radius: 2px;
+        cursor: pointer;
+        transition: transform 0.1s;
+    }
+
+    .minimap-node:hover {
+        transform: scale(1.2);
+    }
+
+    .minimap-node.selected {
+        background: var(--mud-palette-secondary);
+        box-shadow: 0 0 4px var(--mud-palette-secondary);
+    }
+
+    .minimap-viewport {
+        position: absolute;
+        border: 2px solid var(--mud-palette-primary);
+        background: rgba(var(--mud-palette-primary-rgb), 0.1);
+        pointer-events: none;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public BlazorDiagram? Diagram { get; set; }
+
+    [Parameter]
+    public ConnectorNode? SelectedNode { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorNode> OnNodeFocused { get; set; }
+
+    [Parameter]
+    public int Width { get; set; } = 200;
+
+    [Parameter]
+    public int Height { get; set; } = 150;
+
+    private bool _collapsed = false;
+    private double _scale = 1;
+    private double _offsetX = 0;
+    private double _offsetY = 0;
+    private double _viewportX = 0;
+    private double _viewportY = 0;
+    private double _viewportWidth = 200;
+    private double _viewportHeight = 150;
+
+    private const int NodeWidth = 12;
+    private const int NodeHeight = 8;
+    private const int Padding = 10;
+
+    protected override void OnParametersSet()
+    {
+        CalculateScale();
+    }
+
+    private void CalculateScale()
+    {
+        if (Diagram == null || !Diagram.Nodes.Any())
+        {
+            _scale = 1;
+            _offsetX = 0;
+            _offsetY = 0;
+            return;
+        }
+
+        var nodes = Diagram.Nodes.OfType<ConnectorNode>().ToList();
+        if (nodes.Count == 0) return;
+
+        var minX = nodes.Min(n => n.Position?.X ?? 0);
+        var maxX = nodes.Max(n => n.Position?.X ?? 0) + 150; // Node width
+        var minY = nodes.Min(n => n.Position?.Y ?? 0);
+        var maxY = nodes.Max(n => n.Position?.Y ?? 0) + 80; // Node height
+
+        var contentWidth = maxX - minX + Padding * 2;
+        var contentHeight = maxY - minY + Padding * 2;
+
+        var scaleX = (Width - Padding * 2) / contentWidth;
+        var scaleY = (Height - Padding * 2) / contentHeight;
+
+        _scale = Math.Min(scaleX, scaleY);
+        _scale = Math.Min(_scale, 1); // Don't scale up
+
+        _offsetX = -minX + Padding / _scale;
+        _offsetY = -minY + Padding / _scale;
+
+        // Calculate viewport rectangle
+        if (Diagram.Container != null)
+        {
+            _viewportX = (-Diagram.Pan.X / Diagram.Zoom + _offsetX) * _scale;
+            _viewportY = (-Diagram.Pan.Y / Diagram.Zoom + _offsetY) * _scale;
+            _viewportWidth = (Diagram.Container.Width / Diagram.Zoom) * _scale;
+            _viewportHeight = (Diagram.Container.Height / Diagram.Zoom) * _scale;
+        }
+    }
+
+    private (double X, double Y) GetScaledPosition(ConnectorNode node)
+    {
+        var x = ((node.Position?.X ?? 0) + _offsetX) * _scale;
+        var y = ((node.Position?.Y ?? 0) + _offsetY) * _scale;
+        return (x, y);
+    }
+
+    private bool IsSelected(ConnectorNode node) => node == SelectedNode;
+
+    private async Task FocusNode(ConnectorNode node)
+    {
+        await OnNodeFocused.InvokeAsync(node);
+    }
+
+    private void ToggleCollapse()
+    {
+        _collapsed = !_collapsed;
+    }
+
+    private string GetContainerStyle()
+    {
+        return _collapsed
+            ? "width: 120px;"
+            : $"width: {Width + 8}px;";
+    }
+}

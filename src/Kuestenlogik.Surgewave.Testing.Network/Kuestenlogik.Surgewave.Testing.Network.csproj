@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>Network impairment primitives for Surgewave testing and benchmarking. Provides UDP packet-loss proxies, TCP latency injection, and related fault-on-the-wire utilities that are independent of Surgewave's internal ChaosEngine.</Description>
+    <PackageTags>surgewave;kafka;testing;network;chaos;packet-loss;latency;proxy</PackageTags>
+  </PropertyGroup>
+
+</Project>

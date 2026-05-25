@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Plugins.Packaging</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <Description>Surgewave Plugin Packaging — pure types and orchestrator for .swpkg Surgewave Plugin Packages: PluginManifest, PluginPackageManager, dependency resolution, package validation. Sibling assembly to Kuestenlogik.Surgewave.Plugins; depends only on the BCL + Microsoft.Extensions.Logging.Abstractions, so it can be referenced from build tooling, marketplaces, plugin authors and inspection tools without pulling the plugin runtime loader.</Description>
+    <PackageTags>surgewave;plugins;packaging;pluginPackage;manifest</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Plugins" />
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Connect.Tests" />
+  </ItemGroup>
+
+</Project>

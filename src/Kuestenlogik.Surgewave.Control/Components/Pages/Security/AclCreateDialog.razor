@@ -1,0 +1,228 @@
+@using Kuestenlogik.Surgewave.Control.Models.Security
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IAclApiClient AclApiClient
+@inject ISurgewaveApiClient SurgewaveApiClient
+@inject NotificationState Notification
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Security" Class="mr-2" />
+            Create ACL
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_formValid">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_principal" Label="Principal" Required="true"
+                                  RequiredError="Principal is required"
+                                  Placeholder="User:alice or User:*"
+                                  HelperText="Format: User:name or User:* for all users"
+                                  Variant="Variant.Outlined" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_host" Label="Host"
+                                  Placeholder="* (all hosts)"
+                                  HelperText="IP address or * for all hosts"
+                                  Variant="Variant.Outlined" />
+                </MudItem>
+
+                <MudItem xs="12" md="6">
+                    <MudSelect T="AclResourceType" @bind-Value="_resourceType" Label="Resource Type" Required="true"
+                               RequiredError="Resource type is required" Variant="Variant.Outlined">
+                        @foreach (var rt in Enum.GetValues<AclResourceType>().Where(r => r > AclResourceType.Any))
+                        {
+                            <MudSelectItem Value="@rt">@rt</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="AclPatternType" @bind-Value="_patternType" Label="Pattern Type"
+                               Variant="Variant.Outlined">
+                        <MudSelectItem Value="AclPatternType.Literal">Literal (exact match)</MudSelectItem>
+                        <MudSelectItem Value="AclPatternType.Prefixed">Prefixed (starts with)</MudSelectItem>
+                        <MudSelectItem Value="AclPatternType.Suffix">Suffix (ends with)</MudSelectItem>
+                        <MudSelectItem Value="AclPatternType.Regex">Regex (pattern match)</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudAutocomplete T="string" @bind-Value="_resourceName" Label="Resource Name" Required="true"
+                                     RequiredError="Resource name is required"
+                                     SearchFunc="SearchResourcesAsync"
+                                     Placeholder="@GetResourceNamePlaceholder()"
+                                     HelperText="@GetResourceNameHelperText()"
+                                     Variant="Variant.Outlined"
+                                     CoerceValue="true" />
+                </MudItem>
+
+                <MudItem xs="12" md="6">
+                    <MudSelect T="AclOperation" @bind-Value="_operation" Label="Operation" Required="true"
+                               RequiredError="Operation is required" Variant="Variant.Outlined">
+                        <MudSelectItem Value="AclOperation.All">All (full access)</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.Read">Read</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.Write">Write</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.Create">Create</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.Delete">Delete</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.Alter">Alter</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.Describe">Describe</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.DescribeConfigs">Describe Configs</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.AlterConfigs">Alter Configs</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.ClusterAction">Cluster Action</MudSelectItem>
+                        <MudSelectItem Value="AclOperation.IdempotentWrite">Idempotent Write</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="AclPermission" @bind-Value="_permission" Label="Permission" Required="true"
+                               RequiredError="Permission is required" Variant="Variant.Outlined">
+                        <MudSelectItem Value="AclPermission.Allow">Allow</MudSelectItem>
+                        <MudSelectItem Value="AclPermission.Deny">Deny</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+
+            <MudAlert Severity="Severity.Info" Class="mt-4" Dense="true">
+                <MudText Typo="Typo.body2">
+                    This ACL will @(_permission == AclPermission.Allow ? "allow" : "deny")
+                    <strong>@_principal</strong> to perform <strong>@_operation</strong>
+                    on @_resourceType <strong>@(_resourceName ?? "*")</strong>
+                    @if (_patternType != AclPatternType.Literal)
+                    {
+                        <span> (pattern: @_patternType)</span>
+                    }
+                </MudText>
+            </MudAlert>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CreateAsync"
+                   Disabled="@(!_formValid || _creating)">
+            @if (_creating)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Create ACL
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private MudForm _form = null!;
+    private bool _formValid;
+    private bool _creating;
+
+    // Form fields
+    private string _principal = "User:";
+    private string _host = "*";
+    private AclResourceType _resourceType = AclResourceType.Topic;
+    private AclPatternType _patternType = AclPatternType.Literal;
+    private string? _resourceName;
+    private AclOperation _operation = AclOperation.Read;
+    private AclPermission _permission = AclPermission.Allow;
+
+    // Cached resources for autocomplete
+    private List<string> _topics = [];
+    private List<string> _groups = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load topics and groups for autocomplete
+        try
+        {
+            var topics = await SurgewaveApiClient.ListTopicsAsync();
+            _topics = topics?.Select(t => t.Name).ToList() ?? [];
+
+            var groups = await SurgewaveApiClient.ListConsumerGroupsAsync();
+            _groups = groups?.Select(g => g.GroupId).ToList() ?? [];
+        }
+        catch
+        {
+            // Ignore - autocomplete will just be empty
+        }
+    }
+
+    private async Task<IEnumerable<string>> SearchResourcesAsync(string? value, CancellationToken ct)
+    {
+        var resources = _resourceType switch
+        {
+            AclResourceType.Topic => _topics,
+            AclResourceType.Group => _groups,
+            AclResourceType.Cluster => ["kafka-cluster"],
+            _ => []
+        };
+
+        // Add wildcard option
+        resources = ["*", ..resources];
+
+        if (string.IsNullOrWhiteSpace(value))
+            return resources.Take(20);
+
+        return resources
+            .Where(r => r.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Take(20);
+    }
+
+    private string GetResourceNamePlaceholder() => _resourceType switch
+    {
+        AclResourceType.Topic => "my-topic or * for all",
+        AclResourceType.Group => "my-consumer-group or * for all",
+        AclResourceType.Cluster => "kafka-cluster",
+        AclResourceType.TransactionalId => "my-transactional-id",
+        _ => "resource name"
+    };
+
+    private string GetResourceNameHelperText() => _patternType switch
+    {
+        AclPatternType.Literal => "Exact resource name or * for all",
+        AclPatternType.Prefixed => "Resource names starting with this prefix",
+        AclPatternType.Suffix => "Resource names ending with this suffix",
+        AclPatternType.Regex => "Regular expression pattern",
+        _ => ""
+    };
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task CreateAsync()
+    {
+        if (!_formValid) return;
+
+        _creating = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new CreateAclRequest(
+                Principal: _principal,
+                ResourceType: _resourceType,
+                ResourceName: _resourceName ?? "*",
+                Operation: _operation,
+                Permission: _permission,
+                Host: string.IsNullOrWhiteSpace(_host) ? "*" : _host,
+                PatternType: _patternType);
+
+            var result = await AclApiClient.CreateAclAsync(request);
+
+            if (result != null)
+            {
+                MudDialog.Close(DialogResult.Ok(result));
+            }
+            else
+            {
+                Notification.ShowError("Failed to create ACL");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to create ACL: {ex.Message}");
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+}

@@ -1,0 +1,193 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@inject IPipelineApiClient ApiClient
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.SettingsInputComponent" Class="mr-2" />
+            Port Mapping - @SubPipelineName
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_portInfo == null)
+        {
+            <MudAlert Severity="Severity.Warning">Could not load port info for sub-pipeline</MudAlert>
+        }
+        else
+        {
+            <MudGrid>
+                @* Input Mappings *@
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Input" Size="MudBlazor.Size.Small" Class="mr-1" />
+                        Input Ports
+                    </MudText>
+                    @if (_portInfo.InputPorts.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">No input ports detected</MudAlert>
+                    }
+                    else
+                    {
+                        @foreach (var port in _portInfo.InputPorts)
+                        {
+                            <MudCard Outlined="true" Class="mb-2 pa-2">
+                                <div class="d-flex align-center gap-2">
+                                    <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Success"
+                                             Variant="Variant.Outlined">Source</MudChip>
+                                    <MudText Typo="Typo.body2"><strong>@port.Label</strong></MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">(@port.ConnectorType)</MudText>
+                                    <MudSpacer />
+                                    <MudSelect T="string" @bind-Value="@_inputMappings[port.NodeId]"
+                                               Label="Map to parent port"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense"
+                                               Dense="true" Style="max-width: 200px;">
+                                        <MudSelectItem T="string" Value="@("")">Unmapped</MudSelectItem>
+                                        @foreach (var parentPort in ParentInputPorts)
+                                        {
+                                            <MudSelectItem T="string" Value="@parentPort">@parentPort</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
+                            </MudCard>
+                        }
+                    }
+                </MudItem>
+
+                @* Output Mappings *@
+                <MudItem xs="12" Class="mt-2">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Output" Size="MudBlazor.Size.Small" Class="mr-1" />
+                        Output Ports
+                    </MudText>
+                    @if (_portInfo.OutputPorts.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">No output ports detected</MudAlert>
+                    }
+                    else
+                    {
+                        @foreach (var port in _portInfo.OutputPorts)
+                        {
+                            <MudCard Outlined="true" Class="mb-2 pa-2">
+                                <div class="d-flex align-center gap-2">
+                                    <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Info"
+                                             Variant="Variant.Outlined">Sink</MudChip>
+                                    <MudText Typo="Typo.body2"><strong>@port.Label</strong></MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">(@port.ConnectorType)</MudText>
+                                    <MudSpacer />
+                                    <MudSelect T="string" @bind-Value="@_outputMappings[port.NodeId]"
+                                               Label="Map to parent port"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense"
+                                               Dense="true" Style="max-width: 200px;">
+                                        <MudSelectItem T="string" Value="@("")">Unmapped</MudSelectItem>
+                                        @foreach (var parentPort in ParentOutputPorts)
+                                        {
+                                            <MudSelectItem T="string" Value="@parentPort">@parentPort</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
+                            </MudCard>
+                        }
+                    }
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save"
+                   Disabled="@(_loading || _portInfo == null)">Save Mapping</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string SubPipelineId { get; set; } = "";
+
+    [Parameter]
+    public string SubPipelineName { get; set; } = "Sub-Pipeline";
+
+    [Parameter]
+    public List<string> ParentInputPorts { get; set; } = [];
+
+    [Parameter]
+    public List<string> ParentOutputPorts { get; set; } = [];
+
+    [Parameter]
+    public SubPipelinePortMappingModel? ExistingMapping { get; set; }
+
+    private bool _loading = true;
+    private SubPipelinePortInfo? _portInfo;
+    private readonly Dictionary<string, string> _inputMappings = new();
+    private readonly Dictionary<string, string> _outputMappings = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _portInfo = await ApiClient.GetPipelinePortsAsync(SubPipelineId);
+            if (_portInfo != null)
+            {
+                // Initialize mappings with existing values or empty
+                foreach (var port in _portInfo.InputPorts)
+                {
+                    var existing = ExistingMapping?.InputMappings
+                        .FirstOrDefault(m => m.SubPipelineNodeId == port.NodeId);
+                    _inputMappings[port.NodeId] = existing?.ParentPortId ?? "";
+                }
+                foreach (var port in _portInfo.OutputPorts)
+                {
+                    var existing = ExistingMapping?.OutputMappings
+                        .FirstOrDefault(m => m.SubPipelineNodeId == port.NodeId);
+                    _outputMappings[port.NodeId] = existing?.ParentPortId ?? "";
+                }
+            }
+        }
+        catch
+        {
+            _portInfo = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Save()
+    {
+        if (_portInfo == null) return;
+
+        var mapping = new SubPipelinePortMappingModel
+        {
+            SubPipelineId = SubPipelineId,
+            InputMappings = _inputMappings
+                .Where(kv => !string.IsNullOrEmpty(kv.Value))
+                .Select(kv => new PortMappingModel
+                {
+                    ParentPortId = kv.Value,
+                    SubPipelineNodeId = kv.Key,
+                    SubNodeLabel = _portInfo.InputPorts.FirstOrDefault(p => p.NodeId == kv.Key)?.Label
+                })
+                .ToList(),
+            OutputMappings = _outputMappings
+                .Where(kv => !string.IsNullOrEmpty(kv.Value))
+                .Select(kv => new PortMappingModel
+                {
+                    ParentPortId = kv.Value,
+                    SubPipelineNodeId = kv.Key,
+                    SubNodeLabel = _portInfo.OutputPorts.FirstOrDefault(p => p.NodeId == kv.Key)?.Label
+                })
+                .ToList()
+        };
+
+        MudDialog.Close(DialogResult.Ok(mapping));
+    }
+}

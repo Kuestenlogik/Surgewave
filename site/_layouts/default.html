@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title | default: site.title }}</title>
+  <meta name="description" content="{{ page.description | default: site.description }}">
+
+  <!-- Apply stored theme synchronously so the first frame doesn't flash. -->
+  <script>
+    (function () {
+      var mode = localStorage.getItem('theme') || 'auto';
+      var resolved = mode === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : mode;
+      document.documentElement.setAttribute('data-theme', mode);
+      document.documentElement.setAttribute('data-theme-resolved', resolved);
+    })();
+  </script>
+
+  {% seo %}
+
+  {%- comment -%}
+  schema.org JSON-LD — gives search engines a structured-data view of the
+  page so they can render rich results (sitelinks searchbox via the
+  Pagefind-backed /search.html, organisation entity link). The
+  SoftwareApplication block is opt-in via `schema_type: SoftwareApplication`
+  on the home page front matter so the signal stays focused.
+  {%- endcomment -%}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Küstenlogik",
+    "url": "https://kuestenlogik.com",
+    "sameAs": [
+      "https://github.com/Kuestenlogik"
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Surgewave",
+    "url": "{{ '/' | absolute_url }}",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": {
+        "@type": "EntryPoint",
+        "urlTemplate": "{{ '/search.html' | absolute_url }}?q={search_term_string}"
+      },
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+
+  {%- comment -%}
+  Favicon stack:
+  * SVG primary — favicon.svg uses the hero colourway (Wave #66cfff,
+    Ink #ffffff, statisch). Adaptive mark_adaptive.svg ist im Light-Mode
+    blau+navy und damit auf hellgrauen Browser-Tabs zu dunkel; das
+    Favicon bekommt deshalb einen eigenen statischen Override mit den
+    helleren Hero-Toenen.
+  * .ico fallback — multi-size bundle (16/32/48/64/128/256) for
+    legacy browsers + Windows pinning.
+  * apple-touch-icon — 180x180 PNG for iOS home-screen bookmarks.
+  {%- endcomment -%}
+  <link rel="icon" type="image/svg+xml" href="{{ '/assets/images/favicon.svg' | relative_url }}">
+  <link rel="alternate icon" href="{{ '/assets/images/favicon.ico' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ '/assets/images/favicon-16.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ '/assets/images/favicon-32.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="48x48" href="{{ '/assets/images/favicon-48.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="96x96" href="{{ '/assets/images/favicon-96.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="128x128" href="{{ '/assets/images/favicon-128.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ '/assets/images/favicon-192.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="256x256" href="{{ '/assets/images/favicon-256.png' | relative_url }}">
+  <link rel="apple-touch-icon" href="{{ '/assets/images/apple-touch-icon.png' | relative_url }}">
+  <link rel="apple-touch-icon" sizes="152x152" href="{{ '/assets/images/favicon-152.png' | relative_url }}">
+  <link rel="apple-touch-icon" sizes="167x167" href="{{ '/assets/images/favicon-167.png' | relative_url }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ '/assets/images/favicon-180.png' | relative_url }}">
+  <link rel="manifest" href="{{ '/site.webmanifest' | relative_url }}">
+  <meta name="theme-color" content="#33bcff">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  {%- comment -%}
+  Pagefind stylesheet loads BEFORE style.css so style.css's theme overrides
+  for `--pagefind-ui-*` win the cascade.
+  {%- endcomment -%}
+  <link rel="stylesheet" href="{{ '/pagefind/pagefind-ui.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+
+  {%- comment -%}
+  Brand preloader — same idiom as Bowire's site + the surgewave-theme docs:
+  80-px cyan ring rotates around a 40-px Surgewave mark, theme-aware bg
+  set from the <head> theme-apply script above. Visible from first
+  paint, fades out on window.load once stylesheets + fonts are in.
+  Inline so it's available before /assets/css/style.css resolves.
+  {%- endcomment -%}
+  <style>
+    #surgewave-loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      background: #080d1a;
+      transition: opacity 300ms ease;
+    }
+    :root[data-theme-resolved="light"] #surgewave-loading {
+      background: #fafaff;
+    }
+    .surgewave-loading-wrap {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .surgewave-loading-ring {
+      position: absolute;
+      inset: 0;
+      border: 3px solid rgba(56, 189, 248, 0.18);
+      border-top-color: #0ea5e9;
+      border-radius: 50%;
+      animation: surgewave-loading-spin 800ms linear infinite;
+    }
+    :root[data-theme-resolved="light"] .surgewave-loading-ring {
+      border-color: rgba(14, 165, 233, 0.18);
+      border-top-color: #0369a1;
+    }
+    .surgewave-loading-mark {
+      width: 44px;
+      height: 44px;
+      position: relative;
+      z-index: 1;
+    }
+    @keyframes surgewave-loading-spin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .surgewave-loading-ring { animation: none; }
+    }
+    #surgewave-loading.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="surgewave-loading" aria-hidden="true">
+    <div class="surgewave-loading-wrap">
+      <div class="surgewave-loading-ring"></div>
+      {%- comment -%}
+      Surgewave mark inlined (no <span>Surgewave</span> wordmark — just the
+      glyph). The .surgewave-wave / .surgewave-ink fills swap with the page
+      theme via the rules in style.css, so the mark stays legible
+      against both the dark and light loader background.
+      {%- endcomment -%}
+      <svg class="surgewave-loading-mark surgewave-mark" viewBox="0 0 77.026421 77.673187" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Surgewave">
+        <g transform="translate(-40.266827,-38.242717)">
+          <g transform="translate(12.27173,11.95761)">
+            <path class="surgewave-wave" d="m 95.130627,56.386739 c -5.389529,0 -9.820478,4.387905 -9.891385,9.761678 h 5.000728 c 0.06777,-2.668882 2.203414,-4.761466 4.890657,-4.761466 2.731013,-1e-6 4.890653,2.161195 4.890653,4.892208 0,2.71208 -2.129671,4.860481 -4.833808,4.89014 l -24.548205,-0.08733 c 0.700506,2.052312 0.851744,3.555356 0.944794,5.000212 13.358013,0.01054 10.39167,0.08476 23.749674,0.08785 v -0.0021 c 5.340655,-0.109535 9.687785,-4.52352 9.687785,-9.888802 0,-5.433214 -4.45766,-9.892421 -9.890874,-9.89242 z" />
+          </g>
+          <path class="surgewave-ink"  d="m 95.08012,115.91586 c -5.389523,0 -9.820472,-4.3879 -9.891379,-9.76168 h 5.000728 c 0.06777,2.66888 2.203414,4.76147 4.890651,4.76147 2.731005,0 4.890633,-2.1612 4.890633,-4.89221 0,-2.71208 -2.129658,-4.86049 -4.833783,-4.89015 l -12.688352,0.0464 c 0.86524,-1.66674 1.124339,-3.333478 1.23251,-5.000215 l 11.602099,-0.04481 c 5.340633,0.109535 9.687763,4.523525 9.687763,9.888815 0,5.43321 -4.45766,9.89242 -9.89085,9.89242 z" />
+          <path class="surgewave-ink"  d="m 87.551243,55.433307 c -5.389529,0 -9.820478,4.387905 -9.891385,9.761678 h 5.000728 c 0.06777,-2.668882 2.203414,-4.761466 4.890657,-4.761466 2.731013,-10e-7 4.890658,2.161194 4.890658,4.892207 0,2.71208 -2.129676,4.860482 -4.833813,4.890141 l -30.222084,-0.05012 c 1.12428,1.688192 2.831807,3.352081 5.264824,4.985742 0,0 9.059641,0.02565 12.219552,0.03876 3.1141,0.01292 6.253737,0.02482 12.883968,0.02635 v -0.0021 c 5.340655,-0.109535 9.687787,-4.52352 9.687787,-9.888802 0,-5.433214 -4.457662,-9.89242 -9.890876,-9.892419 z" />
+          <path class="surgewave-ink"  d="m 77.516199,78.89441 -11.253697,0.0042 c 5.156293,4.52398 7.346412,13.179124 1.290515,21.13713 -5.016824,6.59279 -14.42837,7.87017 -21.02094,2.85305 -0.07007,-0.0535 -0.139659,-0.10756 -0.208772,-0.16226 l -6.056478,7.95817 c 8.597942,6.70306 25.213099,8.58791 35.243843,-4.593 5.989691,-7.870853 6.77593,-18.532996 2.005563,-27.197308 z" />
+          <path class="surgewave-wave" d="m 43.366914,75.22779 12.11278,-0.004 c -5.15629,-4.52398 -8.2055,-13.17912 -2.1496,-21.13713 5.016823,-6.59279 14.428372,-7.87017 21.020942,-2.85305 0.0701,0.0535 0.13966,0.10756 0.20877,0.16226 l 6.05648,-7.95817 c -8.59795,-6.70306 -25.213102,-8.58791 -35.243842,4.593 -5.98969,7.87085 -6.77593,18.533 -2.00557,27.19731 z" />
+        </g>
+      </svg>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('load', function () {
+      var pre = document.getElementById('surgewave-loading');
+      if (!pre) return;
+      pre.classList.add('is-hidden');
+      setTimeout(function () { pre.remove(); }, 300);
+    });
+  </script>
+
+  {% include header.html %}
+
+  <main>
+    {{ content }}
+  </main>
+
+  {% include footer.html %}
+
+  {% include search-overlay.html %}
+
+  <script>
+    (function () {
+      var toggle = document.getElementById('theme-toggle');
+      if (!toggle) return;
+      // Lucide-style sun / moon / half-circle icons. Inlined so the
+      // toggle has zero-flash on first paint — same pattern as Bowire's
+      // theme button. The half-circle communicates "auto / system"
+      // without the ambiguous "auto" word.
+      var ICONS = {
+        light: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+        dark:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+        auto:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3 a 9 9 0 0 1 0 18 z" fill="currentColor" stroke="none"/></svg>'
+      };
+      function next(current) {
+        return current === 'light' ? 'dark' : current === 'dark' ? 'auto' : 'light';
+      }
+      function paint() {
+        var mode = localStorage.getItem('theme') || 'auto';
+        toggle.innerHTML = ICONS[mode] || ICONS.auto;
+        var label = 'Theme: ' + mode + ' (click to cycle)';
+        toggle.setAttribute('title', label);
+        toggle.setAttribute('aria-label', label);
+        var resolved = mode === 'auto'
+          ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : mode;
+        document.documentElement.setAttribute('data-theme', mode);
+        document.documentElement.setAttribute('data-theme-resolved', resolved);
+      }
+      toggle.addEventListener('click', function () {
+        var mode = localStorage.getItem('theme') || 'auto';
+        localStorage.setItem('theme', next(mode));
+        paint();
+      });
+      paint();
+    })();
+  </script>
+
+  {%- comment -%}
+  PagefindUI is a Svelte component — its constructor reads props in
+  snake_case (base_path / show_images / page_size / reset_styles /
+  show_sub_results), NOT the camelCase form shown in pagefind.app/docs.
+  The camelCase keys are silently ignored, which would produce a failed
+  dynamic import to /pagefind/pagefind.js (default fallback) instead of
+  /Surgewave/pagefind/pagefind.js when the layout has base_path set.
+
+  If pagefind-ui.js fails to load (e.g. you're previewing the source
+  before running pagefind), the trigger button is greyed out so the
+  user sees that search is unavailable instead of a silent no-op.
+  {%- endcomment -%}
+  {%- comment -%}
+  main.js wires theme-toggle, code-copy buttons, mobile-menu, screenshot
+  carousel dots. Loaded with `defer` so DOMContentLoaded runs after the
+  hamburger/toggle markup is in the tree.
+  {%- endcomment -%}
+  <script src="{{ '/assets/js/main.js' | relative_url }}" defer></script>
+  <script src="{{ '/pagefind/pagefind-ui.js' | relative_url }}"
+          onerror="(function(){var b=document.querySelector('.surgewave-search-trigger');if(b){b.disabled=true;b.title='Search index not available — run pagefind on the built site first';b.setAttribute('aria-disabled','true');}})()"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      if (!window.PagefindUI) {
+        var b = document.querySelector('.surgewave-search-trigger');
+        if (b && !b.disabled) {
+          b.disabled = true;
+          b.title = 'Search index not available — run pagefind on the built site first';
+          b.setAttribute('aria-disabled', 'true');
+        }
+        return;
+      }
+
+      new window.PagefindUI({
+        element: '#search',
+        show_images: false,
+        show_sub_results: false,
+        reset_styles: false,
+        page_size: 5,
+        base_path: {{ '/pagefind/' | relative_url | jsonify }}
+      });
+
+      var overlay = document.getElementById('surgewave-search-overlay');
+      var highlighted = -1;
+      function getResults() {
+        return Array.from(document.querySelectorAll('#search .pagefind-ui__result'));
+      }
+      function paintHighlight() {
+        var items = getResults();
+        items.forEach(function (el, i) {
+          el.classList.toggle('is-highlighted', i === highlighted);
+        });
+        if (highlighted >= 0 && items[highlighted]) {
+          items[highlighted].scrollIntoView({ block: 'nearest' });
+        }
+      }
+      // Each PagefindUI re-render resets the keyboard-highlight cursor and
+      // moves the "X results" message out of the scrollable drawer into the
+      // sticky form header — Pagefind nests it inside the drawer by default,
+      // which scrolls away with the results.
+      new MutationObserver(function () {
+        highlighted = -1;
+        paintHighlight();
+        var msg = document.querySelector('#search .pagefind-ui__message');
+        var drawer = document.querySelector('#search .pagefind-ui__drawer');
+        var form = document.querySelector('#search .pagefind-ui__form');
+        if (msg && drawer && form && drawer.contains(msg)) {
+          form.insertBefore(msg, drawer);
+        }
+      }).observe(document.getElementById('search'), { childList: true, subtree: true });
+
+      // Infinite-scroll within the drawer (auto-click Load-More), plus
+      // mouseover synchronises the visual cursor with keyboard ArrowUp/Down,
+      // plus the whole result row is clickable (not just the inner link).
+      var drawerEl = document.querySelector('#search .pagefind-ui__drawer');
+      if (drawerEl) {
+        var loading = false;
+        drawerEl.addEventListener('scroll', function () {
+          if (loading) return;
+          if (drawerEl.scrollTop + drawerEl.clientHeight < drawerEl.scrollHeight - 80) return;
+          var loadMore = document.querySelector('#search .pagefind-ui__button');
+          if (!loadMore) return;
+          loading = true;
+          loadMore.click();
+          setTimeout(function () { loading = false; }, 200);
+        }, { passive: true });
+
+        drawerEl.addEventListener('mouseover', function (e) {
+          var result = e.target.closest('.pagefind-ui__result');
+          if (!result) return;
+          var items = getResults();
+          var idx = items.indexOf(result);
+          if (idx === -1 || idx === highlighted) return;
+          highlighted = idx;
+          paintHighlight();
+        });
+
+        drawerEl.addEventListener('click', function (e) {
+          if (e.target.closest('a')) return;
+          var result = e.target.closest('.pagefind-ui__result');
+          if (!result) return;
+          var link = result.querySelector('a');
+          if (link) link.click();
+        });
+      }
+
+      function open() {
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+        overlay.removeAttribute('inert');
+        var input = document.querySelector('#search input[type="text"]');
+        if (input) setTimeout(function () { input.focus(); }, 50);
+      }
+      function close() {
+        overlay.classList.remove('is-open');
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.setAttribute('inert', '');
+        highlighted = -1;
+      }
+
+      document.addEventListener('click', function (e) {
+        var trigger = e.target.closest('.surgewave-search-trigger');
+        if (trigger) { e.preventDefault(); open(); return; }
+        if (e.target === overlay) close();
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && overlay.classList.contains('is-open')) close();
+        if ((e.key === '/' || (e.key === 'k' && (e.metaKey || e.ctrlKey))) &&
+            !/^(INPUT|TEXTAREA)$/i.test(document.activeElement.tagName)) {
+          e.preventDefault();
+          open();
+        }
+        if (!overlay.classList.contains('is-open')) return;
+        var active = document.activeElement;
+        var isInput = active && active.matches && active.matches('.pagefind-ui__search-input');
+        if (!isInput) return;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          var items = getResults();
+          if (items.length === 0) return;
+          highlighted = Math.min(highlighted + 1, items.length - 1);
+          paintHighlight();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          highlighted = Math.max(highlighted - 1, -1);
+          paintHighlight();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var items = getResults();
+          if (highlighted >= 0 && items[highlighted]) {
+            var link = items[highlighted].querySelector('a.pagefind-ui__result-link');
+            if (link) { window.location = link.href; return; }
+          }
+          var q = (active.value || '').trim();
+          if (!q) return;
+          close();
+          window.location = {{ '/search.html' | relative_url | jsonify }} + '?q=' + encodeURIComponent(q);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

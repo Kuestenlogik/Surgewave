@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Broker runtime files (harvested from publish output) -->
+    <!-- The BrokerExe and config files are defined in BrokerService.wxs -->
+    <!-- This component group captures all remaining DLLs and dependencies -->
+    <ComponentGroup Id="BrokerFiles" Directory="BrokerDir">
+      <!-- WiX v5 unterstuetzt keine 'Exclude'-Attribute am <Files>-Element;
+           Excludes muessen als Subelemente kommen. Die drei Files werden
+           separat in BrokerService.wxs (BrokerExe) und BrokerConfig
+           (appsettings*) registriert. -->
+      <Files Include="$(var.BrokerPublishDir)\**">
+        <Exclude Files="$(var.BrokerPublishDir)\surgewave-broker.exe" />
+        <Exclude Files="$(var.BrokerPublishDir)\appsettings.json" />
+        <Exclude Files="$(var.BrokerPublishDir)\appsettings.Production.json" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

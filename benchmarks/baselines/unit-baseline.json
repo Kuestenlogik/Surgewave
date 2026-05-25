@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "timestamp": "2026-03-14T00:00:00Z",
+  "environment": {
+    "os": "Windows 11",
+    "cpu": "Unknown",
+    "runtime": ".NET 10"
+  },
+  "benchmarks": {}
+}

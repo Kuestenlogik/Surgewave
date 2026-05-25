@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/Kuestenlogik/Surgewave/discussions
+    about: Ask questions, share ideas, or show what you've built with Surgewave
+  - name: Surgewave Documentation
+    url: https://github.com/Kuestenlogik/Surgewave/tree/main/docs
+    about: Check the documentation before opening an issue
+  - name: Surgewave Bootcamp
+    url: https://github.com/Kuestenlogik/Surgewave.Bootcamp
+    about: Learn Surgewave with hands-on tutorials
+  - name: Surgewave Samples
+    url: https://github.com/Kuestenlogik/Surgewave.Samples
+    about: Browse sample applications

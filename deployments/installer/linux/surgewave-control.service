@@ -1,0 +1,35 @@
+[Unit]
+Description=Surgewave Control UI - Web-based administration dashboard
+Documentation=https://github.com/Kuestenlogik/Surgewave
+After=surgewave-broker.service
+Wants=surgewave-broker.service
+
+[Service]
+Type=exec
+ExecStart=/opt/surgewave/control/surgewave-control --urls http://0.0.0.0:5050
+WorkingDirectory=/opt/surgewave
+
+# Environment
+Environment=DOTNET_RUNNING_IN_CONTAINER=false
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Security
+User=surgewave
+Group=surgewave
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surgewave-control
+
+[Install]
+WantedBy=multi-user.target

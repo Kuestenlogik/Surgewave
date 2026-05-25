@@ -1,0 +1,8 @@
+- name: Clustering Overview
+  href: index.md
+- name: Replication
+  href: replication.md
+- name: KRaft Consensus
+  href: raft.md
+- name: Failover
+  href: failover.md

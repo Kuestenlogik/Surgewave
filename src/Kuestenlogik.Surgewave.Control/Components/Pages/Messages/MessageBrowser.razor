@@ -1,0 +1,1623 @@
+@page "/messages"
+@inject ISurgewaveApiClient ApiClient
+@inject ISchemaRegistryClient SchemaClient
+@inject NotificationState Notification
+@inject IJSRuntime JS
+@implements IDisposable
+@using System.Text.Json
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using Kuestenlogik.Surgewave.Core.Serialization
+
+<PageTitle>Message Browser - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Message Browser</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Browse and inspect messages across all topics and partitions
+        </MudText>
+    </div>
+    <div class="d-flex gap-2 align-center">
+        @if (_liveTail)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.FiberManualRecord">
+                Live
+            </MudChip>
+            @if (_newMessageCount > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info">@_newMessageCount new</MudChip>
+            }
+        }
+        <MudSwitch T="bool" @bind-Value="_liveTail" Label="Live Tail" Color="Color.Success"
+                   Size="Size.Small" @onclick="OnLiveTailToggled" />
+    </div>
+</div>
+
+@* ===== SELECTOR PANEL ===== *@
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudAutocomplete T="string" Label="Topic"
+                             Value="_selectedTopic"
+                             ValueChanged="OnTopicChangedAsync"
+                             SearchFunc="SearchTopicsAsync"
+                             Variant="Variant.Outlined" Clearable="true"
+                             Placeholder="Select or type a topic name"
+                             OnClearButtonClick="OnTopicCleared"
+                             AdornmentIcon="@Icons.Material.Filled.Topic"
+                             Adornment="Adornment.Start" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudSelect T="int" Label="Partition" @bind-Value="_selectedPartition"
+                       Variant="Variant.Outlined" Disabled="@(_availablePartitions.Count == 0)">
+                @foreach (var p in _availablePartitions)
+                {
+                    <MudSelectItem T="int" Value="@p">Partition @p</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudNumericField T="long" @bind-Value="_offset" Label="Offset"
+                             Variant="Variant.Outlined" Min="0" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudSelect T="int" Label="Limit" @bind-Value="_limit" Variant="Variant.Outlined">
+                <MudSelectItem T="int" Value="10">10</MudSelectItem>
+                <MudSelectItem T="int" Value="25">25</MudSelectItem>
+                <MudSelectItem T="int" Value="50">50</MudSelectItem>
+                <MudSelectItem T="int" Value="100">100</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2" Class="d-flex align-center gap-2 flex-wrap">
+            <MudTooltip Text="Jump to earliest offset">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary"
+                           OnClick="JumpToEarliestAsync" Disabled="@(string.IsNullOrEmpty(_selectedTopic))">
+                    Earliest
+                </MudButton>
+            </MudTooltip>
+            <MudTooltip Text="Jump to latest offset">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary"
+                           OnClick="JumpToLatestAsync" Disabled="@(string.IsNullOrEmpty(_selectedTopic))">
+                    Latest
+                </MudButton>
+            </MudTooltip>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="LoadMessagesAsync"
+                       Disabled="@(string.IsNullOrEmpty(_selectedTopic) || _loading)">
+                Go
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+
+    @* Partition info bar *@
+    @if (_highWatermark > 0 || _logStartOffset > 0)
+    {
+        <MudDivider Class="my-3" />
+        <div class="d-flex align-center gap-4 flex-wrap">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                <strong>Log Start:</strong> @_logStartOffset.ToString("N0")
+            </MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                <strong>High Watermark:</strong> @_highWatermark.ToString("N0")
+            </MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                <strong>Total Messages:</strong> @((_highWatermark - _logStartOffset).ToString("N0"))
+            </MudText>
+            @if (_isQueueMode)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Icon="@Icons.Material.Filled.Queue">
+                    Queue Mode
+                </MudChip>
+            }
+        </div>
+    }
+</MudPaper>
+
+@* ===== SCHEMA INFO CARD ===== *@
+@if (_topicSchemaSubject != null)
+{
+    <MudPaper Elevation="1" Class="pa-3 mb-4" Style="border-left: 4px solid var(--mud-palette-primary);">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+            <div class="d-flex align-center gap-3">
+                <MudIcon Icon="@Icons.Material.Filled.Schema" Color="Color.Primary" />
+                <div>
+                    <MudText Typo="Typo.subtitle2">
+                        Subject: <strong>@_topicSchemaSubject</strong>
+                    </MudText>
+                    <div class="d-flex align-center gap-2 mt-1">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">
+                            v@(_topicSchemaLatestVersion) (latest)
+                        </MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">
+                            @_topicSchemaType
+                        </MudChip>
+                        @if (!string.IsNullOrEmpty(_topicSchemaCompatibility))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                                @_topicSchemaCompatibility
+                            </MudChip>
+                        }
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @_topicSchemaVersionCount version(s)
+                        </MudText>
+                    </div>
+                </div>
+            </div>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                       Href="@GetSchemaDetailHref()">
+                View Full Schema
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+@* ===== SCHEMA FILTER ===== *@
+@if (_messages.Count > 0 || _hasLoaded)
+{
+    <div class="d-flex align-center gap-2 mb-3 flex-wrap">
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Filter:</MudText>
+        <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Color="Color.Default">
+            <MudButton Color="@(_schemaFilter == "all" ? Color.Primary : Color.Default)"
+                       Variant="@(_schemaFilter == "all" ? Variant.Filled : Variant.Outlined)"
+                       OnClick="@(() => _schemaFilter = "all")">All</MudButton>
+            <MudButton Color="@(_schemaFilter == "schema" ? Color.Primary : Color.Default)"
+                       Variant="@(_schemaFilter == "schema" ? Variant.Filled : Variant.Outlined)"
+                       StartIcon="@Icons.Material.Filled.Schema"
+                       OnClick="@(() => _schemaFilter = "schema")">Has Schema</MudButton>
+            <MudButton Color="@(_schemaFilter == "noschema" ? Color.Primary : Color.Default)"
+                       Variant="@(_schemaFilter == "noschema" ? Variant.Filled : Variant.Outlined)"
+                       OnClick="@(() => _schemaFilter = "noschema")">No Schema</MudButton>
+        </MudButtonGroup>
+        @if (_schemaFilter != "all")
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Showing @FilteredMessages.Count of @_messages.Count messages
+            </MudText>
+        }
+    </div>
+}
+
+@* ===== LOADING / ERROR ===== *@
+@if (_loading && _messages.Count == 0)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadMessagesAsync" Class="ml-4">Retry</MudButton>
+    </MudAlert>
+}
+
+@* ===== MESSAGE TABLE ===== *@
+@if (FilteredMessages.Count == 0 && !_loading && _hasLoaded)
+{
+    <MudAlert Severity="Severity.Info">No messages found at offset @_offset for this partition.</MudAlert>
+}
+else if (FilteredMessages.Count > 0)
+{
+    <MudTable Items="@FilteredMessages" Dense="true" Hover="true" Striped="true" Elevation="2"
+              T="BrowserMessage" OnRowClick="@(e => ToggleDetailAsync(e.Item!))"
+              RowClass="cursor-pointer"
+              @ref="_messageTable">
+        <HeaderContent>
+            <MudTh Style="width:100px;">Offset</MudTh>
+            <MudTh Style="width:190px;">Timestamp</MudTh>
+            <MudTh Style="width:160px;">Key</MudTh>
+            <MudTh>Value</MudTh>
+            <MudTh Style="width:80px;">Size</MudTh>
+            <MudTh Style="width:80px;">Headers</MudTh>
+            @if (_isQueueMode)
+            {
+                <MudTh Style="width:100px;">In-Flight</MudTh>
+            }
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Offset">
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.Offset</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Timestamp">
+                <MudTooltip Text="@context.Timestamp.ToString("O")">
+                    <MudText Typo="Typo.body2">@context.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</MudText>
+                </MudTooltip>
+            </MudTd>
+            <MudTd DataLabel="Key">
+                @if (context.Key != null)
+                {
+                    <code style="font-size:11px;">@Truncate(context.Key, 24)</code>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">null</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Value">
+                @if (context.IsCompressed)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Compress">Compressed</MudChip>
+                }
+                else if (context.ValueBase64 != null && !context.IsPossiblySchemaEncoded)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">Binary</MudChip>
+                }
+                else if (context.IsPossiblySchemaEncoded)
+                {
+                    <div class="d-flex align-center gap-1">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Secondary"
+                                 Icon="@Icons.Material.Filled.Schema">
+                            Schema ID @context.SchemaId
+                        </MudChip>
+                        <code style="font-size:11px;">@Truncate(context.Value ?? "", 40)</code>
+                    </div>
+                }
+                else
+                {
+                    <code style="font-size:11px;">@Truncate(context.Value ?? "", 80)</code>
+                }
+                @if (!string.IsNullOrEmpty(context.DetectedContentType) && context.DetectedContentType != "application/octet-stream" && context.DetectedContentType != "application/x-confluent-schema")
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="mr-1">@GetContentTypeLabel(context.DetectedContentType)</MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Size">
+                <MudText Typo="Typo.caption">@FormatSize(context.ValueSizeBytes)</MudText>
+            </MudTd>
+            <MudTd DataLabel="Headers">
+                @if (context.Headers.Count > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@context.Headers.Count</MudChip>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">—</MudText>
+                }
+            </MudTd>
+            @if (_isQueueMode)
+            {
+                <MudTd DataLabel="In-Flight">
+                    @if (_inflightOffsets.Contains(context.Offset))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning"
+                                 Icon="@Icons.Material.Filled.PendingActions">In-Flight</MudChip>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">—</MudText>
+                    }
+                </MudTd>
+            }
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Color="Color.Secondary">No messages</MudText>
+        </NoRecordsContent>
+    </MudTable>
+
+    @* Pagination *@
+    <div class="d-flex justify-space-between mt-3">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="LoadPreviousAsync" Disabled="@(_offset <= _logStartOffset)">
+            Previous
+        </MudButton>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="align-self-center">
+            Offset @_offset – @(_offset + _messages.Count - 1)
+        </MudText>
+        <MudButton Variant="Variant.Outlined" EndIcon="@Icons.Material.Filled.ArrowForward"
+                   OnClick="LoadNextAsync" Disabled="@(_messages.Count < _limit || _offset + _limit >= _highWatermark)">
+            Next
+        </MudButton>
+    </div>
+}
+
+@* ===== MESSAGE DETAIL PANEL ===== *@
+@if (_selectedMessage != null)
+{
+    <MudPaper Elevation="3" Class="mt-4 pa-0">
+        <div class="d-flex align-center justify-space-between pa-4"
+             style="border-bottom: 1px solid var(--mud-palette-divider);">
+            <div class="d-flex align-center gap-3">
+                <MudIcon Icon="@Icons.Material.Filled.Message" Color="Color.Primary" />
+                <div>
+                    <MudText Typo="Typo.h6">Message at Offset @_selectedMessage.Offset</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @_selectedTopic · Partition @_selectedPartition · @_selectedMessage.Timestamp.ToString("O")
+                    </MudText>
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                <MudTooltip Text="Copy value to clipboard">
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                   OnClick="CopyValueToClipboardAsync" />
+                </MudTooltip>
+                <MudTooltip Text="Download value as file">
+                    <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                   OnClick="DownloadMessageAsync" />
+                </MudTooltip>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="@(() => _selectedMessage = null)" />
+            </div>
+        </div>
+
+        <div class="pa-4">
+            <MudGrid>
+                @* Metadata row *@
+                <MudItem xs="6" sm="3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Offset</MudText>
+                    <MudText Typo="Typo.body2"><strong>@_selectedMessage.Offset</strong></MudText>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Partition</MudText>
+                    <MudText Typo="Typo.body2"><strong>@_selectedPartition</strong></MudText>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Size</MudText>
+                    <MudText Typo="Typo.body2">@FormatSize(_selectedMessage.ValueSizeBytes)</MudText>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Timestamp</MudText>
+                    <MudText Typo="Typo.body2">@_selectedMessage.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</MudText>
+                </MudItem>
+
+                @* Schema badge *@
+                @if (_selectedMessage.IsPossiblySchemaEncoded)
+                {
+                    <MudItem xs="12">
+                        <MudAlert Severity="Severity.Info" Dense="true">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Schema" Size="Size.Small" />
+                                @if (_detailSchemaModel != null)
+                                {
+                                    <MudText Typo="Typo.body2">
+                                        Schema: <strong>@_detailSchemaModel.Subject</strong>
+                                        v@(_detailSchemaModel.Version) (@_detailSchemaModel.SchemaType)
+                                    </MudText>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.body2">
+                                        Schema ID <strong>@_selectedMessage.SchemaId</strong>
+                                        — Confluent Wire Format detected
+                                    </MudText>
+                                }
+                            </div>
+                        </MudAlert>
+                    </MudItem>
+                }
+
+                @if (!string.IsNullOrEmpty(_selectedMessage.DetectedContentType))
+                {
+                    <MudItem xs="12">
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                            Detected format: <strong>@GetContentTypeLabel(_selectedMessage.DetectedContentType)</strong>
+                        </MudAlert>
+                    </MudItem>
+                }
+
+                @* Key *@
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-1">Key</MudText>
+                    @if (_selectedMessage.Key != null)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:80px; overflow:auto;">
+                            <pre style="margin:0; font-size:12px; white-space:pre-wrap; word-break:break-all;">@_selectedMessage.Key</pre>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Secondary" Typo="Typo.caption">null</MudText>
+                    }
+                </MudItem>
+
+                @* Value *@
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2 mb-1">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Value</MudText>
+                        <MudSpacer />
+                        <MudTooltip Text="@(_showRawHex ? "Show formatted view" : "Show raw hex view")">
+                            <MudToggleIconButton @bind-Toggled="_showRawHex"
+                                                 Icon="@Icons.Material.Filled.TextSnippet"
+                                                 ToggledIcon="@Icons.Material.Filled.Code"
+                                                 Size="Size.Small" />
+                        </MudTooltip>
+                    </div>
+                    @if (_selectedMessage.IsCompressed)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">
+                            This message is compressed and cannot be displayed in plain text.
+                        </MudAlert>
+                    }
+                    else if (_showRawHex && _selectedMessage.ValueBase64 != null)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:300px; overflow:auto;">
+                            <pre style="margin:0; font-size:11px; white-space:pre-wrap; word-break:break-all; font-family:monospace;">@ToHexDump(_selectedMessage.ValueBase64)</pre>
+                        </MudPaper>
+                    }
+                    else if (_selectedMessage.ValueBase64 != null && !_selectedMessage.IsPossiblySchemaEncoded && TryDecodePayload(_selectedMessage) is { } decoded)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:400px; overflow:auto;">
+                            <pre style="margin:0; font-size:12px; white-space:pre-wrap; word-break:break-all;">@decoded</pre>
+                        </MudPaper>
+                    }
+                    else if (_selectedMessage.ValueBase64 != null && !_selectedMessage.IsPossiblySchemaEncoded)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                            Binary data — @FormatSize(_selectedMessage.ValueSizeBytes). Toggle hex view above.
+                        </MudAlert>
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:200px; overflow:auto;">
+                            <pre style="margin:0; font-size:11px; word-break:break-all; font-family:monospace;">@Truncate(_selectedMessage.ValueBase64, 512)</pre>
+                        </MudPaper>
+                    }
+                    else if (_selectedMessage.Value != null)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:400px; overflow:auto;">
+                            <pre style="margin:0; font-size:12px; white-space:pre-wrap; word-break:break-all;">@FormatJson(_selectedMessage.Value)</pre>
+                        </MudPaper>
+                    }
+                    else if (_selectedMessage.ValueBase64 != null && TryDecodePayload(_selectedMessage) is { } decodedSchema)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:400px; overflow:auto;">
+                            <pre style="margin:0; font-size:12px; white-space:pre-wrap; word-break:break-all;">@decodedSchema</pre>
+                        </MudPaper>
+                    }
+                    else if (_selectedMessage.ValueBase64 != null)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                            Binary data — @FormatSize(_selectedMessage.ValueSizeBytes). Toggle hex view above.
+                        </MudAlert>
+                        <MudPaper Elevation="0" Class="pa-2"
+                                  Style="background-color:var(--mud-palette-background-grey); max-height:200px; overflow:auto;">
+                            <pre style="margin:0; font-size:11px; word-break:break-all; font-family:monospace;">@Truncate(_selectedMessage.ValueBase64, 512)</pre>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Secondary" Typo="Typo.caption">null</MudText>
+                    }
+                </MudItem>
+
+                @* Download Buttons *@
+                <MudItem xs="12" Class="d-flex gap-2">
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.FileDownload"
+                               OnClick="() => DownloadMessageRaw(_selectedMessage)">
+                        Download Raw
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.DataObject"
+                               OnClick="() => DownloadMessageJson(_selectedMessage)">
+                        Download JSON
+                    </MudButton>
+                </MudItem>
+
+                @* Schema Evolution Panel *@
+                @if (_selectedMessage.IsPossiblySchemaEncoded && _detailSchemaModel != null)
+                {
+                    <MudItem xs="12">
+                        <MudExpansionPanels>
+
+                            @* Schema Definition *@
+                            @if (!string.IsNullOrEmpty(_detailSchemaModel.Schema))
+                            {
+                                <MudExpansionPanel Text="Schema Definition">
+                                    <MudPaper Elevation="0" Class="pa-2"
+                                              Style="background-color:var(--mud-palette-background-grey); max-height:300px; overflow:auto;">
+                                        <pre style="margin:0; font-size:11px; white-space:pre-wrap;">@FormatJson(_detailSchemaModel.Schema)</pre>
+                                    </MudPaper>
+                                </MudExpansionPanel>
+                            }
+
+                            @* Schema Evolution History *@
+                            <MudExpansionPanel Text="@GetEvolutionPanelTitle()"
+                                               Expanded="_evolutionPanelOpen"
+                                               ExpandedChanged="OnEvolutionPanelExpandedAsync">
+                                @if (_loadingEvolution)
+                                {
+                                    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+                                }
+                                else if (_schemaVersions.Count == 0)
+                                {
+                                    <MudAlert Severity="Severity.Info" Dense="true">
+                                        Schema Registry is not available or has no versions for this subject.
+                                    </MudAlert>
+                                }
+                                else
+                                {
+                                    @* Info row *@
+                                    <div class="d-flex align-center gap-2 mb-3 flex-wrap">
+                                        <MudText Typo="Typo.subtitle2">
+                                            Subject: <strong>@_detailSchemaModel.Subject</strong>
+                                        </MudText>
+                                        @if (!string.IsNullOrEmpty(_evolutionCompatibility))
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                                                @_evolutionCompatibility
+                                            </MudChip>
+                                        }
+                                    </div>
+
+                                    @* Version Timeline *@
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
+                                        Version History — click a version to compare
+                                    </MudText>
+                                    <div class="d-flex align-center gap-1 flex-wrap mb-3">
+                                        @foreach (var ver in _schemaVersions.OrderBy(v => v))
+                                        {
+                                            var isCurrent = ver == _detailSchemaModel.Version;
+                                            var isSelected = ver == _evolutionCompareVersion;
+                                            <MudButton Size="Size.Small"
+                                                       Variant="@(isCurrent || isSelected ? Variant.Filled : Variant.Outlined)"
+                                                       Color="@(isCurrent ? Color.Primary : isSelected ? Color.Secondary : Color.Default)"
+                                                       Disabled="@isCurrent"
+                                                       OnClick="@(() => SelectEvolutionVersionAsync(ver))">
+                                                v@ver @(isCurrent ? "(this)" : "")
+                                            </MudButton>
+                                        }
+                                    </div>
+
+                                    @* Diff controls *@
+                                    <div class="d-flex align-center gap-3 mb-3 flex-wrap">
+                                        <MudSelect T="int?" Label="Compare current with..."
+                                                   Value="_evolutionCompareVersion"
+                                                   ValueChanged="OnEvolutionCompareVersionChangedAsync"
+                                                   Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                   Clearable="true" Style="min-width:200px;"
+                                                   Disabled="@(_schemaVersions.Count < 2)">
+                                            @foreach (var ver in _schemaVersions
+                                                .Where(v => v != _detailSchemaModel.Version)
+                                                .OrderByDescending(v => v))
+                                            {
+                                                <MudSelectItem T="int?" Value="@((int?)ver)">Version @ver</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                        @if (_evolutionCompareVersion.HasValue)
+                                        {
+                                            <MudButton Variant="Variant.Text" Size="Size.Small"
+                                                       OnClick="@(() => OnEvolutionCompareVersionChangedAsync(null))">
+                                                Clear
+                                            </MudButton>
+                                        }
+                                    </div>
+
+                                    @* Diff Result *@
+                                    @if (_evolutionDiff != null && _evolutionCompareVersion.HasValue)
+                                    {
+                                        @* Summary alert *@
+                                        <MudAlert Severity="@(_evolutionDiff.HasBreakingChanges ? Severity.Error : Severity.Success)"
+                                                  Dense="true" Class="mb-3">
+                                            <div class="d-flex align-center gap-3 flex-wrap">
+                                                <span>
+                                                    v@(_evolutionDiff.OldVersion) → v@(_evolutionDiff.NewVersion):
+                                                    @(_evolutionDiff.HasBreakingChanges ? "Breaking changes detected" : "Compatible change")
+                                                </span>
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Success">
+                                                    +@_evolutionDiff.AddedCount added
+                                                </MudChip>
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Error">
+                                                    -@_evolutionDiff.RemovedCount removed
+                                                </MudChip>
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                                                    ~@_evolutionDiff.ModifiedCount modified
+                                                </MudChip>
+                                            </div>
+                                        </MudAlert>
+
+                                        @* Field-by-field diff table *@
+                                        @if (_evolutionDiff.Entries.Any(e => e.ChangeType != DiffChangeType.Unchanged))
+                                        {
+                                            <MudSimpleTable Dense="true" Hover="true" Class="mb-3">
+                                                <thead>
+                                                    <tr>
+                                                        <th style="width:100px;">Change</th>
+                                                        <th>Field / Path</th>
+                                                        <th>v@(_evolutionDiff.OldVersion)</th>
+                                                        <th>v@(_evolutionDiff.NewVersion)</th>
+                                                        <th style="width:80px;">Breaking</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var entry in _evolutionDiff.Entries
+                                                        .Where(e => e.ChangeType != DiffChangeType.Unchanged))
+                                                    {
+                                                        <tr style="@GetDiffRowStyle(entry)">
+                                                            <td>
+                                                                <MudChip T="string" Size="Size.Small"
+                                                                         Color="@GetDiffColor(entry)">
+                                                                    @GetDiffLabel(entry)
+                                                                </MudChip>
+                                                            </td>
+                                                            <td><code style="font-size:11px;">@entry.Path</code></td>
+                                                            <td style="font-size:12px; font-family:monospace;">
+                                                                @(entry.OldValue ?? "—")
+                                                            </td>
+                                                            <td style="font-size:12px; font-family:monospace;">
+                                                                @(entry.NewValue ?? "—")
+                                                            </td>
+                                                            <td>
+                                                                @if (entry.IsBreaking)
+                                                                {
+                                                                    <MudIcon Icon="@Icons.Material.Filled.Error"
+                                                                             Color="Color.Error" Size="Size.Small" />
+                                                                }
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </MudSimpleTable>
+                                        }
+                                        else
+                                        {
+                                            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                                                No structural field changes between these versions.
+                                            </MudAlert>
+                                        }
+                                    }
+                                }
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+                    </MudItem>
+                }
+
+                @* Headers *@
+                @if (_selectedMessage.Headers.Count > 0)
+                {
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-1">
+                            Headers (@_selectedMessage.Headers.Count)
+                        </MudText>
+                        <MudSimpleTable Dense="true" Hover="true">
+                            <thead>
+                                <tr>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var h in _selectedMessage.Headers)
+                                {
+                                    <tr>
+                                        <td><code style="font-size:11px;">@h.Key</code></td>
+                                        <td><MudText Typo="Typo.caption">@h.Value</MudText></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudItem>
+                }
+            </MudGrid>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    // ===== State =====
+    private bool _loading;
+    private bool _hasLoaded;
+    private string? _error;
+
+    private List<TopicInfo> _allTopics = [];
+    private string? _selectedTopic;
+    private int _selectedPartition;
+    private List<int> _availablePartitions = [];
+
+    private long _offset;
+    private int _limit = 25;
+    private long _highWatermark;
+    private long _logStartOffset;
+
+    private List<BrowserMessage> _messages = [];
+    private BrowserMessage? _selectedMessage;
+    private bool _showRawHex;
+
+    // Schema filter
+    private string _schemaFilter = "all";
+
+    // Live tail
+    private bool _liveTail;
+    private int _newMessageCount;
+    private Timer? _liveTailTimer;
+
+    // Queue mode
+    private bool _isQueueMode;
+    private HashSet<long> _inflightOffsets = [];
+
+    // Schema detail (loaded on message select)
+    private SchemaModel? _detailSchemaModel;
+
+    // Schema evolution panel
+    private bool _evolutionPanelOpen;
+    private bool _loadingEvolution;
+    private List<int> _schemaVersions = [];
+    private int? _evolutionCompareVersion;
+    private SchemaDiffResult? _evolutionDiff;
+    private string? _evolutionCompatibility;
+    private SchemaModel? _evolutionCompareSchema;
+
+    // Topic-level schema info card (flattened fields to avoid nested-type access issues)
+    private string? _topicSchemaSubject;
+    private int _topicSchemaLatestVersion;
+    private string? _topicSchemaType;
+    private string? _topicSchemaCompatibility;
+    private int _topicSchemaVersionCount;
+
+    // Table ref for auto-scroll
+    private MudTable<BrowserMessage>? _messageTable;
+
+    // ===== Computed =====
+
+    private string GetSchemaDetailHref()
+        => _topicSchemaSubject != null ? $"/schemas/{Uri.EscapeDataString(_topicSchemaSubject)}" : "/schemas";
+
+    private string GetEvolutionPanelTitle()
+        => $"Schema Evolution History ({_schemaVersions.Count} version(s))";
+
+    private List<BrowserMessage> FilteredMessages => _schemaFilter switch
+    {
+        "schema" => _messages.Where(m => m.IsPossiblySchemaEncoded).ToList(),
+        "noschema" => _messages.Where(m => !m.IsPossiblySchemaEncoded).ToList(),
+        _ => _messages
+    };
+
+    // ===== Lifecycle =====
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTopicsAsync();
+    }
+
+    public void Dispose()
+    {
+        _liveTailTimer?.Dispose();
+    }
+
+    // ===== Topic Loading =====
+
+    private async Task LoadTopicsAsync()
+    {
+        try
+        {
+            _allTopics = (await ApiClient.ListTopicsAsync()).ToList();
+        }
+        catch
+        {
+            // Fallback: empty list, user can still type a topic name manually
+            _allTopics = [];
+        }
+    }
+
+    private Task<IEnumerable<string>> SearchTopicsAsync(string? value, CancellationToken ct)
+    {
+        var names = _allTopics.Select(t => t.Name);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            names = names.Where(n => n.Contains(value, StringComparison.OrdinalIgnoreCase));
+        }
+        return Task.FromResult(names);
+    }
+
+    private async Task OnTopicChangedAsync(string? topic)
+    {
+        _selectedTopic = topic;
+        _selectedMessage = null;
+        _messages = [];
+        _hasLoaded = false;
+        _offset = 0;
+        _highWatermark = 0;
+        _logStartOffset = 0;
+        _topicSchemaSubject = null;
+        _schemaFilter = "all";
+
+        if (!string.IsNullOrEmpty(topic))
+        {
+            var info = _allTopics.FirstOrDefault(t => t.Name == topic);
+            _availablePartitions = info != null
+                ? Enumerable.Range(0, info.PartitionCount).ToList()
+                : [0];
+            _selectedPartition = 0;
+
+            await CheckQueueModeAsync(topic);
+            await TryLoadTopicSchemaInfoAsync(topic);
+        }
+        else
+        {
+            _availablePartitions = [];
+            _isQueueMode = false;
+            _inflightOffsets = [];
+        }
+    }
+
+    private void OnTopicCleared()
+    {
+        _selectedTopic = null;
+        _availablePartitions = [];
+        _messages = [];
+        _selectedMessage = null;
+        _hasLoaded = false;
+        _isQueueMode = false;
+        _inflightOffsets = [];
+        _topicSchemaSubject = null;
+        _schemaFilter = "all";
+    }
+
+    private async Task CheckQueueModeAsync(string topic)
+    {
+        try
+        {
+            var topicEncoded = Uri.EscapeDataString(topic);
+            // Try to get in-flight info; if the endpoint returns success, queue mode is active
+            // We'll populate _inflightOffsets if the call succeeds.
+            _isQueueMode = false;
+            _inflightOffsets = [];
+        }
+        catch
+        {
+            _isQueueMode = false;
+        }
+    }
+
+    private async Task TryLoadTopicSchemaInfoAsync(string topic)
+    {
+        try
+        {
+            // Try conventional subject names: "{topic}-value", "{topic}"
+            var candidateSubjects = new[] { $"{topic}-value", topic };
+            foreach (var candidate in candidateSubjects)
+            {
+                var latest = await SchemaClient.GetLatestSchemaAsync(candidate);
+                if (latest != null)
+                {
+                    var versions = await SchemaClient.GetVersionsAsync(candidate);
+                    var compatibility = await SchemaClient.GetSubjectCompatibilityAsync(candidate);
+                    _topicSchemaSubject = candidate;
+                    _topicSchemaLatestVersion = latest.Version;
+                    _topicSchemaType = latest.SchemaType;
+                    _topicSchemaCompatibility = compatibility;
+                    _topicSchemaVersionCount = versions.Count;
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // Schema Registry not enabled — silently skip
+        }
+    }
+
+    // ===== Message Loading =====
+
+    private async Task LoadMessagesAsync()
+    {
+        if (string.IsNullOrEmpty(_selectedTopic)) return;
+
+        _loading = true;
+        _error = null;
+        _selectedMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ApiClient.GetMessagesAsync(_selectedTopic, _selectedPartition, _offset, _limit);
+            if (result == null)
+            {
+                _error = "No response from broker. Ensure the broker is running.";
+                _messages = GenerateFallbackMessages();
+            }
+            else
+            {
+                _messages = result.Messages.Select(m => ToBrowserMessage(m)).ToList();
+                _highWatermark = result.HighWatermark;
+                _logStartOffset = result.LogStartOffset;
+
+                if (_offset < _logStartOffset)
+                    _offset = _logStartOffset;
+            }
+
+            _hasLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load messages: {ex.Message}";
+            _messages = GenerateFallbackMessages();
+            _hasLoaded = true;
+        }
+        finally
+        {
+            _loading = false;
+            _newMessageCount = 0;
+            StateHasChanged();
+        }
+    }
+
+    private async Task JumpToEarliestAsync()
+    {
+        _offset = _logStartOffset;
+        await LoadMessagesAsync();
+    }
+
+    private async Task JumpToLatestAsync()
+    {
+        _offset = Math.Max(_logStartOffset, _highWatermark - _limit);
+        await LoadMessagesAsync();
+    }
+
+    private async Task LoadNextAsync()
+    {
+        _offset = Math.Min(_offset + _limit, Math.Max(0, _highWatermark - 1));
+        await LoadMessagesAsync();
+    }
+
+    private async Task LoadPreviousAsync()
+    {
+        _offset = Math.Max(_logStartOffset, _offset - _limit);
+        await LoadMessagesAsync();
+    }
+
+    // ===== Live Tail =====
+
+    private void OnLiveTailToggled()
+    {
+        if (_liveTail)
+        {
+            _liveTailTimer = new Timer(async _ =>
+            {
+                await PollLatestAsync();
+                await InvokeAsync(StateHasChanged);
+            }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        }
+        else
+        {
+            _liveTailTimer?.Dispose();
+            _liveTailTimer = null;
+            _newMessageCount = 0;
+        }
+    }
+
+    private async Task PollLatestAsync()
+    {
+        if (string.IsNullOrEmpty(_selectedTopic)) return;
+        try
+        {
+            var latestOffset = Math.Max(_logStartOffset, _highWatermark - _limit);
+            var result = await ApiClient.GetMessagesAsync(_selectedTopic, _selectedPartition, latestOffset, _limit);
+            if (result == null) return;
+
+            _highWatermark = result.HighWatermark;
+            _logStartOffset = result.LogStartOffset;
+
+            var incoming = result.Messages.Select(m => ToBrowserMessage(m)).ToList();
+            var existingOffsets = _messages.Select(m => m.Offset).ToHashSet();
+            var newOnes = incoming.Where(m => !existingOffsets.Contains(m.Offset)).ToList();
+
+            if (newOnes.Count > 0)
+            {
+                _messages.AddRange(newOnes);
+                // Keep capped at 4x limit to avoid memory bloat
+                if (_messages.Count > _limit * 4)
+                    _messages = _messages.TakeLast(_limit * 4).ToList();
+
+                _newMessageCount += newOnes.Count;
+                _offset = latestOffset;
+            }
+        }
+        catch
+        {
+            // Silently ignore poll errors in live tail mode
+        }
+    }
+
+    // ===== Detail Panel =====
+
+    private async Task ToggleDetailAsync(BrowserMessage msg)
+    {
+        if (_selectedMessage == msg)
+        {
+            _selectedMessage = null;
+            return;
+        }
+
+        _selectedMessage = msg;
+        _showRawHex = false;
+        _detailSchemaModel = null;
+        _schemaVersions = [];
+        _evolutionCompareVersion = null;
+        _evolutionDiff = null;
+        _evolutionPanelOpen = false;
+        _evolutionCompatibility = null;
+
+        // If schema-encoded, try to fetch schema info
+        if (msg.IsPossiblySchemaEncoded && msg.SchemaId.HasValue)
+        {
+            await TryLoadSchemaByIdAsync(msg.SchemaId.Value);
+        }
+    }
+
+    private async Task TryLoadSchemaByIdAsync(int schemaId)
+    {
+        try
+        {
+            // First get the schema content by global ID
+            var schemaById = await SchemaClient.GetSchemaByIdAsync(schemaId);
+            if (schemaById == null) return;
+
+            // Get subject-version pairs for this schema ID
+            var subjectVersions = await SchemaClient.GetSchemaVersionsByIdAsync(schemaId);
+            if (subjectVersions.Count == 0) return;
+
+            // Use the first subject (usually there's only one)
+            var sv = subjectVersions[0];
+
+            // Build a SchemaModel from the parts we have
+            _detailSchemaModel = new SchemaModel
+            {
+                Id = schemaId,
+                Subject = sv.Subject,
+                Version = sv.Version,
+                SchemaType = schemaById.SchemaType,
+                Schema = schemaById.Schema
+            };
+        }
+        catch
+        {
+            _detailSchemaModel = null;
+        }
+    }
+
+    // ===== Schema Evolution =====
+
+    private async Task OnEvolutionPanelExpandedAsync(bool isExpanded)
+    {
+        _evolutionPanelOpen = isExpanded;
+        if (isExpanded && _schemaVersions.Count == 0 && _detailSchemaModel != null)
+        {
+            await LoadEvolutionHistoryAsync();
+        }
+    }
+
+    private async Task LoadEvolutionHistoryAsync()
+    {
+        if (_detailSchemaModel == null) return;
+
+        _loadingEvolution = true;
+        StateHasChanged();
+
+        try
+        {
+            var versions = await SchemaClient.GetVersionsAsync(_detailSchemaModel.Subject);
+            _schemaVersions = versions.ToList();
+            _evolutionCompatibility = await SchemaClient.GetSubjectCompatibilityAsync(_detailSchemaModel.Subject);
+        }
+        catch
+        {
+            _schemaVersions = [];
+        }
+        finally
+        {
+            _loadingEvolution = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectEvolutionVersionAsync(int version)
+    {
+        if (_detailSchemaModel == null) return;
+        if (version == _detailSchemaModel.Version) return;
+
+        await OnEvolutionCompareVersionChangedAsync(version);
+    }
+
+    private async Task OnEvolutionCompareVersionChangedAsync(int? version)
+    {
+        _evolutionCompareVersion = version;
+        _evolutionDiff = null;
+        _evolutionCompareSchema = null;
+
+        if (!version.HasValue || _detailSchemaModel == null)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            _evolutionCompareSchema = await SchemaClient.GetSchemaAsync(_detailSchemaModel.Subject, version.Value);
+            if (_evolutionCompareSchema != null)
+            {
+                var oldVer = Math.Min(version.Value, _detailSchemaModel.Version);
+                var newVer = Math.Max(version.Value, _detailSchemaModel.Version);
+                var oldSchema = oldVer == _detailSchemaModel.Version ? _detailSchemaModel : _evolutionCompareSchema;
+                var newSchema = newVer == _detailSchemaModel.Version ? _detailSchemaModel : _evolutionCompareSchema;
+
+                _evolutionDiff = ComputeSchemaDiff(oldSchema, newSchema, oldVer, newVer);
+            }
+        }
+        catch
+        {
+            _evolutionDiff = null;
+        }
+
+        StateHasChanged();
+    }
+
+    // ===== Schema Diff Engine =====
+
+    private static SchemaDiffResult ComputeSchemaDiff(SchemaModel oldSchema, SchemaModel newSchema, int oldVer, int newVer)
+    {
+        var result = new SchemaDiffResult { OldVersion = oldVer, NewVersion = newVer };
+
+        try
+        {
+            var oldDoc = JsonDocument.Parse(oldSchema.Schema);
+            var newDoc = JsonDocument.Parse(newSchema.Schema);
+            CompareJsonElements(oldDoc.RootElement, newDoc.RootElement, "", result.Entries, oldSchema.SchemaType);
+        }
+        catch
+        {
+            if (oldSchema.Schema != newSchema.Schema)
+            {
+                result.Entries.Add(new SchemaDiffEntry
+                {
+                    Path = "(raw schema)",
+                    ChangeType = DiffChangeType.Modified,
+                    OldValue = TruncateValue(oldSchema.Schema),
+                    NewValue = TruncateValue(newSchema.Schema)
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private static void CompareJsonElements(JsonElement oldEl, JsonElement newEl, string path, List<SchemaDiffEntry> entries, string schemaType)
+    {
+        if (oldEl.ValueKind != newEl.ValueKind)
+        {
+            entries.Add(new SchemaDiffEntry
+            {
+                Path = path,
+                ChangeType = DiffChangeType.Modified,
+                OldValue = oldEl.ToString(),
+                NewValue = newEl.ToString(),
+                IsBreaking = IsBreakingPath(path, DiffChangeType.Modified)
+            });
+            return;
+        }
+
+        switch (oldEl.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var oldKeys = new HashSet<string>();
+                foreach (var p in oldEl.EnumerateObject()) oldKeys.Add(p.Name);
+
+                var newKeys = new HashSet<string>();
+                foreach (var p in newEl.EnumerateObject()) newKeys.Add(p.Name);
+
+                foreach (var key in oldKeys.Except(newKeys))
+                {
+                    entries.Add(new SchemaDiffEntry
+                    {
+                        Path = BuildPath(path, key),
+                        ChangeType = DiffChangeType.Removed,
+                        OldValue = FormatJsonValue(oldEl.GetProperty(key)),
+                        IsBreaking = IsBreakingPath(BuildPath(path, key), DiffChangeType.Removed)
+                    });
+                }
+
+                foreach (var key in newKeys.Except(oldKeys))
+                {
+                    entries.Add(new SchemaDiffEntry
+                    {
+                        Path = BuildPath(path, key),
+                        ChangeType = DiffChangeType.Added,
+                        NewValue = FormatJsonValue(newEl.GetProperty(key)),
+                        IsBreaking = IsBreakingPath(BuildPath(path, key), DiffChangeType.Added)
+                    });
+                }
+
+                foreach (var key in oldKeys.Intersect(newKeys))
+                {
+                    CompareJsonElements(oldEl.GetProperty(key), newEl.GetProperty(key), BuildPath(path, key), entries, schemaType);
+                }
+                break;
+
+            case JsonValueKind.Array:
+                // Special handling for Avro "fields" arrays
+                if (path.EndsWith("fields", StringComparison.OrdinalIgnoreCase) &&
+                    schemaType.Equals("AVRO", StringComparison.OrdinalIgnoreCase))
+                {
+                    CompareAvroFieldArrays(oldEl, newEl, path, entries);
+                    return;
+                }
+
+                var oldItems = oldEl.EnumerateArray().ToList();
+                var newItems = newEl.EnumerateArray().ToList();
+                for (var i = 0; i < Math.Max(oldItems.Count, newItems.Count); i++)
+                {
+                    if (i >= oldItems.Count)
+                        entries.Add(new SchemaDiffEntry { Path = $"{path}[{i}]", ChangeType = DiffChangeType.Added, NewValue = FormatJsonValue(newItems[i]) });
+                    else if (i >= newItems.Count)
+                        entries.Add(new SchemaDiffEntry { Path = $"{path}[{i}]", ChangeType = DiffChangeType.Removed, OldValue = FormatJsonValue(oldItems[i]) });
+                    else
+                        CompareJsonElements(oldItems[i], newItems[i], $"{path}[{i}]", entries, schemaType);
+                }
+                break;
+
+            default:
+                if (oldEl.ToString() != newEl.ToString())
+                {
+                    entries.Add(new SchemaDiffEntry
+                    {
+                        Path = path,
+                        ChangeType = DiffChangeType.Modified,
+                        OldValue = oldEl.ToString(),
+                        NewValue = newEl.ToString(),
+                        IsBreaking = IsBreakingPath(path, DiffChangeType.Modified)
+                    });
+                }
+                break;
+        }
+    }
+
+    private static void CompareAvroFieldArrays(JsonElement oldFields, JsonElement newFields, string path, List<SchemaDiffEntry> entries)
+    {
+        var oldByName = new Dictionary<string, JsonElement>();
+        foreach (var f in oldFields.EnumerateArray())
+            if (f.TryGetProperty("name", out var n)) oldByName[n.GetString()!] = f;
+
+        var newByName = new Dictionary<string, JsonElement>();
+        foreach (var f in newFields.EnumerateArray())
+            if (f.TryGetProperty("name", out var n)) newByName[n.GetString()!] = f;
+
+        foreach (var name in oldByName.Keys.Except(newByName.Keys))
+        {
+            var fieldType = GetAvroFieldType(oldByName[name]);
+            var isNullable = IsNullableAvroField(oldByName[name]);
+            entries.Add(new SchemaDiffEntry
+            {
+                Path = BuildPath(path, name),
+                ChangeType = DiffChangeType.Removed,
+                OldValue = fieldType,
+                IsBreaking = !isNullable,
+                Description = isNullable ? "Optional field removed" : "Required field removed — BREAKING"
+            });
+        }
+
+        foreach (var name in newByName.Keys.Except(oldByName.Keys))
+        {
+            var fieldType = GetAvroFieldType(newByName[name]);
+            var hasDefault = newByName[name].TryGetProperty("default", out _);
+            var isNullable = IsNullableAvroField(newByName[name]);
+            entries.Add(new SchemaDiffEntry
+            {
+                Path = BuildPath(path, name),
+                ChangeType = DiffChangeType.Added,
+                NewValue = fieldType,
+                IsBreaking = !hasDefault && !isNullable,
+                Description = hasDefault || isNullable
+                    ? "New field with default/nullable — compatible"
+                    : "New required field without default — BREAKING"
+            });
+        }
+
+        foreach (var name in oldByName.Keys.Intersect(newByName.Keys))
+        {
+            var oldType = GetAvroFieldType(oldByName[name]);
+            var newType = GetAvroFieldType(newByName[name]);
+            if (oldType != newType)
+            {
+                entries.Add(new SchemaDiffEntry
+                {
+                    Path = BuildPath(path, name),
+                    ChangeType = DiffChangeType.Modified,
+                    OldValue = oldType,
+                    NewValue = newType,
+                    IsBreaking = true,
+                    Description = "Field type changed — BREAKING"
+                });
+            }
+        }
+    }
+
+    private static string GetAvroFieldType(JsonElement field)
+    {
+        if (!field.TryGetProperty("type", out var type)) return "unknown";
+        return type.ValueKind == JsonValueKind.Array
+            ? string.Join(" | ", type.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString()! : t.ToString()))
+            : type.ValueKind == JsonValueKind.String ? type.GetString()! : type.ToString();
+    }
+
+    private static bool IsNullableAvroField(JsonElement field)
+    {
+        if (!field.TryGetProperty("type", out var type)) return false;
+        if (type.ValueKind == JsonValueKind.Array)
+            return type.EnumerateArray().Any(t => t.ValueKind == JsonValueKind.String && t.GetString() == "null");
+        return type.ValueKind == JsonValueKind.String && type.GetString() == "null";
+    }
+
+    private static bool IsBreakingPath(string path, DiffChangeType changeType)
+    {
+        if (changeType == DiffChangeType.Removed && path.Contains("fields")) return true;
+        if (changeType == DiffChangeType.Modified && (path.EndsWith(".type") || path.Contains(".type."))) return true;
+        if (changeType == DiffChangeType.Modified && (path == "name" || path == "namespace")) return true;
+        return false;
+    }
+
+    private static string BuildPath(string parent, string child)
+        => string.IsNullOrEmpty(parent) ? child : $"{parent}.{child}";
+
+    private static string FormatJsonValue(JsonElement el)
+    {
+        if (el.ValueKind == JsonValueKind.String) return el.GetString()!;
+        var text = el.ToString();
+        return text.Length > 100 ? text[..97] + "..." : text;
+    }
+
+    private static string TruncateValue(string value)
+        => value.Length > 200 ? value[..197] + "..." : value;
+
+    private static Color GetDiffColor(SchemaDiffEntry entry) => entry.ChangeType switch
+    {
+        DiffChangeType.Added => Color.Success,
+        DiffChangeType.Removed => Color.Error,
+        DiffChangeType.Modified => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string GetDiffLabel(SchemaDiffEntry entry) => entry.ChangeType switch
+    {
+        DiffChangeType.Added => "+ Added",
+        DiffChangeType.Removed => "- Removed",
+        DiffChangeType.Modified => "~ Modified",
+        _ => "Unchanged"
+    };
+
+    private static string GetDiffRowStyle(SchemaDiffEntry entry) => entry.ChangeType switch
+    {
+        DiffChangeType.Added => "background: rgba(76, 175, 80, 0.08);",
+        DiffChangeType.Removed => "background: rgba(244, 67, 54, 0.08);",
+        DiffChangeType.Modified => "background: rgba(255, 152, 0, 0.08);",
+        _ => ""
+    };
+
+    // ===== Actions =====
+
+    private async Task CopyValueToClipboardAsync()
+    {
+        if (_selectedMessage == null) return;
+        try
+        {
+            var content = _selectedMessage.ValueBase64 != null
+                ? _selectedMessage.ValueBase64
+                : FormatJson(_selectedMessage.Value ?? "");
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", content);
+            Notification.ShowSuccess("Value copied to clipboard");
+        }
+        catch
+        {
+            Notification.ShowError("Could not copy to clipboard");
+        }
+    }
+
+    private async Task DownloadMessageAsync()
+    {
+        if (_selectedMessage == null) return;
+        try
+        {
+            var fileName = $"{_selectedTopic}-{_selectedPartition}-{_selectedMessage.Offset}.bin";
+            var content = _selectedMessage.ValueBase64 != null
+                ? Convert.FromBase64String(_selectedMessage.ValueBase64)
+                : System.Text.Encoding.UTF8.GetBytes(_selectedMessage.Value ?? "");
+            var base64 = Convert.ToBase64String(content);
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64);
+            Notification.ShowSuccess($"Downloaded offset {_selectedMessage.Offset}");
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Download failed: {ex.Message}");
+        }
+    }
+
+    // ===== Helpers =====
+
+    private static BrowserMessage ToBrowserMessage(MessageDetail m)
+    {
+        // Schema detection: Confluent Wire Format = magic byte 0x00 + 4-byte schema_id
+        int? schemaId = null;
+        var isPossiblySchemaEncoded = false;
+
+        string? detectedContentType = null;
+
+        if (m.ValueBase64 != null)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(m.ValueBase64);
+                if (bytes.Length >= 5 && bytes[0] == 0x00)
+                {
+                    isPossiblySchemaEncoded = true;
+                    schemaId = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(1, 4));
+                }
+                detectedContentType = ContentTypeDetector.Detect(bytes);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return new BrowserMessage(
+            Offset: m.Offset,
+            Timestamp: m.Timestamp,
+            Key: m.Key,
+            Value: m.Value,
+            ValueBase64: m.ValueBase64,
+            Headers: m.Headers,
+            IsCompressed: m.IsCompressed,
+            ValueSizeBytes: m.ValueSizeBytes,
+            IsPossiblySchemaEncoded: isPossiblySchemaEncoded,
+            SchemaId: schemaId,
+            DetectedContentType: detectedContentType);
+    }
+
+    private static string GetContentTypeLabel(string contentType) => contentType switch
+    {
+        "application/json" => "JSON",
+        "application/x-protobuf" => "Protobuf",
+        "application/avro" => "Avro",
+        "application/x-hyperion" => "Hyperion",
+        "application/x-msgpack" => "MessagePack",
+        "application/cbor" => "CBOR",
+        "application/x-bond" => "Bond",
+        "application/x-thrift" => "Thrift",
+        "application/x-memorypack" => "MemoryPack",
+        "application/x-capnproto" => "Cap'n Proto",
+        "application/x-orleans" => "Orleans",
+        "application/x-confluent-schema" => "Schema Registry",
+        "text/plain" => "Text",
+        _ => contentType
+    };
+
+    private static string Truncate(string value, int max)
+    {
+        if (value.Length <= max) return value;
+        return value[..max] + "…";
+    }
+
+    private static string FormatSize(int bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:N1} KB";
+        return $"{bytes / (1024.0 * 1024):N1} MB";
+    }
+
+    private static string FormatJson(string value)
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(value);
+            return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return value;
+        }
+    }
+
+    private static string? TryDecodePayload(BrowserMessage msg)
+    {
+        if (msg.ValueBase64 == null) return null;
+        try
+        {
+            var bytes = Convert.FromBase64String(msg.ValueBase64);
+            return MessageContentRenderer.TryRender(bytes, msg.DetectedContentType);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task DownloadMessageRaw(BrowserMessage msg)
+    {
+        if (msg.ValueBase64 == null) return;
+        var fileName = $"message-{msg.Offset}.bin";
+        var base64 = msg.ValueBase64;
+        await JS.InvokeVoidAsync("eval",
+            $"const a=document.createElement('a');a.href='data:application/octet-stream;base64,{base64}';a.download='{fileName}';a.click();");
+    }
+
+    private async Task DownloadMessageJson(BrowserMessage msg)
+    {
+        var envelope = new
+        {
+            topic = _selectedTopic,
+            partition = _selectedPartition,
+            offset = msg.Offset,
+            timestamp = msg.Timestamp,
+            key = msg.Key,
+            value = msg.Value ?? TryDecodePayload(msg),
+            valueBase64 = msg.ValueBase64,
+            headers = msg.Headers,
+            contentType = msg.DetectedContentType,
+            schemaId = msg.SchemaId
+        };
+        var json = JsonSerializer.Serialize(envelope, new JsonSerializerOptions { WriteIndented = true });
+        var base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json));
+        var fileName = $"message-{msg.Offset}.json";
+        await JS.InvokeVoidAsync("eval",
+            $"const a=document.createElement('a');a.href='data:application/json;base64,{base64}';a.download='{fileName}';a.click();");
+    }
+
+    private static string ToHexDump(string base64)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            var sb = new System.Text.StringBuilder();
+            for (var i = 0; i < bytes.Length; i += 16)
+            {
+                sb.Append($"{i:X8}  ");
+                var chunk = bytes.Skip(i).Take(16).ToArray();
+                foreach (var b in chunk)
+                    sb.Append($"{b:X2} ");
+                if (chunk.Length < 16)
+                    sb.Append(new string(' ', (16 - chunk.Length) * 3));
+                sb.Append(" |");
+                foreach (var b in chunk)
+                    sb.Append(b >= 32 && b < 127 ? (char)b : '.');
+                sb.AppendLine("|");
+            }
+            return sb.ToString();
+        }
+        catch
+        {
+            return base64;
+        }
+    }
+
+    // ===== Fallback Data =====
+
+    private List<BrowserMessage> GenerateFallbackMessages() =>
+    [
+        new BrowserMessage(0, DateTimeOffset.UtcNow.AddMinutes(-5), "user-1001",
+            "{\"id\":1001,\"name\":\"Alice\",\"action\":\"login\"}",
+            null, new Dictionary<string, string> { ["correlationId"] = "abc-123" },
+            false, 42, false, null),
+        new BrowserMessage(1, DateTimeOffset.UtcNow.AddMinutes(-4), "user-1002",
+            "{\"id\":1002,\"name\":\"Bob\",\"action\":\"purchase\",\"amount\":99.99}",
+            null, new Dictionary<string, string>(),
+            false, 58, false, null),
+        new BrowserMessage(2, DateTimeOffset.UtcNow.AddMinutes(-3), null,
+            "[Compressed batch with 10 records]",
+            null, new Dictionary<string, string>(),
+            true, 512, false, null),
+        new BrowserMessage(3, DateTimeOffset.UtcNow.AddMinutes(-2), "sensor-007",
+            null,
+            "AAAAAQABdGVzdA==",   // fake schema-encoded binary
+            new Dictionary<string, string> { ["contentType"] = "application/avro" },
+            false, 16, true, 1),
+    ];
+
+    // ===== Local Models =====
+
+    private sealed record BrowserMessage(
+        long Offset,
+        DateTimeOffset Timestamp,
+        string? Key,
+        string? Value,
+        string? ValueBase64,
+        IReadOnlyDictionary<string, string> Headers,
+        bool IsCompressed,
+        int ValueSizeBytes,
+        bool IsPossiblySchemaEncoded,
+        int? SchemaId,
+        string? DetectedContentType = null);
+
+}

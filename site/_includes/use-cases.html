@@ -1,0 +1,164 @@
+{%- comment -%}
+Use-cases section — six pain/fix pairs as full-width blocks, alternating
+direction (pain-left-fix-right ↔ fix-left-pain-right). Replaces the
+previous 6-card grid with a more readable problem→solution narrative
+that the reader can scan top-to-bottom. Mobile collapses the inner
+2-column grid to a single column (pain stacks above fix).
+{%- endcomment -%}
+<section class="use-cases" id="use-cases">
+  <div class="container">
+    <h2 class="section-title">Solutions, not just features</h2>
+    <p class="section-lede">Each Surgewave use case starts from a real pain we kept hitting in .NET shops &mdash; here's what Surgewave actually does about it, and where to go next.</p>
+
+    <div class="use-case-pairs">
+
+      <article class="use-case-pair">
+        <header class="use-case-pair-head">
+          <div class="use-case-pair-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 8h13l-3-3M3 8l3 3"/>
+              <path d="M21 16H8l3 3M21 16l-3-3"/>
+            </svg>
+          </div>
+          <h3>Escape Kafka without a rewrite</h3>
+        </header>
+        <div class="use-case-pair-body">
+          <div class="use-case-pair-pain">
+            <span class="use-case-pair-label">The pain</span>
+            <p>JVM cluster ops, ZooKeeper drift, KRaft surprise upgrades, Confluent licence math.</p>
+          </div>
+          <div class="use-case-pair-fix">
+            <span class="use-case-pair-label">Surgewave</span>
+            <p>Kafka-wire compatibility means existing producers, consumers, and admin tools connect unchanged. Transactions stay exactly-once. Migrate one topic at a time.</p>
+            <a class="use-case-pair-go" href="{{ '/docs/migration/index.html' | relative_url }}">Migration guide &rarr;</a>
+          </div>
+        </div>
+      </article>
+
+      <article class="use-case-pair">
+        <header class="use-case-pair-head">
+          <div class="use-case-pair-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6z"/>
+              <path d="M9 12l2 2 4-4"/>
+            </svg>
+          </div>
+          <h3>Real-time fraud detection</h3>
+        </header>
+        <div class="use-case-pair-body">
+          <div class="use-case-pair-pain">
+            <span class="use-case-pair-label">The pain</span>
+            <p>Kafka-Streams + Flink + an ML cluster &mdash; three systems, three SREs, three bills, three failure modes.</p>
+          </div>
+          <div class="use-case-pair-fix">
+            <span class="use-case-pair-label">Surgewave</span>
+            <p>Joins, windowing, and ONNX scoring inside a single .NET process. Native protocol round-trip lands risk decisions inside the tap-to-pay envelope.</p>
+            <a class="use-case-pair-go" href="{{ '/docs/cookbook/fraud-detection.html' | relative_url }}">Fraud-detection cookbook &rarr;</a>
+          </div>
+        </div>
+      </article>
+
+      <article class="use-case-pair">
+        <header class="use-case-pair-head">
+          <div class="use-case-pair-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="7" width="16" height="13" rx="2"/>
+              <circle cx="9" cy="13" r="1" fill="currentColor"/>
+              <circle cx="15" cy="13" r="1" fill="currentColor"/>
+              <path d="M9 17h6M12 7V4M2 13h2M20 13h2"/>
+            </svg>
+          </div>
+          <h3>AI pipelines &amp; agent memory</h3>
+        </header>
+        <div class="use-case-pair-body">
+          <div class="use-case-pair-pain">
+            <span class="use-case-pair-label">The pain</span>
+            <p>Agent memory glued from Postgres + Redis + Pinecone + LangChain &mdash; four systems, four bills, brittle plumbing.</p>
+          </div>
+          <div class="use-case-pair-fix">
+            <span class="use-case-pair-label">Surgewave</span>
+            <p>Topic-as-memory, embedded vector retrievers, signed OpenAI / Ollama / Qdrant pipeline nodes. Guardrails veto outputs in-line.</p>
+            <a class="use-case-pair-go" href="{{ '/docs/ai/index.html' | relative_url }}">AI docs &rarr;</a>
+          </div>
+        </div>
+      </article>
+
+      <article class="use-case-pair">
+        <header class="use-case-pair-head">
+          <div class="use-case-pair-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="2.2"/>
+              <circle cx="5" cy="5" r="1.5"/>
+              <circle cx="19" cy="5" r="1.5"/>
+              <circle cx="5" cy="19" r="1.5"/>
+              <circle cx="19" cy="19" r="1.5"/>
+              <circle cx="2" cy="12" r="1.2"/>
+              <circle cx="22" cy="12" r="1.2"/>
+              <path d="M12 12L5 5M12 12l7-7M12 12L5 19M12 12l7 7M12 12H2M12 12h10"/>
+            </svg>
+          </div>
+          <h3>Digital twins &amp; massive simulation</h3>
+        </header>
+        <div class="use-case-pair-body">
+          <div class="use-case-pair-pain">
+            <span class="use-case-pair-label">The pain</span>
+            <p>A million vehicles &times; per-second state updates &times; replay-the-last-week = Kafka segments thrash, JVM GC stalls.</p>
+          </div>
+          <div class="use-case-pair-fix">
+            <span class="use-case-pair-label">Surgewave</span>
+            <p>Per-entity partitioning, native sub-ms transport, RocksDB for hot keyed state, S3-direct for cold replay &mdash; weeks of history cost cents per&nbsp;GB.</p>
+            <a class="use-case-pair-go" href="https://github.com/Kuestenlogik/Surgewave.Samples"><code>FleetTracker</code> &amp; <code>DigitalTwin</code> samples &rarr;</a>
+          </div>
+        </div>
+      </article>
+
+      <article class="use-case-pair">
+        <header class="use-case-pair-head">
+          <div class="use-case-pair-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="8" ry="2.5"/>
+              <path d="M4 5v6c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5V5"/>
+              <path d="M4 11v6c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5v-6"/>
+            </svg>
+          </div>
+          <h3>Storage that fits the workload</h3>
+        </header>
+        <div class="use-case-pair-body">
+          <div class="use-case-pair-pain">
+            <span class="use-case-pair-label">The pain</span>
+            <p>Kafka and Redpanda lock you into one log-segment engine. Keyed lookups become partition scans, cold archives stay on hot SSD &mdash; or you pay extra for someone's tiered-storage add-on.</p>
+          </div>
+          <div class="use-case-pair-fix">
+            <span class="use-case-pair-label">Surgewave</span>
+            <p>Pick the engine per topic. Arrow columnar for analytics, RocksDB for keyed state, S3-direct for cold archive, NVMe-direct for hot paths &mdash; or write your own against <code>IStorageEnginePlugin</code>.</p>
+            <a class="use-case-pair-go" href="{{ '/docs/storage/index.html' | relative_url }}">Storage engines &rarr;</a>
+          </div>
+        </div>
+      </article>
+
+      <article class="use-case-pair">
+        <header class="use-case-pair-head">
+          <div class="use-case-pair-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+            </svg>
+          </div>
+          <h3>IoT &amp; edge ingestion</h3>
+        </header>
+        <div class="use-case-pair-body">
+          <div class="use-case-pair-pain">
+            <span class="use-case-pair-label">The pain</span>
+            <p>Gateways speak MQTT, analytics wants Kafka &mdash; you cobble a bridge service nobody owns.</p>
+          </div>
+          <div class="use-case-pair-fix">
+            <span class="use-case-pair-label">Surgewave</span>
+            <p>MQTT in, Kafka out &mdash; same broker, same topic, no bridge service. Embedded broker on the edge gateway itself.</p>
+            <a class="use-case-pair-go" href="{{ '/docs/cookbook/iot.html' | relative_url }}">IoT cookbook &rarr;</a>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>

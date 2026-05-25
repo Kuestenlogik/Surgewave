@@ -1,0 +1,429 @@
+@page "/cruise-control"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Cruise Control - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Cruise Control</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Automatic partition balancing based on load, disk, and network metrics</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" OnClick="AnalyzeNowAsync"
+                   StartIcon="@Icons.Material.Filled.Analytics" Disabled="_loading">Analyze Now</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Score Overview Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Balance"
+                             Color="@GetScoreColor(_report.Score.OverallScore)" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Overall Score</MudText>
+                        <MudText Typo="Typo.h5">@(_report.Score.OverallScore.ToString("F1"))%</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@(GetBalanceIcon(_report.IsBalanced))"
+                             Color="@(_report.IsBalanced ? Color.Success : Color.Warning)" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
+                        <MudText Typo="Typo.h5">@(_report.IsBalanced ? "Balanced" : "Imbalanced")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Imbalances</MudText>
+                        <MudText Typo="Typo.h5">@_report.Imbalances.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Settings" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Mode</MudText>
+                        <MudText Typo="Typo.h5">@_config.Mode</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Per-Metric Balance Scores *@
+<MudCard Class="mb-4" Elevation="2">
+    <MudCardHeader>
+        <MudText Typo="Typo.h6">Balance Scores</MudText>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Partitions</MudText>
+                <MudProgressLinear Color="@GetScoreColor(_report.Score.PartitionBalance)"
+                                   Value="@_report.Score.PartitionBalance" Class="my-2" />
+                <MudText>@(_report.Score.PartitionBalance.ToString("F1"))%</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Leaders</MudText>
+                <MudProgressLinear Color="@GetScoreColor(_report.Score.LeaderBalance)"
+                                   Value="@_report.Score.LeaderBalance" Class="my-2" />
+                <MudText>@(_report.Score.LeaderBalance.ToString("F1"))%</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Disk</MudText>
+                <MudProgressLinear Color="@GetScoreColor(_report.Score.DiskBalance)"
+                                   Value="@_report.Score.DiskBalance" Class="my-2" />
+                <MudText>@(_report.Score.DiskBalance.ToString("F1"))%</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Network</MudText>
+                <MudProgressLinear Color="@GetScoreColor(_report.Score.NetworkBalance)"
+                                   Value="@_report.Score.NetworkBalance" Class="my-2" />
+                <MudText>@(_report.Score.NetworkBalance.ToString("F1"))%</MudText>
+            </MudItem>
+        </MudGrid>
+    </MudCardContent>
+</MudCard>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+    @* Broker Loads *@
+    <MudTabPanel Text="Broker Loads" Icon="@Icons.Material.Filled.Dns">
+        <MudTable Items="_report.BrokerLoads" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Broker ID</MudTh>
+                <MudTh>Partitions</MudTh>
+                <MudTh>Leaders</MudTh>
+                <MudTh>Disk Usage</MudTh>
+                <MudTh>Produce Rate</MudTh>
+                <MudTh>Consume Rate</MudTh>
+                <MudTh>CPU %</MudTh>
+                <MudTh>Network %</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Broker ID"><strong>@context.BrokerId</strong></MudTd>
+                <MudTd DataLabel="Partitions">@context.PartitionCount</MudTd>
+                <MudTd DataLabel="Leaders">@context.LeaderCount</MudTd>
+                <MudTd DataLabel="Disk Usage">@FormatBytes(context.DiskUsageBytes)</MudTd>
+                <MudTd DataLabel="Produce Rate">@FormatBytesPerSec(context.ProduceRateBytesPerSec)</MudTd>
+                <MudTd DataLabel="Consume Rate">@FormatBytesPerSec(context.ConsumeRateBytesPerSec)</MudTd>
+                <MudTd DataLabel="CPU">@context.CpuPercent.ToString("F1")%</MudTd>
+                <MudTd DataLabel="Network">@context.NetworkUtilizationPercent.ToString("F1")%</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No broker load data available. Run an analysis first.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* Imbalances *@
+    <MudTabPanel Text="Imbalances" Icon="@Icons.Material.Filled.Warning" BadgeData="@(_report.Imbalances.Count > 0 ? _report.Imbalances.Count.ToString() : null)" BadgeColor="Color.Warning">
+        <MudTable Items="_report.Imbalances" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Metric</MudTh>
+                <MudTh>Overloaded Broker</MudTh>
+                <MudTh>Underloaded Broker</MudTh>
+                <MudTh>Imbalance %</MudTh>
+                <MudTh>Description</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Metric"><MudChip T="string" Size="Size.Small">@context.Metric.ToString()</MudChip></MudTd>
+                <MudTd DataLabel="Overloaded"><strong>@context.OverloadedBrokerId</strong></MudTd>
+                <MudTd DataLabel="Underloaded"><strong>@context.UnderloadedBrokerId</strong></MudTd>
+                <MudTd DataLabel="Imbalance"><MudText Color="Color.Error">@context.ImbalancePercent.ToString("F1")%</MudText></MudTd>
+                <MudTd DataLabel="Description">@context.Description</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No imbalances detected. The cluster is well-balanced.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* Suggested Plan *@
+    <MudTabPanel Text="Suggested Plan" Icon="@Icons.Material.Filled.SwapHoriz">
+        @if (_report.SuggestedPlan is not null && _report.SuggestedPlan.Assignments.Count > 0)
+        {
+            <div class="ma-4">
+                <div class="d-flex align-center justify-space-between mb-3">
+                    <MudText Typo="Typo.subtitle1">@_report.SuggestedPlan.Assignments.Count partition move(s) suggested</MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="ApplyPlanAsync" StartIcon="@Icons.Material.Filled.PlayArrow">Apply Plan</MudButton>
+                </div>
+                <MudTable Items="_report.SuggestedPlan.Assignments" Hover="true" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Topic</MudTh>
+                        <MudTh>Partition</MudTh>
+                        <MudTh>Current Replicas</MudTh>
+                        <MudTh>Target Replicas</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Topic">@context.Topic</MudTd>
+                        <MudTd DataLabel="Partition">@context.Partition</MudTd>
+                        <MudTd DataLabel="Current">[@(string.Join(", ", context.CurrentReplicas))]</MudTd>
+                        <MudTd DataLabel="Target">[@(string.Join(", ", context.TargetReplicas))]</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </div>
+        }
+        else
+        {
+            <div class="ma-4">
+                <MudText>No rebalance plan suggested. The cluster is either balanced or no improvements can be made.</MudText>
+            </div>
+        }
+    </MudTabPanel>
+
+    @* History *@
+    <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History">
+        <MudTable Items="_history" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Timestamp</MudTh>
+                <MudTh>Overall Score</MudTh>
+                <MudTh>Balanced</MudTh>
+                <MudTh>Imbalances</MudTh>
+                <MudTh>Suggested Moves</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Timestamp">@context.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Score">
+                    <MudText Color="@GetScoreColor(context.Score.OverallScore)">@context.Score.OverallScore.ToString("F1")%</MudText>
+                </MudTd>
+                <MudTd DataLabel="Balanced">
+                    @if (context.IsBalanced)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Color="Color.Warning" />
+                    }
+                </MudTd>
+                <MudTd DataLabel="Imbalances">@context.Imbalances.Count</MudTd>
+                <MudTd DataLabel="Moves">@(context.SuggestedPlan?.Assignments.Count ?? 0)</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No analysis history yet.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* Configuration *@
+    <MudTabPanel Text="Configuration" Icon="@Icons.Material.Filled.Settings">
+        <div class="ma-4">
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudCard Elevation="1">
+                        <MudCardHeader><MudText Typo="Typo.subtitle1">General</MudText></MudCardHeader>
+                        <MudCardContent>
+                            <MudText><strong>Enabled:</strong> @_config.Enabled</MudText>
+                            <MudText><strong>Mode:</strong> @_config.Mode</MudText>
+                            <MudText><strong>Analysis Interval:</strong> @(_config.AnalysisIntervalSeconds)s</MudText>
+                            <MudText><strong>Throttle Rate:</strong> @FormatBytesPerSec(_config.ThrottleRateBytesPerSec)/s</MudText>
+                            <MudText><strong>Cooldown:</strong> @(_config.CooldownMinutes) min</MudText>
+                        </MudCardContent>
+                    </MudCard>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudCard Elevation="1">
+                        <MudCardHeader><MudText Typo="Typo.subtitle1">Balance Goals</MudText></MudCardHeader>
+                        <MudCardContent>
+                            <MudText><strong>Max Partition Imbalance:</strong> @(_config.Goals.MaxPartitionImbalancePercent)%</MudText>
+                            <MudText><strong>Max Leader Imbalance:</strong> @(_config.Goals.MaxLeaderImbalancePercent)%</MudText>
+                            <MudText><strong>Max Disk Imbalance:</strong> @(_config.Goals.MaxDiskImbalancePercent)%</MudText>
+                            <MudText><strong>Max Network Imbalance:</strong> @(_config.Goals.MaxNetworkImbalancePercent)%</MudText>
+                            <MudText><strong>Min Partitions to Rebalance:</strong> @_config.Goals.MinPartitionsToRebalance</MudText>
+                        </MudCardContent>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private CruiseControlReport _report = new();
+    private CruiseControlConfigInfo _config = new();
+    private List<CruiseControlReport> _history = [];
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _report = await Http.GetFromJsonAsync<CruiseControlReport>("/api/cruise-control/status") ?? new();
+            _history = await Http.GetFromJsonAsync<List<CruiseControlReport>>("/api/cruise-control/history?count=20") ?? [];
+            _config = await Http.GetFromJsonAsync<CruiseControlConfigInfo>("/api/cruise-control/config") ?? new();
+        }
+        catch (Exception ex) { _error = $"Failed to load Cruise Control data: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task AnalyzeNowAsync()
+    {
+        try
+        {
+            var response = await Http.PostAsync("/api/cruise-control/analyze", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Notification.ShowSuccess("Analysis completed");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Analysis failed");
+            }
+        }
+        catch (Exception ex) { Notification.ShowError($"Analysis failed: {ex.Message}"); }
+    }
+
+    private async Task ApplyPlanAsync()
+    {
+        try
+        {
+            var response = await Http.PostAsync("/api/cruise-control/apply", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Notification.ShowSuccess("Rebalance plan submitted for execution");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to apply rebalance plan");
+            }
+        }
+        catch (Exception ex) { Notification.ShowError($"Apply failed: {ex.Message}"); }
+    }
+
+    private static Color GetScoreColor(double score) => score switch
+    {
+        >= 90 => Color.Success,
+        >= 70 => Color.Warning,
+        _ => Color.Error
+    };
+
+    private static string GetBalanceIcon(bool balanced) =>
+        balanced ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Warning;
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
+    };
+
+    private static string FormatBytesPerSec(double bytesPerSec) => bytesPerSec switch
+    {
+        >= 1_073_741_824 => $"{bytesPerSec / 1_073_741_824.0:F1} GB",
+        >= 1_048_576 => $"{bytesPerSec / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytesPerSec / 1_024.0:F1} KB",
+        _ => $"{bytesPerSec:F0} B"
+    };
+
+    // Client-side DTOs
+    private sealed class CruiseControlReport
+    {
+        public DateTimeOffset Timestamp { get; set; }
+        public List<BrokerLoadInfo> BrokerLoads { get; set; } = [];
+        public BalanceScoreInfo Score { get; set; } = new();
+        public bool IsBalanced { get; set; } = true;
+        public List<ImbalanceInfo> Imbalances { get; set; } = [];
+        public SuggestedPlanInfo? SuggestedPlan { get; set; }
+    }
+
+    private sealed class BalanceScoreInfo
+    {
+        public double PartitionBalance { get; set; } = 100;
+        public double LeaderBalance { get; set; } = 100;
+        public double DiskBalance { get; set; } = 100;
+        public double NetworkBalance { get; set; } = 100;
+        public double OverallScore { get; set; } = 100;
+    }
+
+    private sealed class BrokerLoadInfo
+    {
+        public int BrokerId { get; set; }
+        public int PartitionCount { get; set; }
+        public int LeaderCount { get; set; }
+        public long DiskUsageBytes { get; set; }
+        public double ProduceRateBytesPerSec { get; set; }
+        public double ConsumeRateBytesPerSec { get; set; }
+        public double CpuPercent { get; set; }
+        public double NetworkUtilizationPercent { get; set; }
+    }
+
+    private sealed class ImbalanceInfo
+    {
+        public string Metric { get; set; } = "";
+        public int OverloadedBrokerId { get; set; }
+        public int UnderloadedBrokerId { get; set; }
+        public double ImbalancePercent { get; set; }
+        public string Description { get; set; } = "";
+    }
+
+    private sealed class SuggestedPlanInfo
+    {
+        public List<AssignmentInfo> Assignments { get; set; } = [];
+    }
+
+    private sealed class AssignmentInfo
+    {
+        public string Topic { get; set; } = "";
+        public int Partition { get; set; }
+        public List<int> CurrentReplicas { get; set; } = [];
+        public List<int> TargetReplicas { get; set; } = [];
+    }
+
+    private sealed class CruiseControlConfigInfo
+    {
+        public bool Enabled { get; set; }
+        public string Mode { get; set; } = "SuggestOnly";
+        public int AnalysisIntervalSeconds { get; set; } = 300;
+        public int ThrottleRateBytesPerSec { get; set; } = 50_000_000;
+        public int CooldownMinutes { get; set; } = 30;
+        public BalanceGoalsInfo Goals { get; set; } = new();
+    }
+
+    private sealed class BalanceGoalsInfo
+    {
+        public double MaxPartitionImbalancePercent { get; set; } = 20;
+        public double MaxLeaderImbalancePercent { get; set; } = 15;
+        public double MaxDiskImbalancePercent { get; set; } = 25;
+        public double MaxNetworkImbalancePercent { get; set; } = 30;
+        public int MinPartitionsToRebalance { get; set; } = 3;
+    }
+}

@@ -1,0 +1,39 @@
+<Project Sdk="WixToolset.Sdk/5.0.1">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- Suppress WiX from appearing in solution builds; build via build-installer.ps1 -->
+    <IsPackable>false</IsPackable>
+    <!-- ICE60: harmlos fuer self-contained .NET binaries (Bulk-Harvest
+         setzt keine Language pro File). ICE61: Same-Version-Upgrades sind
+         explizit per AllowSameVersionUpgrades=yes erlaubt, ICE checkt
+         das aber pauschal. Beide blockieren nur den Build, nicht das
+         tatsaechliche MSI-Verhalten. -->
+    <SuppressIces>ICE60;ICE61</SuppressIces>
+  </PropertyGroup>
+
+  <!-- Pass publish directories as MSBuild properties from the build script -->
+  <PropertyGroup>
+    <BrokerPublishDir Condition="'$(BrokerPublishDir)' == ''">..\..\publish\broker</BrokerPublishDir>
+    <CliPublishDir Condition="'$(CliPublishDir)' == ''">..\..\publish\cli</CliPublishDir>
+    <ControlPublishDir Condition="'$(ControlPublishDir)' == ''">..\..\publish\control</ControlPublishDir>
+  </PropertyGroup>
+
+  <!-- WiX-Preprocessor-Variablen ($(var.XYZ) in den .wxs-Files) werden
+       aus den MSBuild-Properties oben gespeist. Ohne diesen DefineConstants-
+       Eintrag bricht der Build mit WIX0150 ('Undefined preprocessor
+       variable'), weil das WiX-SDK MSBuild-Properties nicht automatisch
+       als Preprocessor-Konstanten exponiert. -->
+  <PropertyGroup>
+    <DefineConstants>BrokerPublishDir=$(BrokerPublishDir);CliPublishDir=$(CliPublishDir);ControlPublishDir=$(ControlPublishDir)</DefineConstants>
+  </PropertyGroup>
+
+  <!-- WiX extension for UI dialogs. Version sits in Directory.Packages.props
+       (Central Package Management) — declaring it inline here triggers
+       NU1008 on restore. -->
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" />
+  </ItemGroup>
+
+</Project>

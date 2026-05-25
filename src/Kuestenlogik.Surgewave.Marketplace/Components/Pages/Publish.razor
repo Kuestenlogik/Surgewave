@@ -1,0 +1,151 @@
+@page "/publish"
+@using System.IO.Compression
+@using System.Text.Json
+@using Kuestenlogik.Surgewave.Plugins.Packaging
+@inject IPackageStorageService StorageService
+@inject IPackageMetadataService MetadataService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Publish Plugin - Surgewave Marketplace</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Publish Plugin</MudText>
+
+<MudPaper Elevation="2" Class="pa-6" MaxWidth="600px">
+    <MudText Typo="Typo.body1" Class="mb-4">
+        Upload a <code>.swpkg</code> (Surgewave Plugin Package) to the marketplace.
+    </MudText>
+
+    <MudFileUpload T="IBrowserFile" Accept=".swpkg"
+                   FilesChanged="OnFileSelected">
+        <ActivatorContent>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.CloudUpload"
+                       FullWidth="true" Disabled="_publishing"
+                       Style="height: 80px; border-style: dashed;">
+                @if (_selectedFile != null)
+                {
+                    <text>@_selectedFile.Name (@FormatSize(_selectedFile.Size))</text>
+                }
+                else
+                {
+                    <text>Drop .swpkg file here or click to browse</text>
+                }
+            </MudButton>
+        </ActivatorContent>
+    </MudFileUpload>
+
+    @if (_selectedFile != null)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   StartIcon="@Icons.Material.Filled.Publish"
+                   OnClick="PublishAsync" Disabled="_publishing" Class="mt-4">
+            @(_publishing ? "Publishing..." : "Publish")
+        </MudButton>
+    }
+
+    @if (_result != null)
+    {
+        @if (_result.Success)
+        {
+            <MudAlert Severity="Severity.Success" Class="mt-4">
+                Published <strong>@_result?.Id</strong> v@(_result?.Version)
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-4">
+                @_result.Error
+            </MudAlert>
+        }
+    }
+</MudPaper>
+
+@code {
+    private IBrowserFile? _selectedFile;
+    private bool _publishing;
+    private PublishResultModel? _result;
+
+    private void OnFileSelected(IBrowserFile? file)
+    {
+        _selectedFile = file;
+        _result = null;
+    }
+
+    private async Task PublishAsync()
+    {
+        if (_selectedFile == null) return;
+        _publishing = true;
+        _result = null;
+        StateHasChanged();
+
+        try
+        {
+            // Save to temp file
+            var tempPath = Path.Combine(Path.GetTempPath(), $"pluginPackage-upload-{Guid.NewGuid()}.swpkg");
+            await using (var fs = new FileStream(tempPath, FileMode.Create))
+            {
+                await using var browserStream = _selectedFile.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024);
+                await browserStream.CopyToAsync(fs);
+            }
+
+            // Read manifest
+            using var archive = ZipFile.OpenRead(tempPath);
+            var manifestEntry = archive.GetEntry("plugin.json")
+                ?? throw new InvalidOperationException("Missing plugin.json");
+            PluginManifest manifest;
+            await using (var ms = manifestEntry.Open())
+            {
+                manifest = await JsonSerializer.DeserializeAsync<PluginManifest>(ms)
+                    ?? throw new InvalidOperationException("Invalid manifest");
+            }
+            archive.Dispose();
+
+            // Store package + metadata
+            await using (var packageStream = new FileStream(tempPath, FileMode.Open, FileAccess.Read))
+            {
+                await StorageService.SavePackageAsync(manifest.Id, manifest.Version, packageStream);
+            }
+
+            var sha256 = await PackageChecksumCalculator.ComputeAsync(tempPath);
+            var existing = await MetadataService.GetAsync(manifest.Id);
+            var allVersions = existing?.AllVersions ?? [];
+            if (!allVersions.Contains(manifest.Version))
+                allVersions = [.. allVersions, manifest.Version];
+
+            await MetadataService.SaveAsync(new PackageMetadata
+            {
+                Id = manifest.Id, Version = manifest.Version, Name = manifest.Name,
+                Description = manifest.Description, Authors = manifest.Authors,
+                Tags = manifest.Tags, License = manifest.License,
+                Sha256 = sha256, PackageSize = new FileInfo(tempPath).Length,
+                Assemblies = manifest.Assemblies,
+                PublishedAt = DateTimeOffset.UtcNow,
+                DownloadCount = existing?.DownloadCount ?? 0,
+                AllVersions = allVersions.ToList()
+            });
+
+            try { File.Delete(tempPath); } catch { }
+
+            _result = new(true, manifest.Id, manifest.Version, null);
+            Snackbar.Add($"Published {manifest.Id} v{manifest.Version}", MudBlazor.Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _result = new(false, null, null, ex.Message);
+        }
+        finally
+        {
+            _publishing = false;
+        }
+    }
+
+    private sealed record PublishResultModel(bool Success, string? Id, string? Version, string? Error);
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
+        _ => $"{bytes} B"
+    };
+}

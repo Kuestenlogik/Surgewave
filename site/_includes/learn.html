@@ -1,0 +1,87 @@
+{%- comment -%}
+"Built to learn from"-Section — Onboarding-Differenzierung gegenueber Kafka.
+Drei Tiles: Bootcamp (hands-on Tutorial), Samples (Real-app-Repo), CLI + MCP
+(Tools/AI-Integration). Sitzt nach kafka-migration und vor services, damit
+Free-User-Onboarding vor Sales-Section kommt.
+
+Zahlen bewusst weich gehalten ("hands-on units", "guided tours" statt 36/35)
+weil sie sich aendern und der Repo-Link das aktuelle Zaehlwerk traegt.
+{%- endcomment -%}
+<section class="learn" aria-labelledby="learn-heading">
+  <div class="container">
+    <p class="learn-eyebrow">Built to learn from</p>
+    <h2 id="learn-heading" class="learn-title">
+      From your first message to production.
+    </h2>
+    <p class="learn-lede">
+      Three complementary on-ramps. Pick the one that fits how you learn &mdash;
+      structured tutorial, real apps to copy from, or jump straight into the
+      CLI with your AI assistant alongside.
+    </p>
+
+    <div class="learn-grid">
+      <a class="learn-tile" href="https://github.com/Kuestenlogik/Surgewave.Bootcamp" target="_blank" rel="noopener">
+        <div class="learn-tile-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+            <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+          </svg>
+        </div>
+        <h3 class="learn-tile-title">Surgewave Bootcamp</h3>
+        <p class="learn-tile-body">
+          A hands-on, self-paced tutorial: build real applications while
+          learning Surgewave concepts. Multiple learning paths, guided
+          walkthroughs via Shepherd.js, exercises with starter code and
+          reference solutions.
+        </p>
+        <span class="learn-tile-cta">
+          Open Bootcamp
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </span>
+      </a>
+
+      <a class="learn-tile" href="https://github.com/Kuestenlogik/Surgewave.Samples" target="_blank" rel="noopener">
+        <div class="learn-tile-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="8" y1="13" x2="16" y2="13"/>
+            <line x1="8" y1="17" x2="16" y2="17"/>
+          </svg>
+        </div>
+        <h3 class="learn-tile-title">Sample apps</h3>
+        <p class="learn-tile-body">
+          Full reference applications you can clone, run, and adapt &mdash;
+          Kafka-compat migration, IoT fleet, RAG pipeline, event-sourcing,
+          multi-protocol gateway, signed plugin walkthroughs and more.
+          Each sample runs end-to-end against a local broker.
+        </p>
+        <span class="learn-tile-cta">
+          Browse samples
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </span>
+      </a>
+
+      <a class="learn-tile" href="{{ '/docs/' | relative_url }}">
+        <div class="learn-tile-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </div>
+        <h3 class="learn-tile-title">CLI &amp; MCP server</h3>
+        <p class="learn-tile-body">
+          A first-class command line covering every cluster operation, and
+          a built-in Model Context Protocol server so Claude, Cursor and
+          other agentic IDEs can drive your broker directly &mdash;
+          inspect topics, replay messages, register schemas, profile
+          performance, all from a chat window.
+        </p>
+        <span class="learn-tile-cta">
+          CLI &amp; MCP docs
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </span>
+      </a>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Streams.Linq</RootNamespace>
+    <Description>LINQ provider for querying Surgewave Streams state stores and materialized views</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Streams.Linq.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Linq\Kuestenlogik.Surgewave.Linq.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Streams\Kuestenlogik.Surgewave.Streams.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Streams.InteractiveQueries\Kuestenlogik.Surgewave.Streams.InteractiveQueries.csproj" />
+  </ItemGroup>
+
+</Project>

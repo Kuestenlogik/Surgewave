@@ -1,0 +1,77 @@
+
+Surgewave has been deployed successfully!
+
+{{- $fullname := include "surgewave.fullname" . }}
+
+== Broker Cluster ==
+
+  Replicas: {{ .Values.broker.replicaCount }}
+  Bootstrap servers (in-cluster):
+    {{ $fullname }}:{{ .Values.broker.ports.kafka }}
+
+  Headless DNS:
+    {{ $fullname }}-headless.{{ .Release.Namespace }}.svc.cluster.local
+
+  Individual brokers:
+{{- $replicaCount := int .Values.broker.replicaCount }}
+{{- range $i := until $replicaCount }}
+    {{ $fullname }}-{{ $i }}.{{ $fullname }}-headless.{{ $.Release.Namespace }}.svc.cluster.local:{{ $.Values.broker.ports.kafka }}
+{{- end }}
+
+  Ports:
+    Kafka:       {{ .Values.broker.ports.kafka }}
+    gRPC:        {{ .Values.broker.ports.grpc }}
+    Replication: {{ .Values.broker.ports.replication }}
+{{- if .Values.features.mqtt.enabled }}
+    MQTT:        {{ .Values.broker.ports.mqtt }}
+{{- end }}
+
+{{- if .Values.control.enabled }}
+
+== Control UI ==
+
+  Access the Control UI:
+    kubectl port-forward svc/{{ $fullname }}-control {{ .Values.control.port }}:{{ .Values.control.port }} -n {{ .Release.Namespace }}
+    Then open: http://localhost:{{ .Values.control.port }}
+
+{{- if .Values.control.ingress.enabled }}
+  Ingress: http{{ if .Values.control.ingress.tls }}s{{ end }}://{{ .Values.control.ingress.hostname }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.service.external.enabled }}
+
+== External Access ==
+
+  External LoadBalancer:
+    kubectl get svc {{ $fullname }}-external -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+{{- end }}
+
+== Quick Start ==
+
+  # Produce a test message
+  kubectl run surgewave-test --rm -it --image=surgewave:latest --restart=Never -- \
+    surgewave-cli produce --bootstrap {{ $fullname }}:{{ .Values.broker.ports.kafka }} --topic test-topic --message "hello surgewave"
+
+  # Consume messages
+  kubectl run surgewave-test --rm -it --image=surgewave:latest --restart=Never -- \
+    surgewave-cli consume --bootstrap {{ $fullname }}:{{ .Values.broker.ports.kafka }} --topic test-topic --from-beginning
+
+== Scaling ==
+
+  # Scale brokers
+  kubectl scale statefulset {{ $fullname }} --replicas=5 -n {{ .Release.Namespace }}
+
+  # Or use Helm
+  helm upgrade {{ .Release.Name }} deploy/helm/surgewave --set broker.replicaCount=5
+
+== Features ==
+
+  Schema Registry: {{ if .Values.schemaRegistry.enabled }}Enabled{{ else }}Disabled{{ end }}
+  Kafka Connect:   {{ if .Values.connect.enabled }}Enabled{{ else }}Disabled{{ end }}
+  MQTT:            {{ if .Values.features.mqtt.enabled }}Enabled{{ else }}Disabled{{ end }}
+  GraphQL:         {{ if .Values.features.graphql.enabled }}Enabled{{ else }}Disabled{{ end }}
+  Data Mesh:       {{ if .Values.features.dataMesh.enabled }}Enabled{{ else }}Disabled{{ end }}
+  Multi-Tenancy:   {{ if .Values.features.multiTenancy.enabled }}Enabled{{ else }}Disabled{{ end }}
+  Monitoring:      {{ if .Values.monitoring.enabled }}Enabled{{ else }}Disabled{{ end }}
+  ServiceMonitor:  {{ if .Values.monitoring.serviceMonitor.enabled }}Enabled{{ else }}Disabled{{ end }}

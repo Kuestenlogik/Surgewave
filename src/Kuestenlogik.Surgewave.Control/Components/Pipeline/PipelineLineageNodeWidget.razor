@@ -1,0 +1,165 @@
+@using Blazor.Diagrams.Components.Renderers
+@using Blazor.Diagrams.Core.Models
+
+<div class="lineage-pipeline-node @GetStatusClass()">
+    <div class="lineage-node-header">
+        <MudIcon Icon="@Icons.Material.Filled.AccountTree" Size="MudBlazor.Size.Small" Class="mr-2" />
+        <span class="lineage-node-title">@Node.Name</span>
+        <MudChip T="string" Size="MudBlazor.Size.Small" Color="@GetStatusColor()" Variant="Variant.Filled"
+                 Class="ml-auto lineage-status-chip">
+            @Node.Status
+        </MudChip>
+    </div>
+    <div class="lineage-node-body">
+        <div class="lineage-node-info">
+            <MudIcon Icon="@Icons.Material.Filled.Hub" Size="MudBlazor.Size.Small" Style="opacity: 0.5;" />
+            <MudText Typo="Typo.caption">@Node.NodeCount nodes</MudText>
+        </div>
+        @if (Node.SourceTopics.Count > 0)
+        {
+            <div class="lineage-topics">
+                <MudText Typo="Typo.overline" Color="Color.Success">IN</MudText>
+                @foreach (var topic in Node.SourceTopics.Take(3))
+                {
+                    <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Outlined"
+                             Color="Color.Success" Class="lineage-topic-chip">@topic</MudChip>
+                }
+                @if (Node.SourceTopics.Count > 3)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">+@(Node.SourceTopics.Count - 3) more</MudText>
+                }
+            </div>
+        }
+        @if (Node.SinkTopics.Count > 0)
+        {
+            <div class="lineage-topics">
+                <MudText Typo="Typo.overline" Color="Color.Info">OUT</MudText>
+                @foreach (var topic in Node.SinkTopics.Take(3))
+                {
+                    <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Outlined"
+                             Color="Color.Info" Class="lineage-topic-chip">@topic</MudChip>
+                }
+                @if (Node.SinkTopics.Count > 3)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">+@(Node.SinkTopics.Count - 3) more</MudText>
+                }
+            </div>
+        }
+    </div>
+    @foreach (var port in Node.Ports)
+    {
+        <PortRenderer Port="port" Class="lineage-port" />
+    }
+</div>
+
+@code {
+    [Parameter]
+    public PipelineLineageNode Node { get; set; } = null!;
+
+    private string GetStatusClass()
+    {
+        return Node.Status switch
+        {
+            Models.Pipeline.PipelineStatus.Running => "status-running",
+            Models.Pipeline.PipelineStatus.Failed => "status-failed",
+            Models.Pipeline.PipelineStatus.Stopped => "status-stopped",
+            _ => "status-draft"
+        };
+    }
+
+    private Color GetStatusColor()
+    {
+        return Node.Status switch
+        {
+            Models.Pipeline.PipelineStatus.Running => Color.Success,
+            Models.Pipeline.PipelineStatus.Failed => Color.Error,
+            Models.Pipeline.PipelineStatus.Stopped => Color.Default,
+            _ => Color.Info
+        };
+    }
+}
+
+<style>
+    .lineage-pipeline-node {
+        min-width: 200px;
+        max-width: 280px;
+        background: var(--mud-palette-surface);
+        border: 2px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.12);
+        font-family: inherit;
+        transition: all 0.2s ease;
+    }
+
+    .lineage-pipeline-node:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .lineage-pipeline-node.status-running {
+        border-color: var(--mud-palette-success);
+    }
+
+    .lineage-pipeline-node.status-failed {
+        border-color: var(--mud-palette-error);
+    }
+
+    .lineage-pipeline-node.status-stopped {
+        border-color: var(--mud-palette-lines-default);
+        opacity: 0.7;
+    }
+
+    .lineage-node-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        background: var(--mud-palette-background-gray);
+        border-radius: 8px 8px 0 0;
+        border-bottom: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .lineage-node-title {
+        font-weight: 600;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 120px;
+    }
+
+    .lineage-status-chip {
+        font-size: 9px !important;
+        height: 20px !important;
+    }
+
+    .lineage-node-body {
+        padding: 8px 12px;
+    }
+
+    .lineage-node-info {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 6px;
+    }
+
+    .lineage-topics {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 4px;
+    }
+
+    .lineage-topic-chip {
+        font-size: 9px !important;
+        height: 18px !important;
+    }
+
+    .lineage-port {
+        width: 10px;
+        height: 10px;
+        background: var(--mud-palette-primary);
+        border: 2px solid var(--mud-palette-surface);
+        border-radius: 50%;
+    }
+</style>

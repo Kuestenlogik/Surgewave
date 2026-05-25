@@ -1,0 +1,875 @@
+@page "/"
+@inject ISurgewaveApiClient ApiClient
+@inject IMetricsClient MetricsClient
+@inject IPipelineApiClient PipelineApi
+@inject ClusterState ClusterState
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Dashboard - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center mb-4">
+    <MudText Typo="Typo.h4">Dashboard</MudText>
+    <MudSpacer />
+    <MudMenu Icon="@Icons.Material.Filled.Widgets" Size="Size.Small" AnchorOrigin="Origin.BottomRight">
+        @foreach (var card in _cards.OrderBy(c => c.Title))
+        {
+            <MudMenuItem>
+                <MudCheckBox T="bool" Value="card.Visible" ValueChanged="@(v => ToggleWidgetVisibility(card, v))"
+                             Label="@card.Title" Dense="true" />
+            </MudMenuItem>
+        }
+    </MudMenu>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        Failed to connect to Gateway: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadDataAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudDropContainer T="DashboardCard" Items="_cards" ItemsSelector="@((item, zone) => item.Zone == zone)"
+                      ItemDropped="OnCardDropped" Class="d-flex flex-column gap-4" data-tour-id="dashboard-summary">
+        <ChildContent>
+            @* Top Row - Summary Cards *@
+            <MudDropZone T="DashboardCard" Identifier="top-row" Class="dashboard-row">
+                @foreach (var card in _cards.Where(c => c.Zone == "top-row" && c.Visible).OrderBy(c => c.Order))
+                {
+                    <MudDynamicDropItem T="DashboardCard" Item="card" Class="dashboard-card-wrapper" >
+                        @RenderCardWithHandle(card)
+                    </MudDynamicDropItem>
+                }
+            </MudDropZone>
+
+            @* Second Row *@
+            <MudDropZone T="DashboardCard" Identifier="second-row" Class="dashboard-row">
+                @foreach (var card in _cards.Where(c => c.Zone == "second-row" && c.Visible).OrderBy(c => c.Order))
+                {
+                    <MudDynamicDropItem T="DashboardCard" Item="card" Class="@GetCardWrapperClass(card)" >
+                        @RenderCardWithHandle(card)
+                    </MudDynamicDropItem>
+                }
+            </MudDropZone>
+
+            @* Bottom Row - Tables *@
+            <MudDropZone T="DashboardCard" Identifier="bottom-row" Class="dashboard-row">
+                @foreach (var card in _cards.Where(c => c.Zone == "bottom-row" && c.Visible).OrderBy(c => c.Order))
+                {
+                    <MudDynamicDropItem T="DashboardCard" Item="card" Class="dashboard-card-wrapper-half" >
+                        @RenderCardWithHandle(card)
+                    </MudDynamicDropItem>
+                }
+            </MudDropZone>
+        </ChildContent>
+    </MudDropContainer>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private bool _isHealthy;
+    private ClusterInfo? _clusterInfo;
+    private int _brokerCount;
+    private int _topicCount;
+    private int _partitionCount;
+    private int _consumerGroupCount;
+    private List<TopicInfo> _topics = [];
+    private List<ConsumerGroupInfo> _consumerGroups = [];
+
+    // Pipelines & Connectors
+    private int _pipelineCount;
+    private int _connectorCount;
+    private List<PipelineDefinition> _pipelines = [];
+
+    // Metrics
+    private MetricsSnapshot? _previousSnapshot;
+    private double _messagesPerSec;
+    private long _errorsTotal;
+    private double _latencyP50;
+    private double _latencyP90;
+    private double _latencyP99;
+    private Timer? _metricsTimer;
+
+    private List<DashboardCard> _cards = [];
+
+    private const string CardOrderStorageKey = "surgewave_dashboard_card_order";
+    private const string WidgetVisibilityStorageKey = "surgewave_dashboard_widget_visibility";
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClusterState.OnChange += StateHasChanged;
+        InitializeCards();
+        await LoadDataAsync();
+        await RefreshMetricsAsync();
+        StartMetricsTimer();
+    }
+
+    private void StartMetricsTimer()
+    {
+        _metricsTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await RefreshMetricsAsync();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task RefreshMetricsAsync()
+    {
+        try
+        {
+            var snapshot = await MetricsClient.GetMetricsAsync();
+            if (_previousSnapshot != null)
+            {
+                var elapsed = (snapshot.Timestamp - _previousSnapshot.Timestamp).TotalSeconds;
+                if (elapsed > 0)
+                {
+                    var producedDelta = snapshot.MessagesProducedTotal - _previousSnapshot.MessagesProducedTotal;
+                    _messagesPerSec = Math.Max(0, producedDelta / elapsed);
+                }
+            }
+            _errorsTotal = snapshot.ErrorsTotal + snapshot.ProduceErrorsTotal;
+            _latencyP50 = snapshot.ProduceLatencyP50;
+            _latencyP90 = snapshot.ProduceLatencyP90;
+            _latencyP99 = snapshot.ProduceLatencyP99;
+            _previousSnapshot = snapshot;
+        }
+        catch
+        {
+            // Ignore metrics fetch errors on dashboard
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadCardOrderAsync();
+            await LoadWidgetVisibilityAsync();
+            StateHasChanged();
+        }
+    }
+
+    private void InitializeCards()
+    {
+        _cards =
+        [
+            new DashboardCard("cluster-status", "Cluster Status", "top-row", 0),
+            new DashboardCard("throughput", "Throughput", "top-row", 1),
+            new DashboardCard("brokers", "Brokers", "top-row", 2),
+            new DashboardCard("topics-count", "Topics", "top-row", 3),
+            new DashboardCard("latency", "Latency", "top-row", 4),
+            new DashboardCard("consumer-groups-count", "Consumer Groups", "second-row", 0),
+            new DashboardCard("partitions", "Partitions", "second-row", 1),
+            new DashboardCard("errors", "Errors", "second-row", 2),
+            new DashboardCard("pipelines-count", "Pipelines", "second-row", 3),
+            new DashboardCard("connectors-count", "Connectors", "second-row", 4),
+            new DashboardCard("cluster-info", "Cluster Information", "second-row", 5),
+            new DashboardCard("topics-table", "Topics", "bottom-row", 0),
+            new DashboardCard("consumer-groups-table", "Consumer Groups", "bottom-row", 1),
+            new DashboardCard("pipelines-table", "Recent Pipelines", "bottom-row", 2)
+        ];
+    }
+
+    private async Task LoadCardOrderAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", CardOrderStorageKey);
+            if (!string.IsNullOrEmpty(json))
+            {
+                var savedOrder = System.Text.Json.JsonSerializer.Deserialize<List<CardOrderInfo>>(json);
+                if (savedOrder != null)
+                {
+                    foreach (var saved in savedOrder)
+                    {
+                        var card = _cards.FirstOrDefault(c => c.Id == saved.Id);
+                        if (card != null)
+                        {
+                            card.Zone = saved.Zone;
+                            card.Order = saved.Order;
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore localStorage errors
+        }
+    }
+
+    private async Task SaveCardOrderAsync()
+    {
+        try
+        {
+            var orderInfo = _cards.Select(c => new CardOrderInfo(c.Id, c.Zone, c.Order)).ToList();
+            var json = System.Text.Json.JsonSerializer.Serialize(orderInfo);
+            await JS.InvokeVoidAsync("localStorage.setItem", CardOrderStorageKey, json);
+        }
+        catch
+        {
+            // Ignore localStorage errors
+        }
+    }
+
+    private async Task OnCardDropped(MudItemDropInfo<DashboardCard> info)
+    {
+        if (info.Item == null) return;
+
+        var droppedCard = info.Item;
+        var oldZone = droppedCard.Zone;
+        var newZone = info.DropzoneIdentifier;
+        var dropIndex = info.IndexInZone;
+
+        // Get all cards in the target zone (excluding the dropped card)
+        var cardsInNewZone = _cards
+            .Where(c => c.Zone == newZone && c.Id != droppedCard.Id)
+            .OrderBy(c => c.Order)
+            .ToList();
+
+        // Update the dropped card's zone
+        droppedCard.Zone = newZone;
+
+        // Insert the card at the correct position
+        if (dropIndex < 0 || dropIndex > cardsInNewZone.Count)
+            dropIndex = cardsInNewZone.Count;
+
+        cardsInNewZone.Insert(dropIndex, droppedCard);
+
+        // Recalculate order for all cards in the new zone
+        for (int i = 0; i < cardsInNewZone.Count; i++)
+        {
+            cardsInNewZone[i].Order = i;
+        }
+
+        // If we moved to a different zone, reorder the old zone too
+        if (oldZone != newZone)
+        {
+            var cardsInOldZone = _cards
+                .Where(c => c.Zone == oldZone)
+                .OrderBy(c => c.Order)
+                .ToList();
+
+            for (int i = 0; i < cardsInOldZone.Count; i++)
+            {
+                cardsInOldZone[i].Order = i;
+            }
+        }
+
+        await SaveCardOrderAsync();
+        StateHasChanged();
+    }
+
+    private string GetCardWrapperClass(DashboardCard card)
+    {
+        return card.Id == "cluster-info" ? "dashboard-card-wrapper-wide" : "dashboard-card-wrapper";
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+
+            // Check health
+            _isHealthy = await ApiClient.PingAsync(clusterId);
+
+            // Get cluster info
+            _clusterInfo = await ApiClient.GetClusterInfoAsync(clusterId);
+            _brokerCount = _clusterInfo?.BrokerCount ?? 0;
+            _topicCount = _clusterInfo?.TopicCount ?? 0;
+            _partitionCount = _clusterInfo?.PartitionCount ?? 0;
+
+            // Get topics
+            _topics = (await ApiClient.ListTopicsAsync(clusterId, includeInternal: false)).ToList();
+            _topicCount = _topics.Count;
+            _partitionCount = _topics.Sum(t => t.PartitionCount);
+
+            // Get consumer groups
+            _consumerGroups = (await ApiClient.ListConsumerGroupsAsync(clusterId)).ToList();
+            _consumerGroupCount = _consumerGroups.Count;
+
+            // Get pipelines
+            try { _pipelines = (await PipelineApi.ListPipelinesAsync()).ToList(); _pipelineCount = _pipelines.Count; } catch { }
+
+            // Get connectors
+            try { var connectors = await ApiClient.ListConnectorsAsync(clusterId); _connectorCount = connectors.Count; } catch { }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _isHealthy = false;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private RenderFragment RenderCardWithHandle(DashboardCard card) =>
+        @<div class="card-with-handle">
+            <MudIconButton Icon="@Icons.Material.Filled.DragIndicator"
+                           Size="Size.Small"
+                           Color="Color.Default"
+                           Class="drag-handle mud-drop-item-handle" />
+            @RenderCard(card)
+        </div>;
+
+    private RenderFragment RenderCard(DashboardCard card) => card.Id switch
+    {
+        "cluster-status" => RenderClusterStatusCard(),
+        "throughput" => RenderThroughputCard(),
+        "brokers" => RenderBrokersCard(),
+        "topics-count" => RenderTopicsCountCard(),
+        "latency" => RenderLatencyCard(),
+        "consumer-groups-count" => RenderConsumerGroupsCountCard(),
+        "partitions" => RenderPartitionsCard(),
+        "errors" => RenderErrorsCard(),
+        "pipelines-count" => RenderPipelinesCountCard(),
+        "connectors-count" => RenderConnectorsCountCard(),
+        "cluster-info" => RenderClusterInfoCard(),
+        "topics-table" => RenderTopicsTableCard(),
+        "consumer-groups-table" => RenderConsumerGroupsTableCard(),
+        "pipelines-table" => RenderPipelinesTableCard(),
+        _ => @<MudText>Unknown card</MudText>
+    };
+
+    private RenderFragment RenderThroughputCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Speed"
+                             Color="@(_errorsTotal > 0 ? Color.Error : Color.Success)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Throughput</MudText>
+                        <MudText Typo="Typo.h5">@_messagesPerSec.ToString("N0") msg/s</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/metrics">View Metrics</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderClusterStatusCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="@(_isHealthy ? Color.Success : Color.Error)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Cluster Status</MudText>
+                        <MudText Typo="Typo.h5">@(_isHealthy ? "Healthy" : "Unhealthy")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/health">View Health</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderBrokersCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Brokers</MudText>
+                        <MudText Typo="Typo.h5">@_brokerCount</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/brokers">View Brokers</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderTopicsCountCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topics</MudText>
+                        <MudText Typo="Typo.h5">@_topicCount</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/topics">View Topics</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderConsumerGroupsCountCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Group" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Consumer Groups</MudText>
+                        <MudText Typo="Typo.h5">@_consumerGroupCount</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/consumer-groups">View Groups</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderPartitionsCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ViewModule" Color="Color.Secondary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Partitions</MudText>
+                        <MudText Typo="Typo.h5">@_partitionCount</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>;
+
+    private RenderFragment RenderClusterInfoCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Cluster Information</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSimpleTable Dense="true" Hover="true">
+                    <tbody>
+                        <tr>
+                            <td><MudText Typo="Typo.body2" Color="Color.Secondary">Cluster ID</MudText></td>
+                            <td><MudText Typo="Typo.body1">@(_clusterInfo?.ClusterId ?? "N/A")</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.body2" Color="Color.Secondary">Controller</MudText></td>
+                            <td><MudText Typo="Typo.body1">Broker @(_clusterInfo?.ControllerId ?? -1)</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.body2" Color="Color.Secondary">Total Brokers</MudText></td>
+                            <td><MudText Typo="Typo.body1">@_brokerCount</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.body2" Color="Color.Secondary">Total Topics</MudText></td>
+                            <td><MudText Typo="Typo.body1">@_topicCount</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.body2" Color="Color.Secondary">Total Partitions</MudText></td>
+                            <td><MudText Typo="Typo.body1">@_partitionCount</MudText></td>
+                        </tr>
+                    </tbody>
+                </MudSimpleTable>
+            </MudCardContent>
+        </MudCard>;
+
+    private RenderFragment RenderTopicsTableCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Topics</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/topics">View All</MudButton>
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_topics.Count == 0)
+                {
+                    <MudText Color="Color.Secondary">No topics found</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Partitions</th>
+                                <th>Replication</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var topic in _topics.Take(5))
+                            {
+                                <tr>
+                                    <td>
+                                        <MudLink Href="@($"/topics/{topic.Name}")">@topic.Name</MudLink>
+                                    </td>
+                                    <td>@topic.PartitionCount</td>
+                                    <td>@topic.ReplicationFactor</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudCardContent>
+        </MudCard>;
+
+    private RenderFragment RenderConsumerGroupsTableCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Consumer Groups</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/consumer-groups">View All</MudButton>
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_consumerGroups.Count == 0)
+                {
+                    <MudText Color="Color.Secondary">No consumer groups found</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Group ID</th>
+                                <th>State</th>
+                                <th>Members</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var group in _consumerGroups.Take(5))
+                            {
+                                <tr>
+                                    <td>
+                                        <MudLink Href="@($"/consumer-groups/{group.GroupId}")">@group.GroupId</MudLink>
+                                    </td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="@GetStateColor(group.State)">
+                                            @group.State
+                                        </MudChip>
+                                    </td>
+                                    <td>@group.MemberCount</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudCardContent>
+        </MudCard>;
+
+    private RenderFragment RenderLatencyCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center mb-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Timer" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Produce Latency</MudText>
+                    </div>
+                </div>
+                <div class="d-flex flex-column gap-1">
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.caption" Style="min-width:30px;">P50</MudText>
+                        <MudProgressLinear Color="Color.Success" Value="@GetLatencyBarValue(_latencyP50)" Class="flex-grow-1" />
+                        <MudText Typo="Typo.body2" Style="min-width:60px;" Align="Align.Right">@_latencyP50.ToString("N1") ms</MudText>
+                    </div>
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.caption" Style="min-width:30px;">P90</MudText>
+                        <MudProgressLinear Color="Color.Warning" Value="@GetLatencyBarValue(_latencyP90)" Class="flex-grow-1" />
+                        <MudText Typo="Typo.body2" Style="min-width:60px;" Align="Align.Right">@_latencyP90.ToString("N1") ms</MudText>
+                    </div>
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.caption" Style="min-width:30px;">P99</MudText>
+                        <MudProgressLinear Color="Color.Error" Value="@GetLatencyBarValue(_latencyP99)" Class="flex-grow-1" />
+                        <MudText Typo="Typo.body2" Style="min-width:60px;" Align="Align.Right">@_latencyP99.ToString("N1") ms</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/metrics">View Metrics</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private static double GetLatencyBarValue(double latencyMs)
+    {
+        // Scale latency to a 0-100 bar value; cap at 1000ms
+        return Math.Min(100, latencyMs / 10.0);
+    }
+
+    private RenderFragment RenderErrorsCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline"
+                             Color="@(_errorsTotal > 0 ? Color.Error : Color.Success)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Errors</MudText>
+                        <MudText Typo="Typo.h5" Color="@(_errorsTotal > 0 ? Color.Error : Color.Success)">@_errorsTotal</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/metrics">View Metrics</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderPipelinesCountCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountTree" Color="Color.Tertiary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Pipelines</MudText>
+                        <MudText Typo="Typo.h5">@_pipelineCount</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/pipelines">View Pipelines</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderConnectorsCountCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Extension" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Connectors</MudText>
+                        <MudText Typo="Typo.h5">@_connectorCount</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/connectors">View Connectors</MudButton>
+            </MudCardActions>
+        </MudCard>;
+
+    private RenderFragment RenderPipelinesTableCard() =>
+        @<MudCard Elevation="2" Class="dashboard-card">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Recent Pipelines</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/pipelines">View All</MudButton>
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_pipelines.Count == 0)
+                {
+                    <MudText Color="Color.Secondary">No pipelines found</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Nodes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var pipeline in _pipelines.OrderByDescending(p => p.CreatedAt).Take(5))
+                            {
+                                <tr>
+                                    <td>
+                                        <MudLink Href="@($"/pipelines/{pipeline.Id}")">@pipeline.Name</MudLink>
+                                    </td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="@GetPipelineStatusColor(pipeline.Status)">
+                                            @pipeline.Status.ToString()
+                                        </MudChip>
+                                    </td>
+                                    <td>@pipeline.Nodes.Count</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudCardContent>
+        </MudCard>;
+
+    private static Color GetPipelineStatusColor(PipelineStatus status) => status switch
+    {
+        PipelineStatus.Running => Color.Success,
+        PipelineStatus.Stopped => Color.Default,
+        PipelineStatus.Failed => Color.Error,
+        PipelineStatus.Draft => Color.Info,
+        _ => Color.Default
+    };
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Stable" => Color.Success,
+        "PreparingRebalance" or "CompletingRebalance" => Color.Warning,
+        "Empty" => Color.Default,
+        "Dead" => Color.Error,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        _metricsTimer?.Dispose();
+        ClusterState.OnChange -= StateHasChanged;
+    }
+
+    private async Task LoadWidgetVisibilityAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", WidgetVisibilityStorageKey);
+            if (!string.IsNullOrEmpty(json))
+            {
+                var hidden = System.Text.Json.JsonSerializer.Deserialize<HashSet<string>>(json);
+                if (hidden != null)
+                    foreach (var card in _cards.Where(c => hidden.Contains(c.Id)))
+                        card.Visible = false;
+            }
+        }
+        catch { }
+    }
+
+    private async Task SaveWidgetVisibilityAsync()
+    {
+        try
+        {
+            var hidden = _cards.Where(c => !c.Visible).Select(c => c.Id).ToHashSet();
+            var json = System.Text.Json.JsonSerializer.Serialize(hidden);
+            await JS.InvokeVoidAsync("localStorage.setItem", WidgetVisibilityStorageKey, json);
+        }
+        catch { }
+    }
+
+    private async Task ToggleWidgetVisibility(DashboardCard card, bool visible)
+    {
+        card.Visible = visible;
+        await SaveWidgetVisibilityAsync();
+        StateHasChanged();
+    }
+
+    private record DashboardCard(string Id, string Title, string Zone, int Order)
+    {
+        public string Zone { get; set; } = Zone;
+        public int Order { get; set; } = Order;
+        public bool Visible { get; set; } = true;
+    }
+
+    private record CardOrderInfo(string Id, string Zone, int Order);
+}
+
+<style>
+    .dashboard-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: stretch;
+        min-height: 120px;
+    }
+
+    .dashboard-card-wrapper {
+        flex: 1 1 calc(25% - 12px);
+        min-width: 200px;
+        max-width: calc(25% - 12px);
+    }
+
+    .dashboard-card-wrapper-wide {
+        flex: 3 1 calc(75% - 12px);
+        min-width: 400px;
+    }
+
+    .dashboard-card-wrapper-half {
+        flex: 1 1 calc(50% - 8px);
+        min-width: 300px;
+    }
+
+    .card-with-handle {
+        position: relative;
+        height: 100%;
+    }
+
+    .drag-handle {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        cursor: grab !important;
+        opacity: 0.4;
+        z-index: 10;
+        padding: 4px;
+        border-radius: 4px;
+        transition: opacity 0.2s ease, background-color 0.2s ease;
+    }
+
+    .drag-handle:hover {
+        opacity: 1;
+        background-color: var(--mud-palette-action-default-hover);
+    }
+
+    .drag-handle:active {
+        cursor: grabbing !important;
+    }
+
+    /* Reset cursor on drop items and cards to default */
+    .mud-drop-item,
+    .mud-drop-item .dashboard-card,
+    .mud-drop-item .card-with-handle {
+        cursor: default !important;
+    }
+
+
+    .dashboard-card {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        transition: box-shadow 0.2s ease;
+    }
+
+    .dashboard-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .health-details-table td {
+        padding: 4px 8px !important;
+    }
+
+    .mud-drop-zone {
+        background: transparent;
+        border: none;
+    }
+
+    .mud-drop-zone.mud-drop-zone-drag-over {
+        background: var(--mud-palette-action-default-hover);
+        border-radius: 4px;
+    }
+
+    @@media (max-width: 960px) {
+        .dashboard-card-wrapper,
+        .dashboard-card-wrapper-wide,
+        .dashboard-card-wrapper-half {
+            flex: 1 1 calc(50% - 8px);
+            max-width: none;
+        }
+    }
+
+    @@media (max-width: 600px) {
+        .dashboard-card-wrapper,
+        .dashboard-card-wrapper-wide,
+        .dashboard-card-wrapper-half {
+            flex: 1 1 100%;
+        }
+    }
+</style>

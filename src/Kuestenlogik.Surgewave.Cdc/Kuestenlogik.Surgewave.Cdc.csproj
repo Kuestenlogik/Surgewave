@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Built-in Change Data Capture (CDC) for Surgewave. Captures INSERT/UPDATE/DELETE from PostgreSQL WAL without external dependencies like Debezium.</Description>
+    <PackageTags>surgewave;cdc;change-data-capture;postgresql;wal;replication</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

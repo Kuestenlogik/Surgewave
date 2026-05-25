@@ -1,0 +1,464 @@
+@page "/connectors"
+@inject ISurgewaveApiClient ApiClient
+@inject IConnectorMarketplaceService Marketplace
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject IDialogService DialogService
+
+<PageTitle>Connectors - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Connectors</MudText>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+    <MudTabPanel Text="Running Connectors" Icon="@Icons.Material.Filled.PlayArrow">
+        <MudGrid Class="mb-4">
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_searchText" Label="Search connectors" Variant="Variant.Outlined"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true" DebounceInterval="300" />
+            </MudItem>
+            <MudItem xs="12" md="4" Class="d-flex align-center justify-end">
+                <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenCreateDialog" data-tour-id="create-connector-btn">
+                        Create Connector
+                    </MudButton>
+                </AuthorizeView>
+            </MudItem>
+        </MudGrid>
+
+        @if (_loadingConnectors)
+        {
+            <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+        }
+        else if (_connectorError != null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                @_connectorError
+                <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadConnectorsAsync" Class="ml-4">
+                    Retry
+                </MudButton>
+            </MudAlert>
+        }
+        else if (!_connectors.Any())
+        {
+            <MudAlert Severity="Severity.Info">
+                No connectors running. Click "Create Connector" to deploy one.
+            </MudAlert>
+        }
+        else
+        {
+            <MudTable Items="@_filteredConnectors" Dense="true" Hover="true" Striped="true" Elevation="0">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Type</MudTh>
+                    <MudTh>State</MudTh>
+                    <MudTh>Tasks</MudTh>
+                    <MudTh Style="width: 200px">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Name">
+                        <MudText Typo="Typo.body2" Style="font-weight: 500">@context.Name</MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Type">
+                        <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.Type)">@context.Type</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="State">
+                        @if (_connectorStatuses.TryGetValue(context.Name, out var status))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(status.State)">@status.State</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default">Loading...</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Tasks">
+                        @if (_connectorStatuses.TryGetValue(context.Name, out var s))
+                        {
+                            var running = s.Tasks.Count(t => t.State == "RUNNING");
+                            var total = s.Tasks.Count;
+                            <MudText>@running / @total</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Actions">
+                        @if (_connectorStatuses.TryGetValue(context.Name, out var st))
+                        {
+                            @if (st.State == "RUNNING")
+                            {
+                                <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage" Context="auth">
+                                    <MudTooltip Text="Pause">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
+                                                       OnClick="@(() => PauseConnectorAsync(context.Name))" />
+                                    </MudTooltip>
+                                </AuthorizeView>
+                            }
+                            else if (st.State == "PAUSED")
+                            {
+                                <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage" Context="auth">
+                                    <MudTooltip Text="Resume">
+                                        <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                                       OnClick="@(() => ResumeConnectorAsync(context.Name))" />
+                                    </MudTooltip>
+                                </AuthorizeView>
+                            }
+                        }
+                        <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage" Context="auth">
+                            <MudTooltip Text="Restart">
+                                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                                               OnClick="@(() => RestartConnectorAsync(context.Name))" />
+                            </MudTooltip>
+                        </AuthorizeView>
+                        <MudTooltip Text="View Config">
+                            <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                                           OnClick="@(() => ShowConfigDialog(context))" />
+                        </MudTooltip>
+                        <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage" Context="auth">
+                            <MudTooltip Text="Delete">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => ConfirmDeleteAsync(context.Name))" />
+                            </MudTooltip>
+                        </AuthorizeView>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Color="Color.Secondary">No connectors match the search</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="Available Plugins" Icon="@Icons.Material.Filled.Extension">
+        @if (_loadingPlugins)
+        {
+            <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+        }
+        else if (_pluginError != null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                @_pluginError
+                <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadPluginsAsync" Class="ml-4">
+                    Retry
+                </MudButton>
+            </MudAlert>
+        }
+        else
+        {
+            <MudGrid>
+                @foreach (var plugin in _plugins)
+                {
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudCard Elevation="2">
+                            <MudCardHeader>
+                                <CardHeaderAvatar>
+                                    <MudAvatar Color="@GetTypeColor(plugin.Type)">
+                                        @if (plugin.Type == "source")
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Input" />
+                                        }
+                                        else
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Output" />
+                                        }
+                                    </MudAvatar>
+                                </CardHeaderAvatar>
+                                <CardHeaderContent>
+                                    <MudText Typo="Typo.body1">@GetPluginShortName(plugin.ClassName)</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">@plugin.Version</MudText>
+                                </CardHeaderContent>
+                                <CardHeaderActions>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(plugin.Type)">@plugin.Type</MudChip>
+                                </CardHeaderActions>
+                            </MudCardHeader>
+                            <MudCardContent>
+                                <MudText Typo="Typo.caption" Style="word-break: break-all">@plugin.ClassName</MudText>
+                            </MudCardContent>
+                            <MudCardActions>
+                                <AuthorizeView Policy="@SurgewavePolicies.ConnectorsManage">
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                               OnClick="@(() => CreateFromPlugin(plugin))">
+                                        Deploy
+                                    </MudButton>
+                                </AuthorizeView>
+                            </MudCardActions>
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+
+            @if (!_plugins.Any())
+            {
+                <MudAlert Severity="Severity.Info">
+                    No connector plugins available. Place plugin assemblies in the plugins/ directory.
+                </MudAlert>
+            }
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private bool _loadingConnectors = true;
+    private bool _loadingPlugins = true;
+    private string? _connectorError;
+    private string? _pluginError;
+    private string _searchText = "";
+    private List<ConnectorInfo> _connectors = [];
+    private Dictionary<string, ConnectorStatus> _connectorStatuses = [];
+    private List<ConnectorPluginInfo> _plugins = [];
+
+    private IEnumerable<ConnectorInfo> _filteredConnectors => string.IsNullOrWhiteSpace(_searchText)
+        ? _connectors
+        : _connectors.Where(c => c.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                                  c.Type.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClusterState.OnChange += async () =>
+        {
+            await LoadAllAsync();
+            StateHasChanged();
+        };
+        await LoadAllAsync();
+    }
+
+    private async Task LoadAllAsync()
+    {
+        await Task.WhenAll(LoadConnectorsAsync(), LoadPluginsAsync());
+    }
+
+    private async Task LoadConnectorsAsync()
+    {
+        _loadingConnectors = true;
+        _connectorError = null;
+        StateHasChanged();
+
+        try
+        {
+            var clusterId = ClusterState.SelectedClusterId;
+            var names = await ApiClient.ListConnectorsAsync(clusterId);
+
+            // Get connector details and status for each
+            var connectors = new List<ConnectorInfo>();
+            var statuses = new Dictionary<string, ConnectorStatus>();
+
+            foreach (var name in names)
+            {
+                var info = await ApiClient.GetConnectorAsync(name, clusterId);
+                if (info != null)
+                {
+                    connectors.Add(info);
+                    var status = await ApiClient.GetConnectorStatusAsync(name, clusterId);
+                    if (status != null)
+                    {
+                        statuses[name] = status;
+                    }
+                }
+            }
+
+            _connectors = connectors;
+            _connectorStatuses = statuses;
+        }
+        catch (Exception ex)
+        {
+            _connectorError = ex.Message;
+        }
+        finally
+        {
+            _loadingConnectors = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadPluginsAsync()
+    {
+        _loadingPlugins = true;
+        _pluginError = null;
+        StateHasChanged();
+
+        try
+        {
+            // Single source of truth: derselbe Marketplace-Service der die installierten
+            // Plugins fuer die Marketplace-Page bereitstellt. Filter auf IsInstalled=true
+            // damit der Connectors-Tab nur die lokal installierten zeigt. Vermeidet einen
+            // separaten REST-Endpoint, der mit der Marketplace-Liste divergieren koennte.
+            var searchResult = await Marketplace.SearchAsync(query: null, skip: 0, take: 200);
+            _plugins = searchResult.Plugins
+                .Where(p => p.IsInstalled)
+                .Select(p => new ConnectorPluginInfo(
+                    ClassName: p.Name ?? p.PackageId,
+                    // ConnectorTypes ist die Vereinigung aller Sink/Source/Processor-Klassen
+                    // im Package. Komma-getrennt rendern wir es als ein Badge pro Card,
+                    // statt N Cards pro Package.
+                    Type: p.ConnectorTypes is { Count: > 0 }
+                        ? string.Join(", ", p.ConnectorTypes)
+                        : "unknown",
+                    Version: p.InstalledVersion ?? p.Version ?? ""))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _pluginError = ex.Message;
+        }
+        finally
+        {
+            _loadingPlugins = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PauseConnectorAsync(string name)
+    {
+        var success = await ApiClient.PauseConnectorAsync(name, ClusterState.SelectedClusterId);
+        if (success)
+        {
+            Notification.ShowSuccess($"Connector '{name}' paused");
+            await LoadConnectorsAsync();
+        }
+        else
+        {
+            Notification.ShowError($"Failed to pause connector '{name}'");
+        }
+    }
+
+    private async Task ResumeConnectorAsync(string name)
+    {
+        var success = await ApiClient.ResumeConnectorAsync(name, ClusterState.SelectedClusterId);
+        if (success)
+        {
+            Notification.ShowSuccess($"Connector '{name}' resumed");
+            await LoadConnectorsAsync();
+        }
+        else
+        {
+            Notification.ShowError($"Failed to resume connector '{name}'");
+        }
+    }
+
+    private async Task RestartConnectorAsync(string name)
+    {
+        var success = await ApiClient.RestartConnectorAsync(name, true, false, ClusterState.SelectedClusterId);
+        if (success)
+        {
+            Notification.ShowSuccess($"Connector '{name}' restarted");
+            await LoadConnectorsAsync();
+        }
+        else
+        {
+            Notification.ShowError($"Failed to restart connector '{name}'");
+        }
+    }
+
+    private async Task ConfirmDeleteAsync(string name)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.ContentText, $"Are you sure you want to delete connector '{name}'? This will stop all tasks." },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Color, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Connector", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            var success = await ApiClient.DeleteConnectorAsync(name, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Connector '{name}' deleted");
+                await LoadConnectorsAsync();
+            }
+            else
+            {
+                Notification.ShowError($"Failed to delete connector '{name}'");
+            }
+        }
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var parameters = new DialogParameters<ConnectorCreateDialog>
+        {
+            { x => x.Plugins, _plugins }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ConnectorCreateDialog>("Create Connector", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: (string name, Dictionary<string, string> config) })
+        {
+            var success = await ApiClient.CreateConnectorAsync(name, config, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Connector '{name}' created");
+                await LoadConnectorsAsync();
+            }
+            else
+            {
+                Notification.ShowError($"Failed to create connector '{name}'");
+            }
+        }
+    }
+
+    private async Task CreateFromPlugin(ConnectorPluginInfo plugin)
+    {
+        var parameters = new DialogParameters<ConnectorCreateDialog>
+        {
+            { x => x.Plugins, _plugins },
+            { x => x.SelectedPluginClass, plugin.ClassName }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ConnectorCreateDialog>("Create Connector", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: (string name, Dictionary<string, string> config) })
+        {
+            var success = await ApiClient.CreateConnectorAsync(name, config, ClusterState.SelectedClusterId);
+            if (success)
+            {
+                Notification.ShowSuccess($"Connector '{name}' created");
+                await LoadConnectorsAsync();
+            }
+            else
+            {
+                Notification.ShowError($"Failed to create connector '{name}'");
+            }
+        }
+    }
+
+    private async Task ShowConfigDialog(ConnectorInfo connector)
+    {
+        var parameters = new DialogParameters<ConnectorConfigDialog>
+        {
+            { x => x.ConnectorName, connector.Name },
+            { x => x.Config, connector.Config }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<ConnectorConfigDialog>("Connector Configuration", parameters, options);
+    }
+
+    private static Color GetTypeColor(string type) => type.ToLowerInvariant() switch
+    {
+        "source" => Color.Success,
+        "sink" => Color.Info,
+        _ => Color.Default
+    };
+
+    private static Color GetStateColor(string state) => state.ToUpperInvariant() switch
+    {
+        "RUNNING" => Color.Success,
+        "PAUSED" => Color.Warning,
+        "FAILED" => Color.Error,
+        "UNASSIGNED" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    private static string GetPluginShortName(string className)
+    {
+        var parts = className.Split('.');
+        return parts.Length > 0 ? parts[^1] : className;
+    }
+}

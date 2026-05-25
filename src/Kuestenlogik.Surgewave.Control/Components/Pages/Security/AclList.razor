@@ -1,0 +1,259 @@
+@page "/acls"
+@using Kuestenlogik.Surgewave.Control.Models.Security
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IAclApiClient AclApiClient
+@inject NotificationState Notification
+@inject IDialogService DialogService
+
+<PageTitle>ACL Management - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">ACL Management</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="3">
+            <MudSelect T="AclResourceType?" Label="Resource Type" @bind-Value="_filterResourceType" Clearable="true"
+                       Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var rt in Enum.GetValues<AclResourceType>().Where(r => r > AclResourceType.Any))
+                {
+                    <MudSelectItem Value="@((AclResourceType?)rt)">@rt</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_filterPrincipal" Label="Principal" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="e.g. User:alice" Clearable="true" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_filterResourceName" Label="Resource Name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="e.g. my-topic" Clearable="true" />
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center gap-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAclsAsync"
+                       StartIcon="@Icons.Material.Filled.Search" Disabled="@_loading">
+                Filter
+            </MudButton>
+            <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+                <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="ShowCreateDialogAsync"
+                           StartIcon="@Icons.Material.Filled.Add" data-tour-id="create-acl-btn">
+                    Add ACL
+                </MudButton>
+            </AuthorizeView>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+<MudTable Items="@_filteredAcls" Dense="true" Hover="true" Striped="true" Bordered="true"
+          Loading="@_loading" LoadingProgressColor="Color.Primary"
+          MultiSelection="true" @bind-SelectedItems="_selectedAcls">
+    <ToolBarContent>
+        <MudText Typo="Typo.h6">ACL Entries</MudText>
+        <MudSpacer />
+        @if (_selectedAcls.Count > 0)
+        {
+            <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+                <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="DeleteSelectedAsync"
+                           StartIcon="@Icons.Material.Filled.Delete" Class="mr-2">
+                    Delete Selected (@_selectedAcls.Count)
+                </MudButton>
+            </AuthorizeView>
+        }
+        <MudTextField @bind-Value="_searchText" Placeholder="Search..." Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0"
+                      Immediate="true" DebounceInterval="300" />
+    </ToolBarContent>
+    <HeaderContent>
+        <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.Principal)">Principal</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.ResourceType)">Resource Type</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.PatternType)">Pattern</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.ResourceName)">Resource Name</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.Operation)">Operation</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.Permission)">Permission</MudTableSortLabel></MudTh>
+        <MudTh>Host</MudTh>
+        <MudTh Style="width: 100px">Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Principal">
+            <MudChip T="string" Size="Size.Small" Color="Color.Default">@context.Principal</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Resource Type">
+            <MudChip T="string" Size="Size.Small" Color="@GetResourceTypeColor(context.ResourceType)">
+                @context.ResourceType
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Pattern">@context.PatternType</MudTd>
+        <MudTd DataLabel="Resource Name">
+            <code>@context.ResourceName</code>
+        </MudTd>
+        <MudTd DataLabel="Operation">@context.Operation</MudTd>
+        <MudTd DataLabel="Permission">
+            <MudChip T="string" Size="Size.Small" Color="@(context.Permission == AclPermission.Allow ? Color.Success : Color.Error)">
+                @context.Permission
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Host">@context.Host</MudTd>
+        <MudTd DataLabel="Actions">
+            <AuthorizeView Policy="@SurgewavePolicies.AclManage" Context="auth">
+                <MudTooltip Text="Delete ACL">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeleteAclAsync(context))" />
+                </MudTooltip>
+            </AuthorizeView>
+        </MudTd>
+    </RowTemplate>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
+    </PagerContent>
+    <NoRecordsContent>
+        <MudText>No ACLs found</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private List<AclEntryModel> _acls = [];
+    private HashSet<AclEntryModel> _selectedAcls = [];
+    private string? _searchText;
+
+    // Filters
+    private AclResourceType? _filterResourceType;
+    private string? _filterPrincipal;
+    private string? _filterResourceName;
+
+    private IEnumerable<AclEntryModel> _filteredAcls => string.IsNullOrWhiteSpace(_searchText)
+        ? _acls
+        : _acls.Where(a =>
+            a.Principal.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+            a.ResourceName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+            a.ResourceType.ToString().Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+            a.Operation.ToString().Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAclsAsync();
+    }
+
+    private async Task LoadAclsAsync()
+    {
+        _loading = true;
+        _error = null;
+        _selectedAcls.Clear();
+        StateHasChanged();
+
+        try
+        {
+            _acls = (await AclApiClient.ListAclsAsync(
+                principal: string.IsNullOrWhiteSpace(_filterPrincipal) ? null : _filterPrincipal,
+                resourceType: _filterResourceType,
+                resourceName: string.IsNullOrWhiteSpace(_filterResourceName) ? null : _filterResourceName
+            )).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load ACLs: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ShowCreateDialogAsync()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<AclCreateDialog>("Create ACL", options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await LoadAclsAsync();
+            Notification.ShowSuccess("ACL created successfully");
+        }
+    }
+
+    private async Task DeleteAclAsync(AclEntryModel acl)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete ACL",
+            $"Are you sure you want to delete this ACL?\n\nPrincipal: {acl.Principal}\nResource: {acl.ResourceType}:{acl.ResourceName}\nOperation: {acl.Operation}",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var deleted = await AclApiClient.DeleteAclsAsync(
+                principal: acl.Principal,
+                resourceType: acl.ResourceType,
+                resourceName: acl.ResourceName,
+                operation: acl.Operation,
+                permission: acl.Permission);
+
+            if (deleted > 0)
+            {
+                Notification.ShowSuccess($"Deleted {deleted} ACL(s)");
+                await LoadAclsAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to delete ACL");
+            }
+        }
+    }
+
+    private async Task DeleteSelectedAsync()
+    {
+        if (_selectedAcls.Count == 0) return;
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete ACLs",
+            $"Are you sure you want to delete {_selectedAcls.Count} selected ACL(s)?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var totalDeleted = 0;
+            foreach (var acl in _selectedAcls.ToList())
+            {
+                var deleted = await AclApiClient.DeleteAclsAsync(
+                    principal: acl.Principal,
+                    resourceType: acl.ResourceType,
+                    resourceName: acl.ResourceName,
+                    operation: acl.Operation,
+                    permission: acl.Permission);
+                totalDeleted += deleted;
+            }
+
+            if (totalDeleted > 0)
+            {
+                Notification.ShowSuccess($"Deleted {totalDeleted} ACL(s)");
+                await LoadAclsAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to delete ACLs");
+            }
+        }
+    }
+
+    private static Color GetResourceTypeColor(AclResourceType resourceType) => resourceType switch
+    {
+        AclResourceType.Topic => Color.Primary,
+        AclResourceType.Group => Color.Secondary,
+        AclResourceType.Cluster => Color.Tertiary,
+        AclResourceType.TransactionalId => Color.Info,
+        AclResourceType.DelegationToken => Color.Warning,
+        _ => Color.Default
+    };
+}

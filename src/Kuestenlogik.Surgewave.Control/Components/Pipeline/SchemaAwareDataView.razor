@@ -1,0 +1,114 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+@if (Schema != null && Schema.Length > 0 && !ShowRawView)
+{
+    <div class="schema-data-view">
+        <div class="d-flex align-center justify-space-between mb-1">
+            <MudText Typo="Typo.caption" Color="Color.Info">
+                Structured View (@Schema.Length fields)
+            </MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Code" Size="MudBlazor.Size.Small"
+                           OnClick="@(() => ShowRawView = true)"
+                           aria-label="Show raw" />
+        </div>
+        <MudSimpleTable Dense="true" Hover="true" Style="overflow-x: auto;">
+            <thead>
+                <tr>
+                    @foreach (var field in Schema)
+                    {
+                        <th>
+                            @field.Name
+                            @if (field.IsRequired)
+                            {
+                                <span style="color: var(--mud-palette-error);">*</span>
+                            }
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (_parsedValues != null)
+                {
+                    <tr>
+                        @foreach (var field in Schema)
+                        {
+                            <td>
+                                <span class="schema-cell-value">@(_parsedValues.TryGetValue(field.Name, out var v) ? v ?? "(null)" : "")</span>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </div>
+}
+else
+{
+    <div class="raw-data-view">
+        @if (Schema != null && Schema.Length > 0)
+        {
+            <div class="d-flex align-center justify-space-between mb-1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Raw View</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.TableChart" Size="MudBlazor.Size.Small"
+                               OnClick="@(() => ShowRawView = false)"
+                               aria-label="Show structured" />
+            </div>
+        }
+        <pre class="sample-value">@FormatValue(RawValue)</pre>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? RawValue { get; set; }
+
+    [Parameter]
+    public SchemaFieldInfo[]? Schema { get; set; }
+
+    [Parameter]
+    public bool ShowRawView { get; set; }
+
+    private Dictionary<string, string?>? _parsedValues;
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(RawValue) && Schema is { Length: > 0 })
+        {
+            _parsedValues = Services.SchemaPreviewService.DeserializeWithSchema(RawValue, Schema);
+        }
+        else
+        {
+            _parsedValues = null;
+        }
+    }
+
+    private static string FormatValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "(empty)";
+        try
+        {
+            var obj = System.Text.Json.JsonSerializer.Deserialize<object>(value);
+            return System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return value;
+        }
+    }
+}
+
+<style>
+    .schema-data-view {
+        font-size: 12px;
+    }
+
+    .schema-cell-value {
+        font-family: monospace;
+        font-size: 11px;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: inline-block;
+    }
+</style>

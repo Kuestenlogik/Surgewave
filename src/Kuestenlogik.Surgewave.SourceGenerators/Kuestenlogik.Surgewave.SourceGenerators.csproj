@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Roslyn-Source-Generators must target netstandard2.0 — the C# compiler
+      loads them in arbitrary build hosts (msbuild, dotnet-cli, JetBrains
+      Rider, VS, Roslyn analyzer host) and only that TFM is portable across
+      every supported one.
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <Description>Roslyn source generators for Surgewave — emits typed codecs and producer/consumer helpers for record types marked with [SurgewaveSchema].</Description>
+    <PackageTags>surgewave;source-generator;roslyn;codec;schema</PackageTags>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the generator dll under analyzers/dotnet/cs so the C# compiler
+         picks it up when this package is referenced. -->
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.SourceGenerators.Tests" />
+  </ItemGroup>
+
+</Project>

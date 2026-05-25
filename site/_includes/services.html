@@ -1,0 +1,75 @@
+{%- comment -%}
+"We Wrote the Framework" credibility-and-services section, sitting
+between the .launch step-by-step and the final .cta. Petabridge-style
+positioning: monetise the expertise without compromising the OSS pitch.
+Four service tiles cover the typical reasons a team hires the framework
+authors — production support, custom plugins, architecture review,
+migration & training.
+
+The standalone /services.html page re-includes this same block plus
+a longer-form "How an engagement works" walkthrough.
+{%- endcomment -%}
+<section class="services" id="services">
+  <div class="container">
+    <h2 class="section-title">We Wrote the Framework.</h2>
+    <p class="section-lede">
+      Surgewave is built and maintained by Küstenlogik. When you need production-grade
+      Surgewave &mdash; performance tuning, custom plugins, Kafka migration, architecture
+      review &mdash; talk to the people who wrote it.
+    </p>
+
+    <div class="services-grid">
+      <article class="service-card">
+        <div class="service-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <h3>Production Support</h3>
+        <p>24/7 incident response with an SLA. We pick up the pager when your cluster does. Triage, root-cause, fix, postmortem &mdash; all by the people who wrote the code paths.</p>
+      </article>
+
+      <article class="service-card">
+        <div class="service-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <path d="M14 18h7M17.5 14.5v7"/>
+          </svg>
+        </div>
+        <h3>Custom Plugins</h3>
+        <p>Need a connector for an in-house system? A bespoke storage engine for your hot path? An AI pipeline node tied to your model registry? We build, sign, and ship it as a regular <code>.swpkg</code>.</p>
+      </article>
+
+      <article class="service-card">
+        <div class="service-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="M16 16l5 5"/>
+            <path d="M11 8v6M8 11h6"/>
+          </svg>
+        </div>
+        <h3>Architecture Review</h3>
+        <p>Pre-deployment audit before you put Surgewave on the critical path: capacity planning, replication topology, security review, failure-mode walkthrough. Two-week engagement, written report.</p>
+      </article>
+
+      <article class="service-card">
+        <div class="service-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12h13M13 6l7 6-7 6"/>
+            <path d="M3 6h4M3 18h4"/>
+          </svg>
+        </div>
+        <h3>Migration &amp; Training</h3>
+        <p>Coming from Kafka, Redpanda, or a custom queue? We run the migration, train your platform team alongside, and stick around through the first week of production.</p>
+      </article>
+    </div>
+
+    <p class="services-cta">
+      <a href="mailto:info@kuestenlogik.com" class="btn btn-primary">Get in touch</a>
+      <a href="{{ '/services.html' | relative_url }}" class="btn btn-ghost">How an engagement works</a>
+    </p>
+  </div>
+</section>

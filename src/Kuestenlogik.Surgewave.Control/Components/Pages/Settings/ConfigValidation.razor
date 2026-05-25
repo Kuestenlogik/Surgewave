@@ -1,0 +1,140 @@
+@page "/settings/config-validation"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IConfiguration Configuration
+
+<PageTitle>Config Validation — Surgewave Control</PageTitle>
+
+<h3>Configuration Validation</h3>
+<p class="text-muted">
+    Validates the broker's live IConfiguration against every <code>IValidatableConfig</code>
+    type in the loaded assemblies. This is the same check that
+    <code>GET /api/config/validate</code> runs.
+</p>
+
+<button class="btn btn-primary mb-3" @onclick="RunValidation" disabled="@_loading">
+    @if (_loading)
+    {
+        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+        <span> Validating...</span>
+    }
+    else
+    {
+        <span>Run Validation</span>
+    }
+</button>
+
+@if (_result is not null)
+{
+    <div class="mb-3">
+        @if (_result.Failed == 0)
+        {
+            <div class="alert alert-success">
+                All @_result.Total configured section(s) are valid.
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-danger">
+                @_result.Failed of @_result.Total section(s) failed validation.
+            </div>
+        }
+    </div>
+
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Section</th>
+                <th>Class</th>
+                <th>Status</th>
+                <th>Errors</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in _result.Sections)
+            {
+                <tr class="@(item.Status == "fail" ? "table-danger" : "")">
+                    <td><code>@item.Section</code></td>
+                    <td><code>@item.Class</code></td>
+                    <td>
+                        @if (item.Status == "ok")
+                        {
+                            <span class="badge bg-success">ok</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger">fail</span>
+                        }
+                    </td>
+                    <td>
+                        @if (item.Errors.Count > 0)
+                        {
+                            <ul class="mb-0 ps-3">
+                                @foreach (var error in item.Errors)
+                                {
+                                    <li class="text-danger">@error</li>
+                                }
+                            </ul>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else if (_error is not null)
+{
+    <div class="alert alert-warning">@_error</div>
+}
+
+@code {
+    private bool _loading;
+    private string? _error;
+    private ConfigValidationResponse? _result;
+
+    private async Task RunValidation()
+    {
+        _loading = true;
+        _error = null;
+        _result = null;
+
+        try
+        {
+            // The broker's /api/config/validate endpoint returns the validation result.
+            // The Control UI connects to the broker via the configured bootstrap server.
+            var brokerUrl = Configuration["Surgewave:Broker:BootstrapServers"] ?? "https://localhost:9093";
+            if (!brokerUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                brokerUrl = $"https://{brokerUrl}";
+
+            // Replace the Kafka port (9092) with the gRPC/HTTP port (9093) if needed
+            brokerUrl = brokerUrl.Replace(":9092", ":9093");
+
+            var response = await Http.GetAsync($"{brokerUrl}/api/config/validate");
+            _result = await response.Content.ReadFromJsonAsync<ConfigValidationResponse>();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to reach broker: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private sealed class ConfigValidationResponse
+    {
+        public int Total { get; set; }
+        public int Passed { get; set; }
+        public int Failed { get; set; }
+        public List<SectionResult> Sections { get; set; } = [];
+    }
+
+    private sealed class SectionResult
+    {
+        public string Section { get; set; } = "";
+        public string Class { get; set; } = "";
+        public string Status { get; set; } = "";
+        public List<string> Errors { get; set; } = [];
+    }
+}

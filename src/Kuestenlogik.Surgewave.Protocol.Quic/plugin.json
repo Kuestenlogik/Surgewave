@@ -1,0 +1,10 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.protocol.quic",
+  "name": "QUIC Protocol",
+  "version": "0.1.0",
+  "description": "Raw QUIC transport for the Kafka wire protocol — 0-RTT reconnect, per-stream flow control, resilience to packet loss.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Protocol.Quic.dll" ],
+  "pluginSettings": "pluginsettings.json",
+  "tags": [ "protocol", "quic", "kafka", "community" ]
+}

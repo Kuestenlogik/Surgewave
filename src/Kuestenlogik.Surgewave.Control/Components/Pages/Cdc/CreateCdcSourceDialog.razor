@@ -1,0 +1,49 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_connectionString" Label="PostgreSQL Connection String" Variant="Variant.Outlined"
+                      Required="true" HelperText="Must include replication=database" Class="mb-3" Lines="2" />
+        <MudTextField @bind-Value="_tables" Label="Tables" Variant="Variant.Outlined"
+                      HelperText="Comma-separated, e.g. public.orders,public.users (empty = all)" Class="mb-3" />
+        <MudTextField @bind-Value="_topicPrefix" Label="Topic Prefix" Variant="Variant.Outlined"
+                      Placeholder="cdc." Class="mb-3" />
+        <MudTextField @bind-Value="_slotName" Label="Slot Name (optional)" Variant="Variant.Outlined" Class="mb-3" />
+        <MudSwitch T="bool" @bind-Value="_snapshotOnStart" Label="Snapshot existing data on start" Color="Color.Primary" Class="mb-2" />
+        <MudSwitch T="bool" @bind-Value="_includeSchema" Label="Include schema in topic name" Color="Color.Primary" Class="mb-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_connectionString))">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _connectionString = "";
+    private string _tables = "";
+    private string _topicPrefix = "cdc.";
+    private string _slotName = "";
+    private bool _snapshotOnStart;
+    private bool _includeSchema = true;
+
+    private async Task Submit()
+    {
+        var tables = _tables.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var payload = new
+        {
+            connectionString = _connectionString,
+            tables,
+            topicPrefix = _topicPrefix,
+            slotName = string.IsNullOrWhiteSpace(_slotName) ? null : _slotName,
+            snapshotOnStart = _snapshotOnStart,
+            includeSchema = _includeSchema
+        };
+        var response = await Http.PostAsJsonAsync("/api/cdc/sources", payload);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

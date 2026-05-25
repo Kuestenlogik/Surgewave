@@ -1,0 +1,46 @@
+[Unit]
+Description=Surgewave Broker - High-performance event streaming platform
+Documentation=https://github.com/Kuestenlogik/Surgewave
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/opt/surgewave/broker/surgewave-broker
+WorkingDirectory=/opt/surgewave
+
+# Environment
+Environment=DOTNET_RUNNING_IN_CONTAINER=false
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=Surgewave__DataDirectory=/var/lib/surgewave/data
+Environment=Surgewave__LogDirectory=/var/log/surgewave
+Environment=Surgewave__Connect__PluginsDirectory=/opt/surgewave/plugins
+Environment=Surgewave__Wasm__WasmDirectory=/opt/surgewave/wasm-plugins
+Environment=Surgewave__ML__ModelsDirectory=/opt/surgewave/models
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Security
+User=surgewave
+Group=surgewave
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/surgewave /var/log/surgewave /opt/surgewave/plugins /opt/surgewave/models /opt/surgewave/wasm-plugins
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+LimitMEMLOCK=infinity
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surgewave-broker
+
+[Install]
+WantedBy=multi-user.target

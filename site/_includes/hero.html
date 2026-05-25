@@ -1,0 +1,512 @@
+{%- comment -%}
+Surgewave hero — live force-directed graph cluster with eye-of-the-surgewave anchor.
+Emergent simulation: ~120 nodes + ~180 edges, all-pairs Coulomb repulsion,
+Hooke springs, centripetal pull toward the eye. Cluster orbits the eye on
+the y-axis at 60 s/turn, projected with simple z-perspective. ~12 named
+feature nodes carry [ ] reticles + mono labels.
+
+The hero is forced-dark; .hero-fg-* styles in assets/css/style.css. The
+sticky header on top of this section is auto-styled by the
+body.has-dark-hero rule (also in style.css) so the logo + nav remain
+legible against the dark canvas until the user has scrolled past.
+{%- endcomment -%}
+<section class="hero-fg" id="hero">
+  <div class="hero-fg-canvas">
+    <svg id="fg-svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <!-- Sun stack: corona is the soft halo (blurred), disc is the
+             hot body (white-hot core fading to orange), core is the
+             tiny incandescent centre. Three layers stacked at the eye
+             give a burning-sun look without baking opacity into solid
+             rings. -->
+        <radialGradient id="sun-corona-grad" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%"   stop-color="#fff3a8" stop-opacity="0.95"/>
+          <stop offset="55%"  stop-color="#facc15" stop-opacity="0.45"/>
+          <stop offset="100%" stop-color="#fb923c" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="sun-disc-grad" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%"   stop-color="#ffffff" stop-opacity="1"/>
+          <stop offset="35%"  stop-color="#fff5b8" stop-opacity="1"/>
+          <stop offset="70%"  stop-color="#facc15" stop-opacity="0.95"/>
+          <stop offset="100%" stop-color="#fb923c" stop-opacity="0.6"/>
+        </radialGradient>
+        <filter id="sun-blur" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4"/>
+        </filter>
+      </defs>
+      <g id="fg-edges"></g>
+      <g id="fg-eyelinks"></g>
+      <g id="fg-nodes"></g>
+      <g id="fg-features"></g>
+      <g id="fg-labels"></g>
+      <g class="hero-fg-eye" id="fg-eye"></g>
+    </svg>
+  </div>
+
+  <div class="hero-fg-content">
+    {%- comment -%}
+    Vertical Surgewave lockup inlined so the hero-fg-logo-slot scope can
+    paint its .surgewave-wave / .surgewave-ink / .surgewave-text-bold classes in the
+    forced-dark colourway (light cyan + white) regardless of the page
+    theme — the canvas behind is always dark.
+    {%- endcomment -%}
+    <div class="hero-fg-logo-slot">
+      {% include surgewave-lockup-v.svg %}
+    </div>
+    <div class="hero-fg-text">
+      {%- comment -%}
+      H1 broad — verkauft die ganze Plattform, nicht nur "Kafka aber besser".
+      Lede ohne Tech-Deepdive (librdkafka, Confluent.Kafka, Apache CLI haben
+      hier nichts zu suchen — gehoeren in eine Migrations-Detail-Section
+      weiter unten); Hero macht das Marketing-Pitch in drei Beats: was es ist,
+      wie es laeuft, was eingebaut ist. Bowire-Pattern (klar, ohne
+      Verb-Drilldown).
+      {%- endcomment -%}
+      <h1 class="hero-title">Your Streams.<br><span class="hero-accent">At Scale. In&nbsp;Control.</span></h1>
+      <p class="hero-lede">
+        The .NET-native message streaming platform. No more JVM.<br>
+        Drop-in Kafka replacement. Run it embedded, standalone, or clustered.<br>
+        AI pipelines, schemas, and a plugin marketplace &mdash; built in, not bolted on.
+      </p>
+      <div class="hero-cta">
+        <a href="{{ '/download.html' | relative_url }}" class="btn btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="12 2 19 21 12 17 5 21 12 2"/>
+          </svg>
+          Get Started
+        </a>
+        <a href="https://github.com/Kuestenlogik/Surgewave.Bootcamp"
+           class="btn btn-secondary btn-disabled"
+           aria-disabled="true" tabindex="-1"
+           title="Bootcamp will become available with the v0.1.0 launch">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3 1 9l11 6 9-4.91V17h2V9z"/>
+          </svg>
+          Bootcamp
+        </a>
+        <a href="https://github.com/Kuestenlogik/Surgewave" class="btn btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.37-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <!-- Hero-Badges, Reihenfolge: Live-Hooks (NuGet+Downloads) zuerst —
+           wenn sie gefuellt sind, sind das die staerksten Social-Proof-
+           Signale (Bowire-Pattern). Pre-launch sind sie via CSS-Regel
+           ".hero-badge[data-badge]:not(:has([data-badge-loaded]))" komplett
+           ausgeblendet, sodass im jetzigen Zustand nur die statischen
+           Identity-Chips erscheinen (License → Wire → .NET 10 → Single
+           binary). Stars-Chip bleibt hinter `if false` bis das Repo
+           genug Sterne hat. -->
+      <div class="hero-badges" aria-label="Project badges">
+        {% if false %}
+        <a class="hero-badge" href="https://github.com/Kuestenlogik/Surgewave" target="_blank" rel="noopener" data-badge="gh-stars">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .587l3.668 7.431 8.2 1.193-5.934 5.787 1.401 8.168L12 18.896l-7.335 3.868 1.401-8.168L.132 8.787a.16.16 0 01-.024-.07L0 8.66l8.2-1.193L12 .587z"/></svg>
+          <span class="hero-badge-label">Stars</span>
+          <span class="hero-badge-value" data-badge-value></span>
+        </a>
+        {% endif %}
+        <a class="hero-badge" href="https://www.nuget.org/packages/Kuestenlogik.Surgewave.Client" target="_blank" rel="noopener" data-badge="nuget-version">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span class="hero-badge-label">NuGet</span>
+          <span class="hero-badge-value" data-badge-value></span>
+        </a>
+        <a class="hero-badge" href="https://www.nuget.org/packages/Kuestenlogik.Surgewave.Client" target="_blank" rel="noopener" data-badge="nuget-downloads">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="hero-badge-label">Downloads</span>
+          <span class="hero-badge-value" data-badge-value></span>
+        </a>
+        <a class="hero-badge" href="https://github.com/Kuestenlogik/Surgewave/blob/main/LICENSE" target="_blank" rel="noopener">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="M5 8l7-5 7 5"/><path d="M5 8l-3 7a4 4 0 006 0z"/><path d="M19 8l3 7a4 4 0 01-6 0z"/><path d="M5 21h14"/></svg>
+          <span class="hero-badge-label">License</span>
+          <span class="hero-badge-value">Apache 2.0</span>
+        </a>
+        <span class="hero-badge">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8a1 1 0 011-1h10a1 1 0 011 1v5a4 4 0 01-4 4h-4a4 4 0 01-4-4z"/></svg>
+          <span class="hero-badge-label">Wire</span>
+          <span class="hero-badge-value">Surgewave + Kafka 4.x</span>
+        </span>
+        <a class="hero-badge" href="https://dotnet.microsoft.com/" target="_blank" rel="noopener">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          <span class="hero-badge-label">Built on</span>
+          <span class="hero-badge-value">.NET 10</span>
+        </a>
+        <span class="hero-badge">
+          <svg class="hero-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+          <span class="hero-badge-label">Runs as</span>
+          <span class="hero-badge-value">Single binary</span>
+        </span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // ============================================================
+  // Force-graph hero — live physics simulation rendered to SVG.
+  // Tuned to ~120 nodes + ~180 edges, settles in 220 steps before the
+  // first paint, runs continuously at 60 fps. Reduced-motion gets a
+  // single static frame.
+  // Coordinate system mirrors viewBox: 1600 × 900. The eye sits behind
+  // the Surgewave lockup — the exact viewBox-coordinates are derived
+  // from the lockup's on-screen position so the cluster stays centred
+  // on the logo no matter how the viewport scales (the SVG uses
+  // preserveAspectRatio="xMidYMid slice", which means a fixed viewBox
+  // coordinate drifts visually as the aspect ratio changes; the logo
+  // sits in HTML flow and follows the CSS grid). measureEye() recomputes
+  // the eye position from the logo's getBoundingClientRect() via the
+  // SVG's screen-to-viewBox CTM; it runs once on load and again on
+  // resize so the cluster tracks the logo through breakpoint flips.
+  // ============================================================
+  (function () {
+    var ns = 'http://www.w3.org/2000/svg';
+    var W = 1600, H = 900;
+    var svg = document.getElementById('fg-svg');
+    var logoSlot = document.querySelector('.hero-fg-logo-slot');
+    // Fallback default — used if the DOM probe fails (logo not yet laid
+    // out, SVG transform matrix unavailable, …). Roughly mirrors the
+    // hand-tuned values that used to be hardcoded.
+    var EYE = { x: 529, y: 450 };
+
+    function measureEye() {
+      if (!svg || !logoSlot) return;
+      var rect = logoSlot.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      var ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      var pt = svg.createSVGPoint();
+      pt.x = rect.left + rect.width / 2;
+      pt.y = rect.top + rect.height / 2;
+      var p = pt.matrixTransform(ctm.inverse());
+      EYE.x = p.x;
+      EYE.y = p.y;
+    }
+    measureEye();
+    // Re-measure once the first paint settles (custom fonts can shift
+    // the logo's bounding box after the initial measurement) and again
+    // whenever the viewport changes. Debounced via rAF because resize
+    // events fire dozens of times during a drag.
+    requestAnimationFrame(measureEye);
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(measureEye);
+    }
+    var resizeQueued = false;
+    window.addEventListener('resize', function () {
+      if (resizeQueued) return;
+      resizeQueued = true;
+      requestAnimationFrame(function () {
+        resizeQueued = false;
+        measureEye();
+      });
+    });
+    var FOCAL = 1100;
+    var ROT_SPEED = (Math.PI * 2) / 60; // one turn per minute
+
+    var NODE_COUNT = 120;
+    var FEATURE_LABELS = [
+      'topic.orders.v2', 'pipeline.fraud', 'consumer.analytics', 'cdc.postgres',
+      'connector.s3', 'producer.gateway', 'replica eu-west', 'schema.registry',
+      'broker.eu-1', 'topic.metrics', 'ai.agent', 'plugin.mqtt'
+    ];
+
+    var COL_NODE      = 'rgba(203, 213, 225, 0.85)';
+    var COL_EDGE      = 'rgba(156, 163, 177, 0.30)';
+    var COL_EDGE_BACK = 'rgba(156, 163, 177, 0.10)';
+    var COL_FEATURE   = '#7dd3fc';
+
+    // Seeded PRNG — keeps the topology stable across reloads.
+    function rng(seed) {
+      return function () {
+        seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+        var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    var rand = rng(231);
+
+    // Initial seed — gaussian-ish 3-sphere around the eye.
+    var nodes = [];
+    for (var i = 0; i < NODE_COUNT; i++) {
+      var u1 = rand(), u2 = rand();
+      var r = Math.sqrt(-2 * Math.log(u1));
+      var theta = 2 * Math.PI * u2;
+      nodes.push({
+        x: EYE.x + r * Math.cos(theta) * 320,
+        y: EYE.y + r * Math.sin(theta) * 200,
+        z: (rand() - 0.5) * 480,
+        vx: 0, vy: 0, vz: 0,
+        r: 1.6 + rand() * 1.4,
+        isFeature: false, label: null
+      });
+    }
+    // Pick the 12 outermost nodes as feature nodes.
+    nodes
+      .map(function (n, idx) {
+        var dx = n.x - EYE.x, dy = n.y - EYE.y;
+        return { idx: idx, d: dx * dx + dy * dy + n.z * n.z };
+      })
+      .sort(function (a, b) { return b.d - a.d; })
+      .slice(0, FEATURE_LABELS.length)
+      .forEach(function (entry, k) {
+        var n = nodes[entry.idx];
+        n.isFeature = true;
+        n.label = FEATURE_LABELS[k];
+        n.r = 3.2 + rand() * 0.8;
+      });
+
+    // Edges via preferential attachment — yields hubs + leaves.
+    var edges = [];
+    var degree = new Array(NODE_COUNT).fill(0);
+    for (var i = 5; i < NODE_COUNT; i++) {
+      var connectCount = 1 + (rand() < 0.35 ? 1 : 0);
+      var picked = {};
+      for (var c = 0; c < connectCount; c++) {
+        var totalW = 0;
+        for (var j = 0; j < i; j++) totalW += degree[j] + 1;
+        var pick = rand() * totalW, acc = 0, target = 0;
+        for (var j = 0; j < i; j++) {
+          acc += degree[j] + 1;
+          if (acc >= pick) { target = j; break; }
+        }
+        if (target === i || picked[target]) continue;
+        picked[target] = true;
+        edges.push({ a: i, b: target });
+        degree[i]++; degree[target]++;
+      }
+    }
+
+    // Physics constants — tuned by feel, see the preview file's commentary
+    // (preview/hero-h-forcegraph.html) for the original tuning notes.
+    var REPULSE = 1800, REPULSE_CUT_SQ = 240 * 240;
+    var SPRING_K = 0.0035, SPRING_LEN = 60;
+    var CENTRIPETAL = 0.0045;
+    var DAMPING = 0.86, MAX_VEL = 6;
+
+    function step(dt) {
+      for (var i = 0; i < NODE_COUNT; i++) {
+        var ni = nodes[i];
+        for (var j = i + 1; j < NODE_COUNT; j++) {
+          var nj = nodes[j];
+          var dx = nj.x - ni.x, dy = nj.y - ni.y, dz = nj.z - ni.z;
+          var d2 = dx*dx + dy*dy + dz*dz;
+          if (d2 > REPULSE_CUT_SQ) continue;
+          if (d2 < 1) d2 = 1;
+          var d = Math.sqrt(d2), f = REPULSE / d2;
+          var fx = f * dx / d, fy = f * dy / d, fz = f * dz / d;
+          ni.vx -= fx; ni.vy -= fy; ni.vz -= fz;
+          nj.vx += fx; nj.vy += fy; nj.vz += fz;
+        }
+      }
+      for (var e = 0; e < edges.length; e++) {
+        var ed = edges[e], ni = nodes[ed.a], nj = nodes[ed.b];
+        var dx = nj.x - ni.x, dy = nj.y - ni.y, dz = nj.z - ni.z;
+        var d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        if (d < 0.01) continue;
+        var f = SPRING_K * (d - SPRING_LEN);
+        var fx = f * dx / d, fy = f * dy / d, fz = f * dz / d;
+        ni.vx += fx; ni.vy += fy; ni.vz += fz;
+        nj.vx -= fx; nj.vy -= fy; nj.vz -= fz;
+      }
+      for (var i = 0; i < NODE_COUNT; i++) {
+        var n = nodes[i];
+        n.vx += (EYE.x - n.x) * CENTRIPETAL;
+        n.vy += (EYE.y - n.y) * CENTRIPETAL;
+        n.vz += (-n.z) * CENTRIPETAL * 0.6;
+      }
+      for (var i = 0; i < NODE_COUNT; i++) {
+        var n = nodes[i];
+        n.vx *= DAMPING; n.vy *= DAMPING; n.vz *= DAMPING;
+        var v2 = n.vx*n.vx + n.vy*n.vy + n.vz*n.vz;
+        if (v2 > MAX_VEL * MAX_VEL) {
+          var s = MAX_VEL / Math.sqrt(v2);
+          n.vx *= s; n.vy *= s; n.vz *= s;
+        }
+        n.x += n.vx * dt; n.y += n.vy * dt; n.z += n.vz * dt;
+      }
+    }
+
+    // Settle before paint so no random-shuffle frame is visible on load.
+    for (var s = 0; s < 220; s++) step(1);
+
+    // SVG element pools — created once, attributes mutated each frame.
+    var edgesG    = document.getElementById('fg-edges');
+    var eyelinkG  = document.getElementById('fg-eyelinks');
+    var nodesG    = document.getElementById('fg-nodes');
+    var featuresG = document.getElementById('fg-features');
+    var labelsG   = document.getElementById('fg-labels');
+    var eyeG      = document.getElementById('fg-eye');
+
+    var edgeEls = edges.map(function () {
+      var line = document.createElementNS(ns, 'line');
+      line.setAttribute('class', 'hero-fg-edge');
+      line.setAttribute('stroke-width', 0.6);
+      line.setAttribute('stroke-linecap', 'round');
+      edgesG.appendChild(line);
+      return line;
+    });
+    var nodeEls = nodes.map(function (n) {
+      var c = document.createElementNS(ns, 'circle');
+      c.setAttribute('fill', n.isFeature ? COL_FEATURE : COL_NODE);
+      c.setAttribute('r', n.r);
+      nodesG.appendChild(c);
+      return c;
+    });
+    var featureEls = nodes
+      .map(function (n, idx) { return n.isFeature ? { node: n, idx: idx } : null; })
+      .filter(Boolean)
+      .map(function (entry) {
+        var brackets = document.createElementNS(ns, 'g'), corners = [];
+        for (var c = 0; c < 4; c++) {
+          var path = document.createElementNS(ns, 'path');
+          path.setAttribute('stroke', COL_FEATURE);
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-width', 1.0);
+          path.setAttribute('stroke-linecap', 'round');
+          brackets.appendChild(path);
+          corners.push(path);
+        }
+        featuresG.appendChild(brackets);
+        var label = document.createElementNS(ns, 'text');
+        label.setAttribute('class', 'hero-fg-label');
+        label.setAttribute('text-anchor', 'start');
+        label.textContent = entry.node.label;
+        labelsG.appendChild(label);
+        var eyeLine = document.createElementNS(ns, 'line');
+        eyeLine.setAttribute('class', 'hero-fg-eyelink');
+        eyeLine.setAttribute('stroke', COL_FEATURE);
+        eyeLine.setAttribute('stroke-width', 0.7);
+        eyeLine.setAttribute('opacity', 0.55);
+        eyelinkG.appendChild(eyeLine);
+        return { node: entry.node, idx: entry.idx, corners: corners, label: label, eyeLine: eyeLine };
+      });
+
+    // Atmospheric surgewave-eye rings (cool cyan + violet) frame the warm
+    // sun core. Order matters: rings paint first so the sun stack on
+    // top reads as the focal heat source against the cool atmosphere.
+    [
+      { r: 70, op: 0.06, fill: '#7dd3fc' },
+      { r: 42, op: 0.10, fill: '#7dd3fc' },
+      { r: 24, op: 0.20, fill: '#a78bfa' }
+    ].forEach(function (ring) {
+      var c = document.createElementNS(ns, 'circle');
+      c.setAttribute('cx', EYE.x); c.setAttribute('cy', EYE.y);
+      c.setAttribute('r', ring.r); c.setAttribute('fill', ring.fill);
+      c.setAttribute('opacity', ring.op);
+      eyeG.appendChild(c);
+    });
+    // Sun stack — three layers, each independently animated below so the
+    // breathing of corona / disc / core go slightly out of phase and the
+    // eye reads as a living burning star rather than a static gradient.
+    function appendSunLayer(r, fill, filter, cls) {
+      var c = document.createElementNS(ns, 'circle');
+      c.setAttribute('cx', EYE.x); c.setAttribute('cy', EYE.y);
+      c.setAttribute('r', r); c.setAttribute('fill', fill);
+      if (filter) c.setAttribute('filter', filter);
+      c.setAttribute('class', cls);
+      eyeG.appendChild(c);
+    }
+    appendSunLayer(26, 'url(#sun-corona-grad)', 'url(#sun-blur)', 'hero-fg-sun-corona');
+    appendSunLayer(14, 'url(#sun-disc-grad)',   null,             'hero-fg-sun-disc');
+    appendSunLayer(5,  '#fffce8',               null,             'hero-fg-sun-core');
+
+    function projected(n, sinA, cosA) {
+      var rx = (n.x - EYE.x) * cosA - n.z * sinA;
+      var rz = (n.x - EYE.x) * sinA + n.z * cosA;
+      var scale = FOCAL / Math.max(180, FOCAL + rz);
+      return { sx: EYE.x + rx * scale, sy: EYE.y + (n.y - EYE.y) * scale, sc: scale, rz: rz };
+    }
+    function alphaForRz(rz) {
+      var t = (rz + 600) / 1200;
+      return Math.max(0.10, Math.min(1.0, 1.0 - t * 0.85));
+    }
+
+    var lastTs = 0;
+    function frame(ts) {
+      if (!lastTs) lastTs = ts;
+      var dt = Math.min(0.05, (ts - lastTs) / 16.667);
+      lastTs = ts;
+      step(dt);
+
+      var angle = ts * 0.001 * ROT_SPEED;
+      var sinA = Math.sin(angle), cosA = Math.cos(angle);
+      var projN = new Array(NODE_COUNT);
+      for (var i = 0; i < NODE_COUNT; i++) projN[i] = projected(nodes[i], sinA, cosA);
+
+      for (var e = 0; e < edges.length; e++) {
+        var ed = edges[e], pa = projN[ed.a], pb = projN[ed.b], el = edgeEls[e];
+        el.setAttribute('x1', pa.sx); el.setAttribute('y1', pa.sy);
+        el.setAttribute('x2', pb.sx); el.setAttribute('y2', pb.sy);
+        var avgRz = (pa.rz + pb.rz) / 2;
+        el.setAttribute('stroke', avgRz > 200 ? COL_EDGE_BACK : COL_EDGE);
+        el.setAttribute('opacity', (alphaForRz(avgRz) * 0.6).toFixed(2));
+      }
+      for (var i = 0; i < NODE_COUNT; i++) {
+        var p = projN[i], n = nodes[i], el = nodeEls[i];
+        el.setAttribute('cx', p.sx);
+        el.setAttribute('cy', p.sy);
+        el.setAttribute('r', (n.r * p.sc).toFixed(2));
+        el.setAttribute('opacity', alphaForRz(p.rz).toFixed(2));
+      }
+      for (var f = 0; f < featureEls.length; f++) {
+        var fe = featureEls[f], p = projN[fe.idx];
+        var size = 12 * p.sc + 4, arm = size * 0.35, x = p.sx, y = p.sy;
+        var paths = [
+          ['M', x - size, y - size + arm, 'L', x - size, y - size, 'L', x - size + arm, y - size],
+          ['M', x + size - arm, y - size, 'L', x + size, y - size, 'L', x + size, y - size + arm],
+          ['M', x - size, y + size - arm, 'L', x - size, y + size, 'L', x - size + arm, y + size],
+          ['M', x + size - arm, y + size, 'L', x + size, y + size, 'L', x + size, y + size - arm]
+        ];
+        var op = alphaForRz(p.rz);
+        for (var c = 0; c < 4; c++) {
+          fe.corners[c].setAttribute('d', paths[c].join(' '));
+          fe.corners[c].setAttribute('opacity', op.toFixed(2));
+        }
+        fe.label.setAttribute('x', x + size + 6);
+        fe.label.setAttribute('y', y + 4);
+        fe.label.setAttribute('font-size', (10 + 3 * p.sc).toFixed(1));
+        fe.label.setAttribute('opacity', op.toFixed(2));
+        fe.eyeLine.setAttribute('x1', EYE.x); fe.eyeLine.setAttribute('y1', EYE.y);
+        fe.eyeLine.setAttribute('x2', x); fe.eyeLine.setAttribute('y2', y);
+        fe.eyeLine.setAttribute('opacity', (op * 0.55).toFixed(2));
+      }
+
+      requestAnimationFrame(frame);
+    }
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      requestAnimationFrame(frame);
+    } else {
+      frame(0); // single static render for reduced-motion users
+    }
+  })();
+
+  // ============================================================
+  // Hero-aware page state — adds:
+  //   • body.has-dark-hero        always while this hero is present
+  //   • body.scrolled-past-hero   once window.scrollY > hero height
+  //   • .site-header.scrolled     once window.scrollY > 20 (header bg fade-in)
+  // Single rAF-throttled scroll listener handles all three. Removing the
+  // hero include reverts the page to its non-dark-hero default.
+  // ============================================================
+  (function () {
+    document.body.classList.add('has-dark-hero');
+    var hero = document.getElementById('hero');
+    var header = document.querySelector('.site-header');
+    var ticking = false;
+
+    function update() {
+      var y = window.scrollY;
+      if (header) header.classList.toggle('scrolled', y > 20);
+      if (hero) {
+        var heroBottom = hero.offsetTop + hero.offsetHeight;
+        document.body.classList.toggle('scrolled-past-hero', y > heroBottom - 120);
+      }
+      ticking = false;
+    }
+    window.addEventListener('scroll', function () {
+      if (ticking) return;
+      requestAnimationFrame(update);
+      ticking = true;
+    }, { passive: true });
+    update();
+  })();
+</script>

@@ -1,0 +1,17 @@
+{
+  "latencyThresholdPercent": 15.0,
+  "throughputThresholdPercent": 10.0,
+  "allocationThresholdPercent": 20.0,
+  "excludedBenchmarks": [],
+  "categoryOverrides": {
+    "transport:quic": {
+      "throughputThresholdPercent": 15.0,
+      "latencyThresholdPercent": 20.0,
+      "notes": "QUIC has higher variance due to UDP/TLS overhead"
+    },
+    "transport:peer": {
+      "latencyThresholdPercent": 25.0,
+      "notes": "Peer transport benchmarks include TCP handshake, high variance expected"
+    }
+  }
+}

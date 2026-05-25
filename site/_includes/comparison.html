@@ -1,0 +1,189 @@
+{%- comment -%}
+Comparison-Tabelle, gruppiert nach 5 Themen (Admin / Performance / Cost /
+Reliability / Capability). Vorbild: redpanda.com/platform — die haben
+~20 Zeilen statt der frueheren 7 flachen, und gruppieren mit Row-Header-
+Spans. Surgewave-vs-Kafka-vs-Redpanda-vs-Aeron.
+
+CSS in style.css: .comparison-group-header (Sticky-Spalten-Header pro Block),
+.comparison-cell-self (Hervorhebung Surgewave-Spalte).
+{%- endcomment -%}
+<section class="comparison" id="comparison">
+  <div class="container">
+    <h2 class="section-title">Surgewave vs the field</h2>
+    <p class="section-lede">A structured side-by-side &mdash; broken down by what
+    operators care about: Admin, Performance, Cost, Reliability, Capability.</p>
+
+    <div class="comparison-table-wrap">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th scope="col" class="comparison-col-criterion">Criterion</th>
+            <th scope="col" class="comparison-col-self">Surgewave</th>
+            <th scope="col">Apache Kafka</th>
+            <th scope="col">Redpanda</th>
+            <th scope="col">Aeron</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- ADMIN -->
+          <tr class="comparison-group-header">
+            <th scope="rowgroup" colspan="5">Admin &amp; Operations</th>
+          </tr>
+          <tr>
+            <th scope="row">Deployment</th>
+            <td class="comparison-cell-self">Single binary, no JVM</td>
+            <td>JVM cluster + KRaft / ZK</td>
+            <td>Single binary (C++)</td>
+            <td>Library inside your process</td>
+          </tr>
+          <tr>
+            <th scope="row">Coordination</th>
+            <td class="comparison-cell-self">Built-in Raft</td>
+            <td>KRaft or ZooKeeper</td>
+            <td>Built-in Raft</td>
+            <td>None (transport only)</td>
+          </tr>
+          <tr>
+            <th scope="row">Embedded mode</th>
+            <td class="comparison-cell-self">In-process (<code>surgewave://embedded</code>)</td>
+            <td>No</td>
+            <td>No</td>
+            <td>Yes (it&rsquo;s a library)</td>
+          </tr>
+          <tr>
+            <th scope="row">Control plane</th>
+            <td class="comparison-cell-self">Per-broker Control + fleet view</td>
+            <td>Kafka Admin API + 3rd-party</td>
+            <td>Redpanda Console</td>
+            <td>External tooling</td>
+          </tr>
+
+          <!-- PERFORMANCE -->
+          <tr class="comparison-group-header">
+            <th scope="rowgroup" colspan="5">Performance</th>
+          </tr>
+          <tr>
+            <th scope="row">P99 latency</th>
+            <td class="comparison-cell-self">Sub-ms (native), Kafka-baseline on Kafka wire</td>
+            <td>JVM-bounded, ~ms</td>
+            <td>Sub-ms (C++ broker)</td>
+            <td>Microsecond UDP</td>
+          </tr>
+          <tr>
+            <th scope="row">Throughput</th>
+            <td class="comparison-cell-self">&gt;1M msg/s/broker</td>
+            <td>&gt;1M msg/s/broker</td>
+            <td>~1.5M msg/s/broker</td>
+            <td>10M+ msg/s (in-memory)</td>
+          </tr>
+          <tr>
+            <th scope="row">Runtime</th>
+            <td class="comparison-cell-self">.NET 10 / C# 14, AOT-ready</td>
+            <td>JVM (Scala/Java)</td>
+            <td>C++ (Seastar)</td>
+            <td>JVM</td>
+          </tr>
+
+          <!-- COST -->
+          <tr class="comparison-group-header">
+            <th scope="rowgroup" colspan="5">Cost &amp; Footprint</th>
+          </tr>
+          <tr>
+            <th scope="row">Memory</th>
+            <td class="comparison-cell-self">No JVM heap, GC-aware</td>
+            <td>JVM heap tuning required</td>
+            <td>Thread-per-core (no GC)</td>
+            <td>JVM heap</td>
+          </tr>
+          <tr>
+            <th scope="row">Cold storage</th>
+            <td class="comparison-cell-self">Tiered to S3/Azure/GCS</td>
+            <td>3.6+ tier (preview)</td>
+            <td>Tiered (managed only)</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <th scope="row">Disk format</th>
+            <td class="comparison-cell-self">Arrow, RocksDB, S3, NVMe-direct</td>
+            <td>Kafka segment log</td>
+            <td>Custom segment log</td>
+            <td>Off-heap buffers</td>
+          </tr>
+
+          <!-- RELIABILITY -->
+          <tr class="comparison-group-header">
+            <th scope="rowgroup" colspan="5">Reliability</th>
+          </tr>
+          <tr>
+            <th scope="row">Replication</th>
+            <td class="comparison-cell-self">Per-partition ISR + Raft</td>
+            <td>ISR-based</td>
+            <td>Raft (per-partition)</td>
+            <td>No persistence</td>
+          </tr>
+          <tr>
+            <th scope="row">Exactly-once</th>
+            <td class="comparison-cell-self">Producer Tx + WriteTxnMarkers</td>
+            <td>Yes (Kafka EOS)</td>
+            <td>Yes</td>
+            <td>App-layer</td>
+          </tr>
+          <tr>
+            <th scope="row">Geo-replication</th>
+            <td class="comparison-cell-self">Cluster Linking + Mirror</td>
+            <td>MirrorMaker 2</td>
+            <td>Built-in linking</td>
+            <td>None</td>
+          </tr>
+
+          <!-- CAPABILITY -->
+          <tr class="comparison-group-header">
+            <th scope="rowgroup" colspan="5">Capability</th>
+          </tr>
+          <tr>
+            <th scope="row">Wire protocols</th>
+            <td class="comparison-cell-self">Kafka 4.x + Native + gRPC + AMQP + MQTT + WebSocket + QUIC</td>
+            <td>Kafka only</td>
+            <td>Kafka only</td>
+            <td>UDP/multicast</td>
+          </tr>
+          <tr>
+            <th scope="row">Plugin model</th>
+            <td class="comparison-cell-self">Signed <code>.swpkg</code>, ALC isolation</td>
+            <td>JAR (Connect, MM2)</td>
+            <td>Wasm transforms</td>
+            <td>None</td>
+          </tr>
+          <tr>
+            <th scope="row">Stream processing</th>
+            <td class="comparison-cell-self">Surgewave.Streams (KIP-1071-aware)</td>
+            <td>Kafka Streams</td>
+            <td>Console transforms</td>
+            <td>None</td>
+          </tr>
+          <tr>
+            <th scope="row">AI pipelines</th>
+            <td class="comparison-cell-self">Built-in nodes (RAG, agents, ONNX)</td>
+            <td>External tooling</td>
+            <td>External tooling</td>
+            <td>None</td>
+          </tr>
+          <tr>
+            <th scope="row">Schema Registry</th>
+            <td class="comparison-cell-self">Confluent-API compatible, built-in</td>
+            <td>External (Confluent SR)</td>
+            <td>External (Confluent SR)</td>
+            <td>None</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="comparison-footnote">
+      Public head-to-head benchmarks land with 1.0; the table above summarises
+      architecture, not measured numbers. See the
+      <a href="{{ '/compare/kafka.html' | relative_url }}">full Surgewave vs Kafka write-up</a>
+      for the migration story.
+    </p>
+  </div>
+</section>

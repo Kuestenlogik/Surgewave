@@ -1,0 +1,28 @@
+@using Kuestenlogik.Surgewave.Control.Security
+@inject Microsoft.Extensions.Options.IOptions<SurgewaveAuthConfig> AuthConfig
+@inject ControlPluginRegistry PluginRegistry
+
+<Router AppAssembly="typeof(Program).Assembly" AdditionalAssemblies="PluginRegistry.PageAssemblies">
+    <Found Context="routeData">
+        @if (AuthConfig.Value.Enabled)
+        {
+            <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    @if (context.User.Identity?.IsAuthenticated != true)
+                    {
+                        <RedirectToLogin />
+                    }
+                    else
+                    {
+                        <Kuestenlogik.Surgewave.Control.Components.Pages.Account.AccessDeniedContent />
+                    }
+                </NotAuthorized>
+            </AuthorizeRouteView>
+        }
+        else
+        {
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        }
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

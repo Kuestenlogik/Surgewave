@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Tests intentionally cover legacy APIs -->
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+    <PackageReference Include="Testcontainers.Kafka" />
+    <PackageReference Include="Testcontainers.Redpanda" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Tiering\Kuestenlogik.Surgewave.Storage.Tiering.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Connect\Kuestenlogik.Surgewave.Connect.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry\Kuestenlogik.Surgewave.Schema.Registry.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Streams\Kuestenlogik.Surgewave.Streams.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Runtime\Kuestenlogik.Surgewave.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Api.Grpc\Kuestenlogik.Surgewave.Api.Grpc.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Api.Grpc.Client\Kuestenlogik.Surgewave.Api.Grpc.Client.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Api.Grpc.Server\Kuestenlogik.Surgewave.Api.Grpc.Server.csproj" />
+  </ItemGroup>
+
+</Project>

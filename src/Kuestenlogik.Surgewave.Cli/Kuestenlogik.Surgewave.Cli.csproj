@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>surgewave</AssemblyName>
+    <RootNamespace>Kuestenlogik.Surgewave.Cli</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>surgewave</ToolCommandName>
+    <!--
+      PackAsTool runs an implicit `dotnet publish` during `dotnet pack` to
+      stage the tool payload. By default that lands in artifacts/pub/
+      (via Directory.Build.props), which clutters the publish folder used
+      by scripts/publish.ps1. Redirect the implicit tool publish into obj/.
+      Explicit `dotnet publish -o <dir>` calls (publish.ps1) override this.
+    -->
+    <PublishDir>$(BaseIntermediateOutputPath)tool-publish\$(Configuration)\</PublishDir>
+    <!-- CS0618: using deprecated APIs intentionally; CS8602/CS8604: nullable in System.CommandLine -->
+    <NoWarn>$(NoWarn);CS0618;CS8602;CS8604</NoWarn>
+
+    <!-- Enable invariant globalization for smaller deployments -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Container Publishing (.NET Native) -->
+  <!-- Usage: dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release /t:PublishContainer -->
+  <PropertyGroup>
+    <ContainerRepository>surgewave/surgewave-cli</ContainerRepository>
+    <ContainerImageTag>0.1.0</ContainerImageTag>
+    <ContainerBaseImage>mcr.microsoft.com/dotnet/runtime:10.0</ContainerBaseImage>
+    <ContainerFamily>jammy</ContainerFamily>
+  </PropertyGroup>
+
+  <ItemGroup Label="Container Environment">
+    <ContainerEnvironmentVariable Include="DOTNET_RUNNING_IN_CONTAINER" Value="true" />
+  </ItemGroup>
+
+  <!-- Publish-specific settings for optimized/trimmed builds -->
+  <!-- No trimming — CLI uses Reflection (System.CommandLine, dynamic commands) -->
+  <!-- Use: dotnet publish -c Release -p:Optimized=true -r win-x64 -->
+  <PropertyGroup Condition="'$(Optimized)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <ReadyToRun>true</ReadyToRun>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+  </PropertyGroup>
+
+  <!-- Native AOT -->
+  <!-- Use: dotnet publish -c Release -p:PublishAot=true -r win-x64 -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <StripSymbols>true</StripSymbols>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect.Abstractions\Kuestenlogik.Surgewave.Connect.Abstractions.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging\Kuestenlogik.Surgewave.Plugins.Packaging.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Repository\Kuestenlogik.Surgewave.Plugins.Repository.csproj" />
+  </ItemGroup>
+
+</Project>

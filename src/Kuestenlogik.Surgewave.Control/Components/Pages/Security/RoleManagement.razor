@@ -1,0 +1,555 @@
+@page "/roles"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using Blazored.LocalStorage
+@inject ILocalStorageService LocalStorage
+@inject IAclApiClient AclClient
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Role Management - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Role Management</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Manage roles, permissions, and user assignments
+        </MudText>
+    </div>
+    <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateRoleAsync"
+                   StartIcon="@Icons.Material.Filled.Add">
+            Create Role
+        </MudButton>
+    </AuthorizeView>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
+    <MudTabPanel Text="Roles" Icon="@Icons.Material.Filled.Shield" />
+    <MudTabPanel Text="User Assignments" Icon="@Icons.Material.Filled.People" />
+    <MudTabPanel Text="Permission Viewer" Icon="@Icons.Material.Filled.Visibility" />
+</MudTabs>
+
+@if (_activeTab == 0)
+{
+    @* ===== ROLES TAB ===== *@
+    <MudGrid>
+        @foreach (var role in _state.Roles.OrderBy(r => r.IsBuiltIn ? 0 : 1).ThenBy(r => r.Name))
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            <MudAvatar Color="@(role.IsBuiltIn ? Color.Primary : Color.Secondary)" Size="Size.Medium">
+                                <MudIcon Icon="@Icons.Material.Filled.Shield" />
+                            </MudAvatar>
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@role.Name</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @(role.Description ?? "No description")
+                            </MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            @if (role.IsBuiltIn)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Built-in</MudChip>
+                            }
+                            else
+                            {
+                                <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                                   OnClick="@(() => EditRoleAsync(role))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => DeleteRoleAsync(role))" />
+                                </AuthorizeView>
+                            }
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">
+                            Permissions (@role.Permissions.Count)
+                        </MudText>
+                        <div class="d-flex flex-wrap gap-1 mb-3">
+                            @foreach (var perm in role.Permissions)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@GetPermissionColor(perm)"
+                                         Variant="Variant.Filled">@perm</MudChip>
+                            }
+                            @if (role.Permissions.Count == 0)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">No permissions</MudText>
+                            }
+                        </div>
+                        <MudDivider Class="mb-2" />
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">
+                            Members (@role.Members.Count)
+                        </MudText>
+                        <div class="d-flex flex-wrap gap-1">
+                            @foreach (var member in role.Members.Take(5))
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@member</MudChip>
+                            }
+                            @if (role.Members.Count > 5)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                    +@(role.Members.Count - 5) more
+                                </MudChip>
+                            }
+                            @if (role.Members.Count == 0)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">No members</MudText>
+                            }
+                        </div>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+else if (_activeTab == 1)
+{
+    @* ===== USER ASSIGNMENTS TAB ===== *@
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <div class="d-flex gap-2 align-center mb-4">
+            <MudTextField T="string" @bind-Value="_newUser" Label="Username (e.g. User:alice)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+            <MudSelect T="string" @bind-Value="_newUserRole" Label="Role" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Style="min-width: 200px;">
+                @foreach (var role in _state.Roles.OrderBy(r => r.Name))
+                {
+                    <MudSelectItem Value="@role.Name">@role.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AssignRoleAsync"
+                           Disabled="@(string.IsNullOrWhiteSpace(_newUser) || string.IsNullOrWhiteSpace(_newUserRole))">
+                    Assign
+                </MudButton>
+            </AuthorizeView>
+        </div>
+    </MudPaper>
+
+    <MudTable Items="UserAssignmentEntries" Dense="true" Hover="true" RowsPerPage="25">
+        <HeaderContent>
+            <MudTh>User</MudTh>
+            <MudTh>Roles</MudTh>
+            <MudTh>Effective Permissions</MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="User">
+                <div class="d-flex align-center gap-2">
+                    <MudAvatar Size="Size.Small" Color="Color.Primary">
+                        <MudIcon Icon="@Icons.Material.Filled.Person" />
+                    </MudAvatar>
+                    <strong>@context.User</strong>
+                </div>
+            </MudTd>
+            <MudTd DataLabel="Roles">
+                <div class="d-flex flex-wrap gap-1">
+                    @foreach (var role in context.Roles)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled"
+                                 OnClose="@(() => RemoveUserRole(context.User, role))">
+                            @role
+                        </MudChip>
+                    }
+                </div>
+            </MudTd>
+            <MudTd DataLabel="Effective Permissions">
+                <div class="d-flex flex-wrap gap-1">
+                    @foreach (var perm in GetEffectivePermissions(context.User).Take(5))
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Color="@GetPermissionColor(perm)">@perm</MudChip>
+                    }
+                    @{
+                        var totalPerms = GetEffectivePermissions(context.User).Count;
+                    }
+                    @if (totalPerms > 5)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">+@(totalPerms - 5)</MudChip>
+                    }
+                </div>
+            </MudTd>
+            <MudTd DataLabel="Actions">
+                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                               OnClick="@(() => ViewUserPermissions(context.User))" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+else
+{
+    @* ===== PERMISSION VIEWER TAB ===== *@
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="_viewerUser" Label="Username (e.g. User:alice)"
+                              Variant="Variant.Outlined" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => ViewUserPermissions(_viewerUser))"
+                           StartIcon="@Icons.Material.Filled.Search" Class="mt-1"
+                           Disabled="@(string.IsNullOrWhiteSpace(_viewerUser))">
+                    Check Permissions
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @if (_viewingPermissions != null)
+    {
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-1" />
+                Effective Permissions for: @_viewingUser
+            </MudText>
+
+            @{
+                var userRoles = GetUserRoles(_viewingUser);
+            }
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Assigned Roles</MudText>
+            <div class="d-flex flex-wrap gap-1 mb-4">
+                @if (userRoles.Count > 0)
+                {
+                    @foreach (var role in userRoles)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">@role</MudChip>
+                    }
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true">No roles assigned</MudAlert>
+                }
+            </div>
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">UI Permissions</MudText>
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead>
+                    <tr>
+                        <th>Permission</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Granted By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var perm in _allPermissions)
+                    {
+                        var hasPermission = _viewingPermissions.Contains(perm.Key);
+                        var grantedBy = _state.Roles
+                            .Where(r => r.Permissions.Contains(perm.Key) && userRoles.Contains(r.Name))
+                            .Select(r => r.Name)
+                            .ToList();
+
+                        <tr style="@(hasPermission ? "" : "opacity: 0.5;")">
+                            <td><code>@perm.Key</code></td>
+                            <td>@perm.Value</td>
+                            <td>
+                                @if (hasPermission)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
+                                }
+                            </td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    @foreach (var r in grantedBy)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@r</MudChip>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+}
+
+@* ===== ROLE EDIT DIALOG ===== *@
+<MudDialog @bind-Visible="_roleDialogVisible" Options="@_dialogOptions">
+    <TitleContent>
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Shield" Class="mr-2" />
+            @(_editingRole?.Name == "" ? "Create Role" : $"Edit Role: {_editingRole?.Name}")
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_editingRole != null)
+        {
+            <MudTextField T="string" @bind-Value="_editingRole.Name" Label="Role Name"
+                          Variant="Variant.Outlined" Class="mb-3" Disabled="@(_editingRole.IsBuiltIn)" />
+            <MudTextField T="string" @bind-Value="_editingRole.Description" Label="Description"
+                          Variant="Variant.Outlined" Class="mb-3" Lines="2" />
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Permissions</MudText>
+            @foreach (var perm in _allPermissions)
+            {
+                <MudCheckBox T="bool" Value="@(_editingRole.Permissions.Contains(perm.Key))"
+                             ValueChanged="@(v => TogglePermission(perm.Key, v))"
+                             Label="@($"{perm.Key} — {perm.Value}")" Dense="true"
+                             Color="@GetPermissionColor(perm.Key)" />
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _roleDialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveRoleAsync"
+                   Disabled="@(string.IsNullOrWhiteSpace(_editingRole?.Name))">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private int _activeTab;
+    private RoleManagementState _state = new();
+
+    // Role edit state
+    private bool _roleDialogVisible;
+    private RoleDefinition? _editingRole;
+
+    // User assignment state
+    private string _newUser = "";
+    private string? _newUserRole;
+
+    // Permission viewer state
+    private string _viewerUser = "";
+    private string _viewingUser = "";
+    private HashSet<string>? _viewingPermissions;
+
+    private static readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+
+    private static readonly Dictionary<string, string> _allPermissions = new()
+    {
+        ["topics.manage"] = "Create, delete, and configure topics",
+        ["topics.produce"] = "Produce messages to topics",
+        ["topics.consume"] = "Consume/browse messages from topics",
+        ["connectors.manage"] = "Create, delete, and configure connectors",
+        ["pipelines.manage"] = "Create, delete, and run pipelines",
+        ["schemas.manage"] = "Register and delete schemas",
+        ["acls.manage"] = "Create and delete ACL entries",
+        ["quotas.manage"] = "Configure client quotas",
+        ["plugins.manage"] = "Upload and manage plugins",
+        ["cluster.admin"] = "Full cluster administration",
+        ["catalog.edit"] = "Edit data catalog entries",
+        ["alerts.manage"] = "Create and manage alert rules"
+    };
+
+    private sealed record UserAssignment(string User, List<string> Roles);
+
+    private IEnumerable<UserAssignment> UserAssignmentEntries =>
+        _state.UserRoles
+            .Select(kvp => new UserAssignment(kvp.Key, kvp.Value))
+            .OrderBy(u => u.User);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var stored = await LocalStorage.GetItemAsync<RoleManagementState>("surgewave-role-management");
+        if (stored != null)
+            _state = stored;
+
+        // Ensure built-in roles exist
+        EnsureBuiltInRoles();
+        _loading = false;
+    }
+
+    private void EnsureBuiltInRoles()
+    {
+        var builtIns = new List<RoleDefinition>
+        {
+            new()
+            {
+                Name = "Admin",
+                Description = "Full access to all features",
+                Permissions = [.._allPermissions.Keys],
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Name = "Operator",
+                Description = "Manage topics, connectors, and monitor cluster",
+                Permissions = ["topics.manage", "topics.produce", "topics.consume", "connectors.manage", "catalog.edit", "alerts.manage"],
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Name = "Developer",
+                Description = "Read topics, produce messages, manage schemas",
+                Permissions = ["topics.produce", "topics.consume", "schemas.manage", "catalog.edit"],
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Name = "Viewer",
+                Description = "Read-only access to all resources",
+                Permissions = ["topics.consume"],
+                IsBuiltIn = true
+            }
+        };
+
+        foreach (var builtIn in builtIns)
+        {
+            if (!_state.Roles.Any(r => r.Name == builtIn.Name))
+                _state.Roles.Add(builtIn);
+        }
+    }
+
+    private void CreateRoleAsync()
+    {
+        _editingRole = new RoleDefinition();
+        _roleDialogVisible = true;
+    }
+
+    private void EditRoleAsync(RoleDefinition role)
+    {
+        _editingRole = new RoleDefinition
+        {
+            Name = role.Name,
+            Description = role.Description,
+            Permissions = [..role.Permissions],
+            Members = [..role.Members],
+            IsBuiltIn = role.IsBuiltIn,
+            CreatedAt = role.CreatedAt
+        };
+        _roleDialogVisible = true;
+    }
+
+    private async Task DeleteRoleAsync(RoleDefinition role)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Role",
+            $"Delete role '{role.Name}' and remove all user assignments?",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            _state.Roles.RemoveAll(r => r.Name == role.Name);
+            foreach (var kvp in _state.UserRoles)
+                kvp.Value.Remove(role.Name);
+            await SaveStateAsync();
+            Notification.ShowSuccess($"Role '{role.Name}' deleted");
+        }
+    }
+
+    private async Task SaveRoleAsync()
+    {
+        if (_editingRole == null || string.IsNullOrWhiteSpace(_editingRole.Name)) return;
+
+        var existing = _state.Roles.FindIndex(r => r.Name == _editingRole.Name);
+        if (existing >= 0)
+        {
+            _state.Roles[existing].Description = _editingRole.Description;
+            _state.Roles[existing].Permissions = [.._editingRole.Permissions];
+        }
+        else
+        {
+            _state.Roles.Add(_editingRole);
+        }
+
+        await SaveStateAsync();
+        _roleDialogVisible = false;
+        Notification.ShowSuccess($"Role '{_editingRole.Name}' saved");
+    }
+
+    private void TogglePermission(string permission, bool enabled)
+    {
+        if (_editingRole == null) return;
+        if (enabled && !_editingRole.Permissions.Contains(permission))
+            _editingRole.Permissions.Add(permission);
+        else if (!enabled)
+            _editingRole.Permissions.Remove(permission);
+    }
+
+    private async Task AssignRoleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newUser) || string.IsNullOrWhiteSpace(_newUserRole)) return;
+
+        if (!_state.UserRoles.TryGetValue(_newUser, out var roles))
+        {
+            roles = [];
+            _state.UserRoles[_newUser] = roles;
+        }
+
+        if (!roles.Contains(_newUserRole))
+        {
+            roles.Add(_newUserRole);
+            // Also add to the role's member list
+            var role = _state.Roles.FirstOrDefault(r => r.Name == _newUserRole);
+            if (role != null && !role.Members.Contains(_newUser))
+                role.Members.Add(_newUser);
+        }
+
+        await SaveStateAsync();
+        Notification.ShowSuccess($"Role '{_newUserRole}' assigned to '{_newUser}'");
+        _newUser = "";
+        _newUserRole = null;
+    }
+
+    private async void RemoveUserRole(string user, string roleName)
+    {
+        if (_state.UserRoles.TryGetValue(user, out var roles))
+        {
+            roles.Remove(roleName);
+            if (roles.Count == 0) _state.UserRoles.Remove(user);
+        }
+
+        var role = _state.Roles.FirstOrDefault(r => r.Name == roleName);
+        role?.Members.Remove(user);
+
+        await SaveStateAsync();
+        Notification.ShowInfo($"Removed '{roleName}' from '{user}'");
+        StateHasChanged();
+    }
+
+    private List<string> GetUserRoles(string user)
+    {
+        return _state.UserRoles.GetValueOrDefault(user) ?? [];
+    }
+
+    private List<string> GetEffectivePermissions(string user)
+    {
+        var roles = GetUserRoles(user);
+        return _state.Roles
+            .Where(r => roles.Contains(r.Name))
+            .SelectMany(r => r.Permissions)
+            .Distinct()
+            .OrderBy(p => p)
+            .ToList();
+    }
+
+    private void ViewUserPermissions(string user)
+    {
+        if (string.IsNullOrWhiteSpace(user)) return;
+        _viewingUser = user;
+        _viewingPermissions = GetEffectivePermissions(user).ToHashSet();
+        _activeTab = 2;
+        StateHasChanged();
+    }
+
+    private async Task SaveStateAsync()
+    {
+        await LocalStorage.SetItemAsync("surgewave-role-management", _state);
+    }
+
+    private static Color GetPermissionColor(string permission) => permission switch
+    {
+        var p when p.Contains("admin") => Color.Error,
+        var p when p.Contains("manage") => Color.Warning,
+        var p when p.Contains("produce") => Color.Primary,
+        var p when p.Contains("consume") => Color.Info,
+        var p when p.Contains("edit") => Color.Success,
+        _ => Color.Default
+    };
+}

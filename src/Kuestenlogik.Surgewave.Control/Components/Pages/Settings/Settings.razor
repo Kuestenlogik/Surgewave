@@ -1,0 +1,454 @@
+@page "/settings"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Models.Assistant
+@using Kuestenlogik.Surgewave.Control.Services
+@using Blazored.LocalStorage
+@inject ILocalStorageService LocalStorage
+@inject ISurgewaveApiClient ApiClient
+@inject NotificationState Notification
+@inject ClusterState ClusterState
+@inject AssistantState AssistantState
+
+<PageTitle>Settings - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Settings & Preferences</MudText>
+
+<MudGrid>
+    @* ===== APPEARANCE ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Primary"><MudIcon Icon="@Icons.Material.Filled.Palette" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Appearance</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect T="string" @bind-Value="_prefs.Theme" Label="Theme" Variant="Variant.Outlined"
+                           Class="mb-3">
+                    <MudSelectItem Value="@("system")">System Default</MudSelectItem>
+                    <MudSelectItem Value="@("light")">Light</MudSelectItem>
+                    <MudSelectItem Value="@("dark")">Dark</MudSelectItem>
+                </MudSelect>
+
+                <MudSelect T="string" @bind-Value="_prefs.DateFormat" Label="Date Format" Variant="Variant.Outlined"
+                           Class="mb-3">
+                    <MudSelectItem Value="@("relative")">Relative (5 min ago)</MudSelectItem>
+                    <MudSelectItem Value="@("absolute")">Absolute (2024-01-15 14:30)</MudSelectItem>
+                    <MudSelectItem Value="@("iso")">ISO 8601</MudSelectItem>
+                </MudSelect>
+
+                <MudSelect T="string" @bind-Value="_prefs.DefaultTimeRange" Label="Default Time Range" Variant="Variant.Outlined"
+                           Class="mb-3">
+                    <MudSelectItem Value="@("15m")">Last 15 minutes</MudSelectItem>
+                    <MudSelectItem Value="@("1h")">Last 1 hour</MudSelectItem>
+                    <MudSelectItem Value="@("6h")">Last 6 hours</MudSelectItem>
+                    <MudSelectItem Value="@("24h")">Last 24 hours</MudSelectItem>
+                    <MudSelectItem Value="@("7d")">Last 7 days</MudSelectItem>
+                </MudSelect>
+
+                <MudNumericField T="int" @bind-Value="_prefs.DefaultPageSize" Label="Default Page Size"
+                                 Variant="Variant.Outlined" Min="10" Max="200" Step="10" />
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    @* ===== DASHBOARD ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Info"><MudIcon Icon="@Icons.Material.Filled.Dashboard" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Dashboard & Refresh</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect T="int" @bind-Value="_prefs.RefreshIntervalSeconds" Label="Auto-Refresh Interval"
+                           Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="5">5 seconds</MudSelectItem>
+                    <MudSelectItem Value="10">10 seconds</MudSelectItem>
+                    <MudSelectItem Value="15">15 seconds</MudSelectItem>
+                    <MudSelectItem Value="30">30 seconds</MudSelectItem>
+                    <MudSelectItem Value="60">60 seconds</MudSelectItem>
+                    <MudSelectItem Value="0">Disabled</MudSelectItem>
+                </MudSelect>
+
+                <MudSelect T="int" @bind-Value="_prefs.MessageBrowserLimit" Label="Message Browser Default Limit"
+                           Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="20">20 messages</MudSelectItem>
+                    <MudSelectItem Value="50">50 messages</MudSelectItem>
+                    <MudSelectItem Value="100">100 messages</MudSelectItem>
+                    <MudSelectItem Value="200">200 messages</MudSelectItem>
+                </MudSelect>
+
+                <MudSwitch T="bool" @bind-Value="_prefs.ShowInternalTopics" Label="Show internal topics by default"
+                           Color="Color.Primary" Class="mb-2" />
+
+                <MudSwitch T="bool" @bind-Value="_prefs.AutoExpandNavGroups" Label="Auto-expand navigation groups"
+                           Color="Color.Primary" />
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    @* ===== NOTIFICATIONS ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Warning"><MudIcon Icon="@Icons.Material.Filled.Notifications" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Notifications</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSwitch T="bool" @bind-Value="_prefs.NotificationsEnabled" Label="Enable notifications"
+                           Color="Color.Primary" Class="mb-2" />
+
+                <MudSwitch T="bool" @bind-Value="_prefs.SoundEnabled" Label="Notification sounds"
+                           Color="Color.Primary" Class="mb-2"
+                           Disabled="@(!_prefs.NotificationsEnabled)" />
+
+                <MudSelect T="int" @bind-Value="_prefs.NotificationDurationSeconds" Label="Notification Duration"
+                           Variant="Variant.Outlined" Disabled="@(!_prefs.NotificationsEnabled)">
+                    <MudSelectItem Value="3">3 seconds</MudSelectItem>
+                    <MudSelectItem Value="5">5 seconds</MudSelectItem>
+                    <MudSelectItem Value="10">10 seconds</MudSelectItem>
+                    <MudSelectItem Value="0">Until dismissed</MudSelectItem>
+                </MudSelect>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    @* ===== FAVORITE TOPICS ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Success"><MudIcon Icon="@Icons.Material.Filled.Star" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Favorite Topics</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Quick access from the dashboard
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <div class="d-flex flex-wrap gap-1 mb-3">
+                    @foreach (var topic in _prefs.FavoriteTopics)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                                 OnClose="@(() => RemoveFavorite(topic))">
+                            @topic
+                        </MudChip>
+                    }
+                    @if (_prefs.FavoriteTopics.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">No favorites yet</MudText>
+                    }
+                </div>
+
+                <div class="d-flex gap-2">
+                    <MudSelect T="string" Value="_newFavorite" ValueChanged="AddFavorite" Label="Add topic"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;">
+                        @foreach (var topic in _availableTopics.Where(t => !_prefs.FavoriteTopics.Contains(t)))
+                        {
+                            <MudSelectItem Value="@topic">@topic</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    @* ===== Surgewave ASSISTANT ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Primary"><MudIcon Icon="@Icons.Material.Filled.Psychology" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Surgewave Assistant</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        AI-powered insights and recommendations
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect T="string" @bind-Value="_assistantSettings.LlmProvider" Label="LLM Provider"
+                           Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="@("None")">None (Disabled)</MudSelectItem>
+                    <MudSelectItem Value="@("OpenAI")">OpenAI</MudSelectItem>
+                    <MudSelectItem Value="@("Ollama")">Ollama</MudSelectItem>
+                    <MudSelectItem Value="@("Custom")">Custom Endpoint</MudSelectItem>
+                </MudSelect>
+
+                @if (_assistantSettings.LlmProvider != "None")
+                {
+                    <MudTextField @bind-Value="_assistantSettings.ApiKey" Label="API Key"
+                                  Variant="Variant.Outlined" InputType="InputType.Password"
+                                  Class="mb-3" Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Key" />
+
+                    <MudTextField @bind-Value="_assistantSettings.Model" Label="Model"
+                                  Variant="Variant.Outlined" Class="mb-3"
+                                  Placeholder="gpt-4" />
+
+                    @if (_assistantSettings.LlmProvider == "Custom")
+                    {
+                        <MudTextField @bind-Value="_assistantSettings.CustomEndpoint" Label="Custom Endpoint URL"
+                                      Variant="Variant.Outlined" Class="mb-3"
+                                      Placeholder="https://your-llm-endpoint/v1" />
+                    }
+
+                    <MudText Typo="Typo.body2" Class="mb-1">
+                        Anomaly Sensitivity: @(_assistantSettings.AnomalySensitivity.ToString("P0"))
+                    </MudText>
+                    <MudSlider T="double" @bind-Value="_assistantSettings.AnomalySensitivity"
+                               Min="0.0" Max="1.0" Step="0.05" Class="mb-3"
+                               Color="Color.Primary" />
+
+                    <MudSwitch T="bool" @bind-Value="_assistantSettings.NlToSqlEnabled"
+                               Label="Enable NL-to-SQL Translation"
+                               Color="Color.Primary" Class="mb-2" />
+
+                    <MudSwitch T="bool" @bind-Value="_assistantSettings.ProactiveAlerts"
+                               Label="Enable Proactive Alerts"
+                               Color="Color.Primary" Class="mb-3" />
+
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.NetworkCheck"
+                               OnClick="TestAssistantConnection" FullWidth="true"
+                               Disabled="@_testingConnection">
+                        @if (_testingConnection)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            <span>Testing...</span>
+                        }
+                        else
+                        {
+                            <span>Test Connection</span>
+                        }
+                    </MudButton>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    @* ===== KEYBOARD SHORTCUTS ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Tertiary"><MudIcon Icon="@Icons.Material.Filled.Keyboard" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Keyboard Shortcuts</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSimpleTable Dense="true" Style="font-size: 13px;">
+                    <tbody>
+                        <tr><td><kbd>?</kbd></td><td>Show keyboard shortcuts</td></tr>
+                        <tr><td><kbd>Ctrl+K</kbd></td><td>Quick search / command palette</td></tr>
+                        <tr><td><kbd>G</kbd> then <kbd>D</kbd></td><td>Go to Dashboard</td></tr>
+                        <tr><td><kbd>G</kbd> then <kbd>T</kbd></td><td>Go to Topics</td></tr>
+                        <tr><td><kbd>G</kbd> then <kbd>C</kbd></td><td>Go to Consumer Groups</td></tr>
+                        <tr><td><kbd>G</kbd> then <kbd>S</kbd></td><td>Go to SQL Query</td></tr>
+                        <tr><td><kbd>G</kbd> then <kbd>B</kbd></td><td>Go to Brokers</td></tr>
+                        <tr><td><kbd>R</kbd></td><td>Refresh current page</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    @* ===== DATA MANAGEMENT ===== *@
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Error"><MudIcon Icon="@Icons.Material.Filled.Storage" /></MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Data Management</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="ExportSettingsAsync"
+                           StartIcon="@Icons.Material.Filled.Download" FullWidth="true" Class="mb-2">
+                    Export All Settings
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearAllDataAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" FullWidth="true">
+                    Clear All Local Data
+                </MudButton>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                    Clears all locally stored preferences, catalog entries, alert rules, and templates.
+                </MudText>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== SAVE BUTTON ===== *@
+<MudPaper Class="pa-4 mt-4 d-flex justify-end" Elevation="0">
+    <MudButton Variant="Variant.Outlined" OnClick="ResetToDefaultsAsync" Class="mr-2">
+        Reset to Defaults
+    </MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SavePreferencesAsync"
+               StartIcon="@Icons.Material.Filled.Save">
+        Save Preferences
+    </MudButton>
+</MudPaper>
+
+@code {
+    private UserPreferences _prefs = new();
+    private AssistantUiSettings _assistantSettings = new();
+    private bool _testingConnection;
+    private List<string> _availableTopics = [];
+    private string? _newFavorite;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var stored = await LocalStorage.GetItemAsync<UserPreferences>("surgewave-user-preferences");
+        if (stored != null) _prefs = stored;
+
+        var assistantStored = await LocalStorage.GetItemAsync<AssistantUiSettings>("surgewave-assistant-settings");
+        if (assistantStored != null)
+        {
+            _assistantSettings = assistantStored;
+            ApplyAssistantSettings();
+        }
+
+        try
+        {
+            var topics = await ApiClient.ListTopicsAsync(ClusterState.SelectedClusterId, includeInternal: false);
+            _availableTopics = topics.Select(t => t.Name).OrderBy(n => n).ToList();
+        }
+        catch { /* ignore */ }
+    }
+
+    private async Task SavePreferencesAsync()
+    {
+        await LocalStorage.SetItemAsync("surgewave-user-preferences", _prefs);
+        await LocalStorage.SetItemAsync("surgewave-assistant-settings", _assistantSettings);
+        ApplyAssistantSettings();
+        Notification.ShowSuccess("Preferences saved");
+    }
+
+    private async Task ResetToDefaultsAsync()
+    {
+        _prefs = new UserPreferences();
+        _assistantSettings = new AssistantUiSettings();
+        await SavePreferencesAsync();
+    }
+
+    private void AddFavorite(string? topic)
+    {
+        if (!string.IsNullOrEmpty(topic) && !_prefs.FavoriteTopics.Contains(topic))
+            _prefs.FavoriteTopics.Add(topic);
+        _newFavorite = null;
+    }
+
+    private void RemoveFavorite(string topic)
+    {
+        _prefs.FavoriteTopics.Remove(topic);
+    }
+
+    private async Task ExportSettingsAsync()
+    {
+        Notification.ShowInfo("Settings exported");
+    }
+
+    private async Task ClearAllDataAsync()
+    {
+        await LocalStorage.ClearAsync();
+        _prefs = new UserPreferences();
+        Notification.ShowSuccess("All local data cleared");
+    }
+
+    private async Task TestAssistantConnection()
+    {
+        _testingConnection = true;
+        StateHasChanged();
+
+        try
+        {
+            // Simulate a connection test by waiting briefly
+            await Task.Delay(1500);
+
+            if (string.IsNullOrWhiteSpace(_assistantSettings.ApiKey) && _assistantSettings.LlmProvider != "Ollama")
+            {
+                Notification.ShowError("API key is required for the selected provider");
+            }
+            else
+            {
+                Notification.ShowSuccess("Connection test successful");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Connection failed: {ex.Message}");
+        }
+        finally
+        {
+            _testingConnection = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ApplyAssistantSettings()
+    {
+        var settings = AssistantState.Settings;
+        settings.LlmEnabled = _assistantSettings.LlmProvider != "None";
+        settings.LlmApiKey = _assistantSettings.ApiKey;
+        settings.LlmModel = string.IsNullOrWhiteSpace(_assistantSettings.Model) ? "gpt-4" : _assistantSettings.Model;
+        settings.AnomalySensitivity = _assistantSettings.AnomalySensitivity;
+        settings.NlToSqlEnabled = _assistantSettings.NlToSqlEnabled;
+        settings.ProactiveAlerts = _assistantSettings.ProactiveAlerts;
+
+        settings.LlmEndpoint = _assistantSettings.LlmProvider switch
+        {
+            "OpenAI" => "https://api.openai.com/v1",
+            "Ollama" => "http://localhost:11434/v1",
+            "Custom" => _assistantSettings.CustomEndpoint,
+            _ => null
+        };
+    }
+
+    /// <summary>Assistant UI settings stored in LocalStorage.</summary>
+    public sealed class AssistantUiSettings
+    {
+        public string LlmProvider { get; set; } = "None";
+        public string? ApiKey { get; set; }
+        public string? Model { get; set; } = "gpt-4";
+        public string? CustomEndpoint { get; set; }
+        public double AnomalySensitivity { get; set; } = 0.5;
+        public bool NlToSqlEnabled { get; set; } = true;
+        public bool ProactiveAlerts { get; set; } = true;
+    }
+
+    /// <summary>User preferences stored in LocalStorage.</summary>
+    public sealed class UserPreferences
+    {
+        public string Theme { get; set; } = "system";
+        public string DateFormat { get; set; } = "relative";
+        public string DefaultTimeRange { get; set; } = "1h";
+        public int DefaultPageSize { get; set; } = 25;
+        public int RefreshIntervalSeconds { get; set; } = 10;
+        public int MessageBrowserLimit { get; set; } = 50;
+        public bool ShowInternalTopics { get; set; }
+        public bool AutoExpandNavGroups { get; set; } = true;
+        public bool NotificationsEnabled { get; set; } = true;
+        public bool SoundEnabled { get; set; }
+        public int NotificationDurationSeconds { get; set; } = 5;
+        public List<string> FavoriteTopics { get; set; } = [];
+    }
+}

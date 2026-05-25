@@ -1,0 +1,121 @@
+@inject ISurgewaveApiClient ApiClient
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_isValid">
+            <MudTextField @bind-Value="_name" Label="Connector Name" Required="true" RequiredError="Name is required"
+                          Variant="Variant.Outlined" Class="mb-4" />
+
+            <MudSelect T="string" @bind-Value="_selectedPlugin" Label="Connector Type" Required="true"
+                       RequiredError="Connector type is required" Variant="Variant.Outlined" Class="mb-4">
+                @foreach (var plugin in Plugins)
+                {
+                    <MudSelectItem Value="@plugin.ClassName">
+                        @GetPluginShortName(plugin.ClassName) (@plugin.Type)
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudDivider Class="my-4" />
+
+            <MudText Typo="Typo.h6" Class="mb-2">Configuration</MudText>
+
+            @foreach (var entry in _configEntries)
+            {
+                <MudGrid Class="mb-2">
+                    <MudItem xs="5">
+                        <MudTextField @bind-Value="entry.Key" Label="Key" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTextField @bind-Value="entry.Value" Label="Value" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="1" Class="d-flex align-center">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => RemoveConfigEntry(entry))" />
+                    </MudItem>
+                </MudGrid>
+            }
+
+            <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddConfigEntry" Size="Size.Small">
+                Add Config Entry
+            </MudButton>
+
+            @if (!string.IsNullOrEmpty(_selectedPlugin))
+            {
+                <MudAlert Severity="Severity.Info" Class="mt-4" Dense="true">
+                    <MudText Typo="Typo.caption">
+                        Common config keys: <code>topics</code>, <code>tasks.max</code>, <code>key.converter</code>, <code>value.converter</code>
+                    </MudText>
+                </MudAlert>
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!_isValid)" OnClick="Submit">
+            Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public List<ConnectorPluginInfo> Plugins { get; set; } = [];
+    [Parameter] public string? SelectedPluginClass { get; set; }
+
+    private MudForm _form = default!;
+    private bool _isValid;
+    private string _name = "";
+    private string _selectedPlugin = "";
+    private List<ConfigEntry> _configEntries = [];
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrEmpty(SelectedPluginClass))
+        {
+            _selectedPlugin = SelectedPluginClass;
+        }
+
+        // Add default config entries
+        _configEntries.Add(new ConfigEntry { Key = "topics", Value = "" });
+        _configEntries.Add(new ConfigEntry { Key = "tasks.max", Value = "1" });
+    }
+
+    private void AddConfigEntry()
+    {
+        _configEntries.Add(new ConfigEntry());
+    }
+
+    private void RemoveConfigEntry(ConfigEntry entry)
+    {
+        _configEntries.Remove(entry);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        var config = _configEntries
+            .Where(e => !string.IsNullOrWhiteSpace(e.Key))
+            .ToDictionary(e => e.Key, e => e.Value ?? "");
+
+        // Add connector.class
+        config["connector.class"] = _selectedPlugin;
+
+        MudDialog.Close(DialogResult.Ok((_name, config)));
+    }
+
+    private static string GetPluginShortName(string className)
+    {
+        var parts = className.Split('.');
+        return parts.Length > 0 ? parts[^1] : className;
+    }
+
+    private class ConfigEntry
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+}

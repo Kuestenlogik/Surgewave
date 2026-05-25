@@ -1,0 +1,190 @@
+@page "/cdc"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>CDC Sources - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Change Data Capture</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Manage CDC sources for database change streaming</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreateSourceDialog"
+                   StartIcon="@Icons.Material.Filled.Add">Add Source</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Storage" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">CDC Sources</MudText>
+                        <MudText Typo="Typo.h5">@_sources.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.PlayCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Streaming</MudText>
+                        <MudText Typo="Typo.h5">@_sources.Count(s => s.State == "Streaming")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.DataUsage" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Events Captured</MudText>
+                        <MudText Typo="Typo.h5">@_sources.Sum(s => s.EventsCaptured).ToString("N0")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Error" Color="@(_sources.Any(s => s.State == "Faulted") ? Color.Error : Color.Success)"
+                             Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Faulted</MudText>
+                        <MudText Typo="Typo.h5">@_sources.Count(s => s.State == "Faulted")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* Sources Table *@
+<MudTable Items="_sources" Hover="true" Dense="true" Elevation="2">
+    <HeaderContent>
+        <MudTh>ID</MudTh>
+        <MudTh>Database</MudTh>
+        <MudTh>State</MudTh>
+        <MudTh>Slot</MudTh>
+        <MudTh>Tables</MudTh>
+        <MudTh>Events</MudTh>
+        <MudTh>Last LSN</MudTh>
+        <MudTh>Started</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="ID"><code>@context.Id</code></MudTd>
+        <MudTd DataLabel="Database">@context.DatabaseType</MudTd>
+        <MudTd DataLabel="State">
+            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)">@context.State</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Slot">@context.SlotName</MudTd>
+        <MudTd DataLabel="Tables">@context.TrackedTables</MudTd>
+        <MudTd DataLabel="Events">@context.EventsCaptured.ToString("N0")</MudTd>
+        <MudTd DataLabel="Last LSN">@context.LastLsn</MudTd>
+        <MudTd DataLabel="Started">@context.StartedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+        <MudTd DataLabel="Actions">
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="() => DeleteSourceAsync(context.Id)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>No CDC sources. Add a PostgreSQL source to start capturing changes.</MudText></NoRecordsContent>
+</MudTable>
+
+@* Error display for faulted sources *@
+@foreach (var source in _sources.Where(s => s.State == "Faulted" && s.Error != null))
+{
+    <MudAlert Severity="Severity.Error" Class="mt-2">
+        <strong>@source.Id:</strong> @source.Error
+    </MudAlert>
+}
+
+@code {
+    private List<CdcSourceInfo> _sources = [];
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _sources = await Http.GetFromJsonAsync<List<CdcSourceInfo>>("/api/cdc/sources") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load CDC sources: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OpenCreateSourceDialog()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreateCdcSourceDialog>("Create CDC Source", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) { Notification.ShowSuccess("CDC source created"); await LoadDataAsync(); }
+    }
+
+    private async Task DeleteSourceAsync(string id)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Remove CDC Source",
+            $"Remove CDC source '{id}'? This will stop change capture.", yesText: "Remove", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            try { await Http.DeleteAsync($"/api/cdc/sources/{id}"); await LoadDataAsync(); }
+            catch (Exception ex) { Notification.ShowError($"Remove failed: {ex.Message}"); }
+        }
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "Streaming" => Color.Success,
+        "Initializing" => Color.Info,
+        "Snapshotting" => Color.Warning,
+        "Stopped" => Color.Default,
+        "Faulted" => Color.Error,
+        _ => Color.Default
+    };
+
+    private sealed class CdcSourceInfo
+    {
+        public string Id { get; set; } = "";
+        public string DatabaseType { get; set; } = "";
+        public string State { get; set; } = "";
+        public string SlotName { get; set; } = "";
+        public string PublicationName { get; set; } = "";
+        public int TrackedTables { get; set; }
+        public long EventsCaptured { get; set; }
+        public long LastLsn { get; set; }
+        public DateTimeOffset? LastEventTimestamp { get; set; }
+        public string? Error { get; set; }
+        public DateTimeOffset StartedAt { get; set; }
+    }
+}

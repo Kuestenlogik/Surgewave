@@ -1,0 +1,46 @@
+- name: Features Overview
+  href: index.md
+- name: Kafka Connect
+  href: connect.md
+- name: Kafka Streams
+  href: streams.md
+- name: Schema Registry
+  href: schema-registry.md
+- name: Transactions
+  href: transactions.md
+- name: Quotas
+  href: quotas.md
+- name: Log Compaction
+  href: compaction.md
+- name: Per-Message TTL
+  href: ttl.md
+- name: Dead Letter Queue
+  href: dlq.md
+- name: SQL Query Engine
+  href: sql-engine.md
+- name: Plugin System
+  href: plugin-system.md
+- name: Plugin Development Guide
+  href: plugin-development.md
+- name: WASM Plugins
+  href: wasm-plugins.md
+- name: ML Scoring
+  href: ml-scoring.md
+- name: Bandwidth Quotas
+  href: bandwidth-quotas.md
+- name: Cruise Control
+  href: cruise-control.md
+- name: Schema Linking
+  href: schema-linking.md
+- name: Schema Migration
+  href: schema-migration.md
+- name: Cluster Linking
+  href: cluster-linking.md
+- name: Intent-Based Configuration
+  href: intent-based-config.md
+- name: Low-Code Data Mesh
+  href: data-mesh.md
+- name: Cross-Topic Transactions
+  href: cross-topic-transactions.md
+- name: Exactly-Once Source Connectors
+  href: eos-connectors.md

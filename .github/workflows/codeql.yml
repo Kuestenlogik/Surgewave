@@ -1,0 +1,72 @@
+name: CodeQL
+
+# Advanced Setup CodeQL analysis with an explicit permissions block.
+# Replaces GitHub's Default Setup so the workflow lives in the repo
+# (reviewable diffs, predictable scope, no surprises after the
+# action/missing-workflow-permissions alert that fired against the
+# implicit setup).
+#
+# Switching: GitHub Repo Settings → Code security → Code scanning →
+# CodeQL analysis: pick "Set up Advanced" (this workflow runs from
+# then on) and disable the existing Default Setup row.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Weekly cron so model / query-set updates surface even if no push
+  # lands during the week.
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  security-events: write
+  packages: read
+  actions: read
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # C# build via dotnet — autobuild handles solution + project
+          # discovery. If autobuild ever fails (rare for this repo)
+          # swap to build-mode: manual + a `dotnet build` step.
+          - language: csharp
+            build-mode: autobuild
+          # JS / TS extractor scans source directly, no build needed.
+          - language: javascript-typescript
+            build-mode: none
+          # GitHub Actions workflow analysis — catches things like the
+          # actions/missing-workflow-permissions warning that triggered
+          # this workflow's adoption in the first place.
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

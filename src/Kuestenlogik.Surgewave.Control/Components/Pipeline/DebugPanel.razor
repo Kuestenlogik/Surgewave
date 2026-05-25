@@ -1,0 +1,154 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+<MudPaper Elevation="2" Class="pa-3 mt-3">
+    <div class="d-flex align-center mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.BugReport" Size="MudBlazor.Size.Small" Class="mr-2"
+                 Color="@(DebugMode ? Color.Error : Color.Default)" />
+        <MudText Typo="Typo.subtitle2">Debug Mode</MudText>
+        <MudSpacer />
+        <MudSwitch T="bool" Value="@DebugMode" ValueChanged="DebugModeToggled"
+                   Color="Color.Error" Size="MudBlazor.Size.Small" />
+    </div>
+
+    @if (DebugMode)
+    {
+        @* Action Buttons *@
+        <div class="d-flex gap-2 mb-3">
+            <MudButton Variant="Variant.Outlined" Size="MudBlazor.Size.Small" Color="Color.Success"
+                       StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="ResumeAll"
+                       Disabled="@(DebugState?.PausedNodes.Count == 0)">
+                Resume All
+            </MudButton>
+        </div>
+
+        @* Breakpoints *@
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">
+            Breakpoints (@(DebugState?.Breakpoints.Count ?? 0))
+        </MudText>
+        @if (DebugState?.Breakpoints.Count > 0)
+        {
+            <MudList T="string" Dense="true" Class="mb-2">
+                @foreach (var bp in DebugState.Breakpoints)
+                {
+                    <MudListItem Dense="true">
+                        <div class="d-flex align-center">
+                            <div class="breakpoint-indicator mr-2"></div>
+                            <MudText Typo="Typo.body2">@bp</MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="MudBlazor.Size.Small"
+                                           OnClick="@(() => RemoveBreakpoint.InvokeAsync(bp))" />
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+
+        @* Paused Nodes *@
+        @if (DebugState?.PausedNodes.Count > 0)
+        {
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mb-1">
+                Paused (@DebugState.PausedNodes.Count)
+            </MudText>
+
+            @foreach (var (nodeId, info) in DebugState.PausedNodes)
+            {
+                <MudPaper Elevation="0" Class="pa-2 mb-2" Style="border: 1px solid var(--mud-palette-warning); border-radius: 4px;">
+                    <div class="d-flex align-center mb-1">
+                        <MudIcon Icon="@Icons.Material.Filled.Pause" Size="MudBlazor.Size.Small" Color="Color.Warning" Class="mr-1" />
+                        <MudText Typo="Typo.body2"><strong>@nodeId</strong></MudText>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(info.RecordKey))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Key:</MudText>
+                        <pre class="debug-record-preview">@info.RecordKey</pre>
+                    }
+
+                    @if (!string.IsNullOrEmpty(info.RecordValue))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Value:</MudText>
+                        <pre class="debug-record-preview">@FormatJsonPreview(info.RecordValue)</pre>
+                    }
+
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                        Paused at @info.PausedAt.ToLocalTime().ToString("HH:mm:ss")
+                    </MudText>
+
+                    <div class="d-flex gap-1 mt-2">
+                        <MudButton Variant="Variant.Outlined" Size="MudBlazor.Size.Small"
+                                   StartIcon="@Icons.Material.Filled.SkipNext" Color="Color.Info"
+                                   OnClick="@(() => StepNode.InvokeAsync(nodeId))">
+                            Step
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Size="MudBlazor.Size.Small"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow" Color="Color.Success"
+                                   OnClick="@(() => ResumeNodeRequested.InvokeAsync(nodeId))">
+                            Resume
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            }
+        }
+    }
+</MudPaper>
+
+<style>
+    .breakpoint-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--mud-palette-error);
+    }
+
+    .debug-record-preview {
+        background: var(--mud-palette-background-gray);
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-family: monospace;
+        max-height: 120px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        margin: 2px 0;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public bool DebugMode { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> DebugModeToggled { get; set; }
+
+    [Parameter]
+    public DebugState? DebugState { get; set; }
+
+    [Parameter]
+    public EventCallback<string> RemoveBreakpoint { get; set; }
+
+    [Parameter]
+    public EventCallback<string> StepNode { get; set; }
+
+    [Parameter]
+    public EventCallback<string> ResumeNodeRequested { get; set; }
+
+    [Parameter]
+    public EventCallback ResumeAll { get; set; }
+
+    private static string FormatJsonPreview(string value)
+    {
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(value);
+            return System.Text.Json.JsonSerializer.Serialize(doc,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return value.Length > 500 ? value[..500] + "..." : value;
+        }
+    }
+}

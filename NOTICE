@@ -1,0 +1,40 @@
+Surgewave
+Copyright 2024-2026 Küstenlogik
+
+This product includes software developed by Küstenlogik (https://kuestenlogik.com).
+
+This product includes or depends on software developed by third parties. The
+following NuGet packages are bundled or linked at runtime; their full license
+texts ship with each package and remain in effect for the respective binaries:
+
+  - Apache.Arrow (Apache License 2.0)
+    https://github.com/apache/arrow
+
+  - Google.Protobuf, Google.Api.CommonProtos, Google.Cloud.* (Apache License 2.0)
+    https://github.com/protocolbuffers/protobuf
+    https://github.com/googleapis/google-cloud-dotnet
+
+  - Snappier (Apache License 2.0)
+    https://github.com/brantburnett/Snappier
+
+  - ZstdSharp.Port (BSD-3-Clause + Apache License 2.0)
+    https://github.com/oleg-st/ZstdSharp
+
+  - K4os.Compression.LZ4 (MIT License)
+    https://github.com/MiloszKrajewski/K4os.Compression.LZ4
+
+  - Spectre.Console (MIT License)
+    https://github.com/spectreconsole/spectre.console
+
+  - MQTTnet (MIT License)
+    https://github.com/dotnet/MQTTnet
+
+  - HotChocolate (MIT License)
+    https://github.com/ChilliCream/graphql-platform
+
+  - Microsoft.CodeAnalysis.* (MIT License)
+    https://github.com/dotnet/roslyn
+
+A full machine-readable bill of materials (CycloneDX SBOM) is generated for
+every Surgewave release and shipped in the corresponding `.swpkg` packages
+under `cyclonedx.bom.json`.

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.schema-registry",
+  "name": "Schema Registry",
+  "version": "0.1.0",
+  "description": "Confluent-compatible Schema Registry — Avro, JSON Schema, Protobuf, FlatBuffers. Inference, evolution, migration, cross-cluster linking.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Schema.Registry.Plugin.dll" ],
+  "pluginSettings": "pluginsettings.json",
+  "tags": [ "schema-registry", "confluent", "avro", "protobuf", "json", "community" ]
+}

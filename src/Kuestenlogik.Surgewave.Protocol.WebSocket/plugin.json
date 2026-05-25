@@ -1,0 +1,10 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.protocol.websocket",
+  "name": "WebSocket Protocol",
+  "version": "0.1.0",
+  "description": "WebSocket protocol support for Surgewave broker — browser-based streaming clients.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Protocol.WebSocket.dll" ],
+  "pluginSettings": "pluginsettings.json",
+  "tags": [ "protocol", "websocket", "browser", "community" ]
+}

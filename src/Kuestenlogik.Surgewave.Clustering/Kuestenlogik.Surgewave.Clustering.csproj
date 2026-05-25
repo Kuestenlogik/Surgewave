@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Enterprise clustering features for Surgewave - Raft consensus, replication, and cluster coordination</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Clustering.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+  </ItemGroup>
+
+</Project>

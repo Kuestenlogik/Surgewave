@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Add Surgewave CLI directory to system PATH -->
+    <Component Id="CliPathComponent" Directory="CliDir" Guid="B8C9D0E1-F2A3-4567-BCDE-678901234567">
+      <Environment
+        Id="SurgewaveCliPath"
+        Name="PATH"
+        Value="[INSTALLFOLDER]cli"
+        Action="set"
+        Part="last"
+        System="yes" />
+    </Component>
+  </Fragment>
+
+</Wix>

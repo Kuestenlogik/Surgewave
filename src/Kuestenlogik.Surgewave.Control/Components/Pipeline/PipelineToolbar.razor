@@ -1,0 +1,302 @@
+@using Kuestenlogik.Surgewave.Control.Services
+
+<MudPaper Elevation="1" Class="d-flex align-center gap-1 pa-1 mb-2" Style="border-radius: 4px;">
+    @* Undo/Redo *@
+    <MudTooltip Text="Undo (Ctrl+Z)">
+        <MudIconButton Icon="@Icons.Material.Filled.Undo"
+                       Size="Size.Small"
+                       Disabled="@(!EditorState.CanUndo)"
+                       OnClick="OnUndo" />
+    </MudTooltip>
+
+    <MudTooltip Text="Redo (Ctrl+Y)">
+        <MudIconButton Icon="@Icons.Material.Filled.Redo"
+                       Size="Size.Small"
+                       Disabled="@(!EditorState.CanRedo)"
+                       OnClick="OnRedo" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Clipboard *@
+    <MudTooltip Text="Cut (Ctrl+X)">
+        <MudIconButton Icon="@Icons.Material.Filled.ContentCut"
+                       Size="Size.Small"
+                       Disabled="@(!HasSelection)"
+                       OnClick="OnCut" />
+    </MudTooltip>
+
+    <MudTooltip Text="Copy (Ctrl+C)">
+        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                       Size="Size.Small"
+                       Disabled="@(!HasSelection)"
+                       OnClick="OnCopy" />
+    </MudTooltip>
+
+    <MudTooltip Text="Paste (Ctrl+V)">
+        <MudIconButton Icon="@Icons.Material.Filled.ContentPaste"
+                       Size="Size.Small"
+                       Disabled="@(!EditorState.HasClipboard)"
+                       OnClick="OnPaste" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Selection/View *@
+    <MudTooltip Text="Select All (Ctrl+A)">
+        <MudIconButton Icon="@Icons.Material.Filled.SelectAll"
+                       Size="Size.Small"
+                       OnClick="OnSelectAll" />
+    </MudTooltip>
+
+    <MudTooltip Text="Delete Selected (Del)">
+        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                       Size="Size.Small"
+                       Color="Color.Error"
+                       Disabled="@(!HasSelection)"
+                       OnClick="OnDeleteSelected" />
+    </MudTooltip>
+
+    <MudTooltip Text="Toggle Disable (D)">
+        <MudIconButton Icon="@Icons.Material.Filled.VisibilityOff"
+                       Size="Size.Small"
+                       Disabled="@(!HasSelection)"
+                       OnClick="OnToggleDisabled" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Zoom *@
+    <MudTooltip Text="Zoom Out">
+        <MudIconButton Icon="@Icons.Material.Filled.ZoomOut"
+                       Size="Size.Small"
+                       OnClick="OnZoomOut" />
+    </MudTooltip>
+
+    <MudText Typo="Typo.caption" Class="px-1">@(ZoomLevel.ToString("P0"))</MudText>
+
+    <MudTooltip Text="Zoom In">
+        <MudIconButton Icon="@Icons.Material.Filled.ZoomIn"
+                       Size="Size.Small"
+                       OnClick="OnZoomIn" />
+    </MudTooltip>
+
+    <MudTooltip Text="Fit to View">
+        <MudIconButton Icon="@Icons.Material.Filled.FitScreen"
+                       Size="Size.Small"
+                       OnClick="OnFitToView" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Layout *@
+    <MudTooltip Text="Auto Layout (Top to Bottom)">
+        <MudIconButton Icon="@Icons.Material.Filled.AutoAwesomeMosaic"
+                       Size="Size.Small"
+                       OnClick="@(() => OnAutoLayoutDirection(LayoutDirection.TopToBottom))" />
+    </MudTooltip>
+
+    <MudTooltip Text="Auto Layout (Left to Right)">
+        <MudIconButton Icon="@Icons.Material.Filled.ViewStream"
+                       Size="Size.Small"
+                       OnClick="@(() => OnAutoLayoutDirection(LayoutDirection.LeftToRight))" />
+    </MudTooltip>
+
+    <MudTooltip Text="Align Horizontally">
+        <MudIconButton Icon="@Icons.Material.Filled.AlignHorizontalCenter"
+                       Size="Size.Small"
+                       Disabled="@(SelectionCount < 2)"
+                       OnClick="OnAlignHorizontal" />
+    </MudTooltip>
+
+    <MudTooltip Text="Align Vertically">
+        <MudIconButton Icon="@Icons.Material.Filled.AlignVerticalCenter"
+                       Size="Size.Small"
+                       Disabled="@(SelectionCount < 2)"
+                       OnClick="OnAlignVertical" />
+    </MudTooltip>
+
+    <MudTooltip Text="Distribute Horizontally">
+        <MudIconButton Icon="@Icons.Material.Filled.ViewColumn"
+                       Size="Size.Small"
+                       Disabled="@(SelectionCount < 3)"
+                       OnClick="OnDistributeHorizontal" />
+    </MudTooltip>
+
+    <MudTooltip Text="Distribute Vertically">
+        <MudIconButton Icon="@Icons.Material.Filled.TableRows"
+                       Size="Size.Small"
+                       Disabled="@(SelectionCount < 3)"
+                       OnClick="OnDistributeVertical" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Grouping *@
+    <MudTooltip Text="Group Selection (Ctrl+G)">
+        <MudIconButton Icon="@Icons.Material.Filled.Folder"
+                       Size="Size.Small"
+                       Disabled="@(SelectionCount < 2)"
+                       OnClick="OnGroupSelection" />
+    </MudTooltip>
+
+    <MudTooltip Text="Ungroup">
+        <MudIconButton Icon="@Icons.Material.Filled.FolderOff"
+                       Size="Size.Small"
+                       Disabled="@(!HasGroupSelected)"
+                       OnClick="OnUngroupSelection" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Snap to Grid *@
+    <MudTooltip Text="@(SnapToGrid ? "Snap to Grid: ON" : "Snap to Grid: OFF")">
+        <MudIconButton Icon="@Icons.Material.Filled.Grid4x4"
+                       Size="Size.Small"
+                       Color="@(SnapToGrid ? Color.Primary : Color.Default)"
+                       OnClick="OnToggleSnap" />
+    </MudTooltip>
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
+    @* Debug *@
+    <MudTooltip Text="@(DebugMode ? "Debug Mode: ON" : "Debug Mode: OFF")">
+        <MudIconButton Icon="@Icons.Material.Filled.BugReport"
+                       Size="Size.Small"
+                       Color="@(DebugMode ? Color.Error : Color.Default)"
+                       OnClick="OnToggleDebug" />
+    </MudTooltip>
+
+    @if (DebugMode)
+    {
+        <MudTooltip Text="Resume All">
+            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow"
+                           Size="Size.Small"
+                           Color="Color.Success"
+                           OnClick="OnResumeAll" />
+        </MudTooltip>
+    }
+
+    <MudSpacer />
+
+    @* Info *@
+    @if (EditorState.HasClipboard)
+    {
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">
+            @EditorState.ClipboardCount in clipboard
+        </MudChip>
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public required PipelineEditorState EditorState { get; set; }
+
+    [Parameter]
+    public bool HasSelection { get; set; }
+
+    [Parameter]
+    public int SelectionCount { get; set; }
+
+    [Parameter]
+    public double ZoomLevel { get; set; } = 1.0;
+
+    [Parameter]
+    public bool SnapToGrid { get; set; }
+
+    [Parameter]
+    public EventCallback SnapToGridToggled { get; set; }
+
+    [Parameter]
+    public EventCallback UndoRequested { get; set; }
+
+    [Parameter]
+    public EventCallback RedoRequested { get; set; }
+
+    [Parameter]
+    public EventCallback CutRequested { get; set; }
+
+    [Parameter]
+    public EventCallback CopyRequested { get; set; }
+
+    [Parameter]
+    public EventCallback PasteRequested { get; set; }
+
+    [Parameter]
+    public EventCallback SelectAllRequested { get; set; }
+
+    [Parameter]
+    public EventCallback DeleteSelectedRequested { get; set; }
+
+    [Parameter]
+    public EventCallback ToggleDisabledRequested { get; set; }
+
+    [Parameter]
+    public EventCallback ZoomInRequested { get; set; }
+
+    [Parameter]
+    public EventCallback ZoomOutRequested { get; set; }
+
+    [Parameter]
+    public EventCallback FitToViewRequested { get; set; }
+
+    [Parameter]
+    public EventCallback AutoLayoutRequested { get; set; }
+
+    [Parameter]
+    public EventCallback<LayoutDirection> AutoLayoutDirectionRequested { get; set; }
+
+    [Parameter]
+    public EventCallback AlignHorizontalRequested { get; set; }
+
+    [Parameter]
+    public EventCallback AlignVerticalRequested { get; set; }
+
+    [Parameter]
+    public EventCallback DistributeHorizontalRequested { get; set; }
+
+    [Parameter]
+    public EventCallback DistributeVerticalRequested { get; set; }
+
+    [Parameter]
+    public bool HasGroupSelected { get; set; }
+
+    [Parameter]
+    public EventCallback GroupSelectionRequested { get; set; }
+
+    [Parameter]
+    public EventCallback UngroupSelectionRequested { get; set; }
+
+    [Parameter]
+    public bool DebugMode { get; set; }
+
+    [Parameter]
+    public EventCallback DebugModeToggled { get; set; }
+
+    [Parameter]
+    public EventCallback ResumeAllRequested { get; set; }
+
+    private async Task OnToggleDebug() => await DebugModeToggled.InvokeAsync();
+    private async Task OnResumeAll() => await ResumeAllRequested.InvokeAsync();
+
+    private async Task OnUndo() => await UndoRequested.InvokeAsync();
+    private async Task OnRedo() => await RedoRequested.InvokeAsync();
+    private async Task OnCut() => await CutRequested.InvokeAsync();
+    private async Task OnCopy() => await CopyRequested.InvokeAsync();
+    private async Task OnPaste() => await PasteRequested.InvokeAsync();
+    private async Task OnSelectAll() => await SelectAllRequested.InvokeAsync();
+    private async Task OnDeleteSelected() => await DeleteSelectedRequested.InvokeAsync();
+    private async Task OnToggleDisabled() => await ToggleDisabledRequested.InvokeAsync();
+    private async Task OnZoomIn() => await ZoomInRequested.InvokeAsync();
+    private async Task OnZoomOut() => await ZoomOutRequested.InvokeAsync();
+    private async Task OnFitToView() => await FitToViewRequested.InvokeAsync();
+    private async Task OnAutoLayout() => await AutoLayoutRequested.InvokeAsync();
+    private async Task OnAutoLayoutDirection(LayoutDirection direction) => await AutoLayoutDirectionRequested.InvokeAsync(direction);
+    private async Task OnAlignHorizontal() => await AlignHorizontalRequested.InvokeAsync();
+    private async Task OnAlignVertical() => await AlignVerticalRequested.InvokeAsync();
+    private async Task OnDistributeHorizontal() => await DistributeHorizontalRequested.InvokeAsync();
+    private async Task OnDistributeVertical() => await DistributeVerticalRequested.InvokeAsync();
+    private async Task OnToggleSnap() => await SnapToGridToggled.InvokeAsync();
+    private async Task OnGroupSelection() => await GroupSelectionRequested.InvokeAsync();
+    private async Task OnUngroupSelection() => await UngroupSelectionRequested.InvokeAsync();
+}

@@ -1,0 +1,85 @@
+---
+# Headless service for StatefulSet DNS discovery
+# Provides stable network identity: <pod-name>.<service-name>.<namespace>.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "surgewave.fullname" . }}-headless
+  labels:
+    {{- include "surgewave.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "surgewave.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: kafka
+      port: {{ .Values.broker.ports.kafka }}
+      targetPort: kafka
+    - name: grpc
+      port: {{ .Values.broker.ports.grpc }}
+      targetPort: grpc
+    - name: replication
+      port: {{ .Values.broker.ports.replication }}
+      targetPort: replication
+    {{- if .Values.features.mqtt.enabled }}
+    - name: mqtt
+      port: {{ .Values.broker.ports.mqtt }}
+      targetPort: mqtt
+    {{- end }}
+
+---
+# Client-facing service for broker access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "surgewave.fullname" . }}
+  labels:
+    {{- include "surgewave.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "surgewave.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: kafka
+      port: {{ .Values.broker.ports.kafka }}
+      targetPort: kafka
+    - name: grpc
+      port: {{ .Values.broker.ports.grpc }}
+      targetPort: grpc
+    {{- if .Values.features.mqtt.enabled }}
+    - name: mqtt
+      port: {{ .Values.broker.ports.mqtt }}
+      targetPort: mqtt
+    {{- end }}
+
+{{- if .Values.service.external.enabled }}
+---
+# External LoadBalancer for outside-cluster access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "surgewave.fullname" . }}-external
+  labels:
+    {{- include "surgewave.labels" . | nindent 4 }}
+  {{- with .Values.service.external.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.external.type }}
+  selector:
+    {{- include "surgewave.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: kafka
+      port: {{ .Values.broker.ports.kafka }}
+      targetPort: kafka
+    - name: grpc
+      port: {{ .Values.broker.ports.grpc }}
+      targetPort: grpc
+    {{- if .Values.features.mqtt.enabled }}
+    - name: mqtt
+      port: {{ .Values.broker.ports.mqtt }}
+      targetPort: mqtt
+    {{- end }}
+{{- end }}

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Grpc.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Api.Grpc\Kuestenlogik.Surgewave.Api.Grpc.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Api.Grpc.Server\Kuestenlogik.Surgewave.Api.Grpc.Server.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine\Kuestenlogik.Surgewave.Storage.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

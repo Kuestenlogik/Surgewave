@@ -1,0 +1,199 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service ClusterService {
+  rpc Ping(PingRequest) returns (PingResponse) {
+    option (google.api.http) = {
+      get: "/v3/ping"
+    };
+  }
+  rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/metadata"
+      additional_bindings {
+        get: "/v3/metadata"
+      }
+    };
+  }
+  rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}"
+      additional_bindings {
+        get: "/v3/cluster"
+      }
+    };
+  }
+  rpc ListBrokers(ListBrokersRequest) returns (ListBrokersResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/brokers"
+      additional_bindings {
+        get: "/v3/brokers"
+      }
+    };
+  }
+  rpc AlterPartitionReassignments(AlterReassignmentsRequest) returns (AlterReassignmentsResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/reassignments"
+      body: "*"
+      additional_bindings {
+        post: "/v3/reassignments"
+        body: "*"
+      }
+    };
+  }
+  rpc ListPartitionReassignments(ListReassignmentsRequest) returns (ListReassignmentsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/reassignments"
+      additional_bindings {
+        get: "/v3/reassignments"
+      }
+    };
+  }
+  rpc TriggerLogCompaction(TriggerCompactionRequest) returns (TriggerCompactionResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/compaction"
+      body: "*"
+      additional_bindings {
+        post: "/v3/compaction"
+        body: "*"
+      }
+    };
+  }
+  rpc GetCompactionStatus(GetCompactionStatusRequest) returns (GetCompactionStatusResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/compaction"
+      additional_bindings {
+        get: "/v3/compaction"
+      }
+    };
+  }
+  rpc WatchHealth(WatchHealthRequest) returns (stream HealthUpdate) {}
+}
+
+message WatchHealthRequest {
+  int32 interval_seconds = 1;
+}
+
+message HealthUpdate {
+  string cluster_id = 1;
+  int32 broker_count = 2;
+  int32 topic_count = 3;
+  int64 total_partitions = 4;
+  double messages_per_second = 5;
+  double bytes_per_second = 6;
+  int64 timestamp = 7;
+}
+
+message PingRequest {}
+
+message PingResponse {
+  int64 timestamp = 1;
+}
+
+message GetMetadataRequest {
+  string cluster_id = 1;
+  repeated string topics = 2;
+}
+
+message GetMetadataResponse {
+  repeated BrokerInfo brokers = 1;
+  repeated TopicInfo topics = 2;
+  int32 controller_id = 3;
+  string cluster_id = 4;
+}
+
+message GetClusterInfoRequest {
+  string cluster_id = 1;
+}
+
+message GetClusterInfoResponse {
+  string cluster_id = 1;
+  int32 controller_id = 2;
+  repeated BrokerInfo brokers = 3;
+  int32 topic_count = 4;
+  int32 partition_count = 5;
+  ResponseStatus status = 6;
+}
+
+message ListBrokersRequest {
+  string cluster_id = 1;
+}
+
+message ListBrokersResponse {
+  repeated BrokerInfo brokers = 1;
+  ResponseStatus status = 2;
+}
+
+message AlterReassignmentsRequest {
+  string cluster_id = 1;
+  int32 timeout_ms = 2;
+  repeated ReassignmentEntry reassignments = 3;
+}
+
+message ReassignmentEntry {
+  string topic = 1;
+  int32 partition = 2;
+  repeated int32 replicas = 3;
+}
+
+message AlterReassignmentsResponse {
+  repeated ReassignmentResult results = 1;
+}
+
+message ReassignmentResult {
+  string topic = 1;
+  int32 partition = 2;
+  ResponseStatus status = 3;
+}
+
+message ListReassignmentsRequest {
+  string cluster_id = 1;
+  repeated TopicPartition partitions = 2;
+  int32 timeout_ms = 3;
+}
+
+message ListReassignmentsResponse {
+  repeated OngoingReassignment reassignments = 1;
+  ResponseStatus status = 2;
+}
+
+message OngoingReassignment {
+  string topic = 1;
+  int32 partition = 2;
+  repeated int32 replicas = 3;
+  repeated int32 adding_replicas = 4;
+  repeated int32 removing_replicas = 5;
+}
+
+message TriggerCompactionRequest {
+  string cluster_id = 1;
+  repeated TopicPartition partitions = 2;
+}
+
+message TriggerCompactionResponse {
+  ResponseStatus status = 1;
+}
+
+message GetCompactionStatusRequest {
+  string cluster_id = 1;
+  repeated TopicPartition partitions = 2;
+}
+
+message GetCompactionStatusResponse {
+  repeated CompactionStatus statuses = 1;
+  ResponseStatus status = 2;
+}
+
+message CompactionStatus {
+  string topic = 1;
+  int32 partition = 2;
+  bool compaction_enabled = 3;
+  int64 last_compaction_time = 4;
+  double compaction_ratio = 5;
+}

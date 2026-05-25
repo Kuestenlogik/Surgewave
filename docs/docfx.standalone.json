@@ -1,0 +1,101 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [
+            "artifacts/bin/Kuestenlogik.Surgewave.Core/Release/Kuestenlogik.Surgewave.Core.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Protocol/Release/Kuestenlogik.Surgewave.Protocol.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Protocol.Kafka/Release/Kuestenlogik.Surgewave.Protocol.Kafka.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Protocol.Native/Release/Kuestenlogik.Surgewave.Protocol.Native.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Client/Release/Kuestenlogik.Surgewave.Client.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Broker/Release/Kuestenlogik.Surgewave.Broker.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Runtime/Release/Kuestenlogik.Surgewave.Runtime.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Hosting/Release/Kuestenlogik.Surgewave.Hosting.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Clustering/Release/Kuestenlogik.Surgewave.Clustering.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Abstractions/Release/Kuestenlogik.Surgewave.Storage.Abstractions.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Memory/Release/Kuestenlogik.Surgewave.Storage.Memory.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.FileSystem/Release/Kuestenlogik.Surgewave.Storage.FileSystem.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Storage.Arrow/Release/Kuestenlogik.Surgewave.Storage.Arrow.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Streams/Release/Kuestenlogik.Surgewave.Streams.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Connect/Release/Kuestenlogik.Surgewave.Connect.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Schema.Registry/Release/Kuestenlogik.Surgewave.Schema.Registry.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Transport/Release/Kuestenlogik.Surgewave.Transport.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Cli/Release/Kuestenlogik.Surgewave.Cli.dll"
+          ],
+          "src": ".."
+        }
+      ],
+      "dest": "../artifacts/docs-standalone/api",
+      "includePrivateMembers": false,
+      "namespaceLayout": "flattened"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": ["**.yml"],
+        "src": "../artifacts/docs-standalone/api",
+        "dest": "api"
+      },
+      {
+        "files": [
+          "quickstart/**.md",
+          "quickstart/**/toc.yml",
+          "setup/**.md",
+          "setup/**/toc.yml",
+          "tutorials/**.md",
+          "tutorials/**/toc.yml",
+          "architecture/**.md",
+          "architecture/**/toc.yml",
+          "storage/**.md",
+          "storage/**/toc.yml",
+          "transport/**.md",
+          "transport/**/toc.yml",
+          "clustering/**.md",
+          "clustering/**/toc.yml",
+          "clients/**.md",
+          "clients/**/toc.yml",
+          "features/**.md",
+          "features/**/toc.yml",
+          "connectors/**.md",
+          "connectors/**/toc.yml",
+          "ai/**.md",
+          "ai/**/toc.yml",
+          "deployment/**.md",
+          "deployment/**/toc.yml",
+          "operations/**.md",
+          "operations/**/toc.yml",
+          "cookbook/**.md",
+          "cookbook/**/toc.yml",
+          "reference/**.md",
+          "reference/**/toc.yml",
+          "conformance/**.md",
+          "conformance/**/toc.yml",
+          "adr/**.md",
+          "adr/**/toc.yml",
+          "api/*.md",
+          "toc.yml",
+          "*.md"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": ["images/**", "favicon.ico"]
+      }
+    ],
+    "dest": "../artifacts/docs-standalone",
+    "template": ["default", "modern", "templates/surgewave-theme"],
+    "globalMetadata": {
+      "_appTitle": "Surgewave Documentation",
+      "_appName": "Surgewave",
+      "_appFaviconPath": "favicon.ico",
+      "_enableSearch": true,
+      "_enableNewTab": true,
+      "_disableContribution": true,
+      "_standalone": true
+    },
+    "postProcessors": ["ExtractSearchIndex"]
+  }
+}

@@ -1,0 +1,31 @@
+{
+    "id": "quickstart-guide",
+    "title": "Quickstart Guide Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "overview",
+            "title": "Getting Started with Surgewave",
+            "text": "This guide walks you through installing Surgewave, starting a broker, and sending your first messages. Follow along step by step.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "prerequisites",
+            "title": "Prerequisites",
+            "text": "Make sure you have .NET 10 SDK installed. Surgewave runs on Windows, Linux, and macOS with no external dependencies required.",
+            "attachTo": { "element": "article h2", "on": "bottom" }
+        },
+        {
+            "id": "sidebar",
+            "title": "More Quickstart Topics",
+            "text": "Check the sidebar for additional quickstart topics like sending your first messages and configuring producers and consumers.",
+            "attachTo": { "element": "#toc", "on": "right" }
+        },
+        {
+            "id": "next",
+            "title": "Next Steps",
+            "text": "Once you have Surgewave running, explore the Features section for advanced capabilities like Streams processing, Connect framework, and Schema Registry.",
+            "attachTo": { "element": "article", "on": "top" }
+        }
+    ]
+}

@@ -1,0 +1,31 @@
+{
+    "id": "docs-ai-agent-memory",
+    "title": "Agent Memory Documentation Tour",
+    "triggerMode": "manual",
+    "steps": [
+        {
+            "id": "overview",
+            "title": "Agent Memory and Tool Caching",
+            "text": "Surgewave provides persistent memory and tool result caching for AI agents. Agents can learn from interactions, recall facts across sessions, and avoid redundant external tool calls.",
+            "attachTo": { "element": "article h1", "on": "bottom" }
+        },
+        {
+            "id": "memory-store",
+            "title": "IAgentMemoryStore",
+            "text": "The core memory interface supports save, get, delete, search, and list operations scoped per agent. Two backends are available: InMemory for testing and File for persistence across restarts.",
+            "attachTo": { "element": "#iagentmemorystore", "on": "bottom" }
+        },
+        {
+            "id": "memory-types",
+            "title": "Memory Types and Context",
+            "text": "Six memory types classify agent knowledge: ConversationSummary, LearnedFact, UserPreference, ToolResult, Episodic, and Procedural. AgentMemoryContext provides a convenient scoped API with RecallAsync and SaveFactAsync helpers.",
+            "attachTo": { "element": "#memory-types", "on": "bottom" }
+        },
+        {
+            "id": "tool-caching",
+            "title": "Tool Result Caching",
+            "text": "CachedAgentTool wraps any agent tool with transparent caching using SHA-256 hashed keys. CachingToolProvider wraps an entire tool provider with per-tool TTL overrides and exclusions. Error results are never cached.",
+            "attachTo": { "element": "#tool-result-caching", "on": "bottom" }
+        }
+    ]
+}

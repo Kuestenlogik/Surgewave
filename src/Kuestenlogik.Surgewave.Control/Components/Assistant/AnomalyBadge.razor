@@ -1,0 +1,56 @@
+@using Kuestenlogik.Surgewave.Control.Models.Assistant
+@inject AssistantState AssistantState
+@implements IDisposable
+
+<MudTooltip Text="@GetTooltipText()">
+    <MudBadge Content="@AssistantState.UnreadAlertCount" Color="@GetBadgeColor()" Overlap="true"
+              Visible="@(AssistantState.UnreadAlertCount > 0)">
+        <MudIconButton Icon="@Icons.Material.Filled.Psychology" Color="Color.Inherit"
+                       OnClick="OnBadgeClicked" />
+    </MudBadge>
+</MudTooltip>
+
+@code {
+    [Parameter]
+    public EventCallback OnClick { get; set; }
+
+    protected override void OnInitialized()
+    {
+        AssistantState.OnChange += OnStateChanged;
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private Color GetBadgeColor()
+    {
+        var anomalies = AssistantState.LatestAnomalies;
+
+        if (anomalies.Any(a => a.Severity == "Critical"))
+            return Color.Error;
+
+        if (anomalies.Any(a => a.Severity == "Warning"))
+            return Color.Warning;
+
+        return Color.Info;
+    }
+
+    private string GetTooltipText() => AssistantState.UnreadAlertCount switch
+    {
+        0 => "Surgewave Assistant",
+        1 => "1 anomaly detected",
+        _ => $"{AssistantState.UnreadAlertCount} anomalies detected"
+    };
+
+    private async Task OnBadgeClicked()
+    {
+        await OnClick.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        AssistantState.OnChange -= OnStateChanged;
+    }
+}

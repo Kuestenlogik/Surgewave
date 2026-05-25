@@ -1,0 +1,8 @@
+- name: Overview
+  href: index.md
+- name: Kafka API matrix
+  href: kafka-rpcs.md
+- name: KIP coverage and tests
+  href: kips.md
+- name: Schema Registry
+  href: schema-registry.md

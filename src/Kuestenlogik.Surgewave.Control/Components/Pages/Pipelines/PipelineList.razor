@@ -1,0 +1,326 @@
+@page "/pipelines"
+@rendermode InteractiveServer
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@using Kuestenlogik.Surgewave.Control.Components.Pipeline
+@inject IPipelineApiClient ApiClient
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+
+<PageTitle>Pipelines - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Pipelines</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_searchText" Label="Search pipelines" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" DebounceInterval="300" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect T="PipelineStatus?" @bind-Value="_statusFilter" Label="Status" Variant="Variant.Outlined">
+                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)null)">All</MudSelectItem>
+                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Draft)">Draft</MudSelectItem>
+                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Running)">Running</MudSelectItem>
+                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Stopped)">Stopped</MudSelectItem>
+                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Failed)">Failed</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center justify-end gap-2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DeviceHub"
+                       Href="/pipelines/lineage">
+                Lineage View
+            </MudButton>
+            <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload"
+                           OnClick="ShowImportDialog">
+                    Import
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Article"
+                           OnClick="ShowTemplatesDialog">
+                    Templates
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="CreateNewPipeline">
+                    Create Pipeline
+                </MudButton>
+            </AuthorizeView>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadPipelinesAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudTable Items="@FilteredPipelines" Dense="true" Hover="true" Striped="true" Elevation="2">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<PipelineDefinition, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<PipelineDefinition, object>(x => x.Nodes.Count)">Nodes</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<PipelineDefinition, object>(x => x.CreatedAt)">Created</MudTableSortLabel></MudTh>
+            <MudTh Style="width: 200px">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">
+                <MudLink Href="@($"/pipelines/{context.Id}/edit")">@context.Name</MudLink>
+                @if (!string.IsNullOrEmpty(context.Description))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@context.Description</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                    @context.Status
+                </MudChip>
+                @if (context.Schedule is { Enabled: true })
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                        @if (context.Schedule.NextRunAt.HasValue)
+                        {
+                            @($"Next: {context.Schedule.NextRunAt.Value.LocalDateTime:g}")
+                        }
+                        else
+                        {
+                            @("Scheduled")
+                        }
+                    </MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Nodes">@context.Nodes.Count</MudTd>
+            <MudTd DataLabel="Created">@context.CreatedAt.LocalDateTime.ToString("g")</MudTd>
+            <MudTd DataLabel="Actions">
+                <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage" Context="auth">
+                    @if (context.Status == PipelineStatus.Running)
+                    {
+                        <MudTooltip Text="Stop pipeline">
+                            <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
+                                           OnClick="@(() => StopPipelineAsync(context))" />
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="Start pipeline">
+                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                           OnClick="@(() => StartPipelineAsync(context))" />
+                        </MudTooltip>
+                    }
+                </AuthorizeView>
+                <MudTooltip Text="Edit pipeline">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   Href="@($"/pipelines/{context.Id}/edit")" />
+                </MudTooltip>
+                <MudTooltip Text="Monitor pipeline">
+                    <MudIconButton Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Small"
+                                   Href="@($"/pipelines/{context.Id}/monitor")"
+                                   Disabled="@(context.Status != PipelineStatus.Running)" />
+                </MudTooltip>
+                <MudTooltip Text="Execution history">
+                    <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small"
+                                   Href="@($"/pipelines/{context.Id}/history")" />
+                </MudTooltip>
+                @if (HasChatEndpoint(context))
+                {
+                    <MudTooltip Text="Chat with pipeline">
+                        <MudIconButton Icon="@Icons.Material.Filled.Chat" Size="Size.Small"
+                                       Color="Color.Primary"
+                                       Href="@($"/pipelines/{context.Id}/chat")" />
+                    </MudTooltip>
+                }
+                <MudTooltip Text="Export pipeline">
+                    <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                   OnClick="@(() => ShowExportDialog(context))" />
+                </MudTooltip>
+                <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage" Context="auth">
+                    <MudTooltip Text="Delete pipeline">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => ConfirmDeleteAsync(context))"
+                                       Disabled="@(context.Status == PipelineStatus.Running)" />
+                    </MudTooltip>
+                </AuthorizeView>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Color="Color.Secondary">No pipelines found. Create one to get started.</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
+        </PagerContent>
+    </MudTable>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string _searchText = "";
+    private PipelineStatus? _statusFilter;
+    private List<PipelineDefinition> _pipelines = [];
+
+    private IEnumerable<PipelineDefinition> FilteredPipelines => _pipelines
+        .Where(p => string.IsNullOrWhiteSpace(_searchText) ||
+                    p.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
+        .Where(p => _statusFilter == null || p.Status == _statusFilter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPipelinesAsync();
+    }
+
+    private async Task LoadPipelinesAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            _pipelines = (await ApiClient.ListPipelinesAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CreateNewPipeline()
+    {
+        Navigation.NavigateTo("/pipelines/new");
+    }
+
+    private async Task StartPipelineAsync(PipelineDefinition pipeline)
+    {
+        try
+        {
+            await ApiClient.StartPipelineAsync(pipeline.Id);
+            Notification.ShowSuccess($"Pipeline '{pipeline.Name}' started");
+            await LoadPipelinesAsync();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to start pipeline: {ex.Message}");
+        }
+    }
+
+    private async Task StopPipelineAsync(PipelineDefinition pipeline)
+    {
+        try
+        {
+            await ApiClient.StopPipelineAsync(pipeline.Id);
+            Notification.ShowSuccess($"Pipeline '{pipeline.Name}' stopped");
+            await LoadPipelinesAsync();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to stop pipeline: {ex.Message}");
+        }
+    }
+
+    private async Task ConfirmDeleteAsync(PipelineDefinition pipeline)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.ContentText, $"Are you sure you want to delete pipeline '{pipeline.Name}'? This action cannot be undone." },
+            { x => x.ButtonText, "Delete" },
+            { x => x.Color, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Pipeline", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await DeletePipelineAsync(pipeline);
+        }
+    }
+
+    private async Task DeletePipelineAsync(PipelineDefinition pipeline)
+    {
+        try
+        {
+            await ApiClient.DeletePipelineAsync(pipeline.Id);
+            Notification.ShowSuccess($"Pipeline '{pipeline.Name}' deleted");
+            await LoadPipelinesAsync();
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to delete pipeline: {ex.Message}");
+        }
+    }
+
+    private static bool HasChatEndpoint(PipelineDefinition pipeline)
+        => pipeline.Nodes.Any(n => n.ConnectorType.Contains("ChatEndpoint", StringComparison.OrdinalIgnoreCase));
+
+    private Color GetStatusColor(PipelineStatus status) => status switch
+    {
+        PipelineStatus.Draft => Color.Default,
+        PipelineStatus.Running => Color.Success,
+        PipelineStatus.Stopped => Color.Warning,
+        PipelineStatus.Failed => Color.Error,
+        _ => Color.Default
+    };
+
+    private async Task ShowImportDialog()
+    {
+        var parameters = new DialogParameters<ImportExportDialog>
+        {
+            { x => x.Mode, ImportExportDialog.ImportExportMode.Import }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ImportExportDialog>("Import Pipeline", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: PipelineDefinition pipeline })
+        {
+            Navigation.NavigateTo($"/pipelines/{pipeline.Id}/edit");
+        }
+    }
+
+    private async Task ShowTemplatesDialog()
+    {
+        var parameters = new DialogParameters<ImportExportDialog>
+        {
+            { x => x.Mode, ImportExportDialog.ImportExportMode.Template }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ImportExportDialog>("Create from Template", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: PipelineDefinition pipeline })
+        {
+            Navigation.NavigateTo($"/pipelines/{pipeline.Id}/edit");
+        }
+    }
+
+    private async Task ShowExportDialog(PipelineDefinition pipeline)
+    {
+        var parameters = new DialogParameters<ImportExportDialog>
+        {
+            { x => x.Mode, ImportExportDialog.ImportExportMode.Export },
+            { x => x.PipelineId, pipeline.Id },
+            { x => x.PipelineName, pipeline.Name }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<ImportExportDialog>("Export Pipeline", parameters, options);
+    }
+}

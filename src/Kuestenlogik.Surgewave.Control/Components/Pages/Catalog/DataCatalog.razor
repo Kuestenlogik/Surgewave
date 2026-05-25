@@ -1,0 +1,547 @@
+@page "/catalog"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@using Blazored.LocalStorage
+@inject ISurgewaveApiClient SurgewaveClient
+@inject ISchemaRegistryClient SchemaClient
+@inject ILocalStorageService LocalStorage
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject NotificationState Notification
+
+<PageTitle>Data Catalog - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Data Catalog</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Topic metadata, ownership, tags, and PII classification
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" OnClick="ExportCatalogAsync"
+                   StartIcon="@Icons.Material.Filled.Download" Disabled="_loading">
+            Export
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
+            Refresh
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@* ===== SUMMARY CARDS ===== *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topics</MudText>
+                        <MudText Typo="Typo.h5">@_allTopics.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Description" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Documented</MudText>
+                        <MudText Typo="Typo.h5">@_catalogState.Entries.Count(e => !string.IsNullOrEmpty(e.Value.Description))</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.People" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Owned</MudText>
+                        <MudText Typo="Typo.h5">@_catalogState.Entries.Count(e => !string.IsNullOrEmpty(e.Value.Owner))</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.PrivacyTip" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Contains PII</MudText>
+                        <MudText Typo="Typo.h5">@_catalogState.Entries.Count(e => e.Value.PiiClassification != PiiClassification.None)</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@* ===== FILTERS ===== *@
+<MudPaper Elevation="2" Class="pa-3 mb-4">
+    <MudGrid>
+        <MudItem xs="12" sm="4">
+            <MudTextField T="string" @bind-Value="_searchText" Placeholder="Search topics..."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_filterTag" Label="Tag" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true">
+                @foreach (var tag in _allTags.OrderBy(t => t))
+                {
+                    <MudSelectItem Value="@tag">@tag</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_filterOwner" Label="Owner" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true">
+                @foreach (var owner in _allOwners.OrderBy(o => o))
+                {
+                    <MudSelectItem Value="@owner">@owner</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="PiiClassification?" @bind-Value="_filterPii" Label="PII Level" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true">
+                @foreach (var pii in Enum.GetValues<PiiClassification>())
+                {
+                    <MudSelectItem Value="@((PiiClassification?)pii)">@pii</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ===== CATALOG TABLE ===== *@
+<MudTable Items="FilteredEntries" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
+          RowsPerPage="25" SortLabel="Sort by">
+    <HeaderContent>
+        <MudTh><MudTableSortLabel SortBy="new Func<CatalogDisplayEntry, object>(x => x.TopicName)">Topic</MudTableSortLabel></MudTh>
+        <MudTh>Description</MudTh>
+        <MudTh><MudTableSortLabel SortBy="@_sortByOwner">Owner</MudTableSortLabel></MudTh>
+        <MudTh>Tags</MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<CatalogDisplayEntry, object>(x => (int)x.PiiClassification)">PII</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<CatalogDisplayEntry, object>(x => (int)x.Quality)">Quality</MudTableSortLabel></MudTh>
+        <MudTh>Schema</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Topic">
+            <MudLink Href="@($"/topics/{Uri.EscapeDataString(context.TopicName)}")" Typo="Typo.body2">
+                <strong>@context.TopicName</strong>
+            </MudLink>
+            @if (context.IsInternal)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="ml-1">internal</MudChip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Description">
+            <MudText Typo="Typo.body2" Style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                @(context.Description ?? "—")
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="Owner">
+            @if (!string.IsNullOrEmpty(context.Owner))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
+                    @context.Owner
+                </MudChip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Tags">
+            <div class="d-flex flex-wrap gap-1">
+                @foreach (var tag in context.Tags.Take(3))
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Default">@tag</MudChip>
+                }
+                @if (context.Tags.Count > 3)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">+@(context.Tags.Count - 3)</MudChip>
+                }
+            </div>
+        </MudTd>
+        <MudTd DataLabel="PII">
+            @if (context.PiiClassification != PiiClassification.None)
+            {
+                <MudChip T="string" Size="Size.Small" Color="@GetPiiColor(context.PiiClassification)">
+                    @context.PiiClassification
+                </MudChip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Quality">
+            @if (context.Quality != DataQuality.Unknown)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetQualityColor(context.Quality)">
+                    @context.Quality
+                </MudChip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Schema">
+            @if (context.SchemaSubject != null)
+            {
+                <MudLink Href="@($"/schemas/{Uri.EscapeDataString(context.SchemaSubject)}")" Typo="Typo.caption">
+                    @context.SchemaSubject
+                </MudLink>
+            }
+        </MudTd>
+        <MudTd DataLabel="Actions">
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                           OnClick="@(() => EditEntryAsync(context.TopicName))" />
+        </MudTd>
+    </RowTemplate>
+    <PagerContent>
+        <MudTablePager />
+    </PagerContent>
+</MudTable>
+
+@* ===== EDIT DIALOG ===== *@
+<MudDialog @bind-Visible="_editDialogVisible" Options="_dialogOptions">
+    <TitleContent>
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Edit" Class="mr-2" />
+            Catalog Entry: @_editingEntry?.TopicName
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_editingEntry != null)
+        {
+            <MudGrid>
+                <MudItem xs="12">
+                    <MudTextField T="string" @bind-Value="_editingEntry.Description" Label="Description"
+                                  Variant="Variant.Outlined" Lines="3" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField T="string" @bind-Value="_editingEntry.Owner" Label="Owner"
+                                  Variant="Variant.Outlined" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField T="string" @bind-Value="_editingEntry.Team" Label="Team"
+                                  Variant="Variant.Outlined" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudSelect T="PiiClassification" @bind-Value="_editingEntry.PiiClassification" Label="PII Classification"
+                               Variant="Variant.Outlined">
+                        @foreach (var pii in Enum.GetValues<PiiClassification>())
+                        {
+                            <MudSelectItem Value="@pii">@pii</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudSelect T="DataQuality" @bind-Value="_editingEntry.Quality" Label="Data Quality"
+                               Variant="Variant.Outlined">
+                        @foreach (var q in Enum.GetValues<DataQuality>())
+                        {
+                            <MudSelectItem Value="@q">@q</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Tags</MudText>
+                    <div class="d-flex flex-wrap gap-1 mb-2">
+                        @foreach (var tag in _editingEntry.Tags)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" OnClose="@(() => RemoveTag(tag))">
+                                @tag
+                            </MudChip>
+                        }
+                    </div>
+                    <div class="d-flex gap-2">
+                        <MudSelect T="string" Value="_newTag" ValueChanged="AddTag" Label="Add tag"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;">
+                            @foreach (var tag in _catalogState.AvailableTags.Except(_editingEntry.Tags).OrderBy(t => t))
+                            {
+                                <MudSelectItem Value="@tag">@tag</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTextField T="string" @bind-Value="_customTag" Label="Custom tag"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width: 150px;"
+                                      OnKeyUp="AddCustomTagOnEnter" />
+                    </div>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" @bind-Value="_editingEntry.Notes" Label="Notes"
+                                  Variant="Variant.Outlined" Lines="2" />
+                </MudItem>
+                @if (_editingEntry.PiiClassification != PiiClassification.None)
+                {
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">PII Fields</MudText>
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            @foreach (var field in _editingEntry.PiiFields)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" OnClose="@(() => _editingEntry.PiiFields.Remove(field))">
+                                    @field
+                                </MudChip>
+                            }
+                        </div>
+                        <MudTextField T="string" @bind-Value="_newPiiField" Label="Add PII field name"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      OnKeyUp="AddPiiFieldOnEnter" />
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editDialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveEntryAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private string _searchText = "";
+    private string? _filterTag;
+    private string? _filterOwner;
+    private PiiClassification? _filterPii;
+
+    private List<TopicInfo> _allTopics = [];
+    private List<string> _schemaSubjects = [];
+    private DataCatalogState _catalogState = new();
+
+    private bool _editDialogVisible;
+    private CatalogEntry? _editingEntry;
+    private string? _newTag;
+    private string _customTag = "";
+    private string _newPiiField = "";
+
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private static readonly Func<CatalogDisplayEntry, object> _sortByOwner = x => x.Owner ?? string.Empty;
+
+    private HashSet<string> _allTags => _catalogState.Entries.Values
+        .SelectMany(e => e.Tags)
+        .Union(_catalogState.AvailableTags)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private HashSet<string> _allOwners => _catalogState.Entries.Values
+        .Where(e => !string.IsNullOrEmpty(e.Owner))
+        .Select(e => e.Owner!)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    // Display model combining topic info with catalog entry
+    private sealed class CatalogDisplayEntry
+    {
+        public string TopicName { get; set; } = "";
+        public bool IsInternal { get; set; }
+        public int PartitionCount { get; set; }
+        public string? Description { get; set; }
+        public string? Owner { get; set; }
+        public List<string> Tags { get; set; } = [];
+        public PiiClassification PiiClassification { get; set; }
+        public DataQuality Quality { get; set; }
+        public string? SchemaSubject { get; set; }
+    }
+
+    private IEnumerable<CatalogDisplayEntry> FilteredEntries
+    {
+        get
+        {
+            var entries = _allTopics.Select(t =>
+            {
+                _catalogState.Entries.TryGetValue(t.Name, out var ce);
+                var schemaSubject = _schemaSubjects
+                    .FirstOrDefault(s => s.Equals($"{t.Name}-value", StringComparison.OrdinalIgnoreCase) ||
+                                         s.Equals(t.Name, StringComparison.OrdinalIgnoreCase));
+
+                return new CatalogDisplayEntry
+                {
+                    TopicName = t.Name,
+                    IsInternal = t.IsInternal,
+                    PartitionCount = t.PartitionCount,
+                    Description = ce?.Description,
+                    Owner = ce?.Owner,
+                    Tags = ce?.Tags ?? [],
+                    PiiClassification = ce?.PiiClassification ?? PiiClassification.None,
+                    Quality = ce?.Quality ?? DataQuality.Unknown,
+                    SchemaSubject = schemaSubject
+                };
+            });
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+            {
+                entries = entries.Where(e =>
+                    e.TopicName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                    (e.Description?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (e.Owner?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    e.Tags.Any(t => t.Contains(_searchText, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (!string.IsNullOrEmpty(_filterTag))
+                entries = entries.Where(e => e.Tags.Contains(_filterTag, StringComparer.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(_filterOwner))
+                entries = entries.Where(e => string.Equals(e.Owner, _filterOwner, StringComparison.OrdinalIgnoreCase));
+
+            if (_filterPii.HasValue)
+                entries = entries.Where(e => e.PiiClassification == _filterPii.Value);
+
+            return entries;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var topicsTask = SurgewaveClient.ListTopicsAsync(includeInternal: true);
+            var subjectsTask = SchemaClient.GetSubjectsAsync();
+            var catalogTask = LocalStorage.GetItemAsync<DataCatalogState>("surgewave-data-catalog");
+
+            await Task.WhenAll(topicsTask, subjectsTask);
+            _allTopics = (await topicsTask).OrderBy(t => t.Name).ToList();
+            _schemaSubjects = (await subjectsTask).ToList();
+
+            var stored = await catalogTask;
+            if (stored != null)
+                _catalogState = stored;
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load catalog: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EditEntryAsync(string topicName)
+    {
+        if (!_catalogState.Entries.TryGetValue(topicName, out var entry))
+        {
+            entry = new CatalogEntry { TopicName = topicName };
+            // Auto-detect schema subject
+            entry.SchemaSubject = _schemaSubjects
+                .FirstOrDefault(s => s.Equals($"{topicName}-value", StringComparison.OrdinalIgnoreCase) ||
+                                     s.Equals(topicName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Clone for editing
+        _editingEntry = new CatalogEntry
+        {
+            TopicName = entry.TopicName,
+            Description = entry.Description,
+            Owner = entry.Owner,
+            Team = entry.Team,
+            Tags = [..entry.Tags],
+            PiiClassification = entry.PiiClassification,
+            PiiFields = [..entry.PiiFields],
+            SchemaSubject = entry.SchemaSubject,
+            Notes = entry.Notes,
+            Quality = entry.Quality,
+            CreatedAt = entry.CreatedAt,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        _editDialogVisible = true;
+    }
+
+    private async Task SaveEntryAsync()
+    {
+        if (_editingEntry == null) return;
+
+        _editingEntry.UpdatedAt = DateTimeOffset.UtcNow;
+        _catalogState.Entries[_editingEntry.TopicName] = _editingEntry;
+
+        // Track new teams
+        if (!string.IsNullOrEmpty(_editingEntry.Team) && !_catalogState.AvailableTeams.Contains(_editingEntry.Team))
+            _catalogState.AvailableTeams.Add(_editingEntry.Team);
+
+        // Track new tags
+        foreach (var tag in _editingEntry.Tags.Where(t => !_catalogState.AvailableTags.Contains(t)))
+            _catalogState.AvailableTags.Add(tag);
+
+        await LocalStorage.SetItemAsync("surgewave-data-catalog", _catalogState);
+        _editDialogVisible = false;
+        Notification.ShowSuccess($"Catalog entry for '{_editingEntry.TopicName}' saved");
+        StateHasChanged();
+    }
+
+    private void AddTag(string? tag)
+    {
+        if (!string.IsNullOrEmpty(tag) && _editingEntry != null && !_editingEntry.Tags.Contains(tag))
+        {
+            _editingEntry.Tags.Add(tag);
+        }
+        _newTag = null;
+    }
+
+    private void RemoveTag(string tag)
+    {
+        _editingEntry?.Tags.Remove(tag);
+    }
+
+    private void AddCustomTagOnEnter(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_customTag) && _editingEntry != null)
+        {
+            var tag = _customTag.Trim().ToLowerInvariant();
+            if (!_editingEntry.Tags.Contains(tag))
+                _editingEntry.Tags.Add(tag);
+            _customTag = "";
+        }
+    }
+
+    private void AddPiiFieldOnEnter(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_newPiiField) && _editingEntry != null)
+        {
+            var field = _newPiiField.Trim();
+            if (!_editingEntry.PiiFields.Contains(field))
+                _editingEntry.PiiFields.Add(field);
+            _newPiiField = "";
+        }
+    }
+
+    private async Task ExportCatalogAsync()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(_catalogState, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        // In a real app, trigger download via JS interop
+        Notification.ShowInfo($"Catalog exported ({_catalogState.Entries.Count} entries)");
+    }
+
+    private static Color GetPiiColor(PiiClassification pii) => pii switch
+    {
+        PiiClassification.Low => Color.Info,
+        PiiClassification.Medium => Color.Warning,
+        PiiClassification.High => Color.Error,
+        PiiClassification.Critical => Color.Error,
+        _ => Color.Default
+    };
+
+    private static Color GetQualityColor(DataQuality quality) => quality switch
+    {
+        DataQuality.Bronze => Color.Warning,
+        DataQuality.Silver => Color.Default,
+        DataQuality.Gold => Color.Warning,
+        DataQuality.Platinum => Color.Success,
+        _ => Color.Default
+    };
+}

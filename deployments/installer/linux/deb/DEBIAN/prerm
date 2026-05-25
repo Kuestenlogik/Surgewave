@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+# Stop services before removal
+systemctl stop surgewave-broker 2>/dev/null || true
+systemctl stop surgewave-control 2>/dev/null || true
+systemctl disable surgewave-broker 2>/dev/null || true
+systemctl disable surgewave-control 2>/dev/null || true

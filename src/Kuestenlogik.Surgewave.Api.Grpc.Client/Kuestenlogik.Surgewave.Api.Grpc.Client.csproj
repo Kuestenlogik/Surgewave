@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Kuestenlogik.Surgewave.Api.Grpc.Client</RootNamespace>
+    <Description>gRPC client SDK for Kuestenlogik.Surgewave - language-independent producer and consumer</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.Grpc\Kuestenlogik.Surgewave.Api.Grpc.csproj" />
+  </ItemGroup>
+
+</Project>

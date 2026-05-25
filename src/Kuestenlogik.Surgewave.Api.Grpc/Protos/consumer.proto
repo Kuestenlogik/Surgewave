@@ -1,0 +1,220 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service ConsumerService {
+  // Streaming RPCs (gRPC only, no REST)
+  rpc Consume(ConsumeRequest) returns (stream ConsumeResponse);
+  rpc ConsumeStream(stream ConsumeStreamControl) returns (stream ConsumeResponse);
+
+  // REST-compatible RPCs
+  rpc Fetch(FetchRequest) returns (FetchResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumers/fetch"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumers/fetch"
+        body: "*"
+      }
+    };
+  }
+  rpc Commit(CommitRequest) returns (CommitResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{consumer_group}/offsets"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{consumer_group}/offsets"
+        body: "*"
+      }
+    };
+  }
+  rpc FetchOffsets(FetchOffsetsRequest) returns (FetchOffsetsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/consumer-groups/{consumer_group}/offsets"
+      additional_bindings {
+        get: "/v3/consumer-groups/{consumer_group}/offsets"
+      }
+    };
+  }
+  rpc ListOffsets(ListOffsetsRequest) returns (ListOffsetsResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/topics/-/partitions/-/offsets"
+      body: "*"
+      additional_bindings {
+        post: "/v3/topics/-/partitions/-/offsets"
+        body: "*"
+      }
+    };
+  }
+  rpc Subscribe(SubscribeRequest) returns (SubscribeResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{consumer_group}/subscribe"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{consumer_group}/subscribe"
+        body: "*"
+      }
+    };
+  }
+  rpc Unsubscribe(UnsubscribeRequest) returns (UnsubscribeResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/consumer-groups/{consumer_group}/unsubscribe"
+      body: "*"
+      additional_bindings {
+        post: "/v3/consumer-groups/{consumer_group}/unsubscribe"
+        body: "*"
+      }
+    };
+  }
+}
+
+message ConsumeRequest {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  int32 max_records = 4;
+  int32 max_wait_ms = 5;
+  string consumer_group = 6;
+}
+
+message ConsumeResponse {
+  string topic = 1;
+  int32 partition = 2;
+  repeated Record records = 3;
+  int64 high_watermark = 4;
+  ResponseStatus status = 5;
+}
+
+message FetchRequest {
+  string cluster_id = 1;
+  repeated TopicPartitionOffset partitions = 2;
+  int32 max_bytes = 3;
+  int32 max_wait_ms = 4;
+}
+
+message TopicPartitionOffset {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  int32 max_bytes = 4;
+}
+
+message FetchResponse {
+  repeated PartitionFetchResult results = 1;
+}
+
+message PartitionFetchResult {
+  string topic = 1;
+  int32 partition = 2;
+  repeated Record records = 3;
+  int64 high_watermark = 4;
+  ResponseStatus status = 5;
+}
+
+message CommitRequest {
+  string cluster_id = 1;
+  string consumer_group = 2;
+  repeated OffsetCommit offsets = 3;
+}
+
+message OffsetCommit {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  string metadata = 4;
+}
+
+message CommitResponse {
+  repeated OffsetCommitResult results = 1;
+}
+
+message OffsetCommitResult {
+  string topic = 1;
+  int32 partition = 2;
+  ResponseStatus status = 3;
+}
+
+message FetchOffsetsRequest {
+  string cluster_id = 1;
+  string consumer_group = 2;
+  repeated TopicPartition partitions = 3;
+}
+
+message FetchOffsetsResponse {
+  repeated OffsetFetchResult results = 1;
+}
+
+message OffsetFetchResult {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  string metadata = 4;
+  ResponseStatus status = 5;
+}
+
+message ListOffsetsRequest {
+  string cluster_id = 1;
+  repeated TopicPartitionTimestamp partitions = 2;
+}
+
+message TopicPartitionTimestamp {
+  string topic = 1;
+  int32 partition = 2;
+  int64 timestamp = 3;
+}
+
+message ListOffsetsResponse {
+  repeated OffsetResult results = 1;
+}
+
+message OffsetResult {
+  string topic = 1;
+  int32 partition = 2;
+  int64 offset = 3;
+  int64 timestamp = 4;
+  ResponseStatus status = 5;
+}
+
+message SubscribeRequest {
+  string cluster_id = 1;
+  string consumer_group = 2;
+  repeated string topics = 3;
+  string pattern = 4;
+}
+
+message SubscribeResponse {
+  repeated TopicPartition assigned_partitions = 1;
+  ResponseStatus status = 2;
+}
+
+message UnsubscribeRequest {
+  string cluster_id = 1;
+  string consumer_group = 2;
+}
+
+message UnsubscribeResponse {
+  ResponseStatus status = 1;
+}
+
+message ConsumeStreamControl {
+  enum ControlType {
+    START = 0;
+    PAUSE = 1;
+    RESUME = 2;
+    ACK = 3;
+    SEEK = 4;
+  }
+
+  ControlType type = 1;
+  string topic = 2;
+  int32 partition = 3;
+  int64 offset = 4;
+  int32 max_records = 5;
+  int32 max_wait_ms = 6;
+  string consumer_group = 7;
+}

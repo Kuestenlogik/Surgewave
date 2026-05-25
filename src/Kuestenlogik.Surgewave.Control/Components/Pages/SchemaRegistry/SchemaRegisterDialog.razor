@@ -1,0 +1,238 @@
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ISchemaRegistryClient SchemaClient
+@inject NotificationState Notification
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Schema" Class="mr-2" />
+            Register Schema
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_formValid">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_subject" Label="Subject" Required="true"
+                                  RequiredError="Subject is required"
+                                  Placeholder="my-topic-value"
+                                  HelperText="Usually: topic-name-value or topic-name-key"
+                                  Variant="Variant.Outlined"
+                                  Disabled="@(!string.IsNullOrEmpty(PrefilledSubject))" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" @bind-Value="_schemaType" Label="Schema Type"
+                               Variant="Variant.Outlined">
+                        <MudSelectItem Value="@("AVRO")">Avro</MudSelectItem>
+                        <MudSelectItem Value="@("JSON")">JSON Schema</MudSelectItem>
+                        <MudSelectItem Value="@("PROTOBUF")">Protobuf</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_schema" Label="Schema Definition" Required="true"
+                                  RequiredError="Schema is required"
+                                  Placeholder="@GetPlaceholder()"
+                                  Variant="Variant.Outlined" Lines="15"
+                                  Style="font-family: monospace; font-size: 12px;"
+                                  Validation="@(new Func<string, string?>(ValidateSchema))" />
+                </MudItem>
+            </MudGrid>
+
+            @if (_compatibilityResult != null)
+            {
+                <MudDivider Class="my-4" />
+                <MudAlert Severity="@(_compatibilityResult.IsCompatible ? Severity.Success : Severity.Error)">
+                    @if (_compatibilityResult.IsCompatible)
+                    {
+                        <span>Schema is compatible with existing versions</span>
+                    }
+                    else
+                    {
+                        <span>Schema is NOT compatible:</span>
+                        @if (_compatibilityResult.Messages?.Count > 0)
+                        {
+                            <ul class="mt-2">
+                                @foreach (var msg in _compatibilityResult.Messages)
+                                {
+                                    <li>@msg</li>
+                                }
+                            </ul>
+                        }
+                    }
+                </MudAlert>
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="CheckCompatibilityAsync"
+                   Disabled="@(!_formValid || _checking)">
+            @if (_checking)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Check Compatibility
+        </MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="RegisterAsync"
+                   Disabled="@(!_formValid || _registering)">
+            @if (_registering)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Register
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string? PrefilledSubject { get; set; }
+
+    private MudForm _form = null!;
+    private bool _formValid;
+    private bool _checking;
+    private bool _registering;
+
+    private string _subject = "";
+    private string _schemaType = "AVRO";
+    private string _schema = "";
+    private CompatibilityCheckResult? _compatibilityResult;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrEmpty(PrefilledSubject))
+        {
+            _subject = PrefilledSubject;
+        }
+    }
+
+    private string? ValidateSchema(string schema)
+    {
+        if (string.IsNullOrWhiteSpace(schema))
+            return "Schema is required";
+
+        try
+        {
+            if (_schemaType is "AVRO" or "JSON")
+            {
+                // Basic JSON validation
+                System.Text.Json.JsonDocument.Parse(schema);
+            }
+            return null;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return $"Invalid JSON: {ex.Message}";
+        }
+    }
+
+    private string GetPlaceholder() => _schemaType switch
+    {
+        "AVRO" => """
+            {
+              "type": "record",
+              "name": "MyRecord",
+              "fields": [
+                {"name": "id", "type": "string"},
+                {"name": "value", "type": "int"}
+              ]
+            }
+            """,
+        "JSON" => """
+            {
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "type": "object",
+              "properties": {
+                "id": {"type": "string"},
+                "value": {"type": "integer"}
+              }
+            }
+            """,
+        "PROTOBUF" => """
+            syntax = "proto3";
+
+            message MyRecord {
+              string id = 1;
+              int32 value = 2;
+            }
+            """,
+        _ => ""
+    };
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task CheckCompatibilityAsync()
+    {
+        if (!_formValid) return;
+
+        _checking = true;
+        _compatibilityResult = null;
+        StateHasChanged();
+
+        try
+        {
+            var request = new RegisterSchemaRequest
+            {
+                Schema = _schema,
+                SchemaType = _schemaType
+            };
+
+            _compatibilityResult = await SchemaClient.CheckCompatibilityAsync(_subject, request);
+
+            if (_compatibilityResult == null)
+            {
+                // No existing schema - compatibility check not applicable
+                _compatibilityResult = new CompatibilityCheckResult { IsCompatible = true };
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Compatibility check failed: {ex.Message}");
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task RegisterAsync()
+    {
+        if (!_formValid) return;
+
+        _registering = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new RegisterSchemaRequest
+            {
+                Schema = _schema,
+                SchemaType = _schemaType
+            };
+
+            var schemaId = await SchemaClient.RegisterSchemaAsync(_subject, request);
+
+            if (schemaId.HasValue)
+            {
+                MudDialog.Close(DialogResult.Ok(schemaId.Value));
+            }
+            else
+            {
+                Notification.ShowError("Failed to register schema");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to register schema: {ex.Message}");
+        }
+        finally
+        {
+            _registering = false;
+        }
+    }
+}

@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+
+service QuotaService {
+  rpc GetQuotaConfig(GetQuotaConfigRequest) returns (GetQuotaConfigResponse);
+  rpc SetQuotaConfig(SetQuotaConfigRequest) returns (SetQuotaConfigResponse);
+  rpc DescribeClientQuotas(DescribeClientQuotasRequest) returns (DescribeClientQuotasResponse);
+  rpc ListClientQuotas(ListClientQuotasRequest) returns (ListClientQuotasResponse);
+}
+
+message GetQuotaConfigRequest {}
+
+message GetQuotaConfigResponse {
+  bool enabled = 1;
+  int64 producer_bytes_per_second = 2;
+  int64 producer_burst_bytes = 3;
+  int64 consumer_bytes_per_second = 4;
+  int64 consumer_burst_bytes = 5;
+  int32 max_throttle_time_ms = 6;
+  int32 client_inactivity_timeout_minutes = 7;
+  ResponseStatus status = 8;
+}
+
+message SetQuotaConfigRequest {
+  bool enabled = 1;
+  int64 producer_bytes_per_second = 2;
+  int64 producer_burst_bytes = 3;
+  int64 consumer_bytes_per_second = 4;
+  int64 consumer_burst_bytes = 5;
+  int32 max_throttle_time_ms = 6;
+  int32 client_inactivity_timeout_minutes = 7;
+}
+
+message SetQuotaConfigResponse {
+  ResponseStatus status = 1;
+}
+
+message DescribeClientQuotasRequest {
+  string client_id = 1;
+}
+
+message DescribeClientQuotasResponse {
+  string client_id = 1;
+  int64 total_produced_bytes = 2;
+  int64 total_fetched_bytes = 3;
+  int32 produce_throttle_count = 4;
+  int32 fetch_throttle_count = 5;
+  int64 available_produce_tokens = 6;
+  int64 available_fetch_tokens = 7;
+  int64 last_activity = 8;
+  ResponseStatus status = 9;
+}
+
+message ListClientQuotasRequest {}
+
+message ListClientQuotasResponse {
+  repeated ClientQuotaStats clients = 1;
+  ResponseStatus status = 2;
+}
+
+message ClientQuotaStats {
+  string client_id = 1;
+  int64 total_produced_bytes = 2;
+  int64 total_fetched_bytes = 3;
+  int32 produce_throttle_count = 4;
+  int32 fetch_throttle_count = 5;
+  int64 available_produce_tokens = 6;
+  int64 available_fetch_tokens = 7;
+  int64 last_activity = 8;
+}

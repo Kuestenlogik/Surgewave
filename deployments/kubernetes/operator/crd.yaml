@@ -1,0 +1,147 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: surgewaveclusters.surgewave.kl.io
+spec:
+  group: surgewave.kl.io
+  names:
+    kind: SurgewaveCluster
+    plural: surgewaveclusters
+    singular: surgewavecluster
+    shortNames:
+      - sc
+      - surgewave
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                brokers:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 3
+                version:
+                  type: string
+                  default: "latest"
+                image:
+                  type: string
+                  default: "surgewave:latest"
+                controlUiEnabled:
+                  type: boolean
+                  default: true
+                kafkaPort:
+                  type: integer
+                  default: 9092
+                grpcPort:
+                  type: integer
+                  default: 9093
+                mqttPort:
+                  type: integer
+                  default: 1883
+                replicationPort:
+                  type: integer
+                  default: 10092
+                tlsEnabled:
+                  type: boolean
+                  default: false
+                tlsSecretName:
+                  type: string
+                storage:
+                  type: object
+                  properties:
+                    size:
+                      type: string
+                      default: "10Gi"
+                    storageClassName:
+                      type: string
+                resources:
+                  type: object
+                  properties:
+                    cpuRequest:
+                      type: string
+                      default: "500m"
+                    cpuLimit:
+                      type: string
+                      default: "2"
+                    memoryRequest:
+                      type: string
+                      default: "1Gi"
+                    memoryLimit:
+                      type: string
+                      default: "4Gi"
+                monitoring:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    serviceMonitor:
+                      type: boolean
+                      default: false
+                serverless:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    minReplicas:
+                      type: integer
+                      minimum: 0
+                      default: 0
+                    maxReplicas:
+                      type: integer
+                      minimum: 1
+                      default: 10
+                    idleTimeoutSeconds:
+                      type: integer
+                      minimum: 30
+                      default: 300
+                config:
+                  type: object
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                readyBrokers:
+                  type: integer
+                totalBrokers:
+                  type: integer
+                bootstrapServers:
+                  type: string
+                controlUiUrl:
+                  type: string
+                lastUpdated:
+                  type: string
+                  format: date-time
+                observedGeneration:
+                  type: integer
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Brokers
+          type: integer
+          jsonPath: .spec.brokers
+        - name: Ready
+          type: integer
+          jsonPath: .status.readyBrokers
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Bootstrap
+          type: string
+          jsonPath: .status.bootstrapServers
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -1,0 +1,953 @@
+@page "/topics/{TopicName}/partitions/{PartitionId:int}/messages"
+@inject ISurgewaveApiClient ApiClient
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+@inject IJSRuntime JS
+@inject ILocalStorageService LocalStorage
+@using System.Text.RegularExpressions
+@using Kuestenlogik.Surgewave.Core.Serialization
+
+<PageTitle>Messages - @TopicName[@PartitionId] - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+@* Navigation Controls *@
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="3">
+            <MudNumericField @bind-Value="_offset" Label="Start Offset" Variant="Variant.Outlined"
+                             Min="@_logStartOffset" Max="@(_highWatermark - 1)" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudNumericField @bind-Value="_limit" Label="Limit" Variant="Variant.Outlined"
+                             Min="1" Max="100" />
+        </MudItem>
+        <MudItem xs="12" md="7" Class="d-flex align-center justify-end gap-2 flex-wrap">
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Log: @_logStartOffset.ToString("N0") - @_highWatermark.ToString("N0")
+                (@((_highWatermark - _logStartOffset).ToString("N0")) messages)
+            </MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => JumpTo(_logStartOffset))"
+                       Disabled="@(_offset == _logStartOffset)" Size="Size.Small">
+                Earliest
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => JumpTo(Math.Max(_logStartOffset, _highWatermark - _limit)))"
+                       Disabled="@(_offset >= _highWatermark - _limit)" Size="Size.Small">
+                Latest
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Schedule"
+                       OnClick="@(() => _showTimestampSeek = !_showTimestampSeek)" Size="Size.Small">
+                Seek to Time
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="LoadMessagesAsync" Disabled="@_loading" Size="Size.Small">
+                Load
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+
+    @* Timestamp Seek Panel *@
+    @if (_showTimestampSeek)
+    {
+        <MudDivider Class="my-3" />
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudDatePicker @bind-Date="_seekDate" Label="Date" Variant="Variant.Outlined"
+                               DateFormat="yyyy-MM-dd" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudTimePicker @bind-Time="_seekTime" Label="Time" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" md="5" Class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Schedule"
+                           OnClick="SeekToTimestampAsync" Disabled="@(_seekDate == null || _seekingTimestamp)">
+                    @if (_seekingTimestamp)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    Seek
+                </MudButton>
+                @if (_seekResult != null)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Success">Found offset: @_seekResult</MudText>
+                }
+            </MudItem>
+        </MudGrid>
+    }
+</MudPaper>
+
+@* Filter Panel *@
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    <div class="d-flex align-center gap-2 mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.FilterList" Size="Size.Small" />
+        <MudText Typo="Typo.subtitle2">Filters</MudText>
+        <MudSpacer />
+        @if (HasActiveFilters())
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                @_filteredMessages.Count / @_messages.Count shown
+            </MudChip>
+            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Secondary" OnClick="ClearFilters">
+                Clear All
+            </MudButton>
+        }
+        <MudTooltip Text="@(_showMaskingConfig ? "Hide Masking Config" : "Configure Data Masking")">
+            <MudToggleIconButton @bind-Toggled="_showMaskingConfig" Icon="@Icons.Material.Filled.VisibilityOff"
+                                  ToggledIcon="@Icons.Material.Filled.Visibility" Size="Size.Small" />
+        </MudTooltip>
+    </div>
+
+    <MudGrid>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_keyFilter" Label="Key Filter (Regex)" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="e.g. user-.*"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.FilterAlt"
+                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="ApplyFilters" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_valueFilter" Label="Value Contains" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="e.g. error"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="ApplyFilters" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_jsonPathFilter" Label="JSONPath Filter" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="e.g. $.user.age > 18"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Code"
+                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="ApplyFilters" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_headerFilter" Label="Header Filter" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="e.g. correlationId=abc.*"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Label"
+                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="ApplyFilters" />
+        </MudItem>
+    </MudGrid>
+
+    @if (!string.IsNullOrWhiteSpace(_filterError))
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@_filterError</MudAlert>
+    }
+</MudPaper>
+
+@* Data Masking Configuration *@
+@if (_showMaskingConfig)
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <div class="d-flex align-center gap-2 mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.Security" Size="Size.Small" />
+            <MudText Typo="Typo.subtitle2">Data Masking Rules</MudText>
+            <MudSpacer />
+            <MudSwitch T="bool" @bind-Value="_maskingEnabled" Label="Enable Masking" Color="Color.Primary"
+                       Size="Size.Small" />
+        </div>
+
+        @for (int i = 0; i < _maskingRules.Count; i++)
+        {
+            var index = i;
+            <MudGrid Class="mb-2">
+                <MudItem xs="12" md="3">
+                    <MudTextField @bind-Value="_maskingRules[index].Name" Label="Rule Name" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudTextField @bind-Value="_maskingRules[index].Pattern" Label="Pattern (Regex)" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Placeholder='e.g. "email"\s*:\s*"[^"]*"' />
+                </MudItem>
+                <MudItem xs="12" md="2">
+                    <MudTextField @bind-Value="_maskingRules[index].Replacement" Label="Replacement" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" md="2">
+                    <MudSwitch T="bool" @bind-Value="_maskingRules[index].Enabled" Label="Active" Color="Color.Primary"
+                               Size="Size.Small" />
+                </MudItem>
+                <MudItem xs="12" md="2" Class="d-flex align-center">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => RemoveMaskingRule(index))" />
+                </MudItem>
+            </MudGrid>
+        }
+
+        <div class="d-flex gap-2 mt-2">
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddMaskingRule">
+                Add Rule
+            </MudButton>
+            <MudMenu Label="Presets" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoAwesome">
+                <MudMenuItem OnClick="@(() => AddPresetRule("Email", @"""email""\s*:\s*""[^""]*""", @"""email"": ""***@***.***"""))">
+                    Email Addresses
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddPresetRule("Phone", @"""phone""\s*:\s*""[^""]*""", @"""phone"": ""***-***-****"""))">
+                    Phone Numbers
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddPresetRule("SSN", @"""ssn""\s*:\s*""[^""]*""", @"""ssn"": ""***-**-****"""))">
+                    SSN
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddPresetRule("Credit Card", @"""(card|cc|creditCard)""\s*:\s*""[^""]*""", @"""$1"": ""****-****-****-****"""))">
+                    Credit Card Numbers
+                </MudMenuItem>
+                <MudMenuItem OnClick="@(() => AddPresetRule("Password", @"""(password|secret|token)""\s*:\s*""[^""]*""", @"""$1"": ""[REDACTED]"""))">
+                    Passwords/Secrets
+                </MudMenuItem>
+            </MudMenu>
+            <MudSpacer />
+            <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
+                       OnClick="SaveMaskingConfigAsync">
+                Save Rules
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+@* Message Table *@
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">
+        @_error
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadMessagesAsync" Class="ml-4">
+            Retry
+        </MudButton>
+    </MudAlert>
+}
+else if (_filteredMessages.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">
+        @if (HasActiveFilters() && _messages.Count > 0)
+        {
+            <span>No messages match the current filters. @_messages.Count message(s) loaded but filtered out.</span>
+        }
+        else
+        {
+            <span>No messages found at this offset.</span>
+        }
+    </MudAlert>
+}
+else
+{
+    <MudTable Items="@_filteredMessages" Dense="true" Hover="true" Striped="true" Class="mb-4"
+              RowClass="cursor-pointer" T="MessageDetail" OnRowClick="@(e => ShowMessageDetail(e.Item!))">
+        <HeaderContent>
+            <MudTh Style="width: 100px;">Offset</MudTh>
+            <MudTh Style="width: 180px;">Timestamp</MudTh>
+            <MudTh Style="width: 150px;">Key</MudTh>
+            <MudTh>Value</MudTh>
+            <MudTh Style="width: 80px;">Size</MudTh>
+            <MudTh Style="width: 100px;">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Offset">
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.Offset</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Timestamp">
+                <MudTooltip Text="@context.Timestamp.ToString("O")">
+                    @context.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+                </MudTooltip>
+            </MudTd>
+            <MudTd DataLabel="Key">
+                @if (context.Key != null)
+                {
+                    <code class="text-truncate" style="max-width: 140px; display: inline-block;">@Truncate(MaskValue(context.Key), 30)</code>
+                }
+                else
+                {
+                    <MudText Color="Color.Secondary" Typo="Typo.caption">null</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Value">
+                @if (context.IsCompressed)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">Compressed</MudChip>
+                }
+                else if (context.ValueBase64 != null)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">Binary</MudChip>
+                }
+                else
+                {
+                    <code class="text-truncate" style="max-width: 400px; display: inline-block;">@Truncate(MaskValue(context.Value ?? ""), 80)</code>
+                }
+                @{ var ct = DetectContentType(context); }
+                @if (!string.IsNullOrEmpty(ct) && ct != "application/octet-stream" && ct != "application/x-confluent-schema")
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="mr-1">@GetContentTypeLabel(ct)</MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Size">@FormatSize(context.ValueSizeBytes)</MudTd>
+            <MudTd>
+                <MudTooltip Text="View">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   OnClick="@(() => ShowMessageDetail(context))" />
+                </MudTooltip>
+                <MudTooltip Text="Download">
+                    <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                   OnClick="@(() => DownloadMessage(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+
+    <div class="d-flex justify-space-between">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="LoadPrevious" Disabled="@(_offset <= _logStartOffset)">
+            Previous
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" EndIcon="@Icons.Material.Filled.ArrowForward"
+                   OnClick="LoadNext" Disabled="@(_messages.Count < _limit || _offset + _limit >= _highWatermark)">
+            Next
+        </MudButton>
+    </div>
+}
+
+@* Message Detail Dialog *@
+<MudDialog @bind-Visible="_showDetailDialog" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Message at Offset @_selectedMessage?.Offset</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_selectedMessage != null)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Timestamp</MudText>
+                    <MudText>@_selectedMessage.Timestamp.ToString("O")</MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Size</MudText>
+                    <MudText>@FormatSize(_selectedMessage.ValueSizeBytes)</MudText>
+                </MudItem>
+
+                @if (_selectedMessage.Headers.Count > 0)
+                {
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-2">Headers</MudText>
+                        <MudSimpleTable Dense="true">
+                            <tbody>
+                                @foreach (var header in _selectedMessage.Headers)
+                                {
+                                    <tr>
+                                        <td><code>@header.Key</code></td>
+                                        <td>@MaskValue(header.Value)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudItem>
+                }
+
+                @{ var detailCt = DetectContentType(_selectedMessage); }
+                @if (!string.IsNullOrEmpty(detailCt))
+                {
+                    <MudItem xs="12">
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                            Detected format: <strong>@GetContentTypeLabel(detailCt)</strong>
+                        </MudAlert>
+                    </MudItem>
+                }
+
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-2">Key</MudText>
+                    @if (_selectedMessage.Key != null)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2" Style="background-color: var(--mud-palette-background-grey); max-height: 100px; overflow: auto;">
+                            <pre style="margin: 0; white-space: pre-wrap; word-break: break-all;">@MaskValue(_selectedMessage.Key)</pre>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Secondary">null</MudText>
+                    }
+                </MudItem>
+
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2 mb-2">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Value</MudText>
+                        @if (_maskingEnabled && _maskingRules.Any(r => r.Enabled))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.VisibilityOff">
+                                Masked
+                            </MudChip>
+                        }
+                    </div>
+                    @if (_selectedMessage.IsCompressed)
+                    {
+                        <MudAlert Severity="Severity.Warning">This message is compressed and cannot be displayed.</MudAlert>
+                    }
+                    else if (_selectedMessage.ValueBase64 != null && TryDecodePayload(_selectedMessage) is { } decodedValue)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2" Style="background-color: var(--mud-palette-background-grey); max-height: 400px; overflow: auto;">
+                            <pre style="margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-all;">@MaskValue(decodedValue)</pre>
+                        </MudPaper>
+                    }
+                    else if (_selectedMessage.ValueBase64 != null)
+                    {
+                        <MudAlert Severity="Severity.Info" Class="mb-2">Binary data — @FormatSize(_selectedMessage.ValueSizeBytes)</MudAlert>
+                        <MudPaper Elevation="0" Class="pa-2" Style="background-color: var(--mud-palette-background-grey); max-height: 300px; overflow: auto;">
+                            <pre style="margin: 0; white-space: pre-wrap; word-break: break-all;">@Truncate(_selectedMessage.ValueBase64, 512)</pre>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudPaper Elevation="0" Class="pa-2" Style="background-color: var(--mud-palette-background-grey); max-height: 400px; overflow: auto;">
+                            <pre style="margin: 0; white-space: pre-wrap; word-break: break-all;">@MaskValue(FormatJson(_selectedMessage.Value ?? ""))</pre>
+                        </MudPaper>
+                    }
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showDetailDialog = false)">Close</MudButton>
+        <MudButton Color="Color.Primary" OnClick="@(() => DownloadMessage(_selectedMessage!))">Download</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter]
+    public string TopicName { get; set; } = "";
+
+    [Parameter]
+    public int PartitionId { get; set; }
+
+    // Core state
+    private bool _loading = true;
+    private string? _error;
+    private List<MessageDetail> _messages = [];
+    private List<MessageDetail> _filteredMessages = [];
+    private long _offset;
+    private int _limit = 20;
+    private long _highWatermark;
+    private long _logStartOffset;
+
+    // Detail dialog
+    private bool _showDetailDialog;
+    private MessageDetail? _selectedMessage;
+
+    // Timestamp seek
+    private bool _showTimestampSeek;
+    private DateTime? _seekDate;
+    private TimeSpan? _seekTime;
+    private bool _seekingTimestamp;
+    private long? _seekResult;
+
+    // Filters
+    private string? _keyFilter;
+    private string? _valueFilter;
+    private string? _jsonPathFilter;
+    private string? _headerFilter;
+    private string? _filterError;
+
+    // Data Masking
+    private bool _showMaskingConfig;
+    private bool _maskingEnabled;
+    private List<MaskingRule> _maskingRules = [];
+
+    private const string MaskingStorageKey = "surgewave-masking-config";
+
+    private readonly List<BreadcrumbItem> _breadcrumbs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbs.AddRange([
+            new BreadcrumbItem("Topics", "/topics"),
+            new BreadcrumbItem(TopicName, $"/topics/{TopicName}"),
+            new BreadcrumbItem($"Partition {PartitionId}", null, true)
+        ]);
+
+        await LoadMaskingConfigAsync();
+        await LoadMessagesAsync();
+    }
+
+    // --- Message Loading ---
+
+    private async Task LoadMessagesAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ApiClient.GetMessagesAsync(TopicName, PartitionId, _offset, _limit);
+            if (result == null)
+            {
+                _error = "Failed to load messages";
+                _messages = [];
+                _filteredMessages = [];
+            }
+            else
+            {
+                _messages = result.Messages.ToList();
+                _highWatermark = result.HighWatermark;
+                _logStartOffset = result.LogStartOffset;
+
+                if (_offset < _logStartOffset)
+                {
+                    _offset = _logStartOffset;
+                }
+
+                ApplyFilters();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _messages = [];
+            _filteredMessages = [];
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task JumpTo(long offset)
+    {
+        _offset = offset;
+        await LoadMessagesAsync();
+    }
+
+    private async Task LoadNext()
+    {
+        _offset = Math.Min(_offset + _limit, _highWatermark - 1);
+        await LoadMessagesAsync();
+    }
+
+    private async Task LoadPrevious()
+    {
+        _offset = Math.Max(_offset - _limit, _logStartOffset);
+        await LoadMessagesAsync();
+    }
+
+    // --- Timestamp Seek ---
+
+    private async Task SeekToTimestampAsync()
+    {
+        if (_seekDate == null) return;
+
+        _seekingTimestamp = true;
+        _seekResult = null;
+        StateHasChanged();
+
+        try
+        {
+            var dateTime = _seekDate.Value;
+            if (_seekTime != null)
+            {
+                dateTime = dateTime.Add(_seekTime.Value);
+            }
+
+            var timestamp = new DateTimeOffset(dateTime, TimeZoneInfo.Local.GetUtcOffset(dateTime));
+            var offset = await ApiClient.GetOffsetForTimestampAsync(TopicName, PartitionId, timestamp);
+
+            if (offset != null)
+            {
+                _seekResult = offset;
+                _offset = offset.Value;
+                await LoadMessagesAsync();
+                Notification.ShowSuccess($"Jumped to offset {offset} for timestamp {timestamp:yyyy-MM-dd HH:mm:ss}");
+            }
+            else
+            {
+                Notification.ShowWarning("No offset found for the specified timestamp");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Seek failed: {ex.Message}");
+        }
+        finally
+        {
+            _seekingTimestamp = false;
+            StateHasChanged();
+        }
+    }
+
+    // --- Filtering ---
+
+    private void ApplyFilters()
+    {
+        _filterError = null;
+
+        if (!HasActiveFilters())
+        {
+            _filteredMessages = _messages.ToList();
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            var filtered = _messages.AsEnumerable();
+
+            // Key regex filter
+            if (!string.IsNullOrWhiteSpace(_keyFilter))
+            {
+                try
+                {
+                    var keyRegex = new Regex(_keyFilter, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+                    filtered = filtered.Where(m => m.Key != null && keyRegex.IsMatch(m.Key));
+                }
+                catch (RegexParseException ex)
+                {
+                    _filterError = $"Invalid key regex: {ex.Message}";
+                    _filteredMessages = _messages.ToList();
+                    StateHasChanged();
+                    return;
+                }
+            }
+
+            // Value contains filter
+            if (!string.IsNullOrWhiteSpace(_valueFilter))
+            {
+                filtered = filtered.Where(m => m.Value != null &&
+                    m.Value.Contains(_valueFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // JSONPath-style filter (simplified: property.path op value)
+            if (!string.IsNullOrWhiteSpace(_jsonPathFilter))
+            {
+                filtered = filtered.Where(m => MatchesJsonPathFilter(m.Value, _jsonPathFilter));
+            }
+
+            // Header filter (format: key=value_regex)
+            if (!string.IsNullOrWhiteSpace(_headerFilter))
+            {
+                var headerParts = _headerFilter.Split('=', 2);
+                if (headerParts.Length == 2)
+                {
+                    var headerKey = headerParts[0].Trim();
+                    try
+                    {
+                        var headerValueRegex = new Regex(headerParts[1].Trim(), RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+                        filtered = filtered.Where(m => m.Headers.TryGetValue(headerKey, out var hv) && headerValueRegex.IsMatch(hv));
+                    }
+                    catch (RegexParseException ex)
+                    {
+                        _filterError = $"Invalid header regex: {ex.Message}";
+                        _filteredMessages = _messages.ToList();
+                        StateHasChanged();
+                        return;
+                    }
+                }
+                else
+                {
+                    // Just key name search
+                    filtered = filtered.Where(m => m.Headers.Keys.Any(k =>
+                        k.Contains(_headerFilter, StringComparison.OrdinalIgnoreCase)));
+                }
+            }
+
+            _filteredMessages = filtered.ToList();
+        }
+        catch (Exception ex)
+        {
+            _filterError = $"Filter error: {ex.Message}";
+            _filteredMessages = _messages.ToList();
+        }
+
+        StateHasChanged();
+    }
+
+    private static bool MatchesJsonPathFilter(string? jsonValue, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(jsonValue)) return false;
+
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(jsonValue);
+            var root = doc.RootElement;
+
+            // Parse filter: $.path.to.field op value
+            var filterTrimmed = filter.TrimStart('$', '.');
+
+            // Try comparison operator patterns: >, <, >=, <=, ==, !=, =
+            string[] operators = [">=", "<=", "!=", "==", ">", "<", "="];
+            foreach (var op in operators)
+            {
+                var opIndex = filterTrimmed.IndexOf(op, StringComparison.Ordinal);
+                if (opIndex > 0)
+                {
+                    var path = filterTrimmed[..opIndex].Trim().TrimStart('$', '.');
+                    var compareValue = filterTrimmed[(opIndex + op.Length)..].Trim().Trim('"', '\'');
+
+                    var element = NavigateJsonPath(root, path);
+                    if (element == null) return false;
+
+                    return CompareJsonValue(element.Value, op == "=" ? "==" : op, compareValue);
+                }
+            }
+
+            // No operator - just check if path exists and has a truthy value
+            var el = NavigateJsonPath(root, filterTrimmed);
+            return el != null && el.Value.ValueKind != System.Text.Json.JsonValueKind.Null
+                             && el.Value.ValueKind != System.Text.Json.JsonValueKind.False;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static System.Text.Json.JsonElement? NavigateJsonPath(System.Text.Json.JsonElement element, string path)
+    {
+        var parts = path.Split('.');
+        var current = element;
+
+        foreach (var part in parts)
+        {
+            if (current.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            if (!current.TryGetProperty(part, out var next)) return null;
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static bool CompareJsonValue(System.Text.Json.JsonElement element, string op, string compareValue)
+    {
+        // Numeric comparison
+        if (element.ValueKind == System.Text.Json.JsonValueKind.Number && double.TryParse(compareValue, System.Globalization.CultureInfo.InvariantCulture, out var numCompare))
+        {
+            var numValue = element.GetDouble();
+            return op switch
+            {
+                "==" => Math.Abs(numValue - numCompare) < 0.0001,
+                "!=" => Math.Abs(numValue - numCompare) >= 0.0001,
+                ">" => numValue > numCompare,
+                "<" => numValue < numCompare,
+                ">=" => numValue >= numCompare,
+                "<=" => numValue <= numCompare,
+                _ => false
+            };
+        }
+
+        // String comparison
+        var strValue = element.ValueKind == System.Text.Json.JsonValueKind.String
+            ? element.GetString() ?? ""
+            : element.GetRawText();
+
+        return op switch
+        {
+            "==" => strValue.Equals(compareValue, StringComparison.OrdinalIgnoreCase),
+            "!=" => !strValue.Equals(compareValue, StringComparison.OrdinalIgnoreCase),
+            _ => strValue.Contains(compareValue, StringComparison.OrdinalIgnoreCase)
+        };
+    }
+
+    private bool HasActiveFilters()
+    {
+        return !string.IsNullOrWhiteSpace(_keyFilter) ||
+               !string.IsNullOrWhiteSpace(_valueFilter) ||
+               !string.IsNullOrWhiteSpace(_jsonPathFilter) ||
+               !string.IsNullOrWhiteSpace(_headerFilter);
+    }
+
+    private void ClearFilters()
+    {
+        _keyFilter = null;
+        _valueFilter = null;
+        _jsonPathFilter = null;
+        _headerFilter = null;
+        _filterError = null;
+        ApplyFilters();
+    }
+
+    // --- Data Masking ---
+
+    private string MaskValue(string value)
+    {
+        if (!_maskingEnabled || _maskingRules.Count == 0) return value;
+
+        var masked = value;
+        foreach (var rule in _maskingRules.Where(r => r.Enabled))
+        {
+            try
+            {
+                masked = Regex.Replace(masked, rule.Pattern, rule.Replacement, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+            }
+            catch
+            {
+                // Skip invalid regex patterns
+            }
+        }
+        return masked;
+    }
+
+    private void AddMaskingRule()
+    {
+        _maskingRules.Add(new MaskingRule { Name = $"Rule {_maskingRules.Count + 1}", Enabled = true });
+    }
+
+    private void RemoveMaskingRule(int index)
+    {
+        _maskingRules.RemoveAt(index);
+    }
+
+    private void AddPresetRule(string name, string pattern, string replacement)
+    {
+        _maskingRules.Add(new MaskingRule
+        {
+            Name = name,
+            Pattern = pattern,
+            Replacement = replacement,
+            Enabled = true
+        });
+    }
+
+    private async Task LoadMaskingConfigAsync()
+    {
+        try
+        {
+            var allConfigs = await LocalStorage.GetItemAsync<Dictionary<string, DataMaskingConfig>>(MaskingStorageKey);
+            if (allConfigs != null && allConfigs.TryGetValue(TopicName, out var config))
+            {
+                _maskingEnabled = config.Enabled;
+                _maskingRules = config.Rules;
+            }
+        }
+        catch
+        {
+            _maskingRules = [];
+        }
+    }
+
+    private async Task SaveMaskingConfigAsync()
+    {
+        try
+        {
+            var allConfigs = await LocalStorage.GetItemAsync<Dictionary<string, DataMaskingConfig>>(MaskingStorageKey)
+                ?? new Dictionary<string, DataMaskingConfig>();
+            allConfigs[TopicName] = new DataMaskingConfig
+            {
+                Enabled = _maskingEnabled,
+                Rules = _maskingRules
+            };
+            await LocalStorage.SetItemAsync(MaskingStorageKey, allConfigs);
+            Notification.ShowSuccess("Masking rules saved");
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to save masking rules: {ex.Message}");
+        }
+    }
+
+    // --- Message Detail & Download ---
+
+    private void ShowMessageDetail(MessageDetail message)
+    {
+        _selectedMessage = message;
+        _showDetailDialog = true;
+    }
+
+    private async Task DownloadMessage(MessageDetail message)
+    {
+        try
+        {
+            var fileName = $"{TopicName}-{PartitionId}-{message.Offset}.txt";
+            var content = message.ValueBase64 != null
+                ? Convert.FromBase64String(message.ValueBase64)
+                : System.Text.Encoding.UTF8.GetBytes(message.Value ?? "");
+
+            var base64 = Convert.ToBase64String(content);
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64);
+
+            Notification.ShowSuccess($"Downloaded message at offset {message.Offset}");
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Download failed: {ex.Message}");
+        }
+    }
+
+    // --- Content Type Detection ---
+
+    private readonly Dictionary<long, string?> _contentTypeCache = [];
+
+    private string? DetectContentType(MessageDetail message)
+    {
+        if (_contentTypeCache.TryGetValue(message.Offset, out var cached))
+            return cached;
+
+        string? result = null;
+        if (message.ValueBase64 != null)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(message.ValueBase64);
+                result = ContentTypeDetector.Detect(bytes);
+            }
+            catch { /* ignore */ }
+        }
+
+        _contentTypeCache[message.Offset] = result;
+        return result;
+    }
+
+    private static string GetContentTypeLabel(string contentType) => contentType switch
+    {
+        "application/json" => "JSON",
+        "application/x-protobuf" => "Protobuf",
+        "application/avro" => "Avro",
+        "application/x-hyperion" => "Hyperion",
+        "application/x-msgpack" => "MessagePack",
+        "application/cbor" => "CBOR",
+        "application/x-bond" => "Bond",
+        "application/x-thrift" => "Thrift",
+        "application/x-memorypack" => "MemoryPack",
+        "application/x-capnproto" => "Cap'n Proto",
+        "application/x-orleans" => "Orleans",
+        "application/x-confluent-schema" => "Schema Registry",
+        "text/plain" => "Text",
+        _ => contentType
+    };
+
+    private string? TryDecodePayload(MessageDetail msg)
+    {
+        if (msg.ValueBase64 == null) return null;
+        try
+        {
+            var bytes = Convert.FromBase64String(msg.ValueBase64);
+            var contentType = DetectContentType(msg);
+            return MessageContentRenderer.TryRender(bytes, contentType);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // --- Helpers ---
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (value.Length <= maxLength) return value;
+        return value[..maxLength] + "...";
+    }
+
+    private static string FormatSize(int bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:N1} KB";
+        return $"{bytes / (1024.0 * 1024):N1} MB";
+    }
+
+    private static string FormatJson(string value)
+    {
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(value);
+            return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return value;
+        }
+    }
+}

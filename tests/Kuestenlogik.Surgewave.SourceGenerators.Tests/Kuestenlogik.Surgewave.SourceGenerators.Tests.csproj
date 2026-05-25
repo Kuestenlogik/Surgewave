@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The generator is referenced as a normal project reference so the test
+      assembly can instantiate it directly via CSharpGeneratorDriver — we test
+      the generator in isolation, not as part of the test project's own build
+      pipeline.
+    -->
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.SourceGenerators\Kuestenlogik.Surgewave.SourceGenerators.csproj" />
+  </ItemGroup>
+
+</Project>

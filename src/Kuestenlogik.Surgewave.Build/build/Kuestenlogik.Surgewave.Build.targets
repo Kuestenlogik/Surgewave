@@ -1,0 +1,134 @@
+<Project>
+
+  <!--
+    Task DLL location — two cases:
+    1. NuGet package:      tasks/net10.0/ (relative to build/)
+    2. Local ProjectRef:   artifacts/bin/Kuestenlogik.Surgewave.Build/Release/ (within Surgewave solution)
+  -->
+  <PropertyGroup>
+    <_SurgewaveBuildDll>$(MSBuildThisFileDirectory)..\tasks\net10.0\Kuestenlogik.Surgewave.Build.dll</_SurgewaveBuildDll>
+    <_SurgewaveBuildDll Condition="!Exists('$(_SurgewaveBuildDll)')">$(MSBuildThisFileDirectory)..\..\..\artifacts\bin\Kuestenlogik.Surgewave.Build\Release\Kuestenlogik.Surgewave.Build.dll</_SurgewaveBuildDll>
+  </PropertyGroup>
+
+  <!-- TaskHostFactory runs the tasks in a separate process, preventing the DLL from being locked
+       by the MSBuild worker so that Kuestenlogik.Surgewave.Build can be rebuilt without restarting the build server. -->
+  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.PackPluginTask"   AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
+  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.InstallPluginTask" AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
+
+  <!--
+    Surgewave property defaults — layout-aware.
+
+    Projects using the .NET artifacts output layout (UseArtifactsOutput=true, $(ArtifactsPath) set):
+      SurgewaveStagingDir   → artifacts/tmp/<ProjectName>/        (parallel to artifacts/obj/, artifacts/bin/)
+      SurgewaveSppOutputDir → artifacts/pub/packages/             (inside artifacts/pub/)
+
+    Projects using the classic layout (bin/, obj/ next to the csproj):
+      SurgewaveStagingDir   → tmp/                               (next to the .csproj)
+      SurgewaveSppOutputDir → pluginPackage/                               (next to the .csproj)
+
+    All three properties can be overridden in the csproj <PropertyGroup> or via -p: on the command line.
+    $(SurgewavePluginsDir) has no default — it is required when $(SurgewaveInstallPlugin)=true.
+  -->
+  <PropertyGroup>
+    <SurgewaveStagingDir   Condition="'$(SurgewaveStagingDir)'   == '' and '$(ArtifactsPath)' != ''">$(ArtifactsPath)tmp\$(MSBuildProjectName)\</SurgewaveStagingDir>
+    <SurgewaveStagingDir   Condition="'$(SurgewaveStagingDir)'   == '' and '$(ArtifactsPath)' == ''">$(MSBuildProjectDirectory)\tmp\</SurgewaveStagingDir>
+    <SurgewaveSppOutputDir Condition="'$(SurgewaveSppOutputDir)' == '' and '$(ArtifactsPath)' != ''">$(ArtifactsPath)pub\packages\</SurgewaveSppOutputDir>
+    <SurgewaveSppOutputDir Condition="'$(SurgewaveSppOutputDir)' == '' and '$(ArtifactsPath)' == ''">$(MSBuildProjectDirectory)\pluginPackage\</SurgewaveSppOutputDir>
+  </PropertyGroup>
+
+  <Target Name="_SurgewaveRedirectPublishDir"
+          BeforeTargets="PrepareForPublish"
+          Condition="'$(SurgewavePackPlugin)' == 'true' and '$(SurgewaveAutoStage)' != 'false' and '$(PublishDir)' == ''">
+    <PropertyGroup>
+      <PublishDir>$(SurgewaveStagingDir)</PublishDir>
+    </PropertyGroup>
+  </Target>
+
+  <!--
+    SurgewavePackPlugin: packs the publish output as a .swpkg file.
+
+    Enable by setting $(SurgewavePackPlugin)=true in the project or via MSBuild property:
+        dotnet publish -p:SurgewavePackPlugin=true
+
+    Properties:
+      $(SurgewaveSppOutputDir)     Output directory for the .swpkg file (see defaults above)
+      $(SurgewavePluginManifest)   Path to a custom plugin.json (optional; auto-detected from PublishDir)
+  -->
+  <Target Name="SurgewavePackPlugin"
+          AfterTargets="Publish"
+          Condition="'$(SurgewavePackPlugin)' == 'true' and '$(PublishDir)' != ''">
+
+    <PackPluginTask
+        SourceDir="$(PublishDir.TrimEnd('\/'))"
+        OutputDir="$(SurgewaveSppOutputDir)"
+        ManifestPath="$(SurgewavePluginManifest)"
+        SigningKeyPath="$(SurgewaveSigningKey)">
+      <Output TaskParameter="PackagePath" PropertyName="_SurgewavePackagePath" />
+    </PackPluginTask>
+
+  </Target>
+
+  <!--
+    SurgewaveInstallPlugin: installs the packed .swpkg into a plugins directory.
+    Runs after SurgewavePackPlugin when $(SurgewaveInstallPlugin)=true.
+
+    No broker connection required — operates on the file system only.
+
+    Properties:
+      $(SurgewavePluginsDir)   Target plugins directory (e.g. the broker's plugins/ folder). Required.
+  -->
+  <Target Name="SurgewaveInstallPlugin"
+          AfterTargets="SurgewavePackPlugin"
+          Condition="'$(SurgewaveInstallPlugin)' == 'true' and '$(_SurgewavePackagePath)' != '' and '$(SurgewavePluginsDir)' != ''">
+
+    <InstallPluginTask
+        PackagePath="$(_SurgewavePackagePath)"
+        PluginsDir="$(SurgewavePluginsDir)"
+        Force="true" />
+
+  </Target>
+
+  <!--
+    SurgewaveCleanupPublish: removes the intermediate publish output directory after pack/install.
+
+    The .swpkg file and the broker's plugins/ dir are the intended outputs — the framework-dependent
+    publish output ($(PublishDir)) is just a staging area and is no longer needed afterwards.
+
+    Enabled by default when $(SurgewavePackPlugin)=true. Set $(SurgewaveCleanupPublish)=false to retain it.
+    Runs after SurgewaveInstallPlugin (which runs after SurgewavePackPlugin), so install completes first.
+    Falls back to running after SurgewavePackPlugin directly when SurgewaveInstallPlugin is not requested.
+  -->
+  <PropertyGroup Condition="'$(SurgewavePackPlugin)' == 'true' and '$(SurgewaveCleanupPublish)' != 'false'">
+    <!-- Compute parent of PublishDir (e.g. artifacts/pub/Kuestenlogik.Surgewave.Protocol.Kafka/)
+         so we can remove it too if it becomes empty after the publish dir is deleted. -->
+    <_SurgewavePublishParentDir>$([System.IO.Path]::GetDirectoryName($(PublishDir.TrimEnd('\').TrimEnd('/'))))\</_SurgewavePublishParentDir>
+  </PropertyGroup>
+
+  <Target Name="SurgewaveCleanupPublish"
+          AfterTargets="SurgewaveInstallPlugin"
+          Condition="'$(SurgewavePackPlugin)' == 'true' and '$(SurgewaveCleanupPublish)' != 'false'">
+    <!-- Remove the publish output directory (e.g. Release/ under the project-named subfolder) -->
+    <RemoveDir Directories="$(PublishDir)" Condition="Exists('$(PublishDir)')" />
+    <!-- Remove the now-empty parent directory.
+         RemoveDir is recursive so we first check that it no longer contains files — it should only
+         contain the (now removed) configuration sub-directory. If other content exists, skip silently. -->
+    <ItemGroup>
+      <_SurgewaveParentContents Include="$(_SurgewavePublishParentDir)**\*" Condition="'$(_SurgewavePublishParentDir)' != ''" />
+    </ItemGroup>
+    <RemoveDir Directories="$(_SurgewavePublishParentDir)"
+               Condition="'$(_SurgewavePublishParentDir)' != '' and Exists('$(_SurgewavePublishParentDir)') and '@(_SurgewaveParentContents)' == ''" />
+  </Target>
+
+  <!-- Fallback: clean up when only packing (SurgewaveInstallPlugin not requested) -->
+  <Target Name="_SurgewaveCleanupPublishPackOnly"
+          AfterTargets="SurgewavePackPlugin"
+          Condition="'$(SurgewavePackPlugin)' == 'true' and '$(SurgewaveInstallPlugin)' != 'true' and '$(SurgewaveCleanupPublish)' != 'false'">
+    <RemoveDir Directories="$(PublishDir)" Condition="Exists('$(PublishDir)')" />
+    <ItemGroup>
+      <_SurgewaveParentContents Include="$(_SurgewavePublishParentDir)**\*" Condition="'$(_SurgewavePublishParentDir)' != ''" />
+    </ItemGroup>
+    <RemoveDir Directories="$(_SurgewavePublishParentDir)"
+               Condition="'$(_SurgewavePublishParentDir)' != '' and Exists('$(_SurgewavePublishParentDir)') and '@(_SurgewaveParentContents)' == ''" />
+  </Target>
+
+</Project>

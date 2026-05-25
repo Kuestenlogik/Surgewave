@@ -1,0 +1,15 @@
+{
+  "id": "example.filter-json",
+  "name": "JSON Field Filter",
+  "version": "1.0.0",
+  "type": "Transform",
+  "description": "Filters messages based on a JSON field value. Messages that do not match the condition are dropped.",
+  "author": "Surgewave Examples",
+  "inputTopic": "events",
+  "outputTopic": "filtered-events",
+  "config": {
+    "field": "severity",
+    "operator": "gte",
+    "value": "3"
+  }
+}

@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Create surgewave user and group
+if ! getent group surgewave >/dev/null 2>&1; then
+    groupadd -r surgewave
+fi
+if ! getent passwd surgewave >/dev/null 2>&1; then
+    useradd -r -g surgewave -d /var/lib/surgewave -s /bin/false surgewave
+fi
+
+# Create data directories
+mkdir -p /var/lib/surgewave/data
+mkdir -p /var/log/surgewave
+
+# Set ownership
+chown -R surgewave:surgewave /var/lib/surgewave /var/log/surgewave
+chown -R surgewave:surgewave /opt/surgewave
+
+# Make binaries executable
+chmod +x /opt/surgewave/broker/surgewave-broker
+chmod +x /opt/surgewave/cli/surgewave 2>/dev/null || true
+chmod +x /opt/surgewave/control/surgewave-control 2>/dev/null || true
+
+# Reload systemd and enable service
+systemctl daemon-reload
+systemctl enable surgewave-broker
+
+echo ""
+echo "Surgewave installed successfully!"
+echo ""
+echo "  Start broker:     sudo systemctl start surgewave-broker"
+echo "  Check status:     sudo systemctl status surgewave-broker"
+echo "  Enable Control:   sudo systemctl enable --now surgewave-control"
+echo "  Config:           /etc/surgewave/appsettings.json"
+echo "  Data:             /var/lib/surgewave/"
+echo "  Logs:             /var/log/surgewave/"
+echo ""

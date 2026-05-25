@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+import "google/api/annotations.proto";
+
+service TopicService {
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse) {
+    option (google.api.http) = {
+      post: "/v3/clusters/{cluster_id}/topics"
+      body: "*"
+      additional_bindings {
+        post: "/v3/topics"
+        body: "*"
+      }
+    };
+  }
+  rpc DeleteTopic(DeleteTopicRequest) returns (DeleteTopicResponse) {
+    option (google.api.http) = {
+      delete: "/v3/clusters/{cluster_id}/topics/{topic}"
+      additional_bindings {
+        delete: "/v3/topics/{topic}"
+      }
+    };
+  }
+  rpc ListTopics(ListTopicsRequest) returns (ListTopicsResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/topics"
+      additional_bindings {
+        get: "/v3/topics"
+      }
+    };
+  }
+  rpc DescribeTopic(DescribeTopicRequest) returns (DescribeTopicResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/topics/{topic}"
+      additional_bindings {
+        get: "/v3/topics/{topic}"
+      }
+    };
+  }
+  rpc AlterConfig(AlterConfigRequest) returns (AlterConfigResponse) {
+    option (google.api.http) = {
+      put: "/v3/clusters/{cluster_id}/topics/{resource.name}/configs"
+      body: "*"
+      additional_bindings {
+        put: "/v3/topics/{resource.name}/configs"
+        body: "*"
+      }
+    };
+  }
+  rpc DescribeConfig(DescribeConfigRequest) returns (DescribeConfigResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/topics/{topic}/configs"
+      additional_bindings {
+        get: "/v3/topics/{topic}/configs"
+      }
+    };
+  }
+}
+
+message CreateTopicRequest {
+  string cluster_id = 1;
+  string topic = 2;
+  int32 num_partitions = 3;
+  int32 replication_factor = 4;
+  map<string, string> config = 5;
+  repeated ReplicaAssignment replica_assignments = 6;
+}
+
+message ReplicaAssignment {
+  int32 partition = 1;
+  repeated int32 replicas = 2;
+}
+
+message CreateTopicResponse {
+  TopicInfo topic_info = 1;
+  ResponseStatus status = 2;
+}
+
+message DeleteTopicRequest {
+  string cluster_id = 1;
+  string topic = 2;
+}
+
+message DeleteTopicResponse {
+  ResponseStatus status = 1;
+}
+
+message ListTopicsRequest {
+  string cluster_id = 1;
+  bool include_internal = 2;
+}
+
+message ListTopicsResponse {
+  repeated string topics = 1;  // Deprecated: use topic_infos instead
+  repeated TopicSummary topic_infos = 2;
+}
+
+message TopicSummary {
+  string name = 1;
+  int32 partition_count = 2;
+  int32 replication_factor = 3;
+  bool is_internal = 4;
+}
+
+message DescribeTopicRequest {
+  string cluster_id = 1;
+  string topic = 2;
+  repeated string topics = 3;
+}
+
+message DescribeTopicResponse {
+  repeated TopicDescription topics = 1;
+}
+
+message TopicDescription {
+  TopicInfo topic_info = 1;
+  ResponseStatus status = 2;
+}
+
+message AlterConfigRequest {
+  string cluster_id = 1;
+  ConfigResource resource = 2;
+  repeated ConfigEntry configs = 3;
+}
+
+message AlterConfigResponse {
+  ResponseStatus status = 1;
+}
+
+message DescribeConfigRequest {
+  string cluster_id = 1;
+  string topic = 2;
+  repeated ConfigResource resources = 3;
+  repeated string config_keys = 4;
+}
+
+message DescribeConfigResponse {
+  repeated ConfigResourceResult results = 1;
+}
+
+message ConfigResourceResult {
+  ConfigResource resource = 1;
+  repeated ConfigEntryDetail configs = 2;
+  ResponseStatus status = 3;
+}

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>Surgewave Schema Registry — standalone Confluent-compatible REST service</Description>
+    <AssemblyName>surgewave-schema-registry</AssemblyName>
+    <PackageTags>surgewave;schema-registry;confluent;standalone;avro;protobuf;json</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Hosting\Kuestenlogik.Surgewave.Schema.Registry.Hosting.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers.csproj" />
+  </ItemGroup>
+
+</Project>

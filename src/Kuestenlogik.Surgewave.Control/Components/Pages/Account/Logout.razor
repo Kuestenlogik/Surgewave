@@ -1,0 +1,54 @@
+@page "/Account/Logout"
+@using Kuestenlogik.Surgewave.Control.Security
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.Extensions.Options
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject IOptions<SurgewaveAuthConfig> AuthOptions
+
+@code {
+    [CascadingParameter]
+    public HttpContext? HttpContext { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContext is null)
+            return;
+
+        // Read the provider name from the surgewave:idp claim to determine correct sign-out flow
+        var providerName = HttpContext.User.FindFirst(SchemeNames.ProviderClaimType)?.Value;
+
+        IdpProviderConfig? provider = null;
+        if (!string.IsNullOrEmpty(providerName))
+        {
+            provider = AuthOptions.Value.Providers
+                .FirstOrDefault(p => string.Equals(p.Name, providerName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (provider is not null && provider.Type == AuthProviderType.Saml)
+        {
+            // SAML uses its own controller endpoint for logout
+            HttpContext.Response.Redirect($"/saml/{Uri.EscapeDataString(provider.Name)}/logout");
+        }
+        else if (provider is not null && provider.Type == AuthProviderType.Ldap)
+        {
+            // LDAP — just sign out of cookies (no external IdP logout)
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            HttpContext.Response.Redirect("/");
+        }
+        else if (provider is not null)
+        {
+            // OIDC — sign out of both Cookie and the named OIDC scheme
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            await HttpContext.SignOutAsync(
+                SchemeNames.OidcScheme(provider.Name),
+                new AuthenticationProperties { RedirectUri = "/" });
+        }
+        else
+        {
+            // Fallback — just sign out of cookies
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            HttpContext.Response.Redirect("/");
+        }
+    }
+}

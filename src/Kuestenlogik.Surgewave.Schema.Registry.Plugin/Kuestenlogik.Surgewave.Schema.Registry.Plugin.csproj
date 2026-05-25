@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Schema Registry — broker plugin, CLI commands, and Control UI pages</Description>
+    <PackageTags>surgewave;schema-registry;plugin;confluent;avro;protobuf;json</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Build\Kuestenlogik.Surgewave.Build.csproj" PrivateAssets="all" />
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Hosting\Kuestenlogik.Surgewave.Schema.Registry.Hosting.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="pluginsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="..\Kuestenlogik.Surgewave.Build\build\Kuestenlogik.Surgewave.Build.targets" />
+
+</Project>

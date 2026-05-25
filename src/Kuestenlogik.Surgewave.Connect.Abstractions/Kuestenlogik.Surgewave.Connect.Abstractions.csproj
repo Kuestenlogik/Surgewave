@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Connect contracts and lightweight client helpers — pipeline definitions, template DTOs, template repositories. No AspNetCore dependency, so usable from CLIs, tools and thin clients.</Description>
+    <PackageTags>surgewave;connect;pipelines;templates;contracts;abstractions</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Connect" />
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Connect.Tests" />
+  </ItemGroup>
+
+</Project>

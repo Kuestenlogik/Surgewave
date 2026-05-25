@@ -1,0 +1,73 @@
+{%- comment -%}
+"Sovereign by design"-Section — adressiert die aktuelle EU-Tech-Souveraenitaets-
+Debatte (Gaia-X, IPCEI-CIS, CLOUD-Act-Konzerne, US-Vendor-Abhaengigkeit).
+Marketing-Frame "Made in Germany. Built for Europe.", aber Body sachlich
+mit konkreten Punkten (Hosting, Lizenz, GDPR, no phone-home).
+
+Position im Index: nach learn.html, vor services.html. Damit landet die
+Sovereign-Story dort wo der Reader gerade ueber Lernen+Operations gelesen
+hat und vor dem Sales-CTA.
+{%- endcomment -%}
+<section class="sovereign" aria-labelledby="sovereign-heading">
+  <div class="container narrow">
+    <p class="sovereign-eyebrow">Sovereign by design</p>
+    <h2 id="sovereign-heading" class="sovereign-title">
+      Made in Germany. <span class="hero-accent">Built for Europe.</span>
+    </h2>
+    <p class="sovereign-lede">
+      Surgewave is a K&uuml;stenlogik product, engineered and maintained
+      in Germany under EU data protection law. As the conversation about
+      European technological sovereignty gets louder, the answer to
+      &ldquo;what do we actually own&rdquo; needs to be short:
+      <em>this&nbsp;runs on your iron, under your rules.</em>
+    </p>
+
+    <ul class="sovereign-points">
+      <li>
+        <strong>Self-hosted by default.</strong> Surgewave runs on your
+        infrastructure &mdash; bare metal, private cloud, or a sovereign
+        EU cloud. There is no managed SaaS that we operate; your topic
+        data never sits on our servers.
+      </li>
+      <li>
+        <strong>No CLOUD&nbsp;Act exposure.</strong> K&uuml;stenlogik is a
+        German company. There is no US parent, no US subsidiary that can
+        be served with a CLOUD&nbsp;Act or FISA&nbsp;702 disclosure
+        order on your behalf.
+      </li>
+      <li>
+        <strong>GDPR built in.</strong> Field-level encryption, PII
+        detection, and right-to-erasure ship as a first-class Privacy
+        plugin &mdash; not gated behind an enterprise tier and not a
+        bolt-on third-party integration.
+      </li>
+      <li>
+        <strong>Apache&nbsp;2.0 core, auditable.</strong> Every line of
+        the broker, the protocol, the storage engine and the CLI is
+        public. Forkable, reviewable, no rug-pull licence terms.
+      </li>
+      <li>
+        <strong>No opt-out telemetry.</strong> Metrics and traces go to
+        the OTLP endpoint <em>you</em> configure &mdash; or nowhere at all.
+      </li>
+    </ul>
+
+    <p class="sovereign-cta">
+      <a href="{{ '/privacy.html' | relative_url }}" class="btn btn-secondary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2L4 6v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V6l-8-4z"/>
+        </svg>
+        Privacy &amp; data sovereignty
+      </a>
+      <a href="https://kuestenlogik.com" target="_blank" rel="noopener" class="btn btn-secondary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 010 20"/>
+          <path d="M12 2a15.3 15.3 0 000 20"/>
+        </svg>
+        About K&uuml;stenlogik
+      </a>
+    </p>
+  </div>
+</section>

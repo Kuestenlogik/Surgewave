@@ -1,0 +1,195 @@
+# Surgewave Helm Chart Values
+
+# ─── Broker ───────────────────────────────────────────────────────────────────
+
+broker:
+  replicaCount: 3
+  image:
+    repository: surgewave/surgewave-broker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  ports:
+    kafka: 9092
+    grpc: 9093
+    mqtt: 1883
+    replication: 10092
+  config:
+    autoTopicCreation: true
+    defaultPartitions: 3
+    defaultReplicationFactor: 3
+    logRetentionHours: 168
+    logRetentionBytes: -1
+    logSegmentBytes: 1073741824
+    maxConnectionsPerIp: 100
+    maxRequestSize: 104857600
+    useRaft: true
+    minInsyncReplicas: 2
+  # Extra environment variables for broker pods
+  extraEnv: []
+  # - name: CUSTOM_VAR
+  #   value: "custom-value"
+
+# ─── Control UI ───────────────────────────────────────────────────────────────
+
+control:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: surgewave/surgewave-control
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  port: 5050
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  ingress:
+    enabled: false
+    className: ""
+    hostname: surgewave.local
+    annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    tls: []
+    # - secretName: surgewave-control-tls
+    #   hosts:
+    #     - surgewave.local
+
+# ─── Schema Registry ─────────────────────────────────────────────────────────
+
+schemaRegistry:
+  enabled: true
+
+# ─── Kafka Connect ────────────────────────────────────────────────────────────
+
+connect:
+  enabled: false
+  groupId: surgewave-connect
+  configTopic: surgewave-connect-configs
+  offsetsTopic: surgewave-connect-offsets
+  statusTopic: surgewave-connect-status
+
+# ─── Tiered Storage ──────────────────────────────────────────────────────────
+
+tieredStorage:
+  enabled: false
+  provider: ""  # s3, azure, gcp
+  s3:
+    bucket: ""
+    region: ""
+    accessKey: ""
+    secretKey: ""
+  azure:
+    connectionString: ""
+    container: ""
+  gcp:
+    bucket: ""
+    projectId: ""
+
+# ─── Features ─────────────────────────────────────────────────────────────────
+
+features:
+  mqtt:
+    enabled: false
+  graphql:
+    enabled: false
+  dataMesh:
+    enabled: false
+  privacy:
+    enabled: false
+  multiTenancy:
+    enabled: false
+  cruiseControl:
+    enabled: false
+
+# ─── Security ─────────────────────────────────────────────────────────────────
+
+security:
+  tls:
+    enabled: false
+    certSecret: ""
+  sasl:
+    enabled: false
+    mechanisms:
+      - PLAIN
+  acl:
+    enabled: false
+    superUsers: []
+  rbac:
+    create: true
+
+# ─── Monitoring ───────────────────────────────────────────────────────────────
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+  prometheusRules:
+    enabled: false
+
+# ─── Pod Configuration ────────────────────────────────────────────────────────
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podSecurityContext:
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext: {}
+
+nodeSelector: {}
+tolerations: []
+
+# Anti-affinity: "soft" (preferred) or "hard" (required)
+antiAffinity: soft
+
+# Health checks
+livenessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# ─── Pod Disruption Budget ────────────────────────────────────────────────────
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+  # minAvailable: 2
+
+# ─── Service Configuration ───────────────────────────────────────────────────
+
+service:
+  type: ClusterIP
+  external:
+    enabled: false
+    type: LoadBalancer
+    annotations: {}
+
+# Extra volumes and volume mounts
+extraVolumes: []
+extraVolumeMounts: []

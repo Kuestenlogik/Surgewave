@@ -1,0 +1,32 @@
+@inject HttpClient Http
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Tenant Name" Variant="Variant.Outlined" Required="true" Class="mb-3" />
+        <MudTextField @bind-Value="_adminPrincipals" Label="Admin Principals" Variant="Variant.Outlined"
+                      HelperText="Comma-separated, e.g. User:alice, User:bob" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit" Disabled="@(string.IsNullOrWhiteSpace(_name))">
+            Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _name = "";
+    private string _adminPrincipals = "";
+
+    private async Task Submit()
+    {
+        var principals = _adminPrincipals.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var payload = new { name = _name, adminPrincipals = principals, enabled = true };
+        var response = await Http.PostAsJsonAsync("/api/tenants", payload);
+        if (response.IsSuccessStatusCode)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

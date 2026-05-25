@@ -1,0 +1,13 @@
+{
+  "Surgewave": {
+    "Mqtt": {
+      "Enabled": false,
+      "Port": 1883,
+      "TopicPrefix": "mqtt.",
+      "MaxClients": 1000,
+      "MaxMessageSizeBytes": 262144,
+      "AllowAnonymous": true,
+      "KeepAliveSeconds": 60
+    }
+  }
+}

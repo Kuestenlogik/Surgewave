@@ -1,0 +1,15 @@
+Package: surgewave
+Version: 0.1.0
+Section: net
+Priority: optional
+Architecture: amd64
+Maintainer: Küstenlogik <info@kuestenlogik.de>
+Description: Surgewave - High-performance event streaming platform
+ A drop-in Kafka replacement built with .NET 10.
+ Includes broker, CLI, and Control UI.
+ .
+ Features: Kafka 4.0 protocol, native high-performance protocol,
+ visual pipeline editor, AI integration, schema registry,
+ 113 connectors, 10 storage engines.
+Depends: libc6 (>= 2.31), libstdc++6
+Homepage: https://github.com/Kuestenlogik/Surgewave

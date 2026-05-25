@@ -1,0 +1,89 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://surgewave.dev/schemas/tour.schema.json",
+    "title": "Surgewave Documentation Tour",
+    "description": "Schema for Shepherd.js tour definition files used in Surgewave documentation",
+    "type": "object",
+    "required": ["id", "title", "steps"],
+    "properties": {
+        "id": {
+            "type": "string",
+            "description": "Unique identifier for the tour, used for localStorage tracking"
+        },
+        "title": {
+            "type": "string",
+            "description": "Human-readable title displayed in the tour button tooltip"
+        },
+        "triggerMode": {
+            "type": "string",
+            "enum": ["manual", "auto-first-visit"],
+            "default": "manual",
+            "description": "How the tour is triggered: 'manual' requires clicking the button, 'auto-first-visit' starts automatically on first page visit"
+        },
+        "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["id", "title", "text"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Unique step identifier within the tour"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Step title shown in the header"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Step body text (supports HTML)"
+                    },
+                    "attachTo": {
+                        "type": "object",
+                        "properties": {
+                            "element": {
+                                "type": "string",
+                                "description": "CSS selector for the element to attach the step to"
+                            },
+                            "on": {
+                                "type": "string",
+                                "enum": ["top", "bottom", "left", "right", "top-start", "top-end", "bottom-start", "bottom-end", "left-start", "left-end", "right-start", "right-end"],
+                                "default": "bottom",
+                                "description": "Position of the step relative to the attached element"
+                            }
+                        },
+                        "required": ["element"]
+                    },
+                    "scrollTo": {
+                        "type": "boolean",
+                        "description": "Override default scroll behavior for this step"
+                    },
+                    "buttons": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["text", "action"],
+                            "properties": {
+                                "text": {
+                                    "type": "string",
+                                    "description": "Button label"
+                                },
+                                "action": {
+                                    "type": "string",
+                                    "enum": ["next", "back", "complete", "cancel"],
+                                    "description": "Tour action to execute when clicked"
+                                },
+                                "secondary": {
+                                    "type": "boolean",
+                                    "default": false,
+                                    "description": "Use secondary button styling"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

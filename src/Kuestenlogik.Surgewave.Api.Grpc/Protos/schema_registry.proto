@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
+
+package klsurgewave;
+
+import "Protos/common.proto";
+
+service SchemaRegistryService {
+  rpc ListSubjects(ListSubjectsRequest) returns (ListSubjectsResponse);
+  rpc GetSubjectVersions(GetSubjectVersionsRequest) returns (GetSubjectVersionsResponse);
+  rpc RegisterSchema(RegisterSchemaRequest) returns (RegisterSchemaResponse);
+  rpc GetSchemaById(GetSchemaByIdRequest) returns (GetSchemaByIdResponse);
+  rpc GetSchemaByVersion(GetSchemaByVersionRequest) returns (GetSchemaByVersionResponse);
+  rpc DeleteSubject(DeleteSubjectRequest) returns (DeleteSubjectResponse);
+  rpc DeleteSchemaVersion(DeleteSchemaVersionRequest) returns (DeleteSchemaVersionResponse);
+  rpc CheckCompatibility(CheckCompatibilityRequest) returns (CheckCompatibilityResponse);
+  rpc GetCompatibilityConfig(GetCompatibilityConfigRequest) returns (GetCompatibilityConfigResponse);
+  rpc SetCompatibilityConfig(SetCompatibilityConfigRequest) returns (SetCompatibilityConfigResponse);
+  rpc GetSchemaTypes(GetSchemaTypesRequest) returns (GetSchemaTypesResponse);
+}
+
+enum SchemaType {
+  AVRO = 0;
+  JSON = 1;
+  PROTOBUF = 2;
+}
+
+enum CompatibilityLevel {
+  COMPATIBILITY_NONE = 0;
+  BACKWARD = 1;
+  BACKWARD_TRANSITIVE = 2;
+  FORWARD = 3;
+  FORWARD_TRANSITIVE = 4;
+  FULL = 5;
+  FULL_TRANSITIVE = 6;
+}
+
+message SchemaReference {
+  string name = 1;
+  string subject = 2;
+  int32 version = 3;
+}
+
+message ListSubjectsRequest {
+  bool include_deleted = 1;
+}
+
+message ListSubjectsResponse {
+  repeated string subjects = 1;
+  ResponseStatus status = 2;
+}
+
+message GetSubjectVersionsRequest {
+  string subject = 1;
+  bool include_deleted = 2;
+}
+
+message GetSubjectVersionsResponse {
+  repeated int32 versions = 1;
+  ResponseStatus status = 2;
+}
+
+message RegisterSchemaRequest {
+  string subject = 1;
+  string schema = 2;
+  SchemaType schema_type = 3;
+  repeated SchemaReference references = 4;
+}
+
+message RegisterSchemaResponse {
+  int32 id = 1;
+  int32 version = 2;
+  ResponseStatus status = 3;
+}
+
+message GetSchemaByIdRequest {
+  int32 id = 1;
+}
+
+message GetSchemaByIdResponse {
+  string schema = 1;
+  SchemaType schema_type = 2;
+  repeated SchemaReference references = 3;
+  ResponseStatus status = 4;
+}
+
+message GetSchemaByVersionRequest {
+  string subject = 1;
+  int32 version = 2;
+}
+
+message GetSchemaByVersionResponse {
+  int32 id = 1;
+  int32 version = 2;
+  string subject = 3;
+  string schema = 4;
+  SchemaType schema_type = 5;
+  repeated SchemaReference references = 6;
+  ResponseStatus status = 7;
+}
+
+message DeleteSubjectRequest {
+  string subject = 1;
+  bool permanent = 2;
+}
+
+message DeleteSubjectResponse {
+  repeated int32 deleted_versions = 1;
+  ResponseStatus status = 2;
+}
+
+message DeleteSchemaVersionRequest {
+  string subject = 1;
+  int32 version = 2;
+  bool permanent = 3;
+}
+
+message DeleteSchemaVersionResponse {
+  int32 version = 1;
+  ResponseStatus status = 2;
+}
+
+message CheckCompatibilityRequest {
+  string subject = 1;
+  string schema = 2;
+  SchemaType schema_type = 3;
+  int32 version = 4;
+  repeated SchemaReference references = 5;
+}
+
+message CheckCompatibilityResponse {
+  bool is_compatible = 1;
+  repeated string messages = 2;
+  ResponseStatus status = 3;
+}
+
+message GetCompatibilityConfigRequest {
+  string subject = 1;
+}
+
+message GetCompatibilityConfigResponse {
+  CompatibilityLevel level = 1;
+  ResponseStatus status = 2;
+}
+
+message SetCompatibilityConfigRequest {
+  string subject = 1;
+  CompatibilityLevel level = 2;
+}
+
+message SetCompatibilityConfigResponse {
+  CompatibilityLevel level = 1;
+  ResponseStatus status = 2;
+}
+
+message GetSchemaTypesRequest {}
+
+message GetSchemaTypesResponse {
+  repeated string types = 1;
+  ResponseStatus status = 2;
+}

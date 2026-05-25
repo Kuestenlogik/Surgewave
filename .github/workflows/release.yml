@@ -1,0 +1,392 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+
+jobs:
+  # ================================================================
+  # build-msi: WiX MSI build (Windows-only)
+  # ================================================================
+  # WiX v5 ist Windows-only (`warning WIX0000: WiX Toolset only supports
+  # Windows`) — der MSI-Build kann deshalb nicht im linux-basierten
+  # release-Job laufen. Bowire-Pattern: eigenes windows-latest-Job baut
+  # nur die .msi, uploaded sie als Artefakt, und der release-Job
+  # downloaded sie wieder vorm GitHub-Release-Schritt.
+  build-msi:
+    name: Build Windows MSI
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      # Self-contained win-x64 publishes fuer Broker, CLI, Control —
+      # diese werden direkt von der wixproj per BrokerPublishDir / CliPublishDir
+      # / ControlPublishDir referenziert.
+      - name: Publish win-x64 binaries (broker / cli / control)
+        shell: bash
+        env:
+          V: ${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker  -c Release -r win-x64 --self-contained -o deployments/installer/publish/broker  -p:Version=$V
+          dotnet publish src/Kuestenlogik.Surgewave.Cli     -c Release -r win-x64 --self-contained -o deployments/installer/publish/cli     -p:Version=$V
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r win-x64 --self-contained -o deployments/installer/publish/control -p:Version=$V
+          cp deployments/installer/config/appsettings.json            deployments/installer/publish/broker/
+          cp deployments/installer/config/appsettings.Production.json deployments/installer/publish/broker/
+
+      - name: Generate icon if missing
+        shell: pwsh
+        run: |
+          $icon = "deployments/installer/Kuestenlogik.Surgewave.Installer/surgewave.ico"
+          if (-not (Test-Path $icon)) {
+            pwsh -NoProfile -File deployments/installer/Kuestenlogik.Surgewave.Installer/generate-icon.ps1
+          }
+
+      # Die wixproj nutzt das WixToolset.Sdk (PackageReference auf
+      # WixToolset.UI.wixext), also reicht `dotnet build` — kein
+      # separates `wix`-Tool muss global installiert werden.
+      #
+      # PublishDirs muessen absolute Windows-Pfade sein (`pwd -W` in
+      # Git-Bash auf windows-latest gibt den Windows-Style-Pfad zurueck).
+      - name: Build MSI
+        shell: bash
+        env:
+          V: ${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet build deployments/installer/Kuestenlogik.Surgewave.Installer/Kuestenlogik.Surgewave.Installer.wixproj \
+            -c Release \
+            -p:Version=$V \
+            -p:BrokerPublishDir="$(pwd -W)/deployments/installer/publish/broker" \
+            -p:CliPublishDir="$(pwd -W)/deployments/installer/publish/cli" \
+            -p:ControlPublishDir="$(pwd -W)/deployments/installer/publish/control"
+          mkdir -p msi-out
+          # Directory.Build.props lenkt BaseOutputPath auf artifacts/bin/...
+          # um, deshalb landet die MSI nicht unter deployments/installer/.
+          # Wir suchen im ganzen Repo nach *.msi (es gibt nur die eine).
+          find . -name '*.msi' -not -path './msi-out/*' -exec cp {} msi-out/surgewave-$V-win-x64.msi \;
+          ls -la msi-out
+
+      - name: Upload MSI artefact
+        uses: actions/upload-artifact@v7
+        with:
+          name: artefacts-msi
+          path: msi-out/*.msi
+          retention-days: 1
+
+  # ================================================================
+  # release: NuGets, Container, Linux-/macOS-Binaries, Release-Assembly
+  # ================================================================
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-msi]
+
+    # Job-level env damit das Secret in step-level `if:`-Ausdruecken sichtbar
+    # ist (der `secrets`-Context ist dort nicht direkt verfuegbar). Empty
+    # string wenn das Org-Secret nicht gesetzt ist, sodass die `env.X != ''`-
+    # Gates korrekt skippen statt zu failen. Bowire-Pattern.
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore Kuestenlogik.Surgewave.slnx
+
+      - name: Build
+        run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Test
+        # IntegrationTests (multi-broker replication, sasl-roundtrip, …) are
+        # excluded from the release-tag run because they bring up real TCP
+        # cluster topology and are flakier on the GitHub-Actions runner than
+        # on bare-metal CI. They still run on every push to main via ci.yml.
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --filter "FullyQualifiedName!~IntegrationTests"
+
+      - name: Pack NuGet
+        run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase repository owner for GHCR
+        # GHCR rejects uppercase registry segments. github.repository_owner
+        # is "Kuestenlogik" (capital K) for this org, so we lower-case it
+        # once and reuse the result for the Broker + Control container
+        # publishes.
+        id: ghcr
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------
+      # Multi-arch Container → GHCR (immer) + Docker Hub (optional)
+      # ----------------------------------------------------------
+      # `ContainerRuntimeIdentifiers` macht aus einem `dotnet publish`-
+      # Call mehrere arch-spezifische Image-Builds in einem Schwung
+      # und published als Multi-Arch-Manifest. Das Pre-Restore braucht
+      # die gleiche RID-Liste, sonst failed der Container-Publish mit
+      # `NETSDK1047: Assets file ... doesn't have a target for
+      # 'net10.0/linux-arm64'`.
+      #
+      # `ContainerImageTags="$V;latest"` taggt die Images doppelt.
+      # Die innere Quoting-Form ist noetig damit MSBuild das ';' als
+      # Property-Wert sieht statt als Argument-Separator.
+      #
+      # ContainerRegistry nimmt nur den Host ("ghcr.io"); der org/image-
+      # Pfad geht via ContainerRepository. Beides kombiniert
+      # ("ghcr.io/<owner>") triggert CONTAINER2012 "could not recognise
+      # registry" weil das SDK das als literalen Host nimmt.
+      - name: Pre-restore Broker (multi-RID)
+        run: |
+          dotnet restore src/Kuestenlogik.Surgewave.Broker \
+            "-p:RuntimeIdentifiers=\"linux-x64;linux-arm64\""
+
+      - name: Pre-restore Control (multi-RID)
+        run: |
+          dotnet restore src/Kuestenlogik.Surgewave.Control \
+            "-p:RuntimeIdentifiers=\"linux-x64;linux-arm64\""
+
+      - name: Push Broker container to GHCR (multi-arch)
+        env:
+          V: ${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker \
+            -c Release \
+            -t:PublishContainer \
+            --no-restore \
+            -p:Version=$V \
+            -p:GeneratePackageOnBuild=false \
+            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
+            "-p:ContainerImageTags=\"$V;latest\"" \
+            -p:ContainerRegistry=ghcr.io \
+            -p:ContainerRepository=${{ steps.ghcr.outputs.owner }}/surgewave-broker
+
+      - name: Push Control container to GHCR (multi-arch)
+        env:
+          V: ${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Control \
+            -c Release \
+            -t:PublishContainer \
+            --no-restore \
+            -p:Version=$V \
+            -p:GeneratePackageOnBuild=false \
+            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
+            "-p:ContainerImageTags=\"$V;latest\"" \
+            -p:ContainerRegistry=ghcr.io \
+            -p:ContainerRepository=${{ steps.ghcr.outputs.owner }}/surgewave-control
+
+      # Docker Hub ist gated: ohne DOCKERHUB_TOKEN + DOCKERHUB_USERNAME
+      # wird skip-ohne-fail gemacht, das GHCR-Image ist die offizielle
+      # Quelle und Docker Hub die zweite Distribution.
+      - name: Login to Docker Hub
+        if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      # Die GHCR-Steps oben haben die Multi-RID-Assets bereits aufgebaut,
+      # `--no-restore` reused den Cache. Der einzige zusaetzliche Aufwand
+      # ist der Registry-Push selbst — Image ist byte-identisch zu GHCR.
+      # Namespace ist fix auf `kuestenlogik` — dem Org-Namespace auf
+      # Docker Hub. DOCKERHUB_USERNAME ist nur der Login-User (kann ein
+      # User-Account mit Push-Rechten auf die Org sein), nicht der
+      # Repository-Namespace.
+      - name: Push Broker container to Docker Hub (multi-arch)
+        if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
+        env:
+          V: ${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker \
+            -c Release \
+            -t:PublishContainer \
+            --no-restore \
+            -p:Version=$V \
+            -p:GeneratePackageOnBuild=false \
+            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
+            "-p:ContainerImageTags=\"$V;latest\"" \
+            -p:ContainerRegistry=docker.io \
+            -p:ContainerRepository=kuestenlogik/surgewave-broker
+
+      - name: Push Control container to Docker Hub (multi-arch)
+        if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
+        env:
+          V: ${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Control \
+            -c Release \
+            -t:PublishContainer \
+            --no-restore \
+            -p:Version=$V \
+            -p:GeneratePackageOnBuild=false \
+            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
+            "-p:ContainerImageTags=\"$V;latest\"" \
+            -p:ContainerRegistry=docker.io \
+            -p:ContainerRepository=kuestenlogik/surgewave-control
+
+      # Self-contained Broker binaries (no .NET SDK needed on target)
+      - name: Publish Broker binaries
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r linux-x64 --self-contained -o ./publish/surgewave-broker-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-broker-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r win-x64 --self-contained -o ./publish/surgewave-broker-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r osx-x64 --self-contained -o ./publish/surgewave-broker-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-broker-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Self-contained Control UI binaries
+      - name: Publish Control binaries
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r linux-x64 --self-contained -o ./publish/surgewave-control-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r win-x64 --self-contained -o ./publish/surgewave-control-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Self-contained CLI binaries. macOS variants drive the Homebrew tap;
+      # linux + win cover the Chocolatey / direct-download story.
+      - name: Publish CLI binaries
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r linux-x64 --self-contained -o ./publish/surgewave-cli-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-cli-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r win-x64 --self-contained -o ./publish/surgewave-cli-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r osx-x64 --self-contained -o ./publish/surgewave-cli-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-cli-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Windows MSI kommt aus dem build-msi-Job (Windows-Runner) als Artefakt.
+      # WiX v5 ist Windows-only, deshalb laesst er sich nicht im linux-basierten
+      # release-Job inline bauen — siehe oben.
+      - name: Download MSI artefact
+        uses: actions/download-artifact@v8
+        with:
+          name: artefacts-msi
+          path: publish/
+
+      # Build .deb and .rpm packages
+      - name: Build Linux packages
+        run: |
+          chmod +x deployments/installer/linux/build-packages.sh
+          cd deployments/installer/linux
+          bash build-packages.sh ${{ steps.version.outputs.VERSION }} amd64
+          cp build/*.deb ../../../publish/ 2>/dev/null || true
+          cp build/*.rpm ../../../publish/ 2>/dev/null || true
+
+      # Create tar.gz/zip archives
+      - name: Create archives
+        run: |
+          cd publish
+          for dir in surgewave-broker-linux-* surgewave-broker-osx-* surgewave-control-linux-*; do
+            [ -d "$dir" ] && tar -czvf "${dir}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" .
+          done
+          for dir in surgewave-broker-win-* surgewave-control-win-* surgewave-cli-win-*; do
+            [ -d "$dir" ] && zip -r "${dir}-${{ steps.version.outputs.VERSION }}.zip" "$dir"
+          done
+          # CLI tarballs cover linux + macOS — they drive the Homebrew tap.
+          for dir in surgewave-cli-linux-* surgewave-cli-osx-*; do
+            [ -d "$dir" ] && tar -czvf "${dir}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" .
+          done
+
+      - name: Publish NuGet to GitHub Packages
+        run: dotnet nuget push ./artifacts/packages/*.nupkg --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+
+      # nuget.org: nur auf stabilen Tags (kein `-rc` Suffix) und nur wenn das
+      # Secret konfiguriert ist. NUGET_API_KEY braucht den 'Push new packages
+      # and package versions'-Scope mit Glob `Kuestenlogik.Surgewave.*` bzw.
+      # `surgewave*` (kebab-IDs fuer Executables).
+      - name: Publish NuGet to nuget.org
+        if: ${{ !contains(github.ref, '-rc') && env.NUGET_API_KEY != '' }}
+        run: |
+          dotnet nuget push "./artifacts/packages/*.nupkg" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY" \
+            --skip-duplicate
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-packages-${{ steps.version.outputs.VERSION }}
+          path: artifacts/packages/*.nupkg
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/packages/*.nupkg
+            publish/*.tar.gz
+            publish/*.zip
+            publish/*.msi
+            publish/*.deb
+            publish/*.rpm
+          body: |
+            ## Surgewave ${{ github.ref_name }}
+
+            ### Installation
+
+            **NuGet:**
+            ```bash
+            dotnet add package Kuestenlogik.Surgewave.Client --version ${{ steps.version.outputs.VERSION }}
+            ```
+
+            **Container — pre-built (Docker Hub, multi-arch linux/amd64 + arm64):**
+            ```bash
+            docker pull kuestenlogik/surgewave-broker:${{ steps.version.outputs.VERSION }}
+            docker pull kuestenlogik/surgewave-control:${{ steps.version.outputs.VERSION }}
+            # …oder :latest
+            ```
+
+            **Container — alternative registry (GHCR):**
+            ```bash
+            docker pull ghcr.io/kuestenlogik/surgewave-broker:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/kuestenlogik/surgewave-control:${{ steps.version.outputs.VERSION }}
+            ```
+
+            **Container — build from source:**
+            ```bash
+            dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer
+            dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer
+            ```
+
+            **Windows MSI (silent install):**
+            ```powershell
+            msiexec /i surgewave-${{ steps.version.outputs.VERSION }}-win-x64.msi /qn
+            ```
+
+            **Linux:**
+            ```bash
+            sudo bash install.sh
+            ```
+
+            **Helm:**
+            ```bash
+            helm install surgewave deploy/helm/surgewave/ --set broker.image.tag=${{ steps.version.outputs.VERSION }}
+            ```

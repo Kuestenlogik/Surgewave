@@ -1,0 +1,32 @@
+---
+layout: default
+permalink: /404.html
+title: Page not found — Surgewave
+description: The page you tried to reach is not part of the Surgewave site.
+sitemap: false
+---
+
+<section class="page-hero">
+  <div class="container">
+    <p class="lede" style="font-family:var(--font-mono); letter-spacing:0.1em; opacity:0.7; margin-bottom:0.5rem;">404</p>
+    <h1>This wave broke before it reached the shore.</h1>
+    <p class="lede">The page you tried to reach is not part of the Surgewave site &mdash; either we moved it, you mistyped, or a link went stale.</p>
+  </div>
+</section>
+
+<section class="page-body">
+  <div class="container narrow">
+    <h2>Where to next?</h2>
+    <ul>
+      <li><a href="{{ '/' | relative_url }}">Home</a> &mdash; product overview and the latest news.</li>
+      <li><a href="{{ '/docs/' | relative_url }}">Documentation</a> &mdash; getting started, architecture, API reference.</li>
+      <li><a href="{{ '/features.html' | relative_url }}">Features</a> &mdash; everything Surgewave ships with.</li>
+      <li><a href="{{ '/compare/kafka.html' | relative_url }}">Surgewave vs Kafka</a> &mdash; migration story.</li>
+      <li><a href="{{ '/search.html' | relative_url }}">Search</a> &mdash; full-text across the site and docs.</li>
+    </ul>
+
+    <p>If you followed a link from another site that should still work, please
+    <a href="https://github.com/Kuestenlogik/Surgewave/issues/new" target="_blank" rel="noopener">open an issue</a>
+    &mdash; we&rsquo;ll add the redirect.</p>
+  </div>
+</section>

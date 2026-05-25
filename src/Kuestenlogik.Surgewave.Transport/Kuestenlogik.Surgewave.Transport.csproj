@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Kuestenlogik.Surgewave.Build</AssemblyName>
+    <RootNamespace>Kuestenlogik.Surgewave.Build</RootNamespace>
+    <Description>MSBuild tasks for Surgewave plugin packaging and installation. Shares PluginPackageManager from Kuestenlogik.Surgewave.Plugins.Packaging — no logic duplication.</Description>
+    <PackageTags>surgewave;msbuild;build;tasks;plugins;packaging</PackageTags>
+    <IsPackable>true</IsPackable>
+    <!-- Build tools are not runtime dependencies of consuming projects -->
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <!-- Task DLL packaging is handled via the custom CopyTasksToPackage target below -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- MSBuild task packages intentionally have no lib/ assemblies — suppress the NuGet validator warning -->
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <!-- Ensure all transitive deps land next to the task DLL so MSBuild can load them -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      MSBuild APIs: PrivateAssets=all (not transitive) + ExcludeAssets=runtime (don't copy to output).
+      MSBuild provides these assemblies at task load time; bundling them would cause version conflicts.
+    -->
+    <PackageReference Include="Microsoft.Build.Framework" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Direct reference to shared packaging logic — the whole point of this project.
+         Note: Plugins.Packaging is a sibling of Kuestenlogik.Surgewave.Plugins (not a sub-namespace), so it can
+         be referenced standalone without dragging in the plugin runtime loader. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging\Kuestenlogik.Surgewave.Plugins.Packaging.csproj" />
+  </ItemGroup>
+
+  <!-- NuGet package layout:
+       build/Kuestenlogik.Surgewave.Build.targets  → auto-imported by consuming projects
+       tasks/net10.0/*.dll           → task DLL + transitive deps (loaded by UsingTask) -->
+  <ItemGroup>
+    <None Include="build\Kuestenlogik.Surgewave.Build.targets" Pack="true" PackagePath="build\" />
+    <None Include="build\Kuestenlogik.Surgewave.Build.targets" Pack="true" PackagePath="buildMultiTargeting\" />
+  </ItemGroup>
+
+  <!--
+    Include the freshly built task DLL + transitive deps under tasks/<tfm>/ in the nupkg.
+    A target that mutates the None ItemGroup BeforeTargets="GenerateNuspec" turned out to
+    be a no-op in some MSBuild versions; declaring the items statically in the csproj
+    (with Condition='Exists') is the robust path.
+
+    The list is enumerated at evaluation time, so the build must produce the DLLs into
+    OutputPath before pack runs. 'dotnet pack' implies build, so this works.
+  -->
+  <ItemGroup>
+    <None Include="$(OutputPath)Kuestenlogik.Surgewave.Build.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Kuestenlogik.Surgewave.Build.dll')" />
+    <None Include="$(OutputPath)Kuestenlogik.Surgewave.Plugins.Packaging.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Kuestenlogik.Surgewave.Plugins.Packaging.dll')" />
+    <None Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
+    <None Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
+    <None Include="$(OutputPath)System.IO.Hashing.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)System.IO.Hashing.dll')" />
+  </ItemGroup>
+
+</Project>

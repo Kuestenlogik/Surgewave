@@ -1,0 +1,535 @@
+@page "/metrics"
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IMetricsClient MetricsClient
+@inject ClusterState ClusterState
+@implements IDisposable
+
+<PageTitle>Metrics - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Metrics Dashboard</MudText>
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudSelect @bind-Value="_refreshInterval" Label="Refresh Interval" Variant="Variant.Outlined"
+                       @bind-Value:after="OnRefreshIntervalChanged">
+                <MudSelectItem Value="0">Manual</MudSelectItem>
+                <MudSelectItem Value="5">5 seconds</MudSelectItem>
+                <MudSelectItem Value="10">10 seconds</MudSelectItem>
+                <MudSelectItem Value="30">30 seconds</MudSelectItem>
+                <MudSelectItem Value="60">1 minute</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="8" Class="d-flex align-center justify-end">
+            @if (_error != null)
+            {
+                <MudChip T="string" Color="Color.Error" Size="Size.Small" Class="mr-4">@_error</MudChip>
+            }
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mr-4">
+                Last updated: @_lastUpdated.ToString("HH:mm:ss")
+            </MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="RefreshMetricsAsync" Disabled="@_loading">
+                Refresh
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading && _throughputPoints.Count == 0)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    <MudGrid>
+        @* Summary Cards *@
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Messages/sec</MudText>
+                            <MudText Typo="Typo.h5">@_currentMessagesPerSec.ToString("N0")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Storage" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Bytes/sec</MudText>
+                            <MudText Typo="Typo.h5">@FormatBytes(_currentBytesPerSec)</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Timer" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">P99 Latency</MudText>
+                            <MudText Typo="Typo.h5">@_currentP99Latency.ToString("N1") ms</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.TrendingUp" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Connections</MudText>
+                            <MudText Typo="Typo.h5">@_activeConnections</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Additional Stats Cards *@
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Tertiary" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topics / Partitions</MudText>
+                            <MudText Typo="Typo.h5">@_topicCount / @_partitionCount</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Group" Color="Color.Secondary" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Consumer Groups</MudText>
+                            <MudText Typo="Typo.h5">@_consumerGroups</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Transactions</MudText>
+                            <MudText Typo="Typo.h5">@_activeTransactions active</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Error" Color="@(_errorsTotal > 0 ? Color.Error : Color.Default)" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Errors / Throttled</MudText>
+                            <MudText Typo="Typo.h5">@_errorsTotal / @_throttledTotal</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Throughput Chart *@
+        <MudItem xs="12" lg="6">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Throughput (Messages/sec)</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Style="height: 300px;">
+                    <MudChart ChartType="ChartType.Line" ChartSeries="@_throughputSeries"
+                              XAxisLabels="@_throughputLabels" Width="100%" Height="280px"
+                              ChartOptions="@_chartOptions" />
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Latency Chart *@
+        <MudItem xs="12" lg="6">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Produce Latency Distribution</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Style="height: 300px;">
+                    <MudChart ChartType="ChartType.Line" ChartSeries="@_latencySeries"
+                              XAxisLabels="@_latencyLabels" Width="100%" Height="280px"
+                              ChartOptions="@_chartOptions" />
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Bytes In/Out Chart *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Network I/O (Bytes/sec)</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Style="height: 300px;">
+                    <MudChart ChartType="ChartType.Line" ChartSeries="@_bytesSeries"
+                              XAxisLabels="@_bytesLabels" Width="100%" Height="280px"
+                              ChartOptions="@_chartOptions" />
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Topic Statistics Section *@
+        <MudItem xs="12">
+            <MudText Typo="Typo.h5" Class="mt-4 mb-2">Topic Statistics</MudText>
+        </MudItem>
+
+        @* Top Topics by Messages/sec *@
+        <MudItem xs="12" lg="6">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Top Topics (Messages/sec)</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Style="height: 250px;">
+                    @if (_topTopics.Count == 0)
+                    {
+                        <div class="d-flex align-center justify-center" style="height: 100%;">
+                            <MudText Color="Color.Secondary">No topic data available</MudText>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudChart ChartType="ChartType.Bar" ChartSeries="@_topTopicsMsgSeries"
+                                  XAxisLabels="@_topTopicsLabels" Width="100%" Height="220px"
+                                  ChartOptions="@_chartOptions" />
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Top Topics by Bytes (In/Out) *@
+        <MudItem xs="12" lg="6">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Top Topics (Bytes/sec - In/Out)</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Style="height: 250px;">
+                    @if (_topTopics.Count == 0)
+                    {
+                        <div class="d-flex align-center justify-center" style="height: 100%;">
+                            <MudText Color="Color.Secondary">No topic data available</MudText>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudChart ChartType="ChartType.Bar" ChartSeries="@_topTopicsBytesSeries"
+                                  XAxisLabels="@_topTopicsLabels" Width="100%" Height="220px"
+                                  ChartOptions="@_chartOptions" />
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        @* Topic Details Table *@
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">All Topics - Current Rates</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (_topTopics.Count == 0)
+                    {
+                        <MudText Color="Color.Secondary">No topic data available. Metrics will appear when topics have activity.</MudText>
+                    }
+                    else
+                    {
+                        <MudSimpleTable Dense="true" Hover="true">
+                            <thead>
+                                <tr>
+                                    <th>Topic</th>
+                                    <th style="text-align: right;">Messages/sec</th>
+                                    <th style="text-align: right;">Bytes In/sec</th>
+                                    <th style="text-align: right;">Bytes Out/sec</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var topic in _topTopics.OrderByDescending(t => t.MessagesPerSec))
+                                {
+                                    <tr>
+                                        <td>
+                                            <MudLink Href="@($"/topics/{topic.Topic}")">@topic.Topic</MudLink>
+                                        </td>
+                                        <td style="text-align: right;">@topic.MessagesPerSec.ToString("N1")</td>
+                                        <td style="text-align: right;">@FormatBytes(topic.BytesInPerSec)</td>
+                                        <td style="text-align: right;">@FormatBytes(topic.BytesOutPerSec)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private int _refreshInterval = 5;
+    private DateTime _lastUpdated = DateTime.Now;
+    private Timer? _timer;
+    private string? _error;
+
+    // Previous snapshot for rate calculation
+    private MetricsSnapshot? _previousSnapshot;
+
+    // Current metrics
+    private double _currentMessagesPerSec;
+    private double _currentBytesPerSec;
+    private double _currentP99Latency;
+    private int _activeConnections;
+    private int _topicCount;
+    private int _partitionCount;
+    private int _consumerGroups;
+    private int _activeTransactions;
+    private long _errorsTotal;
+    private long _throttledTotal;
+
+    // Chart data (rolling window of 60 points)
+    private List<MetricPoint> _throughputPoints = [];
+    private List<MetricPoint> _fetchedPoints = [];
+    private List<MetricPoint> _bytesInPoints = [];
+    private List<MetricPoint> _bytesOutPoints = [];
+    private List<MetricPoint> _p50Points = [];
+    private List<MetricPoint> _p90Points = [];
+    private List<MetricPoint> _p99Points = [];
+
+    // MudChart series + labels
+    private List<ChartSeries> _throughputSeries = [];
+    private string[] _throughputLabels = [];
+    private List<ChartSeries> _latencySeries = [];
+    private string[] _latencyLabels = [];
+    private List<ChartSeries> _bytesSeries = [];
+    private string[] _bytesLabels = [];
+    private List<ChartSeries> _topTopicsMsgSeries = [];
+    private List<ChartSeries> _topTopicsBytesSeries = [];
+    private string[] _topTopicsLabels = [];
+
+    private ChartOptions _chartOptions = new() { YAxisLines = true, XAxisLines = true };
+
+    // Topic metrics
+    private Dictionary<string, TopicMetrics> _previousTopicMetrics = [];
+    private List<TopicRateInfo> _topTopics = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshMetricsAsync();
+        StartTimer();
+    }
+
+    private void StartTimer()
+    {
+        _timer?.Dispose();
+        if (_refreshInterval > 0)
+        {
+            _timer = new Timer(async _ =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshMetricsAsync();
+                    StateHasChanged();
+                });
+            }, null, TimeSpan.FromSeconds(_refreshInterval), TimeSpan.FromSeconds(_refreshInterval));
+        }
+    }
+
+    private async Task OnRefreshIntervalChanged()
+    {
+        StartTimer();
+        await Task.CompletedTask;
+    }
+
+    private async Task RefreshMetricsAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var snapshot = await MetricsClient.GetMetricsAsync();
+            var now = DateTime.Now;
+
+            // Calculate rates if we have a previous snapshot
+            if (_previousSnapshot != null)
+            {
+                var elapsed = (snapshot.Timestamp - _previousSnapshot.Timestamp).TotalSeconds;
+                if (elapsed > 0)
+                {
+                    var producedDelta = snapshot.MessagesProducedTotal - _previousSnapshot.MessagesProducedTotal;
+                    var fetchedDelta = snapshot.MessagesFetchedTotal - _previousSnapshot.MessagesFetchedTotal;
+                    var bytesProducedDelta = snapshot.BytesProducedTotal - _previousSnapshot.BytesProducedTotal;
+                    var bytesFetchedDelta = snapshot.BytesFetchedTotal - _previousSnapshot.BytesFetchedTotal;
+
+                    _currentMessagesPerSec = Math.Max(0, producedDelta / elapsed);
+                    var fetchedPerSec = Math.Max(0, fetchedDelta / elapsed);
+                    var bytesInPerSec = Math.Max(0, bytesProducedDelta / elapsed);
+                    var bytesOutPerSec = Math.Max(0, bytesFetchedDelta / elapsed);
+                    _currentBytesPerSec = bytesInPerSec + bytesOutPerSec;
+
+                    AddPoint(_throughputPoints, now, _currentMessagesPerSec);
+                    AddPoint(_fetchedPoints, now, fetchedPerSec);
+                    AddPoint(_bytesInPoints, now, bytesInPerSec);
+                    AddPoint(_bytesOutPoints, now, bytesOutPerSec);
+                }
+            }
+
+            // Latency from current snapshot
+            _currentP99Latency = snapshot.ProduceLatencyP99;
+            AddPoint(_p50Points, now, snapshot.ProduceLatencyP50);
+            AddPoint(_p90Points, now, snapshot.ProduceLatencyP90);
+            AddPoint(_p99Points, now, snapshot.ProduceLatencyP99);
+
+            // Current state metrics
+            _activeConnections = snapshot.ActiveConnections;
+            _topicCount = snapshot.TopicCount;
+            _partitionCount = snapshot.PartitionCount;
+            _consumerGroups = snapshot.ActiveConsumerGroups;
+            _activeTransactions = snapshot.ActiveTransactions;
+            _errorsTotal = snapshot.ErrorsTotal + snapshot.ProduceErrorsTotal;
+            _throttledTotal = snapshot.ThrottledRequestsTotal;
+
+            // Calculate per-topic rates
+            var topicRates = new List<TopicRateInfo>();
+            foreach (var tm in snapshot.TopicMetrics)
+            {
+                var topic = tm.Topic;
+                var msgRate = 0.0;
+                var bytesInRate = 0.0;
+                var bytesOutRate = 0.0;
+
+                if (_previousTopicMetrics.TryGetValue(topic, out var prevTm) && _previousSnapshot != null)
+                {
+                    var elapsed = (snapshot.Timestamp - _previousSnapshot.Timestamp).TotalSeconds;
+                    if (elapsed > 0)
+                    {
+                        msgRate = Math.Max(0, (tm.MessagesProducedTotal - prevTm.MessagesProducedTotal) / elapsed);
+                        bytesInRate = Math.Max(0, (tm.BytesProducedTotal - prevTm.BytesProducedTotal) / elapsed);
+                        bytesOutRate = Math.Max(0, (tm.BytesFetchedTotal - prevTm.BytesFetchedTotal) / elapsed);
+                    }
+                }
+                topicRates.Add(new TopicRateInfo(topic, msgRate, bytesInRate, bytesOutRate));
+            }
+
+            _topTopics = topicRates.OrderByDescending(t => t.MessagesPerSec).Take(3).ToList();
+            _previousTopicMetrics = snapshot.TopicMetrics.ToDictionary(t => t.Topic);
+            _previousSnapshot = snapshot;
+            _lastUpdated = now;
+
+            RebuildChartData();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to fetch metrics: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void RebuildChartData()
+    {
+        var labelStep = Math.Max(1, _throughputPoints.Count / 10);
+
+        // Throughput
+        _throughputSeries =
+        [
+            new ChartSeries { Name = "Produced", Data = _throughputPoints.Select(p => p.Value).ToArray() },
+            new ChartSeries { Name = "Fetched", Data = _fetchedPoints.Select(p => p.Value).ToArray() }
+        ];
+        _throughputLabels = _throughputPoints.Select((p, i) => i % labelStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
+
+        // Latency
+        var latencyStep = Math.Max(1, _p50Points.Count / 10);
+        _latencySeries =
+        [
+            new ChartSeries { Name = "P50", Data = _p50Points.Select(p => p.Value).ToArray() },
+            new ChartSeries { Name = "P90", Data = _p90Points.Select(p => p.Value).ToArray() },
+            new ChartSeries { Name = "P99", Data = _p99Points.Select(p => p.Value).ToArray() }
+        ];
+        _latencyLabels = _p50Points.Select((p, i) => i % latencyStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
+
+        // Bytes I/O
+        var bytesStep = Math.Max(1, _bytesInPoints.Count / 10);
+        _bytesSeries =
+        [
+            new ChartSeries { Name = "Bytes In", Data = _bytesInPoints.Select(p => p.Value).ToArray() },
+            new ChartSeries { Name = "Bytes Out", Data = _bytesOutPoints.Select(p => p.Value).ToArray() }
+        ];
+        _bytesLabels = _bytesInPoints.Select((p, i) => i % bytesStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
+
+        // Topic bar charts
+        _topTopicsLabels = _topTopics.Select(t => t.Topic).ToArray();
+        _topTopicsMsgSeries = [new ChartSeries { Name = "Messages/sec", Data = _topTopics.Select(t => t.MessagesPerSec).ToArray() }];
+        _topTopicsBytesSeries =
+        [
+            new ChartSeries { Name = "Bytes In", Data = _topTopics.Select(t => t.BytesInPerSec).ToArray() },
+            new ChartSeries { Name = "Bytes Out", Data = _topTopics.Select(t => t.BytesOutPerSec).ToArray() }
+        ];
+    }
+
+    private static void AddPoint(List<MetricPoint> data, DateTime timestamp, double value)
+    {
+        data.Add(new MetricPoint(timestamp, value));
+        if (data.Count > 60)
+            data.RemoveAt(0);
+    }
+
+    private static string FormatBytes(double bytes)
+    {
+        string[] suffixes = ["B", "KB", "MB", "GB"];
+        var order = 0;
+        while (bytes >= 1024 && order < suffixes.Length - 1)
+        {
+            order++;
+            bytes /= 1024;
+        }
+        return $"{bytes:N1} {suffixes[order]}";
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+    }
+
+    private record MetricPoint(DateTime Timestamp, double Value);
+    private record TopicRateInfo(string Topic, double MessagesPerSec, double BytesInPerSec, double BytesOutPerSec);
+}

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Surgewave Plugin SDK — meta-package that bundles everything a plugin author needs at compile, build, test, and IDE time. Pulls in Kuestenlogik.Surgewave.Plugins (contracts), Kuestenlogik.Surgewave.Build (MSBuild tasks for .swpkg packaging + install), and Kuestenlogik.Surgewave.Testing (embedded-runtime fixtures). Reference once with PrivateAssets="all" and start writing IBrokerPlugin / IProtocolPlugin / IStorageEnginePlugin implementations.</Description>
+    <PackageId>Kuestenlogik.Surgewave.Sdk</PackageId>
+    <PackageTags>surgewave;sdk;plugins;meta-package;ibrokerplugin;iprotocolplugin</PackageTags>
+
+    <!--
+      Meta-package: no own assemblies, no own targets. Every dependency lights
+      up transitively. The prior version of this project shipped a
+      build/Kuestenlogik.Surgewave.Sdk.targets file that shelled out to the `surgewave` CLI as an
+      external process; that path is superseded by the in-process MSBuild
+      tasks in Kuestenlogik.Surgewave.Build, which are now pulled in transitively here.
+
+      Future expansion lives in this same meta-package: a Roslyn analyzers
+      package (SRWV001-SRWV010 lint rules — synchron zum Native-Protocol
+      Magic-Byte SRWV), `dotnet new` templates from the Surgewave.Templates
+      repo, schema-validation build tasks, etc. Plugin authors keep one
+      PackageReference; new versions of the SDK pull new tooling in
+      transitively without touching their csproj.
+    -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <DevelopmentDependency>true</DevelopmentDependency>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile-time: plugin contracts (IBrokerPlugin etc.). -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+
+    <!--
+      Build-time: MSBuild tasks for .swpkg packaging, signing, install. Replaces
+      the legacy build/Kuestenlogik.Surgewave.Sdk.targets file that shelled out to the surgewave
+      CLI — the new tasks run in-process via Microsoft.Build.Framework.
+    -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Build\Kuestenlogik.Surgewave.Build.csproj" />
+
+    <!--
+      Test-time: SurgewaveRuntime.CreateBuilder() embedded fixture, TestLogManager,
+      wait helpers. Plugin authors writing xunit tests against their plugin
+      reach for these.
+    -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

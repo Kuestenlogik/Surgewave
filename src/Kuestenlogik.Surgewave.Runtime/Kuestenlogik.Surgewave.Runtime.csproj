@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Surgewave broker runtime - unified startup for embedded and standalone modes. Use for testing or running Surgewave embedded in your application.</Description>
+    <PackageTags>surgewave;kafka;streaming;runtime;broker;embedded</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
+  </ItemGroup>
+
+</Project>

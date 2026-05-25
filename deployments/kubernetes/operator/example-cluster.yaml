@@ -1,0 +1,64 @@
+apiVersion: surgewave.kl.io/v1
+kind: SurgewaveCluster
+metadata:
+  name: my-surgewave-cluster
+  namespace: default
+spec:
+  brokers: 3
+  image: surgewave:latest
+  controlUiEnabled: true
+  storage:
+    size: 50Gi
+    storageClassName: standard
+  resources:
+    cpuRequest: "1"
+    cpuLimit: "4"
+    memoryRequest: 2Gi
+    memoryLimit: 8Gi
+  monitoring:
+    enabled: true
+    serviceMonitor: true
+  config:
+    AutoCreateTopics: "true"
+    DefaultNumPartitions: "6"
+    DefaultReplicationFactor: "3"
+    LogRetentionHours: "168"
+    LogSegmentBytes: "1073741824"
+
+---
+# Minimal single-broker cluster for development
+apiVersion: surgewave.kl.io/v1
+kind: SurgewaveCluster
+metadata:
+  name: surgewave-dev
+  namespace: default
+spec:
+  brokers: 1
+  image: surgewave:latest
+  controlUiEnabled: true
+  storage:
+    size: 5Gi
+  resources:
+    cpuRequest: "250m"
+    cpuLimit: "1"
+    memoryRequest: 512Mi
+    memoryLimit: 2Gi
+
+---
+# Serverless cluster with scale-to-zero
+apiVersion: surgewave.kl.io/v1
+kind: SurgewaveCluster
+metadata:
+  name: surgewave-serverless
+  namespace: default
+spec:
+  brokers: 3
+  image: surgewave:latest
+  controlUiEnabled: false
+  storage:
+    size: 10Gi
+  serverless:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 10
+    idleTimeoutSeconds: 300

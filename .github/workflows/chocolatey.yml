@@ -1,0 +1,133 @@
+name: chocolatey
+
+# Auto-publishes Surgewave to the Chocolatey community feed whenever a
+# stable GitHub release is published.
+#
+# Pipeline:
+#   1. Wait for release.published (fires after release.yml uploads its
+#      assets — gated by the absence of -rc / -beta / -preview tags
+#      since the chocolatey community feed expects stable releases).
+#   2. Download surgewave-<version>-win-x64.msi from the release.
+#   3. Compute SHA256 of the MSI.
+#   4. Patch the __VERSION__ + __SHA256__ placeholders in
+#      packaging/chocolatey/surgewave.nuspec + tools/chocolateyInstall.ps1.
+#   5. `choco pack` the patched directory → surgewave.<version>.nupkg.
+#   6. `choco push` to the Chocolatey community feed.
+#
+# One-time setup before the first release:
+#   - Create a Chocolatey community account at
+#     https://community.chocolatey.org/account/Register
+#   - Profile → API Keys → copy the key
+#   - Add as repository secret CHOCOLATEY_API_KEY
+#
+# Without CHOCOLATEY_API_KEY the workflow uploads the .nupkg as a
+# workflow artefact and skips the push step gracefully.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to submit (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Lifted to workflow-level so step-level `if:` conditions can reference
+# `env.CHOCOLATEY_API_KEY`. GitHub Actions disallows the `secrets`
+# context inside step-level `if:` expressions; assigning the secret to
+# env once here is the documented workaround.
+env:
+  CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+
+jobs:
+  publish:
+    name: Pack + push to community.chocolatey.org
+    runs-on: windows-latest
+
+    # Chocolatey reviewers expect stable-only on the community feed.
+    if: ${{ github.event_name != 'release' || (!contains(github.event.release.tag_name, '-rc') && !contains(github.event.release.tag_name, '-beta') && !contains(github.event.release.tag_name, '-preview')) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve version + tag
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          if ([string]::IsNullOrEmpty($tag)) { throw "No tag resolved — release event payload empty and no dispatch input provided." }
+          $version = $tag.TrimStart('v')
+          "tag=$tag"         | Out-File -Append $env:GITHUB_OUTPUT
+          "version=$version" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "tag=$tag"
+          Write-Host "version=$version"
+
+      - name: Download Windows x64 MSI from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG:      ${{ steps.meta.outputs.tag }}
+          VERSION:  ${{ steps.meta.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern "surgewave-$env:VERSION-win-x64.msi" --dir artifacts
+          Get-ChildItem artifacts
+
+      - name: Compute SHA256 of the MSI
+        id: hash
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $msi = "artifacts/surgewave-$env:VERSION-win-x64.msi"
+          $sha = (Get-FileHash -Algorithm SHA256 $msi).Hash
+          "sha256=$sha" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "sha256 = $sha"
+
+      - name: Patch placeholders in nuspec + install script
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          SHA256:  ${{ steps.hash.outputs.sha256 }}
+        run: |
+          $src = 'packaging/chocolatey'
+          $dst = 'choco-pkg'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          Copy-Item -Recurse -Force "$src/*" $dst
+          (Get-Content "$dst/surgewave.nuspec") -replace '__VERSION__', $env:VERSION | Set-Content "$dst/surgewave.nuspec"
+          (Get-Content "$dst/tools/chocolateyInstall.ps1") -replace '__VERSION__', $env:VERSION -replace '__SHA256__', $env:SHA256 | Set-Content "$dst/tools/chocolateyInstall.ps1"
+          Write-Host "----- patched chocolateyInstall.ps1 -----"
+          Get-Content "$dst/tools/chocolateyInstall.ps1"
+          Write-Host "----- end -----"
+
+      - name: choco pack
+        shell: pwsh
+        run: |
+          choco pack choco-pkg/surgewave.nuspec --outputdirectory choco-pkg
+          Get-ChildItem choco-pkg -Filter '*.nupkg'
+
+      - name: Upload .nupkg as workflow artefact
+        uses: actions/upload-artifact@v7
+        with:
+          name: chocolatey-package
+          path: choco-pkg/*.nupkg
+          retention-days: 30
+
+      - name: choco push to community feed
+        if: ${{ env.CHOCOLATEY_API_KEY != '' }}
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $pkg = "choco-pkg/surgewave.$env:VERSION.nupkg"
+          choco push $pkg --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
+
+      - name: Push skipped — note in summary
+        if: ${{ env.CHOCOLATEY_API_KEY == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "::warning::CHOCOLATEY_API_KEY not set — package built but not pushed. Download the chocolatey-package workflow artefact and push manually with: choco push surgewave.<version>.nupkg --source https://push.chocolatey.org/ --api-key <YOUR_KEY>"

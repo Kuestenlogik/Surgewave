@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Chocolatey package metadata for Surgewave.
+
+  The version + checksum get patched in by the release pipeline
+  (.github/workflows/chocolatey.yml) before `choco pack` runs:
+    - <version> is replaced with the SemVer string for the tag
+      (e.g. 0.1.0)
+    - tools/chocolateyInstall.ps1 has the SHA256 of the corresponding
+      MSI baked in for chocolatey-side download verification.
+
+  Chocolatey community-feed submission goes through a moderation
+  queue — first submission for a new package can take 1-7 days, later
+  versions usually pass within hours. The pipeline runs `choco push`
+  on every stable tag; the moderation step is async on the chocolatey
+  side and not blocking the rest of the release.
+-->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>surgewave</id>
+    <version>__VERSION__</version>
+    <packageSourceUrl>https://github.com/Kuestenlogik/Surgewave/tree/main/packaging/chocolatey</packageSourceUrl>
+    <owners>Kuestenlogik</owners>
+
+    <title>Surgewave</title>
+    <authors>Kuestenlogik</authors>
+    <projectUrl>https://surgewave.io/</projectUrl>
+    <iconUrl>https://raw.githubusercontent.com/Kuestenlogik/Surgewave/main/site/assets/images/mark_adaptive.svg</iconUrl>
+    <copyright>Copyright (c) Küstenlogik</copyright>
+    <licenseUrl>https://github.com/Kuestenlogik/Surgewave/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/Kuestenlogik/Surgewave</projectSourceUrl>
+    <docsUrl>https://surgewave.io/docs/</docsUrl>
+    <bugTrackerUrl>https://github.com/Kuestenlogik/Surgewave/issues</bugTrackerUrl>
+    <tags>surgewave kafka message-broker event-streaming dotnet aspnet schema-registry connect mqtt amqp websocket</tags>
+    <summary>The .NET-native message streaming platform — Kafka-wire-compatible broker, Control UI, CLI. Drop-in replacement for Apache Kafka with built-in AI pipelines, schemas, and a plugin marketplace.</summary>
+    <description><![CDATA[
+**Surgewave** is the .NET-native message streaming platform.
+Wire-compatible with Apache Kafka 4.0 (any existing Kafka client connects
+on day one), with built-in AI pipeline nodes, a Confluent-compatible Schema
+Registry, 100+ connectors, and an embedded mode for tests and edge.
+
+Run it embedded inside your .NET app, as a standalone broker, or scaled
+out across a cluster. Pure .NET 10 — no JVM, no ZooKeeper, single
+technology stack.
+
+This package installs the **Surgewave Broker**, **Control UI**, and
+**`surgewave` CLI** on Windows x64. The MSI registers the broker as a
+Windows service, adds the CLI directory to system PATH, and drops Start
+Menu shortcuts for the Control UI dashboard.
+
+**Quick start after install:**
+
+```powershell
+# Start the broker service
+Start-Service SurgewaveBroker
+
+# Connect from any Kafka client
+$config = New-Object Confluent.Kafka.ProducerConfig
+$config.BootstrapServers = "localhost:9092"
+
+# Open the Control UI
+Start-Process http://localhost:5050
+```
+
+See [https://surgewave.io](https://surgewave.io) for documentation,
+samples, and the open-source repository.
+
+**License:** Apache 2.0 (core). Premium extensions ship in separate
+repositories under the Business Source License 1.1.
+]]></description>
+    <releaseNotes>https://github.com/Kuestenlogik/Surgewave/releases/tag/v__VERSION__</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools/**" target="tools" />
+  </files>
+</package>

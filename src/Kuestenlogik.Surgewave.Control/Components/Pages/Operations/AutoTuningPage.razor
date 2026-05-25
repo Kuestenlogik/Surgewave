@@ -1,0 +1,202 @@
+@page "/auto-tuning"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Auto-Tuning - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Auto-Tuning</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Adaptive configuration tuning based on workload analysis</MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Status Card *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoFixHigh"
+                             Color="@(_status.Enabled ? Color.Success : Color.Default)" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
+                        <MudText Typo="Typo.h5">@(_status.Enabled ? "Enabled" : "Disabled")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Settings" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Mode</MudText>
+                        <MudText Typo="Typo.h5">@_status.Mode</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Lightbulb" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Recommendations</MudText>
+                        <MudText Typo="Typo.h5">@_status.ActiveRecommendations.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Timer" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Interval</MudText>
+                        <MudText Typo="Typo.h5">@(_status.AnalysisIntervalSeconds)s</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+    @* Active Recommendations *@
+    <MudTabPanel Text="Active Recommendations" Icon="@Icons.Material.Filled.Lightbulb">
+        <MudTable Items="_status.ActiveRecommendations" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Rule</MudTh>
+                <MudTh>Config Key</MudTh>
+                <MudTh>Current</MudTh>
+                <MudTh>Suggested</MudTh>
+                <MudTh>Reason</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Rule"><code>@context.RuleId</code></MudTd>
+                <MudTd DataLabel="Config Key"><code>@context.ConfigKey</code></MudTd>
+                <MudTd DataLabel="Current">@context.CurrentValue</MudTd>
+                <MudTd DataLabel="Suggested">
+                    <MudText Color="Color.Primary"><strong>@context.SuggestedValue</strong></MudText>
+                </MudTd>
+                <MudTd DataLabel="Reason">@context.Reason</MudTd>
+                <MudTd DataLabel="Actions">
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="() => ApplyRecommendationAsync(context.RuleId)"
+                               StartIcon="@Icons.Material.Filled.Check">Apply</MudButton>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No active recommendations. The system is well-tuned.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* History *@
+    <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History">
+        <MudTable Items="_history" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Timestamp</MudTh>
+                <MudTh>Rule</MudTh>
+                <MudTh>Config Key</MudTh>
+                <MudTh>Change</MudTh>
+                <MudTh>Auto-Applied</MudTh>
+                <MudTh>Description</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Timestamp">@context.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Rule"><code>@context.RuleId</code></MudTd>
+                <MudTd DataLabel="Config Key"><code>@context.ConfigKey</code></MudTd>
+                <MudTd DataLabel="Change">@context.CurrentValue -> @context.SuggestedValue</MudTd>
+                <MudTd DataLabel="Auto-Applied">
+                    @if (context.WasAutoApplied)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success" />
+                    }
+                </MudTd>
+                <MudTd DataLabel="Description">@context.Description</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No tuning history.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private AutoTuningStatusInfo _status = new();
+    private List<RecommendationInfo> _history = [];
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _status = await Http.GetFromJsonAsync<AutoTuningStatusInfo>("/api/auto-tuning/status") ?? new();
+            _history = await Http.GetFromJsonAsync<List<RecommendationInfo>>("/api/auto-tuning/history") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load auto-tuning data: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task ApplyRecommendationAsync(string ruleId)
+    {
+        try
+        {
+            var response = await Http.PostAsync($"/api/auto-tuning/apply/{ruleId}", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Notification.ShowSuccess($"Recommendation '{ruleId}' applied");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Failed to apply recommendation");
+            }
+        }
+        catch (Exception ex) { Notification.ShowError($"Apply failed: {ex.Message}"); }
+    }
+
+    private sealed class AutoTuningStatusInfo
+    {
+        public bool Enabled { get; set; }
+        public string Mode { get; set; } = "Unknown";
+        public int AnalysisIntervalSeconds { get; set; }
+        public List<RecommendationInfo> ActiveRecommendations { get; set; } = [];
+        public List<string> DisabledRules { get; set; } = [];
+    }
+
+    private sealed class RecommendationInfo
+    {
+        public string RuleId { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string ConfigKey { get; set; } = "";
+        public string CurrentValue { get; set; } = "";
+        public string SuggestedValue { get; set; } = "";
+        public string Reason { get; set; } = "";
+        public bool WasAutoApplied { get; set; }
+        public DateTimeOffset Timestamp { get; set; }
+    }
+}

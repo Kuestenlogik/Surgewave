@@ -1,0 +1,5 @@
+{
+  "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
+  "parallelizeTestCollections": false,
+  "_comment": "SurgewaveTransportFactoryTests and TcpTransportRegistrationTests both mutate the static SurgewaveTransportFactory._tcpFactory. Running classes in parallel causes the mock factory from one test to leak into another, so we serialise the entire assembly. Tests within a class still run sequentially per xUnit defaults."
+}

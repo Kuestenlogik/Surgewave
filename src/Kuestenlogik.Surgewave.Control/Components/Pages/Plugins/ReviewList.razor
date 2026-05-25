@@ -1,0 +1,203 @@
+@using Kuestenlogik.Surgewave.Control.Models.Marketplace
+@inject IReviewService ReviewService
+@inject NotificationState Notifications
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-2" />
+}
+else
+{
+    @* Rating Summary *@
+    @if (_summary != null && _summary.TotalReviews > 0)
+    {
+        <MudPaper Elevation="0" Class="pa-4 mb-4" Style="background-color: var(--mud-palette-background-gray);">
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    <div class="d-flex flex-column align-center">
+                        <MudText Typo="Typo.h2" Color="Color.Primary">@_summary.AverageRating.ToString("F1")</MudText>
+                        <RatingStars Value="@_summary.AverageRating" ReadOnly="true" Size="Size.Medium" />
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                            @_summary.TotalReviews review@(_summary.TotalReviews != 1 ? "s" : "")
+                        </MudText>
+                    </div>
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    @for (int i = 4; i >= 0; i--)
+                    {
+                        var starIndex = i;
+                        var count = _summary.StarDistribution[starIndex];
+                        var pct = _summary.TotalReviews > 0 ? (double)count / _summary.TotalReviews * 100 : 0;
+                        <div class="d-flex align-center mb-1">
+                            <MudText Typo="Typo.body2" Style="min-width: 50px;">@(starIndex + 1) star</MudText>
+                            <MudProgressLinear Value="@pct" Color="Color.Warning" Class="mx-2" Style="flex: 1;" />
+                            <MudText Typo="Typo.caption" Style="min-width: 30px; text-align: right;">@count</MudText>
+                        </div>
+                    }
+                </MudItem>
+            </MudGrid>
+
+            @if (_summary.TopTags.Count > 0)
+            {
+                <div class="d-flex flex-wrap gap-1 mt-3">
+                    @foreach (var tag in _summary.TopTags)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+                            @tag
+                        </MudChip>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
+
+    @* Sort Controls *@
+    @if (_reviews.Count > 0)
+    {
+        <div class="d-flex align-center justify-space-between mb-3">
+            <MudText Typo="Typo.subtitle2">Reviews</MudText>
+            <MudSelect T="ReviewSortMode" @bind-Value="_sortMode" Label="Sort By" Dense="true"
+                       Style="max-width: 180px;" Margin="Margin.Dense">
+                <MudSelectItem Value="ReviewSortMode.MostRecent">Most Recent</MudSelectItem>
+                <MudSelectItem Value="ReviewSortMode.HighestRated">Highest Rated</MudSelectItem>
+                <MudSelectItem Value="ReviewSortMode.MostHelpful">Most Helpful</MudSelectItem>
+            </MudSelect>
+        </div>
+    }
+
+    @* Review Cards *@
+    @foreach (var review in SortedReviews)
+    {
+        <MudCard Elevation="1" Class="mb-3">
+            <MudCardContent>
+                <div class="d-flex align-center justify-space-between">
+                    <div class="d-flex align-center">
+                        <MudAvatar Color="Color.Primary" Size="Size.Small" Class="mr-2">
+                            @(review.Author.Length > 0 ? review.Author[0].ToString().ToUpperInvariant() : "?")
+                        </MudAvatar>
+                        <div>
+                            <MudText Typo="Typo.body2"><strong>@review.Author</strong></MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @review.CreatedAt.LocalDateTime.ToString("MMM d, yyyy")
+                                @if (review.UpdatedAt.HasValue)
+                                {
+                                    <span> (edited)</span>
+                                }
+                            </MudText>
+                        </div>
+                    </div>
+                    <RatingStars Value="@review.Rating" ReadOnly="true" Size="Size.Small" />
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(review.Title))
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-2">@review.Title</MudText>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(review.Comment))
+                {
+                    <MudText Typo="Typo.body2" Class="mt-1" Style="white-space: pre-line;">@review.Comment</MudText>
+                }
+
+                @if (review.Tags.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-1 mt-2">
+                        @foreach (var tag in review.Tags)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@tag</MudChip>
+                        }
+                    </div>
+                }
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton StartIcon="@Icons.Material.Filled.ThumbUp"
+                           Size="Size.Small"
+                           Variant="Variant.Text"
+                           Color="Color.Default"
+                           OnClick="@(() => MarkHelpful(review.Id))">
+                    Helpful @(review.HelpfulCount > 0 ? $"({review.HelpfulCount})" : "")
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    }
+
+    @if (_reviews.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-2">
+            No reviews yet. Be the first to share your experience!
+        </MudAlert>
+    }
+}
+
+@code {
+    /// <summary>
+    /// The connector ID to show reviews for.
+    /// </summary>
+    [Parameter]
+    public string ConnectorId { get; set; } = "";
+
+    private bool _loading = true;
+    private List<ConnectorReview> _reviews = [];
+    private ConnectorRatingSummary? _summary;
+    private ReviewSortMode _sortMode = ReviewSortMode.MostRecent;
+
+    private IReadOnlyList<ConnectorReview> SortedReviews => _sortMode switch
+    {
+        ReviewSortMode.HighestRated => [.. _reviews.OrderByDescending(r => r.Rating).ThenByDescending(r => r.CreatedAt)],
+        ReviewSortMode.MostHelpful => [.. _reviews.OrderByDescending(r => r.HelpfulCount).ThenByDescending(r => r.CreatedAt)],
+        _ => [.. _reviews.OrderByDescending(r => r.CreatedAt)]
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadReviewsAsync();
+    }
+
+    /// <summary>
+    /// Reload reviews from storage. Called externally when a new review is submitted.
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        await LoadReviewsAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadReviewsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _reviews = (await ReviewService.GetReviewsAsync(ConnectorId)).ToList();
+            _summary = await ReviewService.GetRatingSummaryAsync(ConnectorId);
+        }
+        catch
+        {
+            _reviews = [];
+            _summary = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task MarkHelpful(string reviewId)
+    {
+        try
+        {
+            await ReviewService.MarkHelpfulAsync(reviewId);
+            await LoadReviewsAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Failed to mark helpful: {ex.Message}");
+        }
+    }
+
+    private enum ReviewSortMode
+    {
+        MostRecent,
+        HighestRated,
+        MostHelpful
+    }
+}

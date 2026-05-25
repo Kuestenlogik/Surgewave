@@ -1,0 +1,10 @@
+{
+  "$schema": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.protocol.amqp",
+  "name": "AMQP Protocol",
+  "version": "0.1.0",
+  "description": "AMQP 0.9.1 protocol support for Surgewave broker — RabbitMQ client compatibility.",
+  "assemblies": [ "Kuestenlogik.Surgewave.Protocol.Amqp.dll" ],
+  "pluginSettings": "pluginsettings.json",
+  "tags": [ "protocol", "amqp", "rabbitmq", "community" ]
+}

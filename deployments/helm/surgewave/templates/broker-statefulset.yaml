@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "surgewave.fullname" . }}
+  labels:
+    {{- include "surgewave.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "surgewave.fullname" . }}-headless
+  replicas: {{ .Values.broker.replicaCount }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "surgewave.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "surgewave.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/broker-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "surgewave.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 60
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if eq .Values.antiAffinity "hard" }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "surgewave.selectorLabels" . | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+      {{- else if eq .Values.antiAffinity "soft" }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "surgewave.selectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: surgewave-broker
+          image: "{{ .Values.broker.image.repository }}:{{ .Values.broker.image.tag }}"
+          imagePullPolicy: {{ .Values.broker.image.pullPolicy }}
+          ports:
+            - name: kafka
+              containerPort: {{ .Values.broker.ports.kafka }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.broker.ports.grpc }}
+              protocol: TCP
+            - name: replication
+              containerPort: {{ .Values.broker.ports.replication }}
+              protocol: TCP
+            {{- if .Values.features.mqtt.enabled }}
+            - name: mqtt
+              containerPort: {{ .Values.broker.ports.mqtt }}
+              protocol: TCP
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "surgewave.fullname" . }}-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: Surgewave__BrokerId
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: Surgewave__ClusterNodes
+              value: {{ include "surgewave.clusterNodes" . | quote }}
+            {{- with .Values.broker.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.broker.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: grpc
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: grpc
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.broker.storage.storageClassName }}
+        storageClassName: {{ .Values.broker.storage.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.broker.storage.size }}

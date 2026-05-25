@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <!--
+      Razor-Class-Library carrying the shared services + components that
+      Surgewave.Control plugins (Surgewave.Ai, .Replication, .Governance,
+      .Functions, …) need to compile against. The Web-App host
+      Kuestenlogik.Surgewave.Control consumes this assembly via ProjectReference;
+      premium-tier plugins consume it as a NuGet PackageReference.
+
+      Keeping the same RootNamespace as the Web-App host means existing
+      `@using Kuestenlogik.Surgewave.Control.State` / `.Services` / `.Models`
+      directives in the moved files keep working without rewrite.
+    -->
+    <RootNamespace>Kuestenlogik.Surgewave.Control</RootNamespace>
+    <Description>Surgewave Control plugin SDK — shared services, models and components that premium-tier UI plugins (IControlPlugin) compile against. Apache 2.0 alongside the Surgewave core.</Description>
+    <PackageTags>surgewave;control-ui;blazor;plugin-sdk</PackageTags>
+  </PropertyGroup>
+
+  <!-- Sdk.Razor liefert (anders als Sdk.Web) keine impliziten ASP.NET-Usings;
+       die verschobenen Services nutzen ILogger<> ohne `using Microsoft.
+       Extensions.Logging;` — daher explizit als global using deklarieren. -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Blazored.LocalStorage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+  </ItemGroup>
+
+</Project>

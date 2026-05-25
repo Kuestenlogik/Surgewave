@@ -1,0 +1,377 @@
+@using Kuestenlogik.Surgewave.Control.Models.Assistant
+@using Kuestenlogik.Surgewave.Control.Services.Assistant
+@inject IAssistantService AssistantService
+@inject AssistantState AssistantState
+@inject IJSRuntime JS
+@implements IDisposable
+
+<MudDrawer Open="IsOpen" OpenChanged="OnOpenChanged" Anchor="Anchor.End" Elevation="4" Width="460px"
+           Variant="DrawerVariant.Temporary" Class="assistant-drawer">
+    <MudDrawerHeader Class="d-flex align-center justify-space-between pa-3">
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Psychology" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Surgewave Assistant</MudText>
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                       OnClick="@(() => IsOpenChanged.InvokeAsync(false))" />
+    </MudDrawerHeader>
+
+    @* Quick action chips *@
+    <div class="assistant-quick-actions pa-2">
+        <div class="d-flex flex-wrap gap-1">
+            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined"
+                     OnClick="@(() => SendQuickAction("Perform a health check on the cluster"))">
+                <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Small" Class="mr-1" />
+                Health Check
+            </MudChip>
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined"
+                     OnClick="@(() => SendQuickAction("Show current anomalies and issues"))">
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Class="mr-1" />
+                Show Anomalies
+            </MudChip>
+            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
+                     OnClick="@(() => SendQuickAction("Give me tuning recommendations"))">
+                <MudIcon Icon="@Icons.Material.Filled.TipsAndUpdates" Size="Size.Small" Class="mr-1" />
+                Tuning Tips
+            </MudChip>
+            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
+                     OnClick="@(() => SendQuickAction("Help me query data with SQL"))">
+                <MudIcon Icon="@Icons.Material.Filled.TableChart" Size="Size.Small" Class="mr-1" />
+                Query Data
+            </MudChip>
+        </div>
+    </div>
+
+    <MudDivider />
+
+    @* Message history *@
+    <div class="assistant-messages-container" @ref="_messagesContainer">
+        @if (AssistantState.Messages.Count == 0 && !AssistantState.IsProcessing)
+        {
+            <div class="d-flex flex-column align-center justify-center pa-8" style="height: 100%;">
+                <MudIcon Icon="@Icons.Material.Filled.Psychology" Size="Size.Large" Color="Color.Secondary"
+                         Style="font-size: 3rem;" />
+                <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">
+                    Surgewave Assistant
+                </MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 text-center">
+                    Ask about cluster health, anomalies, tuning recommendations, or query data using natural language.
+                </MudText>
+            </div>
+        }
+        else
+        {
+            @foreach (var msg in AssistantState.Messages)
+            {
+                <div class="assistant-bubble-row @GetBubbleAlignment(msg.Role)">
+                    @if (msg.Role == "user")
+                    {
+                        <MudPaper Class="assistant-bubble assistant-bubble-user pa-2 my-1" Elevation="1">
+                            <MudText Typo="Typo.body2" Style="white-space: pre-wrap; word-break: break-word;">
+                                @msg.Content
+                            </MudText>
+                            <MudText Typo="Typo.caption" Class="mt-1" Style="opacity: 0.6;">
+                                @msg.Timestamp.LocalDateTime.ToString("HH:mm")
+                            </MudText>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudPaper Class="assistant-bubble assistant-bubble-assistant pa-2 my-1" Elevation="1">
+                            <MudText Typo="Typo.caption" Color="Color.Primary" Class="mb-1">
+                                <MudIcon Icon="@Icons.Material.Filled.Psychology" Size="Size.Small" Class="mr-1" />
+                                Assistant
+                            </MudText>
+
+                            @* Render anomaly cards *@
+                            @if (msg.Anomalies is { Count: > 0 })
+                            {
+                                @foreach (var anomaly in msg.Anomalies)
+                                {
+                                    <MudAlert Severity="@MapAnomalySeverity(anomaly.Severity)" Dense="true"
+                                              Class="my-1" Variant="Variant.Outlined">
+                                        <MudText Typo="Typo.body2"><strong>@anomaly.Resource</strong> (@anomaly.Type)</MudText>
+                                        <MudText Typo="Typo.caption">@anomaly.Description</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            Value: @anomaly.CurrentValue.ToString("F1") (baseline: @anomaly.BaselineValue.ToString("F1"), deviation: @anomaly.DeviationPercent.ToString("F1")%)
+                                        </MudText>
+                                    </MudAlert>
+                                }
+                            }
+
+                            @* Render recommendation cards *@
+                            @if (msg.Recommendations is { Count: > 0 })
+                            {
+                                @foreach (var rec in msg.Recommendations)
+                                {
+                                    <MudCard Elevation="0" Class="my-1" Style="border: 1px solid var(--mud-palette-lines-default);">
+                                        <MudCardContent Class="pa-2">
+                                            <div class="d-flex align-center gap-1 mb-1">
+                                                <MudIcon Icon="@Icons.Material.Filled.TipsAndUpdates" Size="Size.Small"
+                                                         Color="Color.Success" />
+                                                <MudText Typo="Typo.body2"><strong>@rec.Title</strong></MudText>
+                                                <MudChip T="string" Size="Size.Small" Color="@GetImpactColor(rec.Impact)"
+                                                         Variant="Variant.Filled" Class="ml-auto">@rec.Impact</MudChip>
+                                            </div>
+                                            @if (rec.ConfigKey is not null)
+                                            {
+                                                <div class="d-flex gap-2 align-center">
+                                                    <MudText Typo="Typo.caption"><code>@rec.ConfigKey</code></MudText>
+                                                    @if (rec.CurrentValue is not null)
+                                                    {
+                                                        <MudText Typo="Typo.caption">@rec.CurrentValue</MudText>
+                                                        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" />
+                                                    }
+                                                    @if (rec.SuggestedValue is not null)
+                                                    {
+                                                        <MudText Typo="Typo.caption"><strong>@rec.SuggestedValue</strong></MudText>
+                                                    }
+                                                </div>
+                                            }
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@rec.Description</MudText>
+                                        </MudCardContent>
+                                    </MudCard>
+                                }
+                            }
+
+                            @* SQL generated *@
+                            @if (!string.IsNullOrWhiteSpace(msg.GeneratedSql))
+                            {
+                                <MudPaper Elevation="0" Class="my-1 pa-2" Style="background: var(--mud-palette-background); border: 1px solid var(--mud-palette-lines-default); border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap;">
+                                    @msg.GeneratedSql
+                                </MudPaper>
+                            }
+
+                            @* Text content *@
+                            @if (!string.IsNullOrWhiteSpace(msg.Content))
+                            {
+                                <MudText Typo="Typo.body2" Style="white-space: pre-wrap; word-break: break-word;"
+                                         Class="@(msg.Anomalies is { Count: > 0 } || msg.Recommendations is { Count: > 0 } || !string.IsNullOrWhiteSpace(msg.GeneratedSql) ? "mt-2" : "")">
+                                    @msg.Content
+                                </MudText>
+                            }
+
+                            <MudText Typo="Typo.caption" Class="mt-1" Style="opacity: 0.6;">
+                                @msg.Timestamp.LocalDateTime.ToString("HH:mm")
+                            </MudText>
+                        </MudPaper>
+                    }
+                </div>
+            }
+
+            @if (AssistantState.IsProcessing)
+            {
+                <div class="assistant-bubble-row assistant-align-left">
+                    <MudPaper Class="assistant-bubble assistant-bubble-assistant pa-2 my-1" Elevation="1">
+                        <div class="d-flex align-center gap-2">
+                            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">Analyzing...</MudText>
+                        </div>
+                    </MudPaper>
+                </div>
+            }
+        }
+    </div>
+
+    <MudDivider />
+
+    @* Input bar *@
+    <div class="assistant-input-bar pa-2">
+        <MudGrid Spacing="1">
+            <MudItem xs="10">
+                <MudTextField @bind-Value="_messageText" Label="Ask Surgewave Assistant..." Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Lines="1" Immediate="true"
+                              OnKeyDown="OnInputKeyDown" Disabled="@AssistantState.IsProcessing"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Psychology" />
+            </MudItem>
+            <MudItem xs="2" Class="d-flex align-center justify-center">
+                <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                               OnClick="SendMessage" Size="Size.Medium"
+                               Disabled="@(string.IsNullOrWhiteSpace(_messageText) || AssistantState.IsProcessing)" />
+            </MudItem>
+        </MudGrid>
+    </div>
+</MudDrawer>
+
+<style>
+    .assistant-drawer .mud-drawer-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .assistant-quick-actions {
+        flex-shrink: 0;
+    }
+
+    .assistant-messages-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .assistant-bubble-row {
+        display: flex;
+        width: 100%;
+        margin-bottom: 4px;
+    }
+
+    .assistant-align-right {
+        justify-content: flex-end;
+    }
+
+    .assistant-align-left {
+        justify-content: flex-start;
+    }
+
+    .assistant-bubble {
+        max-width: 90%;
+        border-radius: 12px;
+        padding: 8px 12px;
+        margin: 2px 0;
+    }
+
+    .assistant-bubble-user {
+        background-color: var(--mud-palette-primary) !important;
+        color: var(--mud-palette-primary-text) !important;
+        border-bottom-right-radius: 4px;
+    }
+
+    .assistant-bubble-assistant {
+        background-color: var(--mud-palette-surface) !important;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-bottom-left-radius: 4px;
+    }
+
+    .assistant-input-bar {
+        flex-shrink: 0;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> IsOpenChanged { get; set; }
+
+    private string _messageText = "";
+    private ElementReference _messagesContainer;
+
+    protected override void OnInitialized()
+    {
+        AssistantState.OnChange += OnStateChanged;
+    }
+
+    private async Task OnOpenChanged(bool open)
+    {
+        IsOpen = open;
+        await IsOpenChanged.InvokeAsync(open);
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private Task SendQuickAction(string prompt)
+    {
+        _messageText = prompt;
+        return SendMessage();
+    }
+
+    private async Task OnInputKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        var text = _messageText?.Trim();
+        if (string.IsNullOrWhiteSpace(text) || AssistantState.IsProcessing)
+            return;
+
+        // Add user message
+        AssistantState.AddMessage(new AssistantMessage
+        {
+            Role = "user",
+            Content = text
+        });
+        _messageText = "";
+        AssistantState.IsProcessing = true;
+        StateHasChanged();
+        await ScrollToBottomAsync();
+
+        try
+        {
+            var response = await AssistantService.AskAsync(text);
+            AssistantState.AddMessage(response);
+
+            // Update anomalies if the response contains them
+            if (response.Anomalies is { Count: > 0 })
+            {
+                AssistantState.UpdateAnomalies(response.Anomalies);
+            }
+        }
+        catch (Exception ex)
+        {
+            AssistantState.AddMessage(new AssistantMessage
+            {
+                Role = "system",
+                Content = $"Error: {ex.Message}"
+            });
+        }
+        finally
+        {
+            AssistantState.IsProcessing = false;
+            StateHasChanged();
+            await ScrollToBottomAsync();
+        }
+    }
+
+    private async Task ScrollToBottomAsync()
+    {
+        try
+        {
+            await Task.Delay(50);
+            await JS.InvokeVoidAsync("eval",
+                "document.querySelector('.assistant-messages-container')?.scrollTo(0, document.querySelector('.assistant-messages-container')?.scrollHeight ?? 0)");
+        }
+        catch
+        {
+            // JS interop may fail during prerender
+        }
+    }
+
+    private static string GetBubbleAlignment(string role) => role switch
+    {
+        "user" => "assistant-align-right",
+        _ => "assistant-align-left"
+    };
+
+    private static MudBlazor.Severity MapAnomalySeverity(string severity) => severity switch
+    {
+        "Critical" => MudBlazor.Severity.Error,
+        "Warning" => MudBlazor.Severity.Warning,
+        "Info" => MudBlazor.Severity.Info,
+        _ => MudBlazor.Severity.Normal
+    };
+
+    private static Color GetImpactColor(string impact) => impact switch
+    {
+        "High" => Color.Error,
+        "Medium" => Color.Warning,
+        "Low" => Color.Info,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        AssistantState.OnChange -= OnStateChanged;
+    }
+}

@@ -1,0 +1,180 @@
+@using Blazor.Diagrams
+@using Blazor.Diagrams.Components
+@using Blazor.Diagrams.Core.Geometry
+@using Blazor.Diagrams.Core.Models
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+
+<div class="diagram-canvas-container" style="width: 100%; height: 600px;"
+     @ondrop="OnDrop" @ondrop:preventDefault
+     @ondragover="OnDragOver" @ondragover:preventDefault
+     @oncontextmenu="OnContextMenu" @oncontextmenu:preventDefault>
+    @if (_isInteractive && Diagram != null)
+    {
+        <CascadingValue Value="Diagram" IsFixed="true">
+            <DiagramCanvas></DiagramCanvas>
+        </CascadingValue>
+    }
+    else
+    {
+        <div class="d-flex align-center justify-center" style="height: 600px;">
+            <MudProgressCircular Indeterminate="true" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public BlazorDiagram Diagram { get; set; } = null!;
+
+    [Parameter]
+    public ConnectorTypeInfo? PendingConnector { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorNode> OnNodeAdded { get; set; }
+
+    [Parameter]
+    public EventCallback<ConnectorNode> OnNodeSelected { get; set; }
+
+    [Parameter]
+    public EventCallback<PipelineLink> OnLinkCreated { get; set; }
+
+    [Parameter]
+    public EventCallback OnPendingConnectorCleared { get; set; }
+
+    [Parameter]
+    public EventCallback<(ConnectorTypeInfo Connector, double X, double Y)> OnConnectorDropped { get; set; }
+
+    [Parameter]
+    public EventCallback<(double X, double Y, ConnectorNode? Node)> OnContextMenuRequested { get; set; }
+
+    private bool _isInteractive = false;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && !_isInteractive)
+        {
+            _isInteractive = true;
+            StateHasChanged();
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Diagram.SelectionChanged += (model) =>
+        {
+            if (model is ConnectorNode node)
+            {
+                OnNodeSelected.InvokeAsync(node);
+            }
+        };
+
+        Diagram.Links.Added += (link) =>
+        {
+            if (link is PipelineLink pipelineLink)
+            {
+                OnLinkCreated.InvokeAsync(pipelineLink);
+            }
+        };
+
+        // Register for pointer down on the canvas to add nodes
+        Diagram.PointerDown += OnDiagramPointerDown;
+    }
+
+    private void OnDiagramPointerDown(Blazor.Diagrams.Core.Models.Base.Model? model, Blazor.Diagrams.Core.Events.PointerEventArgs e)
+    {
+        // Only add node if:
+        // 1. We have a pending connector
+        // 2. Click wasn't on an existing element (model is null = clicked on canvas)
+        if (PendingConnector == null || model != null)
+        {
+            return;
+        }
+
+        // Get position from client coordinates, adjusted for diagram pan/zoom
+        var position = Diagram.GetRelativeMousePoint(e.ClientX, e.ClientY);
+
+        var node = new ConnectorNode(position)
+        {
+            NodeId = Guid.NewGuid().ToString("N"),
+            ConnectorType = PendingConnector.Type,
+            Label = PendingConnector.Name,
+            IsSource = PendingConnector.IsSource,
+            IsSink = PendingConnector.IsSink
+        };
+
+        // Add ports based on node type
+        if (PendingConnector.IsSource)
+        {
+            node.AddPort(PortAlignment.Right);
+        }
+        else if (PendingConnector.IsSink)
+        {
+            node.AddPort(PortAlignment.Left);
+        }
+        else
+        {
+            node.AddPort(PortAlignment.Left);
+            node.AddPort(PortAlignment.Right);
+        }
+
+        Diagram.Nodes.Add(node);
+        OnNodeAdded.InvokeAsync(node);
+        OnPendingConnectorCleared.InvokeAsync();
+    }
+
+    private void OnDragOver(DragEventArgs e)
+    {
+        // Allow drop
+    }
+
+    private async Task OnDrop(DragEventArgs e)
+    {
+        // Get relative position and notify parent
+        var position = Diagram.GetRelativeMousePoint(e.ClientX, e.ClientY);
+        await OnConnectorDropped.InvokeAsync((null!, position.X, position.Y));
+    }
+
+    private async Task OnContextMenu(MouseEventArgs e)
+    {
+        // Find if we clicked on a node
+        var position = Diagram.GetRelativeMousePoint(e.ClientX, e.ClientY);
+        ConnectorNode? clickedNode = null;
+
+        foreach (var node in Diagram.Nodes.OfType<ConnectorNode>())
+        {
+            if (node.Position != null)
+            {
+                // Check if click is within node bounds (approximate)
+                var nodeX = node.Position.X;
+                var nodeY = node.Position.Y;
+                var nodeWidth = 160.0;
+                var nodeHeight = 60.0;
+
+                if (position.X >= nodeX && position.X <= nodeX + nodeWidth &&
+                    position.Y >= nodeY && position.Y <= nodeY + nodeHeight)
+                {
+                    clickedNode = node;
+                    break;
+                }
+            }
+        }
+
+        await OnContextMenuRequested.InvokeAsync((e.ClientX, e.ClientY, clickedNode));
+    }
+}
+
+<style>
+    .diagram-canvas-container {
+        width: 100%;
+        height: 100%;
+        min-height: 500px;
+        background-color: var(--mud-palette-background);
+        background-image:
+            linear-gradient(rgba(0,0,0,.1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0,0,0,.1) 1px, transparent 1px);
+        background-size: 20px 20px;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 4px;
+    }
+</style>

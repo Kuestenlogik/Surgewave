@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- xunit.runner.json must be present in the test output for xUnit to
+         pick it up. parallelizeTestCollections=false serialises classes in
+         this assembly because SurgewaveTransportFactoryTests mutates the
+         static SurgewaveTransportFactory._tcpFactory and would otherwise leak
+         a mock into TcpTransportRegistrationTests when xUnit runs them in
+         parallel — that's the green-locally / red-on-CI failure mode. -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Transport.Quic\Kuestenlogik.Surgewave.Transport.Quic.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Quic\Kuestenlogik.Surgewave.Protocol.Quic.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing.Network\Kuestenlogik.Surgewave.Testing.Network.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,278 @@
+@inherits LayoutComponentBase
+@inject ClusterState ClusterState
+@inject AssistantState AssistantState
+@inject ShepherdService ShepherdService
+@inject ISurgewaveApiClient ApiClient
+@inject NavigationManager Navigation
+@using Kuestenlogik.Surgewave.Control.Security
+@using Kuestenlogik.Surgewave.Control.Components.Assistant
+@inject Microsoft.Extensions.Options.IOptions<SurgewaveAuthConfig> AuthConfig
+@inject IJSRuntime JS
+
+<MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@ToggleDrawer" />
+        <MudText Typo="Typo.h5" Class="ml-3">Surgewave Control</MudText>
+        <MudSpacer />
+
+        @* Guided Tour Button *@
+        <MudTooltip Text="Start guided tour" data-tour-id="tour-button">
+            <MudIconButton Icon="@Icons.Material.Filled.Tour" Color="Color.Inherit" OnClick="StartPageTour"
+                           data-tour-id="tour-button" />
+        </MudTooltip>
+
+        @* Surgewave Assistant Badge *@
+        <AnomalyBadge OnClick="ToggleAssistantDrawer" />
+
+        @* Dark/Light Mode Toggle *@
+        <MudTooltip Text="@(_isDarkMode ? "Light Mode" : "Dark Mode")">
+            <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                           Color="Color.Inherit" OnClick="ToggleDarkMode"
+                           data-tour-id="dark-mode-toggle" />
+        </MudTooltip>
+
+        @* User Menu *@
+        <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <div class="px-4 py-2">
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Signed in as</MudText>
+                @if (AuthConfig.Value.Enabled)
+                {
+                    <AuthorizeView>
+                        <Authorized>
+                            <MudText Typo="Typo.body1" Class="mb-2">@context.User.Identity?.Name</MudText>
+                        </Authorized>
+                        <NotAuthorized>
+                            <MudText Typo="Typo.body1" Class="mb-2">Not signed in</MudText>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body1" Class="mb-2">Admin</MudText>
+                }
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Cluster</MudText>
+                <MudSelect T="string" Value="@ClusterState.SelectedClusterId" ValueChanged="OnClusterChanged"
+                           Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Class="mt-1" Style="min-width: 180px;">
+                    @foreach (var cluster in _clusters)
+                    {
+                        <MudSelectItem Value="@cluster">@cluster</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudDivider Class="my-2" />
+                @if (AuthConfig.Value.Enabled)
+                {
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Logout" Color="Color.Default"
+                               FullWidth="true" Class="justify-start" OnClick="SignOut">
+                        Sign out
+                    </MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Logout" Color="Color.Default"
+                               FullWidth="true" Class="justify-start" Disabled="true">
+                        Sign out
+                    </MudButton>
+                }
+            </div>
+        </MudMenu>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+        <NavMenu />
+    </MudDrawer>
+
+    <MudMainContent Class="pt-16 px-4" Style="height: 100vh; overflow: hidden;">
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-2" Style="height: calc(100vh - 64px); overflow: auto;">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+
+    <AssistantDrawer @bind-IsOpen="_assistantDrawerOpen" />
+</MudLayout>
+
+@code {
+    private const string ThemeStorageKey = "surgewave_theme_dark_mode";
+
+    private bool _drawerOpen = true;
+    private bool _isDarkMode = true;
+    private bool _assistantDrawerOpen;
+    private List<string> _clusters = ["surgewave-cluster"];
+
+    // Surgewave-Brand-Palette aus site/assets/css/style.css portiert,
+    // damit die Control-UI die gleichen Cyan/Violet-Toene + Surface-Farben
+    // traegt wie die Marketing-Site (Wave #33bcff / sky-500 als Primary,
+    // helleres Cyan #66cfff im Dark-Mode, Violet #a78bfa als Secondary,
+    // navy-tinted Backgrounds im Dark-Mode).
+    private MudTheme _theme = new()
+    {
+        // Density-Tuning: MudBlazor-Default ist Mobile-Touch-optimiert.
+        // Desktop-Web-App-Style verlangt engere Spacing, kleinere Schrift,
+        // niedrigere AppBar. Marketing-Site Inter ueber System-Stack —
+        // keine extra Web-Font-Loader im Control.
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["Inter", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+                FontSize = "0.875rem",  // 14px statt MudBlazor-Default 16px
+                LineHeight = "1.5",
+            },
+            H1 = new H1Typography { FontSize = "2rem", FontWeight = "700", LineHeight = "1.2" },
+            H2 = new H2Typography { FontSize = "1.625rem", FontWeight = "700", LineHeight = "1.25" },
+            H3 = new H3Typography { FontSize = "1.375rem", FontWeight = "700", LineHeight = "1.3" },
+            H4 = new H4Typography { FontSize = "1.125rem", FontWeight = "700", LineHeight = "1.3" },
+            H5 = new H5Typography { FontSize = "1rem", FontWeight = "600", LineHeight = "1.35" },
+            H6 = new H6Typography { FontSize = "0.9375rem", FontWeight = "600", LineHeight = "1.4" },
+            Subtitle1 = new Subtitle1Typography { FontSize = "0.875rem", FontWeight = "500" },
+            Subtitle2 = new Subtitle2Typography { FontSize = "0.8125rem", FontWeight = "500" },
+            Body1 = new Body1Typography { FontSize = "0.875rem", LineHeight = "1.5" },
+            Body2 = new Body2Typography { FontSize = "0.8125rem", LineHeight = "1.45" },
+            Button = new ButtonTypography { FontSize = "0.8125rem", FontWeight = "600", TextTransform = "none", LetterSpacing = "0" },
+            Caption = new CaptionTypography { FontSize = "0.75rem", LineHeight = "1.4" },
+            Overline = new OverlineTypography { FontSize = "0.6875rem", LetterSpacing = "0.08em", FontWeight = "600", TextTransform = "uppercase" },
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DefaultBorderRadius = "8px",
+            AppbarHeight = "56px",
+            DrawerWidthLeft = "232px",
+        },
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0ea5e9",          // sky-500 — Marketing-Site --accent
+            PrimaryDarken = "#0369a1",    // sky-700 — Hover-Strong
+            PrimaryLighten = "#7dd3fc",   // sky-300
+            Secondary = "#a78bfa",        // violet — Marketing-Site --accent-secondary
+            Tertiary = "#33bcff",         // Surgewave Wave Cyan (Brand-Logo)
+            Info = "#0ea5e9",
+            Success = "#22c55e",
+            Warning = "#f59e0b",
+            Error = "#ef4444",
+            Surface = "#ffffff",
+            Background = "#fafaff",
+            BackgroundGray = "#f4f4fa",
+            DrawerBackground = "#ffffff",
+            DrawerText = "#0f172a",
+            DrawerIcon = "#475569",
+            AppbarBackground = "#ffffff",
+            AppbarText = "#0f172a",
+            TextPrimary = "#0f172a",
+            TextSecondary = "#475569",
+            ActionDefault = "#475569",
+            LinesDefault = "#e2e8f0",
+            LinesInputs = "#cbd5e1",
+            TableLines = "#e2e8f0",
+            TableStriped = "rgba(14, 165, 233, 0.04)",
+            TableHover = "rgba(14, 165, 233, 0.08)",
+            Divider = "#e2e8f0",
+            DividerLight = "#f1f5f9",
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#66cfff",          // helleres Cyan — Hero-Mode
+            PrimaryDarken = "#33bcff",
+            PrimaryLighten = "#a5e4ff",
+            Secondary = "#a78bfa",
+            Tertiary = "#66cfff",
+            Info = "#66cfff",
+            Success = "#22c55e",
+            Warning = "#fbbf24",
+            Error = "#f87171",
+            Surface = "#0f172a",
+            Background = "#0b1020",
+            BackgroundGray = "#0f172a",
+            DrawerBackground = "#0b1020",
+            DrawerText = "#e2e8f0",
+            DrawerIcon = "#94a3b8",
+            AppbarBackground = "#0b1020",
+            AppbarText = "#e2e8f0",
+            TextPrimary = "#e2e8f0",
+            TextSecondary = "#94a3b8",
+            ActionDefault = "#94a3b8",
+            LinesDefault = "#1e293b",
+            LinesInputs = "#334155",
+            TableLines = "#1e293b",
+            TableStriped = "rgba(102, 207, 255, 0.04)",
+            TableHover = "rgba(102, 207, 255, 0.08)",
+            Divider = "#1e293b",
+            DividerLight = "#0f172a",
+        },
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var clusterInfo = await ApiClient.GetClusterInfoAsync();
+            if (clusterInfo != null)
+            {
+                ClusterState.SelectedClusterId = clusterInfo.ClusterId;
+                _clusters = [clusterInfo.ClusterId];
+            }
+        }
+        catch
+        {
+            // Gateway not available, use default
+            ClusterState.SelectedClusterId = "surgewave-cluster";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
+            if (stored is not null)
+            {
+                _isDarkMode = stored == "true";
+            }
+            else
+            {
+                _isDarkMode = await JS.InvokeAsync<bool>("eval", "window.matchMedia('(prefers-color-scheme: dark)').matches");
+            }
+
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void ToggleAssistantDrawer() => _assistantDrawerOpen = !_assistantDrawerOpen;
+
+    private async Task ToggleDarkMode()
+    {
+        _isDarkMode = !_isDarkMode;
+        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, _isDarkMode ? "true" : "false");
+    }
+
+    private void OnClusterChanged(string clusterId)
+    {
+        ClusterState.SelectedClusterId = clusterId;
+    }
+
+    private async Task StartPageTour()
+    {
+        var currentPath = new Uri(Navigation.Uri).AbsolutePath;
+        var tour = ShepherdTourDefinitions.GetByPage(currentPath);
+        if (tour is not null)
+        {
+            await ShepherdService.StartTourAsync(tour);
+        }
+        else
+        {
+            // Default to welcome tour if no page-specific tour
+            await ShepherdService.StartTourAsync(ShepherdTourDefinitions.Welcome);
+        }
+    }
+
+    private void SignOut()
+    {
+        Navigation.NavigateTo("Account/Logout", forceLoad: true);
+    }
+}

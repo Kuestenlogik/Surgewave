@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+#
+# Version manifest — points winget at the locale + installer files.
+# This is the entry point the winget client reads first when it
+# resolves `winget install Kuestenlogik.Surgewave`.
+PackageIdentifier: Kuestenlogik.Surgewave
+PackageVersion: __VERSION__
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.10.0

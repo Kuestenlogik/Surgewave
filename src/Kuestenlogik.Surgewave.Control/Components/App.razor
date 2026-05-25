@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <link href="_content/Z.Blazor.Diagrams/style.min.css" rel="stylesheet" />
+    <link href="_content/Z.Blazor.Diagrams/default.styles.min.css" rel="stylesheet" />
+    <link href="css/pipeline-editor.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/shepherd.js@13/dist/css/shepherd.css"/>
+    <link href="css/shepherd-surgewave.css" rel="stylesheet" />
+    <link href="_content/BlazorMonaco/lib/monaco-editor/min/vs/editor/editor.main.css" rel="stylesheet" />
+    <link href="Kuestenlogik.Surgewave.Control.styles.css" rel="stylesheet" />
+    <!-- Surgewave-Brand-Skin: ueberschreibt MudBlazor-Defaults mit Brand-
+         Tokens (Cyan-Akzent, kompaktes Spacing, weichere Shadows, Hover-
+         Lifts, Custom-Scrollbars). MUSS NACH dem MudBlazor-CSS geladen
+         werden damit Component-Class-Overrides greifen. -->
+    <link href="css/surgewave-control.css" rel="stylesheet" />
+    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+    <title>Surgewave Control</title>
+</head>
+
+<body>
+    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <script src="_content/Z.Blazor.Diagrams/script.min.js"></script>
+    <script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/loader.js"></script>
+    <script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/editor/editor.main.nls.js"></script>
+    <script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/editor/editor.main.js"></script>
+    <script src="js/app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/shepherd.js@13/dist/js/shepherd.min.js"></script>
+    <script src="js/shepherd-interop.js"></script>
+</body>
+
+</html>

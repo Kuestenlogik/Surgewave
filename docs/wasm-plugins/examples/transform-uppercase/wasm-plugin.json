@@ -1,0 +1,14 @@
+{
+  "id": "example.transform-uppercase",
+  "name": "Uppercase Transform",
+  "version": "1.0.0",
+  "type": "Transform",
+  "description": "Converts all string values in JSON messages to uppercase",
+  "author": "Surgewave Examples",
+  "inputTopic": "raw-messages",
+  "outputTopic": "uppercased-messages",
+  "config": {
+    "fields": "*",
+    "recursive": "true"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "Surgewave": {
+    "Amqp": {
+      "Enabled": false,
+      "Port": 5672,
+      "MaxChannels": 256,
+      "HeartbeatInterval": 60,
+      "MaxConnections": 1000,
+      "MaxFrameSize": 131072,
+      "AllowAnonymous": true,
+      "VirtualHost": "/"
+    }
+  }
+}

@@ -1,0 +1,280 @@
+@page "/partitions/reassignment"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NotificationState Notification
+
+<PageTitle>Partition Reassignment - Surgewave Control</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h4">Partition Reassignment</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Rebalance partitions, decommission brokers, and track reassignment progress</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AutoBalanceAsync"
+                   StartIcon="@Icons.Material.Filled.Balance" Disabled="_balancing">
+            @(_balancing ? "Balancing..." : "Auto-Balance")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.ViewModule" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Partitions</MudText>
+                        <MudText Typo="Typo.h5">@_assignments.Count</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Info" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Plans</MudText>
+                        <MudText Typo="Typo.h5">@_plans.Count(p => p.Status is "InProgress" or "Pending")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Completed</MudText>
+                        <MudText Typo="Typo.h5">@_plans.Count(p => p.Status == "Completed")</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="2">
+            <MudCardContent>
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Brokers</MudText>
+                        <MudText Typo="Typo.h5">@_assignments.SelectMany(a => a.Replicas).Distinct().Count()</MudText>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+    @* Current Assignments *@
+    <MudTabPanel Text="Partition Assignments" Icon="@Icons.Material.Filled.ViewModule">
+        <MudTable Items="_assignments" Hover="true" Dense="true" Class="ma-4" Filter="FilterAssignment">
+            <ToolBarContent>
+                <MudTextField @bind-Value="_assignmentSearch" Placeholder="Filter topic..." Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0"
+                              Immediate="true" DebounceInterval="300" />
+                <MudSpacer />
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                           OnClick="OpenDecommissionDialog" StartIcon="@Icons.Material.Filled.RemoveCircle">
+                    Decommission Broker
+                </MudButton>
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh><MudTableSortLabel SortBy="new Func<AssignmentInfo, object>(x => x.Topic)">Topic</MudTableSortLabel></MudTh>
+                <MudTh>Partition</MudTh>
+                <MudTh>Leader</MudTh>
+                <MudTh>Replicas</MudTh>
+                <MudTh>ISR</MudTh>
+                <MudTh>Size</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Topic"><code>@context.Topic</code></MudTd>
+                <MudTd DataLabel="Partition">@context.Partition</MudTd>
+                <MudTd DataLabel="Leader">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.Leader</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Replicas">@string.Join(", ", context.Replicas)</MudTd>
+                <MudTd DataLabel="ISR">
+                    <MudText Color="@(context.Isr.Count < context.Replicas.Count ? Color.Warning : Color.Default)">
+                        @string.Join(", ", context.Isr)
+                    </MudText>
+                </MudTd>
+                <MudTd DataLabel="Size">@FormatBytes(context.SizeBytes)</MudTd>
+            </RowTemplate>
+            <PagerContent>
+                <MudTablePager PageSizeOptions="new int[] { 25, 50, 100 }" />
+            </PagerContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* Reassignment Plans *@
+    <MudTabPanel Text="Reassignment Plans" Icon="@Icons.Material.Filled.SwapHoriz">
+        <MudTable Items="_plans" Hover="true" Dense="true" Class="ma-4">
+            <HeaderContent>
+                <MudTh>Plan ID</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Partitions</MudTh>
+                <MudTh>Completed</MudTh>
+                <MudTh>Failed</MudTh>
+                <MudTh>Created</MudTh>
+                <MudTh>Description</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Plan ID"><code>@context.PlanId[..8]</code></MudTd>
+                <MudTd DataLabel="Status">
+                    <MudChip T="string" Size="Size.Small" Color="@GetPlanStatusColor(context.Status)">@context.Status</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Partitions">@context.TotalPartitions</MudTd>
+                <MudTd DataLabel="Completed">@context.Completed</MudTd>
+                <MudTd DataLabel="Failed">
+                    <MudText Color="@(context.Failed > 0 ? Color.Error : Color.Default)">@context.Failed</MudText>
+                </MudTd>
+                <MudTd DataLabel="Created">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd DataLabel="Description">@(context.Description ?? "-")</MudTd>
+                <MudTd DataLabel="Actions">
+                    @if (context.Status is "InProgress" or "Pending")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Color="Color.Error"
+                                       OnClick="() => CancelPlanAsync(context.PlanId)" />
+                    }
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No reassignment plans.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private List<AssignmentInfo> _assignments = [];
+    private List<PlanSummaryInfo> _plans = [];
+    private bool _loading = true;
+    private bool _balancing;
+    private string? _error;
+    private string _assignmentSearch = "";
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _assignments = await Http.GetFromJsonAsync<List<AssignmentInfo>>("/api/partitions/assignment") ?? [];
+            _plans = await Http.GetFromJsonAsync<List<PlanSummaryInfo>>("/api/partitions/reassign") ?? [];
+        }
+        catch (Exception ex) { _error = $"Failed to load partition data: {ex.Message}"; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private bool FilterAssignment(AssignmentInfo a) =>
+        string.IsNullOrWhiteSpace(_assignmentSearch) ||
+        a.Topic.Contains(_assignmentSearch, StringComparison.OrdinalIgnoreCase);
+
+    private async Task AutoBalanceAsync()
+    {
+        var confirmed = await DialogService.ShowMessageBox("Auto-Balance",
+            "Generate and execute a partition balance plan across all brokers?", yesText: "Balance", cancelText: "Cancel");
+        if (confirmed != true) return;
+        _balancing = true;
+        StateHasChanged();
+        try
+        {
+            var response = await Http.PostAsync("/api/partitions/balance", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Notification.ShowSuccess("Balance plan executed");
+                await LoadDataAsync();
+            }
+            else
+            {
+                Notification.ShowError("Balance failed");
+            }
+        }
+        catch (Exception ex) { Notification.ShowError($"Balance failed: {ex.Message}"); }
+        finally { _balancing = false; StateHasChanged(); }
+    }
+
+    private async Task OpenDecommissionDialog()
+    {
+        var brokerIds = _assignments.SelectMany(a => a.Replicas).Distinct().OrderBy(id => id).ToList();
+        if (brokerIds.Count == 0) { Notification.ShowInfo("No brokers to decommission"); return; }
+
+        var parameters = new DialogParameters<DecommissionBrokerDialog> { { x => x.BrokerIds, brokerIds } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<DecommissionBrokerDialog>("Decommission Broker", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            Notification.ShowSuccess("Decommission plan submitted");
+            await LoadDataAsync();
+        }
+    }
+
+    private async Task CancelPlanAsync(string planId)
+    {
+        try { await Http.DeleteAsync($"/api/partitions/reassign/{planId}"); await LoadDataAsync(); }
+        catch (Exception ex) { Notification.ShowError($"Cancel failed: {ex.Message}"); }
+    }
+
+    private static Color GetPlanStatusColor(string status) => status switch
+    {
+        "Completed" => Color.Success,
+        "InProgress" or "Pending" => Color.Info,
+        "Failed" => Color.Error,
+        "Cancelled" => Color.Default,
+        _ => Color.Default
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F1} MB";
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
+    }
+
+    private sealed class AssignmentInfo
+    {
+        public string Topic { get; set; } = "";
+        public int Partition { get; set; }
+        public int Leader { get; set; }
+        public List<int> Replicas { get; set; } = [];
+        public List<int> Isr { get; set; } = [];
+        public long SizeBytes { get; set; }
+    }
+
+    private sealed class PlanSummaryInfo
+    {
+        public string PlanId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public int TotalPartitions { get; set; }
+        public int Completed { get; set; }
+        public int Failed { get; set; }
+        public DateTimeOffset CreatedAt { get; set; }
+        public DateTimeOffset? CompletedAt { get; set; }
+        public string? Description { get; set; }
+    }
+}

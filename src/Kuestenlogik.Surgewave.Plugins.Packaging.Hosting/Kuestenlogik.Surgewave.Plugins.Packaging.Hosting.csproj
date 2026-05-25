@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kuestenlogik.Surgewave.Plugins.Packaging.Hosting</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <Description>Surgewave Plugin Packaging hosting integration — IConfigurationBuilder extension that layers plugin-bundled pluginsettings.json files into the host's IConfiguration as low-priority sources. Sibling to Kuestenlogik.Surgewave.Plugins.Packaging; depends on Microsoft.AspNetCore.App framework so console-only consumers (CLI) can keep referencing the BCL-only Packaging assembly without dragging the AspNet types in.</Description>
+    <PackageTags>surgewave;plugins;packaging;hosting;configuration</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging\Kuestenlogik.Surgewave.Plugins.Packaging.csproj" />
+  </ItemGroup>
+
+</Project>

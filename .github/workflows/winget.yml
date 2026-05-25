@@ -1,0 +1,188 @@
+# Auto-publishes Surgewave to the Windows Package Manager (winget)
+# whenever a GitHub release is published.
+#
+# Pipeline:
+#   1. Wait for release.yml to finish (we trigger on release.published,
+#      which fires after the workflow uploads its assets).
+#   2. Download the win-x64 MSI from the release.
+#   3. Compute SHA256 + extract ProductCode from the MSI.
+#   4. Render the manifest templates under packaging/winget/template/
+#      (substituting __VERSION__, __SHA256_X64__, __PRODUCT_CODE_X64__,
+#      __RELEASE_DATE__) into a fresh
+#      `manifests/k/Kuestenlogik/Surgewave/<version>/` directory.
+#   5. Submit a PR to microsoft/winget-pkgs via wingetcreate.exe.
+#
+# Works for both first-time submission and every subsequent version —
+# `wingetcreate submit` opens a PR either way; upstream reviewers
+# handle the "this is a new package" path on their end.
+#
+# One-time setup before the first release:
+#   - Fork microsoft/winget-pkgs into the maintainer's GitHub account.
+#   - Create a **classic** PAT (not fine-grained) with the
+#     `public_repo` scope. Save it as repo secret WINGET_TOKEN.
+#
+# Classic, not fine-grained, on purpose. `wingetcreate submit` opens a
+# cross-org PR (from <maintainer>/winget-pkgs → microsoft/winget-pkgs),
+# and fine-grained PATs cannot grant write access on third-party orgs.
+#
+# Without WINGET_TOKEN the workflow exits early without failing the
+# release.
+
+name: winget
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to submit (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+
+jobs:
+  publish:
+    name: Submit / update microsoft/winget-pkgs
+    runs-on: windows-latest
+
+    # Skip RC / beta / preview tags — winget reviewers expect stable-
+    # only on the microsoft/winget-pkgs repo.
+    if: ${{ github.event_name != 'release' || (!contains(github.event.release.tag_name, '-rc') && !contains(github.event.release.tag_name, '-beta') && !contains(github.event.release.tag_name, '-preview')) }}
+
+    steps:
+      - name: Bail out if WINGET_TOKEN is missing
+        if: ${{ env.WINGET_TOKEN == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "::warning::WINGET_TOKEN secret is not set — skipping winget submission."
+          Write-Host "Add a *classic* PAT with the public_repo scope as WINGET_TOKEN to enable this step."
+
+      - name: Stop here if no token
+        if: ${{ env.WINGET_TOKEN == '' }}
+        shell: pwsh
+        run: exit 0
+
+      - uses: actions/checkout@v6
+
+      - name: Resolve version + release date
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          if ([string]::IsNullOrEmpty($tag)) { throw "No tag resolved — release event payload empty and no dispatch input provided." }
+          $version = $tag.TrimStart('v')
+          $date = (Get-Date).ToString('yyyy-MM-dd')
+          "version=$version" | Out-File -Append $env:GITHUB_OUTPUT
+          "release_date=$date" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "version=$version"
+          Write-Host "release_date=$date"
+
+      - name: Download Windows MSI from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $tag = "${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern "surgewave-$env:VERSION-win-x64.msi" --dir artifacts
+          Get-ChildItem artifacts
+
+      - name: Compute SHA256 hash
+        id: hash
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $msi = "artifacts/surgewave-$env:VERSION-win-x64.msi"
+          $sha = (Get-FileHash -Algorithm SHA256 $msi).Hash
+          "x64=$sha" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "x64 = $sha"
+
+      - name: Extract ProductCode from the MSI
+        id: pcode
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          # WiX v5 stamps a fresh ProductCode per build, but winget needs
+          # it pinned in the manifest so `winget upgrade` can match
+          # installed copies against published versions. Reach into the
+          # MSI Property table via the WindowsInstaller COM database.
+          function Get-MsiProperty([string]$msi, [string]$prop) {
+              $installer = New-Object -ComObject WindowsInstaller.Installer
+              $database = $installer.GetType().InvokeMember(
+                  "OpenDatabase", "InvokeMethod", $null, $installer,
+                  @($msi, 0))
+              $view = $database.GetType().InvokeMember(
+                  "OpenView", "InvokeMethod", $null, $database,
+                  @("SELECT Value FROM Property WHERE Property='$prop'"))
+              $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+              $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+              if ($record -eq $null) { throw "Property $prop not found in $msi" }
+              return $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, 1)
+          }
+          $px64 = Get-MsiProperty "artifacts/surgewave-$env:VERSION-win-x64.msi" "ProductCode"
+          "x64=$px64" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "ProductCode x64 = $px64"
+
+      - name: Render manifests from templates
+        shell: pwsh
+        env:
+          VERSION:          ${{ steps.meta.outputs.version }}
+          RELEASE_DATE:     ${{ steps.meta.outputs.release_date }}
+          SHA256_X64:       ${{ steps.hash.outputs.x64 }}
+          PRODUCT_CODE_X64: ${{ steps.pcode.outputs.x64 }}
+        run: |
+          $src = 'packaging/winget/template'
+          $dst = "out/manifests/k/Kuestenlogik/Surgewave/$env:VERSION"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+
+          Get-ChildItem $src -Filter '*.yaml' | ForEach-Object {
+              $content = Get-Content $_.FullName -Raw
+              $content = $content `
+                  -replace '__VERSION__',          $env:VERSION `
+                  -replace '__RELEASE_DATE__',     $env:RELEASE_DATE `
+                  -replace '__SHA256_X64__',       $env:SHA256_X64 `
+                  -replace '__PRODUCT_CODE_X64__', $env:PRODUCT_CODE_X64
+              Set-Content -Path (Join-Path $dst $_.Name) -Value $content -NoNewline
+          }
+
+          Write-Host "Rendered manifests:"
+          Get-ChildItem $dst | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://aka.ms/wingetcreate/latest' -OutFile wingetcreate.exe
+          $size = (Get-Item wingetcreate.exe).Length
+          if ($size -lt 100000) { throw "wingetcreate.exe is suspiciously small ($size bytes) — download likely failed or returned an HTML redirect page" }
+          Write-Host "Downloaded wingetcreate.exe ($size bytes)"
+
+      - name: Validate manifests via winget
+        shell: pwsh
+        run: |
+          $output = winget validate "out/manifests/k/Kuestenlogik/Surgewave/${{ steps.meta.outputs.version }}" 2>&1 | Out-String
+          Write-Host $output
+          if ($output -match 'Manifest validation succeeded') {
+              Write-Host "::notice::winget validate passed (warnings, if any, are shown above)"
+              exit 0
+          }
+          throw "winget validate reported errors — see output above"
+
+      - name: Submit PR to microsoft/winget-pkgs
+        shell: pwsh
+        env:
+          TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $manifestDir = "out/manifests/k/Kuestenlogik/Surgewave/${{ steps.meta.outputs.version }}"
+          .\wingetcreate.exe submit `
+              --token $env:TOKEN `
+              $manifestDir

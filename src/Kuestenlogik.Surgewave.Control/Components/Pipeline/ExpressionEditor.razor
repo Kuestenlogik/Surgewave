@@ -1,0 +1,181 @@
+@* Expression Editor for C# expressions used in Logic connectors *@
+
+<MudPaper Elevation="0" Class="pa-2" Style="border: 1px solid var(--mud-palette-lines-default); border-radius: 4px;">
+    <MudText Typo="Typo.caption" Color="Color.Primary" Class="mb-1">@Label</MudText>
+
+    <MudTextField @bind-Value="@_value"
+                  Variant="Variant.Text"
+                  Lines="@Lines"
+                  Placeholder="@Placeholder"
+                  HelperText="@HelperText"
+                  Class="expression-editor"
+                  Style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
+                  @bind-Value:after="OnValueChanged" />
+
+    <MudExpansionPanels Elevation="0" Dense="true" Class="mt-2">
+        <MudExpansionPanel Text="Available Variables" Dense="true" Style="font-size: 12px;">
+            <MudSimpleTable Dense="true" Hover="true" Style="font-size: 12px;">
+                <thead>
+                    <tr>
+                        <th>Variable</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var variable in _availableVariables)
+                    {
+                        <tr @onclick="@(() => InsertVariable(variable.Name))" style="cursor: pointer;">
+                            <td><code>@variable.Name</code></td>
+                            <td>@variable.Type</td>
+                            <td>@variable.Description</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudExpansionPanel>
+
+        <MudExpansionPanel Text="Examples" Dense="true" Style="font-size: 12px;">
+            <MudList T="string" Dense="true">
+                @foreach (var example in _examples)
+                {
+                    <MudListItem @onclick="@(() => UseExample(example.Expression))" Style="cursor: pointer;">
+                        <div class="d-flex flex-column">
+                            <code style="font-size: 12px;">@example.Expression</code>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@example.Description</MudText>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public string Label { get; set; } = "Expression";
+
+    [Parameter]
+    public string Value { get; set; } = "";
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public int Lines { get; set; } = 3;
+
+    [Parameter]
+    public string Placeholder { get; set; } = "Enter C# expression...";
+
+    [Parameter]
+    public string HelperText { get; set; } = "";
+
+    [Parameter]
+    public ExpressionType Type { get; set; } = ExpressionType.Filter;
+
+    private string _value = "";
+
+    private List<VariableInfo> _availableVariables = [];
+    private List<ExampleInfo> _examples = [];
+
+    protected override void OnParametersSet()
+    {
+        _value = Value;
+        UpdateContextualHelp();
+    }
+
+    private void UpdateContextualHelp()
+    {
+        _availableVariables = Type switch
+        {
+            ExpressionType.Filter =>
+            [
+                new("key", "string?", "The record key"),
+                new("value", "string?", "The record value (JSON)"),
+                new("topic", "string", "Source topic name"),
+                new("partition", "int", "Source partition"),
+                new("offset", "long", "Message offset"),
+                new("timestamp", "DateTimeOffset", "Message timestamp"),
+                new("headers", "IDictionary<string, string>", "Message headers")
+            ],
+            ExpressionType.Transform =>
+            [
+                new("key", "string?", "The record key"),
+                new("value", "string?", "The record value (JSON)"),
+                new("json", "dynamic", "Parsed JSON object (if value is JSON)"),
+                new("topic", "string", "Source topic name"),
+                new("timestamp", "DateTimeOffset", "Message timestamp")
+            ],
+            ExpressionType.Condition =>
+            [
+                new("key", "string?", "The record key"),
+                new("value", "string?", "The record value"),
+                new("json", "dynamic", "Parsed JSON object"),
+                new("headers", "IDictionary<string, string>", "Message headers")
+            ],
+            _ =>
+            [
+                new("key", "string?", "The record key"),
+                new("value", "string?", "The record value")
+            ]
+        };
+
+        _examples = Type switch
+        {
+            ExpressionType.Filter =>
+            [
+                new("value != null", "Non-null values only"),
+                new("json.status == \"active\"", "Filter by JSON field"),
+                new("int.Parse(json.amount) > 100", "Numeric comparison"),
+                new("key?.StartsWith(\"user-\") == true", "Key prefix filter"),
+                new("headers.ContainsKey(\"priority\")", "Has specific header")
+            ],
+            ExpressionType.Transform =>
+            [
+                new("value?.ToUpper()", "Convert to uppercase"),
+                new("$\"{{\\\"id\\\": \\\"{key}\\\", \\\"data\\\": {value}}}\"", "Wrap in new JSON"),
+                new("json.name + \" (\" + json.email + \")\"", "Combine JSON fields"),
+                new("DateTime.UtcNow.ToString(\"o\")", "Current timestamp")
+            ],
+            ExpressionType.Condition =>
+            [
+                new("json.type == \"order\"", "Check message type"),
+                new("int.Parse(json.priority ?? \"0\") > 5", "Priority check"),
+                new("json.status == \"pending\"", "Status check"),
+                new("key?.Contains(\"vip\") == true", "VIP customer check")
+            ],
+            _ =>
+            [
+                new("value != null", "Basic null check"),
+                new("true", "Always true")
+            ]
+        };
+    }
+
+    private async Task OnValueChanged()
+    {
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private async Task InsertVariable(string name)
+    {
+        _value = string.IsNullOrEmpty(_value) ? name : _value + name;
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    private async Task UseExample(string expression)
+    {
+        _value = expression;
+        await ValueChanged.InvokeAsync(_value);
+    }
+
+    public enum ExpressionType
+    {
+        Filter,
+        Transform,
+        Condition
+    }
+
+    private record VariableInfo(string Name, string Type, string Description);
+    private record ExampleInfo(string Expression, string Description);
+}

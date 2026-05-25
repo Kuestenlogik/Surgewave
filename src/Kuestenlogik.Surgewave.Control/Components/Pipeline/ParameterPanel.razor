@@ -1,0 +1,238 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+
+<MudPaper Elevation="2" Class="pa-3" Style="height: 100%; overflow-y: auto;">
+    <MudText Typo="Typo.h6" Class="mb-2">Parameters</MudText>
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+        Use <code>${param.name}</code> in node configs for substitution.
+    </MudText>
+
+    @if (Parameters.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            No parameters defined. Click "Add Parameter" to get started.
+        </MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable Dense="true" Hover="true" Class="mb-3">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Default</th>
+                    <th>Type</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var param in Parameters)
+                {
+                    <tr>
+                        <td>
+                            <MudTextField @bind-Value="@_editNames[param.Name]" Variant="Variant.Text" Margin="Margin.Dense"
+                                          Style="max-width: 100px;" @bind-Value:after="@(() => OnParameterRenamed(param.Name))" />
+                        </td>
+                        <td>
+                            @if (param.IsSecret)
+                            {
+                                <MudTextField @bind-Value="@_editDefaults[param.Name]" Variant="Variant.Text" Margin="Margin.Dense"
+                                              InputType="InputType.Password" Style="max-width: 100px;"
+                                              @bind-Value:after="@(() => OnParameterDefaultChanged(param.Name))" />
+                            }
+                            else
+                            {
+                                <MudTextField @bind-Value="@_editDefaults[param.Name]" Variant="Variant.Text" Margin="Margin.Dense"
+                                              Style="max-width: 100px;"
+                                              @bind-Value:after="@(() => OnParameterDefaultChanged(param.Name))" />
+                            }
+                        </td>
+                        <td>
+                            <MudChip T="string" Size="MudBlazor.Size.Small" Variant="Variant.Outlined"
+                                     Color="@(param.IsSecret ? Color.Warning : Color.Default)">
+                                @(param.IsSecret ? "secret" : param.Type)
+                            </MudChip>
+                        </td>
+                        <td>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="MudBlazor.Size.Small"
+                                           Color="Color.Error" OnClick="@(() => RemoveParameter(param.Name))" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+
+    <div class="d-flex gap-2 mb-4">
+        <MudButton Variant="Variant.Outlined" Size="MudBlazor.Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="AddParameter">
+            Add Parameter
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Size="MudBlazor.Size.Small" StartIcon="@Icons.Material.Filled.VpnKey"
+                   Color="Color.Warning" OnClick="AddSecretParameter">
+            Add Secret
+        </MudButton>
+    </div>
+
+    @* Environments *@
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Environments</MudText>
+
+    @if (Environments.Count > 0)
+    {
+        <MudTabs @bind-ActivePanelIndex="_activeEnvTab" Outlined="true" Rounded="true" Class="mb-3">
+            @foreach (var env in Environments)
+            {
+                <MudTabPanel Text="@env.Name" BadgeData="@env.Overrides.Count" BadgeColor="Color.Primary">
+                    @foreach (var param in Parameters)
+                    {
+                        var envKey = $"{env.Name}:{param.Name}";
+                        <MudTextField @bind-Value="@_envOverrides[envKey]"
+                                      Label="@param.Name"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Placeholder="@param.DefaultValue"
+                                      InputType="@(param.IsSecret ? InputType.Password : InputType.Text)"
+                                      HelperText="@param.Description"
+                                      Class="mb-2"
+                                      @bind-Value:after="@(() => OnEnvOverrideChanged(env.Name, param.Name))" />
+                    }
+                    <MudButton Variant="Variant.Text" Color="Color.Error" Size="MudBlazor.Size.Small"
+                               OnClick="@(() => RemoveEnvironment(env.Name))">
+                        Remove Environment
+                    </MudButton>
+                </MudTabPanel>
+            }
+        </MudTabs>
+    }
+
+    <MudButton Variant="Variant.Outlined" Size="MudBlazor.Size.Small" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="AddEnvironment">
+        Add Environment
+    </MudButton>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public List<PipelineParameter> Parameters { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<List<PipelineParameter>> ParametersChanged { get; set; }
+
+    [Parameter]
+    public List<PipelineEnvironment> Environments { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<List<PipelineEnvironment>> EnvironmentsChanged { get; set; }
+
+    private int _activeEnvTab;
+    private Dictionary<string, string> _editNames = new();
+    private Dictionary<string, string> _editDefaults = new();
+    private Dictionary<string, string> _envOverrides = new();
+    private int _paramCounter;
+
+    protected override void OnParametersSet()
+    {
+        SyncEditState();
+    }
+
+    private void SyncEditState()
+    {
+        _editNames.Clear();
+        _editDefaults.Clear();
+        _envOverrides.Clear();
+
+        foreach (var p in Parameters)
+        {
+            _editNames[p.Name] = p.Name;
+            _editDefaults[p.Name] = p.DefaultValue;
+        }
+
+        foreach (var env in Environments)
+        {
+            foreach (var p in Parameters)
+            {
+                var key = $"{env.Name}:{p.Name}";
+                _envOverrides[key] = env.Overrides.TryGetValue(p.Name, out var v) ? v : "";
+            }
+        }
+    }
+
+    private async Task AddParameter()
+    {
+        _paramCounter++;
+        var name = $"param{_paramCounter}";
+        Parameters.Add(new PipelineParameter { Name = name });
+        SyncEditState();
+        await ParametersChanged.InvokeAsync(Parameters);
+    }
+
+    private async Task AddSecretParameter()
+    {
+        _paramCounter++;
+        var name = $"secret{_paramCounter}";
+        Parameters.Add(new PipelineParameter { Name = name, IsSecret = true });
+        SyncEditState();
+        await ParametersChanged.InvokeAsync(Parameters);
+    }
+
+    private async Task RemoveParameter(string name)
+    {
+        Parameters.RemoveAll(p => p.Name == name);
+        SyncEditState();
+        await ParametersChanged.InvokeAsync(Parameters);
+    }
+
+    private async Task OnParameterRenamed(string oldName)
+    {
+        var newName = _editNames.TryGetValue(oldName, out var n) ? n : oldName;
+        if (newName == oldName || string.IsNullOrWhiteSpace(newName)) return;
+
+        var idx = Parameters.FindIndex(p => p.Name == oldName);
+        if (idx >= 0)
+        {
+            Parameters[idx] = Parameters[idx] with { Name = newName };
+            SyncEditState();
+            await ParametersChanged.InvokeAsync(Parameters);
+        }
+    }
+
+    private async Task OnParameterDefaultChanged(string name)
+    {
+        var newDefault = _editDefaults.TryGetValue(name, out var d) ? d : "";
+        var idx = Parameters.FindIndex(p => p.Name == name);
+        if (idx >= 0)
+        {
+            Parameters[idx] = Parameters[idx] with { DefaultValue = newDefault };
+            await ParametersChanged.InvokeAsync(Parameters);
+        }
+    }
+
+    private async Task AddEnvironment()
+    {
+        var name = $"env-{Environments.Count + 1}";
+        Environments.Add(new PipelineEnvironment { Name = name });
+        SyncEditState();
+        await EnvironmentsChanged.InvokeAsync(Environments);
+    }
+
+    private async Task RemoveEnvironment(string name)
+    {
+        Environments.RemoveAll(e => e.Name == name);
+        SyncEditState();
+        await EnvironmentsChanged.InvokeAsync(Environments);
+    }
+
+    private async Task OnEnvOverrideChanged(string envName, string paramName)
+    {
+        var key = $"{envName}:{paramName}";
+        var value = _envOverrides.TryGetValue(key, out var v) ? v : "";
+
+        var env = Environments.FirstOrDefault(e => e.Name == envName);
+        if (env != null)
+        {
+            if (string.IsNullOrEmpty(value))
+                env.Overrides.Remove(paramName);
+            else
+                env.Overrides[paramName] = value;
+            await EnvironmentsChanged.InvokeAsync(Environments);
+        }
+    }
+}

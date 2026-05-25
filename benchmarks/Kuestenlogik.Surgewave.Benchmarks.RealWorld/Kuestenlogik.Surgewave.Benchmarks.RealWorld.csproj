@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- CS0618: benchmarks may test deprecated APIs; CA rules in .editorconfig -->
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+    <!-- Server GC for accurate performance measurements -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Runtime\Kuestenlogik.Surgewave.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing.Chaos\Kuestenlogik.Surgewave.Testing.Chaos.csproj" />
+  </ItemGroup>
+
+</Project>

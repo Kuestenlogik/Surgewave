@@ -1,0 +1,45 @@
+title: Surgewave
+description: The complete event streaming platform for .NET 10. Native low-latency transport, signed plugin marketplace, AI pipelines, embedded broker — plus full Kafka 4.x wire compatibility for an instant migration path.
+url: "https://surgewave.io"
+baseurl: ""
+
+markdown: kramdown
+kramdown:
+  syntax_highlighter: rouge
+
+# Plain HTML templates only — no bundled theme.
+theme: null
+
+plugins:
+  - jekyll-seo-tag
+
+# Exclude dev artifacts + anything that should never ship to the public site.
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor/
+  - node_modules/
+  - README.md
+
+# Project metadata surfaced in layouts / includes.
+github:
+  repository: Kuestenlogik/Surgewave
+
+surgewave:
+  version: "0.1.0"
+  tagline: "Streaming, reimagined for .NET 10"
+  docs_url: "/docs/"
+
+# Default OG-/Twitter-Card-Image picked up by jekyll-seo-tag for every page
+# that doesn't set its own `image:` in front matter. 1200x630 PNG rendered
+# from scripts/og-image-template.html via scripts/generate-og-image.js.
+defaults:
+  - scope:
+      path: ""
+    values:
+      image: /assets/images/og-image.png
+
+# Twitter handle used by jekyll-seo-tag for twitter:site / twitter:creator.
+# (No active account yet — placeholder consumed only when present.)
+twitter:
+  card: summary_large_image

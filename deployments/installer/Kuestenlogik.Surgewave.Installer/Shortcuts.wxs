@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <!-- Start Menu shortcuts for Surgewave -->
+    <Component Id="BrokerShortcutComponent" Directory="SurgewaveShortcutDir" Guid="C9D0E1F2-A3B4-5678-CDEF-789012345678">
+      <Shortcut
+        Id="SurgewaveBrokerShortcut"
+        Name="Surgewave Broker (Console)"
+        Description="Start Surgewave Broker in console mode"
+        Target="[BrokerDir]surgewave-broker.exe"
+        WorkingDirectory="INSTALLFOLDER"
+        Icon="SurgewaveIcon" />
+
+      <RegistryValue
+        Root="HKCU"
+        Key="SOFTWARE\Kustenlogik\Surgewave"
+        Name="BrokerShortcutInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes" />
+
+      <RemoveFolder Id="RemoveSurgewaveShortcutDir" On="uninstall" />
+    </Component>
+
+    <Component Id="ControlShortcutComponent" Directory="SurgewaveShortcutDir" Guid="D0E1F2A3-B4C5-6789-DEFA-890123456789">
+      <Shortcut
+        Id="SurgewaveControlShortcut"
+        Name="Surgewave Control UI"
+        Description="Open Surgewave Control web dashboard"
+        Target="[ControlDir]surgewave-control.exe"
+        Arguments="--urls http://localhost:5050"
+        WorkingDirectory="INSTALLFOLDER"
+        Icon="SurgewaveIcon" />
+
+      <Shortcut
+        Id="SurgewaveControlBrowserShortcut"
+        Name="Surgewave Dashboard (Browser)"
+        Description="Open Surgewave dashboard in browser"
+        Target="[SystemFolder]cmd.exe"
+        Arguments="/c start http://localhost:5050" />
+
+      <RegistryValue
+        Root="HKCU"
+        Key="SOFTWARE\Kustenlogik\Surgewave"
+        Name="ControlShortcutInstalled"
+        Type="integer"
+        Value="1"
+        KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+</Wix>

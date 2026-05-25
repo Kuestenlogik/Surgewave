@@ -1,0 +1,345 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@using MudBlazor
+@using System.Text.Json
+@inject IPipelineApiClient ApiClient
+@inject NotificationState Notification
+@inject IJSRuntime JSRuntime
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @if (Mode == ImportExportMode.Export)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Download" Class="mr-2" />
+                @:Export Pipeline
+            }
+            else if (Mode == ImportExportMode.Import)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Upload" Class="mr-2" />
+                @:Import Pipeline
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Article" Class="mr-2" />
+                @:Create from Template
+            }
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (Mode == ImportExportMode.Export)
+        {
+            <MudText Class="mb-4">
+                Export "<strong>@PipelineName</strong>" as a portable JSON file that can be imported into another Surgewave instance.
+            </MudText>
+
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            else if (_exportData != null)
+            {
+                <MudTextField @bind-Value="_exportJson" Lines="15" ReadOnly="true"
+                              Variant="Variant.Outlined" Label="Export JSON"
+                              Style="font-family: monospace; font-size: 12px;" />
+            }
+        }
+        else if (Mode == ImportExportMode.Import)
+        {
+            <MudText Class="mb-4">
+                Paste a pipeline export JSON to import it. A new pipeline will be created with a new ID.
+            </MudText>
+
+            <MudTextField @bind-Value="_importJson" Lines="15" Placeholder="Paste export JSON here..."
+                          Variant="Variant.Outlined" Label="Import JSON"
+                          Style="font-family: monospace; font-size: 12px;" />
+
+            <MudTextField @bind-Value="_importName" Label="Pipeline Name (optional)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                          HelperText="Leave empty to use the name from the export" />
+
+            @if (_importError != null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-2">@_importError</MudAlert>
+            }
+        }
+        else
+        {
+            <MudText Class="mb-4">Choose a template to create a new pipeline.</MudText>
+
+            @if (_loadingTemplates)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+            }
+            else
+            {
+                <MudSelect T="string" @bind-Value="_selectedTemplateId" Label="Template" Variant="Variant.Outlined"
+                           Margin="Margin.Dense">
+                    @foreach (var template in _templates)
+                    {
+                        <MudSelectItem Value="@template.Id">
+                            @template.Name - @template.Category
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+
+                @if (_selectedTemplate != null)
+                {
+                    <MudPaper Elevation="0" Class="pa-3 mt-3" Style="background: var(--mud-palette-background-grey)">
+                        <MudText Typo="Typo.subtitle1">@_selectedTemplate.Name</MudText>
+                        <MudText Typo="Typo.body2" Class="mb-2">@_selectedTemplate.Description</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">@_selectedTemplate.Category</MudChip>
+                    </MudPaper>
+                }
+
+                <MudTextField @bind-Value="_templatePipelineName" Label="Pipeline Name (optional)"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                              HelperText="Leave empty to use the template's default name" />
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        @if (Mode == ImportExportMode.Export && _exportData != null)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CopyToClipboard"
+                       StartIcon="@Icons.Material.Filled.ContentCopy">
+                Copy to Clipboard
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="DownloadFile"
+                       StartIcon="@Icons.Material.Filled.Download">
+                Download
+            </MudButton>
+        }
+        else if (Mode == ImportExportMode.Import)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ImportAsync"
+                       Disabled="@(string.IsNullOrWhiteSpace(_importJson) || _importing)"
+                       StartIcon="@Icons.Material.Filled.Upload">
+                @if (_importing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Import
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateFromTemplateAsync"
+                       Disabled="@(string.IsNullOrWhiteSpace(_selectedTemplateId) || _creatingFromTemplate)"
+                       StartIcon="@Icons.Material.Filled.Add">
+                @if (_creatingFromTemplate)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Create Pipeline
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public ImportExportMode Mode { get; set; }
+
+    [Parameter]
+    public string? PipelineId { get; set; }
+
+    [Parameter]
+    public string? PipelineName { get; set; }
+
+    private bool _loading;
+    private bool _importing;
+    private bool _loadingTemplates;
+    private bool _creatingFromTemplate;
+    private PipelineExportFormat? _exportData;
+    private string _exportJson = "";
+    private string _importJson = "";
+    private string _importName = "";
+    private string? _importError;
+
+    private List<PipelineTemplateSummary> _templates = [];
+    private string _selectedTemplateId = "";
+    private PipelineTemplateSummary? _selectedTemplate => _templates.FirstOrDefault(t => t.Id == _selectedTemplateId);
+    private string _templatePipelineName = "";
+
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Mode == ImportExportMode.Export && !string.IsNullOrEmpty(PipelineId))
+        {
+            await LoadExportDataAsync();
+        }
+        else if (Mode == ImportExportMode.Template)
+        {
+            await LoadTemplatesAsync();
+        }
+    }
+
+    private async Task LoadExportDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            _exportData = await ApiClient.ExportPipelineAsync(PipelineId!);
+            _exportJson = JsonSerializer.Serialize(_exportData, _jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to export: {ex.Message}");
+            MudDialog.Cancel();
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadTemplatesAsync()
+    {
+        _loadingTemplates = true;
+        StateHasChanged();
+
+        try
+        {
+            var templates = await ApiClient.ListTemplatesAsync();
+            _templates = templates.ToList();
+            if (_templates.Count > 0)
+            {
+                _selectedTemplateId = _templates[0].Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to load templates: {ex.Message}");
+        }
+        finally
+        {
+            _loadingTemplates = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyToClipboard()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", _exportJson);
+            Notification.ShowSuccess("Copied to clipboard");
+        }
+        catch
+        {
+            Notification.ShowWarning("Could not copy to clipboard");
+        }
+    }
+
+    private async Task DownloadFile()
+    {
+        try
+        {
+            var fileName = $"pipeline-{PipelineName?.Replace(" ", "-").ToLowerInvariant() ?? "export"}-{DateTime.UtcNow:yyyyMMdd}.json";
+            await JSRuntime.InvokeVoidAsync("eval", $@"
+                const blob = new Blob([{JsonSerializer.Serialize(_exportJson)}], {{ type: 'application/json' }});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '{fileName}';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            ");
+            Notification.ShowSuccess("Download started");
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Download failed: {ex.Message}");
+        }
+    }
+
+    private async Task ImportAsync()
+    {
+        _importError = null;
+        _importing = true;
+        StateHasChanged();
+
+        try
+        {
+            var export = JsonSerializer.Deserialize<PipelineExportFormat>(_importJson, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (export == null)
+            {
+                _importError = "Invalid JSON format";
+                return;
+            }
+
+            var pipeline = await ApiClient.ImportPipelineAsync(export,
+                string.IsNullOrWhiteSpace(_importName) ? null : _importName);
+
+            Notification.ShowSuccess($"Pipeline '{pipeline.Name}' imported successfully");
+            MudDialog.Close(DialogResult.Ok(pipeline));
+        }
+        catch (JsonException)
+        {
+            _importError = "Invalid JSON format. Please paste a valid pipeline export.";
+        }
+        catch (Exception ex)
+        {
+            _importError = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CreateFromTemplateAsync()
+    {
+        _creatingFromTemplate = true;
+        StateHasChanged();
+
+        try
+        {
+            var pipeline = await ApiClient.CreateFromTemplateAsync(_selectedTemplateId,
+                string.IsNullOrWhiteSpace(_templatePipelineName) ? null : _templatePipelineName);
+
+            Notification.ShowSuccess($"Pipeline '{pipeline.Name}' created from template");
+            MudDialog.Close(DialogResult.Ok(pipeline));
+        }
+        catch (Exception ex)
+        {
+            Notification.ShowError($"Failed to create pipeline: {ex.Message}");
+        }
+        finally
+        {
+            _creatingFromTemplate = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
+
+@code {
+    public enum ImportExportMode
+    {
+        Export,
+        Import,
+        Template
+    }
+}

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://surgewave.kuest.nlogik.com/schemas/plugin-manifest/v1",
+  "title": "Surgewave Plugin Manifest",
+  "description": "Schema for plugin.json — the metadata file at the root of every Surgewave Plugin Package (.swpkg). Surgewave reads this file to discover the plugin's identity, the assemblies to load, optional bundled default settings, and any dependencies on other Surgewave plugins.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [ "id", "name", "version", "assemblies" ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "Optional pointer to this schema. IDEs use it for completion and validation while editing plugin.json."
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9._-]+$",
+      "description": "Unique plugin identifier. Convention: reverse-DNS lowercase, e.g. 'kuestenlogik.surgewave.protocol.mqtt' or 'com.example.my-plugin'. Used as the install directory name and the cache key."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name. Shown in 'surgewave plugin list' and the Surgewave Control UI."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][\\w.-]+)?$",
+      "description": "Plugin version. Semantic versioning recommended (major.minor.patch with optional -prerelease/+build suffix)."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short, one-paragraph description of what the plugin does. Shown in 'surgewave plugin show', the marketplace listing and the Control UI plugin browser."
+    },
+    "authors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Author name(s). Free-form strings — typically 'Name <email>' or just 'Organization'."
+    },
+    "license": {
+      "type": "string",
+      "description": "License identifier. SPDX expression preferred (e.g. 'Apache-2.0', 'MIT', 'BSL-1.1')."
+    },
+    "projectUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "Homepage / source repository URL. Linked from the Control UI and marketplace."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Free-form tags for marketplace filtering and discoverability. Convention: lowercase, hyphenated. Example: ['protocol', 'mqtt', 'iot']."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Path to an icon file inside the .swpkg package (relative to the archive root). Supported formats: PNG, SVG. Recommended size: 128x128 or 256x256. Displayed in Surgewave Control plugin UI and the marketplace."
+    },
+    "minRuntimeVersion": {
+      "type": "string",
+      "description": "Minimum Surgewave runtime version required to load this plugin. SemVer string. The broker refuses to load plugins whose minRuntimeVersion is higher than the running broker."
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "External NuGet package dependencies, keyed by package id with a version specifier. These are not resolved automatically — they document the assumptions of the plugin and are surfaced by 'surgewave plugin show'."
+    },
+    "surgewaveDependencies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pluginDependency" },
+      "description": "Dependencies on other Surgewave plugins. Resolved at install time by the dependency resolver, optionally honoured at load time by the broker."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$",
+      "description": "Optional integrity hash of the .swpkg file. When present, 'surgewave plugin install' verifies the package matches before extracting."
+    },
+    "assemblies": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "pattern": "\\.dll$" },
+      "minItems": 1,
+      "description": "Assembly file names (relative to the .swpkg lib/ directory) that contain IPlugin implementations. The broker scans these specifically — other DLLs in lib/ are loaded as dependencies but not scanned, which keeps reflection work bounded."
+    },
+    "pluginSettings": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+$",
+      "description": "Optional name of a JSON file inside the .swpkg containing the plugin's recommended default configuration. Defaults to 'pluginsettings.json' (auto-detected if a file with that name exists next to the manifest). The file is bundled at the .swpkg root, extracted to plugins/<id>/<filename> on install, and layered into the broker's IConfiguration as a low-priority source — so plugin authors can ship recommended defaults that the user's appsettings.json still overrides. Must be a plain filename, no path separators."
+    }
+  },
+  "$defs": {
+    "pluginDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "id", "version" ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Plugin id of the dependency (matches another plugin's 'id' field)."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version constraint. Supported operators: exact ('1.2.3'), wildcard ('*'), comparison ('>=1.0.0', '>1.0.0', '<=2.0.0', '<2.0.0'), caret ('^1.2.3' = same major, >= minor.patch), tilde ('~1.2.3' = same major.minor, >= patch)."
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, the dependency is recommended but not enforced. The plugin will load even if the dependency is missing."
+        }
+      }
+    }
+  }
+}

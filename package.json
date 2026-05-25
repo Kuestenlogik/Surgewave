@@ -1,0 +1,22 @@
+{
+  "name": "surgewave-site-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Site-build + Playwright-capture tooling for Surgewave marketing site.",
+  "scripts": {
+    "capture-screenshots": "node scripts/capture-screenshots.js",
+    "capture-screenshots-dark": "cross-env THEME=dark node scripts/capture-screenshots.js",
+    "capture-screenshots-light": "cross-env THEME=light node scripts/capture-screenshots.js",
+    "record-demo": "node scripts/record-demo.js",
+    "record-demo-dark": "cross-env THEME=dark node scripts/record-demo.js",
+    "record-demo-light": "cross-env THEME=light node scripts/record-demo.js",
+    "check-links": "node scripts/check-internal-links.mjs",
+    "og-image": "node scripts/generate-og-image.js",
+    "docs-pdf": "node scripts/build-docs-pdf.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "cross-env": "^7.0.3",
+    "pdf-lib": "^1.17.1"
+  }
+}

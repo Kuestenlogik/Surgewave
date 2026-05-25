@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+#
+# Default-locale manifest — human-facing metadata (name, description,
+# license, URLs, tags). winget shows these in `winget show
+# Kuestenlogik.Surgewave` and the search results.
+PackageIdentifier: Kuestenlogik.Surgewave
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: Kuestenlogik
+PublisherUrl: https://kuestenlogik.com
+PublisherSupportUrl: https://github.com/Kuestenlogik/Surgewave/issues
+Author: Kuestenlogik
+PackageName: Surgewave
+PackageUrl: https://surgewave.io
+License: Apache-2.0
+LicenseUrl: https://github.com/Kuestenlogik/Surgewave/blob/main/LICENSE
+Copyright: Copyright (c) Küstenlogik
+ShortDescription: The .NET-native message streaming platform — Kafka-wire-compatible broker, Control UI, CLI. Drop-in replacement for Apache Kafka with AI pipelines, schemas, and a plugin marketplace.
+Description: |-
+  Surgewave is the .NET-native message streaming platform.
+  Wire-compatible with Apache Kafka 4.0 — any existing Kafka client
+  (Confluent.Kafka, librdkafka, kafka-go, ...) connects on day one.
+
+  This installer registers the Surgewave Broker as a Windows service,
+  installs the Control UI (web dashboard on http://localhost:5050),
+  and adds the `surgewave` CLI to the system PATH.
+
+  Pure .NET 10 — no JVM, no ZooKeeper, single technology stack.
+  Run embedded inside your .NET app, as a standalone broker, or
+  scaled out across a cluster.
+
+  Premium extensions ship in separate repositories under the
+  Business Source License 1.1.
+Moniker: surgewave
+Tags:
+  - aspnet
+  - broker
+  - cluster
+  - connect
+  - dotnet
+  - event-streaming
+  - kafka
+  - message-broker
+  - mqtt
+  - schema-registry
+  - streaming
+  - surgewave
+ReleaseNotesUrl: https://github.com/Kuestenlogik/Surgewave/releases/tag/v__VERSION__
+Documentation:
+  - DocumentLabel: Documentation
+    DocumentUrl: https://surgewave.io/docs/
+  - DocumentLabel: Quick Start
+    DocumentUrl: https://surgewave.io/docs/quickstart/
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

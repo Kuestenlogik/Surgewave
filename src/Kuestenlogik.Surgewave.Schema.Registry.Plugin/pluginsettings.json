@@ -1,0 +1,8 @@
+{
+  "Surgewave": {
+    "SchemaRegistry": {
+      "Enabled": true,
+      "DefaultCompatibility": "Backward"
+    }
+  }
+}

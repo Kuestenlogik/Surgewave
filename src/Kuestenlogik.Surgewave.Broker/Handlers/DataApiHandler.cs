@@ -1,0 +1,805 @@
+using System.Buffers.Binary;
+using Kuestenlogik.Surgewave.Broker.Quotas;
+using Kuestenlogik.Surgewave.Broker.Security;
+using Kuestenlogik.Surgewave.Core;
+using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Observability;
+using Kuestenlogik.Surgewave.Core.Pipeline;
+using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
+using Kuestenlogik.Surgewave.Protocol.Kafka;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Microsoft.Extensions.Logging;
+
+namespace Kuestenlogik.Surgewave.Broker.Handlers;
+
+/// <summary>
+/// Handler for core data APIs: Produce, Fetch, ListOffsets
+/// </summary>
+public sealed class DataApiHandler : IKafkaRequestHandler
+{
+    private readonly BrokerConfig _config;
+    private readonly LogManager _logManager;
+    private readonly TransactionCoordinator _transactionCoordinator;
+    private readonly QuotaManager _quotaManager;
+    private readonly BandwidthQuotaManager? _bandwidthQuotaManager;
+    private readonly RecordBatchSerializer _recordBatchSerializer;
+    private readonly AclAuthorizer? _aclAuthorizer;
+    private readonly DeduplicationManager? _deduplicationManager;
+    private readonly DelayIndex? _delayIndex;
+    private readonly TtlIndex? _ttlIndex;
+    private readonly BrokerMetrics? _metrics;
+    private readonly SurgewaveBrokerObservability? _observability;
+    private readonly IRecordTransformPipeline? _recordTransform;
+    private readonly ILogger<DataApiHandler> _logger;
+
+    public IEnumerable<ApiKey> SupportedApiKeys =>
+    [
+        ApiKey.Produce,
+        ApiKey.Fetch,
+        ApiKey.ListOffsets
+    ];
+
+    public DataApiHandler(
+        BrokerConfig config,
+        LogManager logManager,
+        TransactionCoordinator transactionCoordinator,
+        QuotaManager quotaManager,
+        RecordBatchSerializer recordBatchSerializer,
+        AclAuthorizer? aclAuthorizer,
+        DeduplicationManager? deduplicationManager,
+        DelayIndex? delayIndex,
+        TtlIndex? ttlIndex,
+        BrokerMetrics? metrics,
+        ILogger<DataApiHandler> logger,
+        BandwidthQuotaManager? bandwidthQuotaManager = null,
+        SurgewaveBrokerObservability? observability = null,
+        IRecordTransformPipeline? recordTransform = null)
+    {
+        _config = config;
+        _logManager = logManager;
+        _transactionCoordinator = transactionCoordinator;
+        _quotaManager = quotaManager;
+        _bandwidthQuotaManager = bandwidthQuotaManager;
+        _recordBatchSerializer = recordBatchSerializer;
+        _aclAuthorizer = aclAuthorizer;
+        _deduplicationManager = deduplicationManager;
+        _delayIndex = delayIndex;
+        _ttlIndex = ttlIndex;
+        _metrics = metrics;
+        _observability = observability;
+        _recordTransform = recordTransform;
+        _logger = logger;
+    }
+
+    public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
+    {
+        return request switch
+        {
+            ProduceRequest produceRequest => await HandleProduceAsync(produceRequest, context.ConnectionState, cancellationToken),
+            FetchRequest fetchRequest => await HandleFetchAsync(fetchRequest, context.ConnectionState, cancellationToken),
+            ListOffsetsRequest listOffsetsRequest => HandleListOffsets(listOffsetsRequest),
+            _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by DataApiHandler")
+        };
+    }
+
+    private async Task<ProduceResponse> HandleProduceAsync(ProduceRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
+    {
+        var responses = new List<ProduceResponse.TopicProduceResponse>(request.TopicData.Count);
+
+        // Calculate total bytes to produce for quota check (inline loop avoids LINQ closure allocations)
+        long totalBytes = 0;
+        foreach (var t in request.TopicData)
+            foreach (var p in t.PartitionData)
+                totalBytes += p.Records.Length;
+
+        // Check produce quota (token bucket)
+        var clientId = request.ClientId;
+        var throttleTimeMs = _quotaManager.CheckProduceQuota(clientId, totalBytes);
+
+        // Check bandwidth quota (sliding window per-client/user)
+        if (_bandwidthQuotaManager is { Enabled: true })
+        {
+            var bwResult = _bandwidthQuotaManager.CheckAndRecordProduce(clientId, connectionState.AuthenticatedUser, totalBytes);
+            if (bwResult.Throttled && bwResult.Delay.HasValue)
+            {
+                var bwThrottleMs = (int)Math.Ceiling(bwResult.Delay.Value.TotalMilliseconds);
+                throttleTimeMs = Math.Max(throttleTimeMs, bwThrottleMs);
+            }
+        }
+
+        foreach (var topicData in request.TopicData)
+        {
+            var topic = topicData.Name ?? string.Empty;
+            var partitionResponses = new List<ProduceResponse.PartitionProduceResponse>(topicData.PartitionData.Count);
+
+            // Reject writes to read-only mirror topics (geo-replication)
+            var topicMetadata = _logManager.GetTopicMetadata(topic);
+            if (topicMetadata is { IsReadOnly: true })
+            {
+                foreach (var partitionData in topicData.PartitionData)
+                {
+                    partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                    {
+                        Index = partitionData.Index,
+                        ErrorCode = ErrorCode.TopicAuthorizationFailed,
+                        BaseOffset = -1,
+                        LogAppendTimeMs = -1
+                    });
+                }
+                responses.Add(new ProduceResponse.TopicProduceResponse
+                {
+                    Name = topic,
+                    TopicId = topicData.TopicId,
+                    PartitionResponses = partitionResponses
+                });
+                continue;
+            }
+
+            // Check authorization for producing to this topic
+            if (!AuthorizeTopic(connectionState, topic, AclOperation.Write))
+            {
+                foreach (var partitionData in topicData.PartitionData)
+                {
+                    partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                    {
+                        Index = partitionData.Index,
+                        ErrorCode = ErrorCode.TopicAuthorizationFailed,
+                        BaseOffset = -1,
+                        LogAppendTimeMs = -1
+                    });
+                }
+                responses.Add(new ProduceResponse.TopicProduceResponse
+                {
+                    Name = topic,
+                    TopicId = topicData.TopicId,
+                    PartitionResponses = partitionResponses
+                });
+                continue;
+            }
+
+            foreach (var partitionData in topicData.PartitionData)
+            {
+                try
+                {
+                    // Check for unsupported compression before storing
+                    var compressionType = CompressionCodec.GetCompressionTypeFromBatch(partitionData.Records.Span);
+                    if (!CompressionCodec.IsSupported(compressionType))
+                    {
+                        partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                        {
+                            Index = partitionData.Index,
+                            ErrorCode = ErrorCode.UnsupportedCompressionType,
+                            BaseOffset = -1,
+                            LogAppendTimeMs = -1
+                        });
+                        continue;
+                    }
+
+                    var topicPartition = new TopicPartition
+                    {
+                        Topic = topic,
+                        Partition = partitionData.Index
+                    };
+
+                    // Extract idempotence info and validate if present
+                    var (producerId, producerEpoch, baseSequence, lastOffsetDelta) =
+                        CompressionCodec.GetIdempotenceInfo(partitionData.Records.Span);
+
+                    if (producerId != KafkaConstants.Producer.NoProducerId)
+                    {
+                        var validationError = _transactionCoordinator.ValidateProduceBatch(
+                            producerId, producerEpoch, baseSequence, topicPartition);
+
+                        if (validationError != ErrorCode.None)
+                        {
+                            partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                            {
+                                Index = partitionData.Index,
+                                ErrorCode = validationError,
+                                BaseOffset = -1,
+                                LogAppendTimeMs = -1
+                            });
+                            continue;
+                        }
+                    }
+
+                    // Content-based deduplication check (if enabled for this topic)
+                    if (_deduplicationManager != null && IsDeduplicationEnabled(topic))
+                    {
+                        var dedupResult = _deduplicationManager.CheckDuplicate(topicPartition, partitionData.Records.Span);
+                        if (dedupResult.IsDuplicate)
+                        {
+                            _metrics?.RecordDeduplication(topic, partitionData.Index);
+                            partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                            {
+                                Index = partitionData.Index,
+                                ErrorCode = ErrorCode.None,
+                                BaseOffset = dedupResult.OriginalOffset,
+                                LogAppendTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                            });
+                            continue;
+                        }
+                    }
+
+                    // On-broker record transform (G7 / Redpanda Data Transforms parity).
+                    // Runs after dedup so we don't pay the WASM cost on duplicates,
+                    // and before append so the persisted bytes are the post-transform
+                    // payload. Returning null from the pipeline drops the batch
+                    // silently — the producer sees success with the next-in-line
+                    // base offset, but no records actually land.
+                    var recordsToAppend = partitionData.Records;
+                    if (_recordTransform is { } transform && transform.HasBinding(topic))
+                    {
+                        var transformed = await transform.TransformAsync(topic, recordsToAppend, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (transformed is null)
+                        {
+                            // Drop: report a synthetic base offset matching the log's
+                            // current end so the producer's idempotent state stays
+                            // self-consistent.
+                            var droppedLog = _logManager.GetLog(topicPartition);
+                            partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                            {
+                                Index = partitionData.Index,
+                                ErrorCode = ErrorCode.None,
+                                BaseOffset = droppedLog?.NextOffset ?? 0,
+                                LogAppendTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                            });
+                            continue;
+                        }
+                        recordsToAppend = transformed.Value;
+                    }
+
+                    // Store raw RecordBatch bytes directly (no parsing needed)
+                    var baseOffset = await _logManager.AppendBatchAsync(topicPartition, recordsToAppend, cancellationToken);
+
+                    // Register hash after successful write (deduplication)
+                    _deduplicationManager?.Register(topicPartition, recordsToAppend.Span, baseOffset);
+
+                    // Extract and index delayed delivery headers (if enabled for this topic)
+                    if (_delayIndex != null && IsDelayDeliveryEnabled(topic))
+                    {
+                        var deliverAtMs = DelayHeaderParser.ExtractDeliverAtTimestamp(partitionData.Records.Span);
+                        if (deliverAtMs.HasValue)
+                        {
+                            _delayIndex.RecordDelayedBatch(topicPartition, baseOffset, deliverAtMs.Value);
+                        }
+                    }
+
+                    // Extract and index TTL headers (if enabled for this topic)
+                    if (_ttlIndex != null && IsTtlEnabled(topic))
+                    {
+                        var expiryMs = TtlHeaderParser.ExtractExpiryTimestamp(partitionData.Records.Span);
+                        if (expiryMs.HasValue)
+                        {
+                            _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, expiryMs.Value);
+                        }
+                        else if (_config.Ttl.DefaultTtlMs > 0)
+                        {
+                            // Apply default TTL when no header is present
+                            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                            _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, nowMs + _config.Ttl.DefaultTtlMs);
+                        }
+                    }
+
+                    // Track transactional batches for LSO calculation
+                    if (CompressionCodec.IsTransactional(partitionData.Records.Span) &&
+                        !CompressionCodec.IsControlBatch(partitionData.Records.Span))
+                    {
+                        _transactionCoordinator.RecordTransactionalBatch(topicPartition, producerId, baseOffset);
+                    }
+
+                    Log.RecordBatchStored(_logger, topic, partitionData.Index, baseOffset, partitionData.Records.Length);
+
+                    // Record produce metrics
+                    var recordCount = CompressionCodec.GetRecordCount(partitionData.Records.Span);
+                    _metrics?.RecordProduce(topic, partitionData.Index, recordCount, partitionData.Records.Length, 0);
+
+                    partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                    {
+                        Index = partitionData.Index,
+                        ErrorCode = ErrorCode.None,
+                        BaseOffset = baseOffset,
+                        LogAppendTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    });
+
+                    // Surface the produce event on the observability
+                    // bus. The HasSubscribers gate is critical — without
+                    // it we would allocate a SurgewaveBrokerEvent for every
+                    // single produce even when no observer is wired up.
+                    // Payload bytes are deliberately omitted (they would
+                    // be a second copy of the batch); observers that
+                    // need bytes subscribe to a regular consume stream.
+                    // Rejected / Consumed / Rebalanced are also wired —
+                    // see the catch block below, the fetch path further
+                    // down, and ConsumerGroupCoordinator.HandleSyncGroup.
+                    if (_observability?.HasSubscribers == true)
+                    {
+                        _observability.Publish(new SurgewaveBrokerEvent(
+                            SurgewaveBrokerEventKind.Produced,
+                            topic, partitionData.Index, baseOffset,
+                            Principal: connectionState.AuthenticatedUser,
+                            RejectReason: null, Consumers: null,
+                            Key: null, Value: null,
+                            Timestamp: DateTimeOffset.UtcNow));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.ProduceError(_logger, ex, topic, partitionData.Index);
+                    _metrics?.RecordProduceError(topic, partitionData.Index, ErrorCode.Unknown.ToString());
+
+                    partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                    {
+                        Index = partitionData.Index,
+                        ErrorCode = ErrorCode.Unknown,
+                        BaseOffset = -1,
+                        LogAppendTimeMs = -1
+                    });
+
+                    if (_observability?.HasSubscribers == true)
+                    {
+                        _observability.Publish(new SurgewaveBrokerEvent(
+                            SurgewaveBrokerEventKind.Rejected,
+                            topic, partitionData.Index, Offset: null,
+                            Principal: connectionState.AuthenticatedUser,
+                            RejectReason: ex.Message, Consumers: null,
+                            Key: null, Value: null,
+                            Timestamp: DateTimeOffset.UtcNow));
+                    }
+                }
+            }
+
+            responses.Add(new ProduceResponse.TopicProduceResponse
+            {
+                Name = topic,
+                TopicId = topicData.TopicId,
+                PartitionResponses = partitionResponses
+            });
+        }
+
+        // Record produced bytes for quota tracking (after successful produce)
+        _quotaManager.RecordProducedBytes(clientId, totalBytes);
+
+        return new ProduceResponse
+        {
+            CorrelationId = request.CorrelationId,
+            ApiVersion = request.ApiVersion,
+            Responses = responses,
+            ThrottleTimeMs = throttleTimeMs
+        };
+    }
+
+    private async Task<FetchResponse> HandleFetchAsync(FetchRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
+    {
+        var responses = new List<FetchResponse.FetchableTopicResponse>(request.Topics.Count);
+        var isReadCommitted = request.IsolationLevel == FetchRequest.ReadCommitted;
+
+        // Check fetch quota upfront based on max bytes requested (inline loop avoids LINQ closure allocations)
+        var clientId = request.ClientId;
+        long maxBytesRequested = 0;
+        foreach (var t in request.Topics)
+            foreach (var p in t.Partitions)
+                maxBytesRequested += p.MaxBytes;
+        var throttleTimeMs = _quotaManager.CheckFetchQuota(clientId, maxBytesRequested);
+
+        // Check bandwidth quota (sliding window per-client/user) — pre-flight check only, record actual bytes after fetch
+        if (_bandwidthQuotaManager is { Enabled: true })
+        {
+            var bwResult = _bandwidthQuotaManager.CheckConsume(clientId, connectionState.AuthenticatedUser, maxBytesRequested);
+            if (bwResult.Throttled && bwResult.Delay.HasValue)
+            {
+                var bwThrottleMs = (int)Math.Ceiling(bwResult.Delay.Value.TotalMilliseconds);
+                throttleTimeMs = Math.Max(throttleTimeMs, bwThrottleMs);
+            }
+        }
+
+        long totalBytesFetched = 0;
+
+        foreach (var topicRequest in request.Topics)
+        {
+            // Fetch v13+ identifies topics by UUID only — the Name field is null on
+            // the wire. Resolve the id to a name (KIP-516, used by KIP-848 next-gen
+            // consumers) before the rest of the pipeline tries to look up partition
+            // logs by topic name.
+            var topic = topicRequest.Topic;
+            if (string.IsNullOrEmpty(topic) && topicRequest.TopicId != Guid.Empty)
+            {
+                topic = _logManager.ResolveTopicId(topicRequest.TopicId);
+            }
+            topic ??= string.Empty;
+            var partitionResponses = new List<FetchResponse.PartitionResponse>(topicRequest.Partitions.Count);
+
+            // Check authorization for reading from this topic
+            if (!AuthorizeTopic(connectionState, topic, AclOperation.Read))
+            {
+                foreach (var partitionData in topicRequest.Partitions)
+                {
+                    partitionResponses.Add(new FetchResponse.PartitionResponse
+                    {
+                        Partition = partitionData.Partition,
+                        ErrorCode = ErrorCode.TopicAuthorizationFailed,
+                        HighWatermark = 0,
+                        RecordSet = []
+                    });
+                }
+                responses.Add(new FetchResponse.FetchableTopicResponse
+                {
+                    Topic = topic,
+                    TopicId = topicRequest.TopicId,
+                    Partitions = partitionResponses
+                });
+                continue;
+            }
+
+            foreach (var partitionData in topicRequest.Partitions)
+            {
+                try
+                {
+                    var topicPartition = new TopicPartition
+                    {
+                        Topic = topic,
+                        Partition = partitionData.Partition
+                    };
+
+                    // Get log once for all operations
+                    var log = _logManager.GetLog(topicPartition);
+
+                    // Debug: Log the state before fetch (Trace level - only when debugging)
+                    Log.FetchDebug(_logger, topic, partitionData.Partition, partitionData.FetchOffset,
+                        log?.LogStartOffset ?? -1, log?.NextOffset ?? -1, log != null);
+
+                    var highWatermark = log?.HighWatermark ?? 0;
+
+                    // Determine if any per-batch filtering is needed. When not needed
+                    // (the common case: READ_UNCOMMITTED, no delay, no TTL), use the
+                    // contiguous read path — zero per-batch allocation, one Memory slice.
+                    var needsFiltering = isReadCommitted
+                        || (_delayIndex != null && IsDelayDeliveryEnabled(topic) && _delayIndex.HasDelayedRecords(topicPartition))
+                        || (_ttlIndex != null && IsTtlEnabled(topic) && _ttlIndex.HasTtlRecords(topicPartition));
+
+                    byte[] recordSet;
+                    int messageCount;
+
+                    if (!needsFiltering)
+                    {
+                        // Fast path: contiguous read — single allocation for all batches.
+                        var (contiguousData, batchOffsets) = await _logManager.ReadBatchesContiguousAsync(
+                            topicPartition, partitionData.FetchOffset,
+                            maxBytes: partitionData.MaxBytes, cancellationToken);
+
+                        Log.BatchesRead(_logger, batchOffsets.Count, topic, partitionData.Partition, partitionData.FetchOffset);
+
+                        recordSet = contiguousData.Length > 0
+                            ? contiguousData.ToArray()   // single copy for the response
+                            : Array.Empty<byte>();
+
+                        messageCount = 0;
+                        foreach (var offset in batchOffsets)
+                        {
+                            if (offset + 57 + 4 <= contiguousData.Length)
+                                messageCount += System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(
+                                    contiguousData.Span.Slice(offset + 57, 4));
+                        }
+                    }
+                    else
+                    {
+                        // Slow path: per-batch read + filtering
+                        var recordBatches = await _logManager.ReadBatchesAsync(
+                            topicPartition, partitionData.FetchOffset,
+                            maxBytes: partitionData.MaxBytes, cancellationToken);
+
+                        Log.BatchesRead(_logger, recordBatches.Count, topic, partitionData.Partition, partitionData.FetchOffset);
+
+                        var filteredBatches = recordBatches.Count > 0
+                            ? FilterBatchesForIsolationLevel(topicPartition, recordBatches, isReadCommitted, highWatermark)
+                            : recordBatches;
+
+                        if (_delayIndex != null && filteredBatches.Count > 0 &&
+                            IsDelayDeliveryEnabled(topic) && _delayIndex.HasDelayedRecords(topicPartition))
+                        {
+                            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                            filteredBatches = DelayFilter.FilterDelayedBatches(filteredBatches, _delayIndex, topicPartition, nowMs);
+                        }
+
+                        if (_ttlIndex != null && filteredBatches.Count > 0 &&
+                            IsTtlEnabled(topic) && _ttlIndex.HasTtlRecords(topicPartition))
+                        {
+                            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                            filteredBatches = TtlFilter.FilterExpiredBatches(filteredBatches, _ttlIndex, topicPartition, nowMs);
+                        }
+
+                        recordSet = _recordBatchSerializer.CombineBatches(filteredBatches);
+
+                        messageCount = 0;
+                        foreach (var b in filteredBatches)
+                            messageCount += CompressionCodec.GetRecordCount(b);
+                    }
+
+                    Log.BatchesCombined(_logger, 0, recordSet.Length);
+                    Log.LogOffsets(_logger, log?.LogStartOffset ?? 0, highWatermark);
+
+                    totalBytesFetched += recordSet.Length;
+                    _metrics?.RecordFetch(topic, partitionData.Partition, messageCount, recordSet.Length, 0);
+
+                    partitionResponses.Add(new FetchResponse.PartitionResponse
+                    {
+                        Partition = partitionData.Partition,
+                        ErrorCode = ErrorCode.None,
+                        HighWatermark = highWatermark,
+                        LogStartOffset = log?.LogStartOffset ?? 0,
+                        RecordSet = recordSet
+                    });
+
+                    // Observability tap — emit one Consumed event per
+                    // partition fetch that actually returned records.
+                    // Empty fetches (poll-with-no-data) would be noise
+                    // in the tap stream. HasSubscribers gates allocation
+                    // so fetches on an unobserved broker pay nothing.
+                    // Payload bytes aren't forwarded for the same
+                    // hot-path reason as Produced.
+                    if (messageCount > 0 && _observability?.HasSubscribers == true)
+                    {
+                        _observability.Publish(new SurgewaveBrokerEvent(
+                            SurgewaveBrokerEventKind.Consumed,
+                            topic, partitionData.Partition, partitionData.FetchOffset,
+                            Principal: connectionState.AuthenticatedUser,
+                            RejectReason: null,
+                            Consumers: null,
+                            Key: null, Value: null,
+                            Timestamp: DateTimeOffset.UtcNow));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.FetchError(_logger, ex, topic, partitionData.Partition);
+                    _metrics?.RecordError(ErrorCode.Unknown.ToString());
+
+                    partitionResponses.Add(new FetchResponse.PartitionResponse
+                    {
+                        Partition = partitionData.Partition,
+                        ErrorCode = ErrorCode.Unknown,
+                        HighWatermark = 0,
+                        RecordSet = []
+                    });
+                }
+            }
+
+            responses.Add(new FetchResponse.FetchableTopicResponse
+            {
+                Topic = topic,
+                TopicId = topicRequest.TopicId,
+                Partitions = partitionResponses
+            });
+        }
+
+        // Record fetched bytes for quota tracking (after successful fetch)
+        _quotaManager.RecordFetchedBytes(clientId, totalBytesFetched);
+
+        // Record actual bytes fetched for bandwidth quota (not the max requested)
+        if (_bandwidthQuotaManager is { Enabled: true } && totalBytesFetched > 0)
+        {
+            _bandwidthQuotaManager.RecordConsume(clientId, totalBytesFetched);
+        }
+
+        return new FetchResponse
+        {
+            CorrelationId = request.CorrelationId,
+            ApiVersion = request.ApiVersion,
+            ThrottleTimeMs = throttleTimeMs,
+            Responses = responses
+        };
+    }
+
+    /// <summary>
+    /// Filter record batches based on isolation level using TransactionIndex.
+    /// For READ_COMMITTED: filter out control batches, uncommitted transactional batches, and aborted batches.
+    /// For READ_UNCOMMITTED: only filter out control batches (transaction markers).
+    /// </summary>
+    private List<byte[]> FilterBatchesForIsolationLevel(
+        TopicPartition partition,
+        List<byte[]> batches,
+        bool isReadCommitted,
+        long highWatermark)
+    {
+        var txnIndex = _transactionCoordinator.TransactionIndex;
+
+        if (isReadCommitted)
+        {
+            return txnIndex.FilterForReadCommitted(partition, batches, highWatermark);
+        }
+        else
+        {
+            return txnIndex.FilterForReadUncommitted(batches);
+        }
+    }
+
+    private ListOffsetsResponse HandleListOffsets(ListOffsetsRequest request)
+    {
+        var topics = new List<TopicPartitionOffsets>();
+
+        foreach (var topicRequest in request.Topics)
+        {
+            var partitions = new List<PartitionOffsetInfo>();
+
+            foreach (var partitionRequest in topicRequest.Partitions)
+            {
+                try
+                {
+                    var topicPartition = new TopicPartition
+                    {
+                        Topic = topicRequest.Topic,
+                        Partition = partitionRequest.PartitionIndex
+                    };
+
+                    long offset;
+                    long timestamp = partitionRequest.Timestamp;
+                    var log = _logManager.GetLog(topicPartition);
+
+                    // Special timestamps per Apache Kafka ListOffsetsRequest constants:
+                    //   -1 LATEST_TIMESTAMP                     (next offset to be written)
+                    //   -2 EARLIEST_TIMESTAMP                   (LogStartOffset)
+                    //   -3 MAX_TIMESTAMP            (KIP-734)    (offset whose record has the max timestamp)
+                    //   -4 EARLIEST_LOCAL_TIMESTAMP (KIP-1059)  (start of local log; same as -2 when no tiered tier is in front)
+                    //   -5 LATEST_TIERED_TIMESTAMP  (KIP-405)   (last offset that has been uploaded to remote storage)
+                    //   -6 EARLIEST_PENDING_UPLOAD  (KIP-1023)  (start of segments still waiting to upload)
+                    // Surgewave's broker-internal tiering keeps a single LogStartOffset, so
+                    // the broker-public surface treats EARLIEST and EARLIEST_LOCAL the
+                    // same and reports -1 for the tiered-only offsets when no tier is
+                    // active. The wire contract is satisfied — clients that only need
+                    // the local view (KIP-1059's reason for existing) get the right
+                    // answer; tiered-aware tooling can probe -5 / -6 and gracefully
+                    // fall back to -2 when the response is -1.
+                    offset = ResolveListOffsetTimestamp(log, timestamp);
+
+                    partitions.Add(new PartitionOffsetInfo
+                    {
+                        PartitionIndex = partitionRequest.PartitionIndex,
+                        ErrorCode = ErrorCode.None,
+                        Timestamp = timestamp,
+                        Offset = offset
+                    });
+                }
+                catch
+                {
+                    partitions.Add(new PartitionOffsetInfo
+                    {
+                        PartitionIndex = partitionRequest.PartitionIndex,
+                        ErrorCode = ErrorCode.UnknownTopicOrPartition,
+                        Timestamp = -1,
+                        Offset = -1
+                    });
+                }
+            }
+
+            topics.Add(new TopicPartitionOffsets
+            {
+                Topic = topicRequest.Topic,
+                Partitions = partitions
+            });
+        }
+
+        return new ListOffsetsResponse
+        {
+            CorrelationId = request.CorrelationId,
+            ApiVersion = request.ApiVersion,
+            Topics = topics
+        };
+    }
+
+    /// <summary>
+    /// Resolves a ListOffsets-style special timestamp to a concrete log offset.
+    /// Handles every reserved value documented in
+    /// <see cref="ListOffsetsRequest.TimestampType"/> plus a positive timestamp
+    /// look-up via <see cref="IPartitionLog.FindOffsetByTimestamp"/>. Pulled out
+    /// into a static helper so unit tests can exercise the timestamp matrix
+    /// without constructing the full <see cref="DataApiHandler"/> dependency
+    /// graph.
+    /// </summary>
+    internal static long ResolveListOffsetTimestamp(IPartitionLog? log, long timestamp)
+    {
+        if (timestamp == ListOffsetsRequest.TimestampType.Latest)
+        {
+            return log?.NextOffset ?? 0;
+        }
+
+        if (timestamp == ListOffsetsRequest.TimestampType.Earliest
+            || timestamp == ListOffsetsRequest.TimestampType.EarliestLocalTimestamp)
+        {
+            // EARLIEST or EARLIEST_LOCAL (KIP-1059) — both map to LogStartOffset on
+            // a non-tiered broker; on a tiered broker the local tier shares the
+            // same start-of-log boundary.
+            return log?.LogStartOffset ?? 0;
+        }
+
+        if (timestamp == ListOffsetsRequest.TimestampType.MaxTimestamp)
+        {
+            // KIP-734: find the offset whose record carries the largest timestamp.
+            return log?.FindOffsetByTimestamp(long.MaxValue) ?? -1;
+        }
+
+        if (timestamp == ListOffsetsRequest.TimestampType.LastTieredOffset
+            || timestamp == ListOffsetsRequest.TimestampType.EarliestPendingUploadOffset)
+        {
+            // KIP-1005 / KIP-1023: tiered-storage probes. Surgewave doesn't expose the
+            // broker-internal tier through this RPC, so clients see -1 (offset not
+            // available). Tiered-aware admin tools detect tiered-storage capability
+            // via the API-versions response before they ask and degrade gracefully.
+            return -1;
+        }
+
+        // Positive timestamp → OffsetsForTimes look-up.
+        if (log == null) return 0;
+        return log.FindOffsetByTimestamp(timestamp) ?? log.NextOffset;
+    }
+
+    /// <summary>
+    /// Check if deduplication is enabled for a topic.
+    /// Requires global deduplication enabled AND topic-level opt-in via config.
+    /// </summary>
+    private bool IsDeduplicationEnabled(string topic)
+    {
+        if (!_config.Deduplication.Enabled)
+            return false;
+
+        var metadata = _logManager.GetTopicMetadata(topic);
+        return metadata?.Config.TryGetValue("surgewave.dedup.enabled", out var val) == true
+            && string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Check if TTL is enabled for a topic.
+    /// Requires global TTL enabled AND topic-level opt-in via config.
+    /// </summary>
+    private bool IsTtlEnabled(string topic)
+    {
+        if (!_config.Ttl.Enabled)
+            return false;
+
+        var metadata = _logManager.GetTopicMetadata(topic);
+        return metadata?.Config.TryGetValue("surgewave.ttl.enabled", out var val) == true
+            && string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Check if delayed delivery is enabled for a topic.
+    /// Requires global delay delivery enabled AND topic-level opt-in via config.
+    /// </summary>
+    private bool IsDelayDeliveryEnabled(string topic)
+    {
+        if (!_config.DelayDelivery.Enabled)
+            return false;
+
+        var metadata = _logManager.GetTopicMetadata(topic);
+        return metadata?.Config.TryGetValue("surgewave.delay.enabled", out var val) == true
+            && string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Check if the current connection is authorized to perform an operation on a topic
+    /// </summary>
+    private bool AuthorizeTopic(ConnectionState connectionState, string topic, AclOperation operation)
+    {
+        // If ACL is not enabled, allow all operations
+        if (_aclAuthorizer == null)
+        {
+            return true;
+        }
+
+        // Get principal from connection state (authenticated user)
+        // Use "User:anonymous" for unauthenticated connections
+        var principal = connectionState.IsAuthenticated
+            ? $"User:{connectionState.AuthenticatedUser}"
+            : "User:anonymous";
+
+        var result = _aclAuthorizer.Authorize(
+            principal,
+            connectionState.ClientHost,
+            AclResourceType.Topic,
+            topic,
+            operation);
+
+        return result.IsAllowed;
+    }
+}

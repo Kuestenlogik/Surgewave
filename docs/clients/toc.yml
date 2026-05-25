@@ -1,0 +1,12 @@
+- name: Client Overview
+  href: index.md
+- name: .NET Client
+  href: dotnet.md
+- name: Kafka Compatibility
+  href: kafka-compat.md
+- name: Producer API
+  href: producer.md
+- name: Consumer API
+  href: consumer.md
+- name: Admin Operations
+  href: admin.md

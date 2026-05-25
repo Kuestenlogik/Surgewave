@@ -1,0 +1,173 @@
+@using Kuestenlogik.Surgewave.Control.Models.Pipeline
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IPipelineApiClient ApiClient
+@inject IDialogService DialogService
+
+<MudPaper Elevation="1" Class="pa-3 mt-2">
+    <div class="d-flex align-center justify-space-between mb-2">
+        <MudText Typo="Typo.subtitle2">Version History</MudText>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="MudBlazor.Size.Small"
+                       OnClick="LoadVersionsAsync" />
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="d-flex align-center justify-center pa-4">
+            <MudProgressCircular Indeterminate="true" Size="MudBlazor.Size.Small" />
+        </div>
+    }
+    else if (_error != null)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+    }
+    else if (_versions.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">No versions available</MudText>
+    }
+    else
+    {
+        <MudTimeline TimelineOrientation="TimelineOrientation.Vertical" TimelinePosition="TimelinePosition.Start">
+            @foreach (var version in _versions.Take(10))
+            {
+                <MudTimelineItem Color="@(version.IsCurrent ? Color.Primary : Color.Default)"
+                                 Size="MudBlazor.Size.Small">
+                    <ItemContent>
+                        <div class="d-flex align-center justify-space-between">
+                            <div>
+                                <MudText Typo="Typo.body2">
+                                    v@(version.VersionNumber)
+                                    @if (version.IsCurrent)
+                                    {
+                                        <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Primary"
+                                                 Variant="Variant.Text" Class="ml-2">Current</MudChip>
+                                    }
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @version.CreatedAt.ToString("g")
+                                    @if (!string.IsNullOrEmpty(version.ChangedBy))
+                                    {
+                                        <span> by @version.ChangedBy</span>
+                                    }
+                                </MudText>
+                                @if (!string.IsNullOrEmpty(version.ChangeSummary))
+                                {
+                                    <MudText Typo="Typo.caption">@version.ChangeSummary</MudText>
+                                }
+                            </div>
+                            <div>
+                                @if (!version.IsCurrent)
+                                {
+                                    <MudTooltip Text="Compare with current">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Compare" Size="MudBlazor.Size.Small"
+                                                       OnClick="@(() => CompareWithCurrent(version.Id))" />
+                                    </MudTooltip>
+                                    <MudTooltip Text="Restore this version">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Restore" Size="MudBlazor.Size.Small"
+                                                       OnClick="@(() => RestoreVersion(version))" />
+                                    </MudTooltip>
+                                }
+                            </div>
+                        </div>
+                    </ItemContent>
+                </MudTimelineItem>
+            }
+        </MudTimeline>
+
+        @if (_versions.Count > 10)
+        {
+            <MudButton Variant="Variant.Text" Size="MudBlazor.Size.Small" FullWidth="true" OnClick="ShowAllVersions">
+                Show all @_totalCount versions
+            </MudButton>
+        }
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public string? PipelineId { get; set; }
+
+    [Parameter]
+    public EventCallback<PipelineDefinition> OnVersionRestored { get; set; }
+
+    private List<PipelineVersionSummary> _versions = [];
+    private int _totalCount;
+    private bool _isLoading;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(PipelineId))
+        {
+            await LoadVersionsAsync();
+        }
+    }
+
+    private async Task LoadVersionsAsync()
+    {
+        if (string.IsNullOrEmpty(PipelineId)) return;
+
+        _isLoading = true;
+        _error = null;
+
+        try
+        {
+            var response = await ApiClient.ListVersionsAsync(PipelineId, limit: 20);
+            _versions = response.Versions;
+            _totalCount = response.TotalCount;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task CompareWithCurrent(string versionId)
+    {
+        if (string.IsNullOrEmpty(PipelineId)) return;
+
+        var currentVersion = _versions.FirstOrDefault(v => v.IsCurrent);
+        if (currentVersion == null) return;
+
+        var parameters = new DialogParameters
+        {
+            ["PipelineId"] = PipelineId,
+            ["FromVersionId"] = versionId,
+            ["ToVersionId"] = currentVersion.Id
+        };
+
+        await DialogService.ShowAsync<VersionDiffDialog>("Compare Versions", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+    }
+
+    private async Task RestoreVersion(PipelineVersionSummary version)
+    {
+        if (string.IsNullOrEmpty(PipelineId)) return;
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Restore Version",
+            $"Are you sure you want to restore version {version.VersionNumber}? This will create a new version with the old state.",
+            yesText: "Restore", cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            var restored = await ApiClient.RestoreVersionAsync(PipelineId, version.Id);
+            await OnVersionRestored.InvokeAsync(restored);
+            await LoadVersionsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void ShowAllVersions()
+    {
+        // TODO: Open full version history dialog
+    }
+}
