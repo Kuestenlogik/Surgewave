@@ -23,8 +23,14 @@
        asymmetrisch (Wave-Tail oben-rechts klein, C-Body unten-links
        gross); naives BBox-Centering wirkt deshalb optisch nach
        links-unten verschoben. Korrektur via scripts/measure-icon.js
-       gemessen: shift (+3.43, -1.78) gegenueber BBox-Center. -->
-  <g transform="translate(22.43 16.72) scale(0.81)">
+       gemessen: shift (+3.43, -1.78) gegenueber BBox-Center.
+
+       Zusaetzlich ~2 units nach oben fuer "optical centering":
+       in kreisformigen Containern wirkt der mathematisch zentrierte
+       Inhalt fuer das menschliche Auge tendenziell zu tief; der
+       leichte Upward-Bias bringt den wahrgenommenen Mittelpunkt
+       auf den Kreis-Mittelpunkt. -->
+  <g transform="translate(22.43 14.72) scale(0.81)">
     <g transform="translate(-40.266827 -38.242717)">
       <g transform="translate(12.27173 11.95761)">
         <path fill="#33bcff"
