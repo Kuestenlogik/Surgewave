@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Surgewave NuGet-Package-Icon.
+  Surgewave NuGet-Package-Icon (128×128).
   Quelle für scripts/generate-icon.js — wird zu ../icon.png gerendert
   und via Directory.Build.props in jedes Surgewave-NuGet eingebettet.
 
-  Adaptive Mark, "Dark"-Variante (Wave hellblau + Ink weiß), transparent
-  BG. nuget.org rendert die Listing-Cards dunkel; PNG bringt deshalb
-  keinen eigenen Untergrund mit.
+  Layout analog Bowire's bowire_logo_small.svg:
+    - Gefüllter Navy-Kreis (#003e60, Radius 50 in einem 100x100 viewBox)
+    - Adaptive Surgewave-Mark zentriert, Wave hellblau (#33bcff),
+      Ink weiß (Dark-Variante) für Kontrast gegen den dunkelblauen Kreis.
 
-  ViewBox bewusst groesser als das Mark (100×100 vs 77×78 effektiv-bbox):
-  ~12 % padding ringsum garantiert, dass das Mark auch dann komplett
-  sichtbar bleibt, wenn das PNG kreisformig gecroppt wird (Avatar-/
-  rounded-icon-Stil, analog Bowire's kreisformigem "B"-Mark).
+  Diese Datei ist NuGet-spezifisch — das allgemeine adaptive
+  Brand-Mark bleibt in images/mark_adaptive.svg (transparent, theme-aware).
 -->
 <svg xmlns="http://www.w3.org/2000/svg"
      width="128" height="128"
      viewBox="0 0 100 100"
      role="img"
      aria-label="Surgewave">
-  <g transform="translate(11.5 11) scale(0.9994)">
+  <circle cx="50" cy="50" r="50" fill="#003e60" />
+  <g transform="translate(19 18.5) scale(0.81)">
     <g transform="translate(-40.266827 -38.242717)">
       <g transform="translate(12.27173 11.95761)">
         <path fill="#33bcff"
