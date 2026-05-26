@@ -119,8 +119,21 @@ per-feature pages, configuration knobs, and worked examples.
   debugging timeline, message browser with live tail / wire format detection /
   hex dump, agent design studio (premium).
 - **Operator** — Kubernetes CRD controller (`SurgewaveCluster`) with Helm chart.
-- **Container images** on GHCR, **MSI / .deb / .rpm** installers,
-  self-contained binaries for win / linux / macOS.
+- **Container images** — multi-arch (linux/amd64 + linux/arm64) on GHCR
+  (`ghcr.io/kuestenlogik/surgewave-broker`, `-control`) and Docker Hub
+  (`kuestenlogik/surgewave-broker`, `-control`), each with a versioned
+  and a `:latest` tag.
+- **Installers** — Windows MSI (WiX v5), `.deb` (Debian/Ubuntu) and
+  `.rpm` (RHEL/Fedora/SUSE).
+- **NuGet** — published to nuget.org and GitHub Packages on every tag;
+  86 packages (`Kuestenlogik.Surgewave.*`) covering broker, clients,
+  protocols, storage engines, connectors, schema registry, AI primitives.
+- **Self-contained binaries** for win-x64, linux-x64/arm64, osx-x64/arm64
+  (broker / CLI / Control).
+- **Distribution channels** (gated on per-channel secrets — silently
+  skipped without them) — Homebrew tap, Chocolatey, winget. The
+  GitHub-Actions workflows are in place; flipping each channel live is
+  a secret-setting step, not a code change.
 - **Cruise Control** — auto-balance partitions / leaders / disk / network.
 - **Rolling upgrades** — zero-downtime leadership transfer, graceful shutdown
   orchestrator.
@@ -203,6 +216,15 @@ The Apache-2.0 core ships in version `0.1.0` (NuGet:
 `Kuestenlogik.Surgewave.Client` and friends). All capabilities listed above
 are present; the public benchmark numbers and a few quality-of-life polish
 items land before `1.0.0` (see *Open Items*).
+
+**Release artefacts** (everything below is live for tag `v0.1.0`):
+
+| Channel | Artefact |
+|---|---|
+| nuget.org + GitHub Packages | 86 × `Kuestenlogik.Surgewave.*.0.1.0.nupkg` |
+| GHCR | `ghcr.io/kuestenlogik/surgewave-broker:0.1.0` + `:latest`, dito `surgewave-control` (multi-arch linux/amd64 + arm64) |
+| Docker Hub | `kuestenlogik/surgewave-broker:0.1.0` + `:latest`, dito `surgewave-control` (multi-arch) |
+| GitHub Release | Windows MSI, `.deb`, `.rpm`, 12× plattform-spezifische `tar.gz` / `zip` (broker / CLI / Control × 6 RIDs) |
 
 ---
 
