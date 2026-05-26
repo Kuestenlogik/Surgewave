@@ -110,8 +110,12 @@ public sealed class SamlController(
 
         logger.LogInformation("SAML login successful for {NameId} via provider {Provider}", LogSanitizer.Sanitize(claimsIdentity.Name), LogSanitizer.Sanitize(providerName));
 
+        // RelayState kommt vom IdP zurueck — wir hatten ihn zwar selbst
+        // gesetzt, der Round-Trip ueber den IdP hinweg ist aber nicht
+        // garantiert manipulationsfrei. Url.IsLocalUrl verhindert
+        // Open-Redirect auf externe Hosts.
         var returnUrl = binding.RelayState;
-        return Redirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
+        return Redirect(Url.IsLocalUrl(returnUrl) ? returnUrl! : "/");
     }
 
     /// <summary>
