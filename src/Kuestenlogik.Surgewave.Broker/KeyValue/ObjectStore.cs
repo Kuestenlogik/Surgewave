@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.KeyValue;
@@ -77,7 +78,7 @@ public sealed class ObjectStore
         await bucket.PutAsync(name, metadataBytes, cancellationToken);
 
         _logger?.LogInformation("Stored object {Name} in store {Store}: {Size} bytes, {Chunks} chunks",
-            name, _storeName, data.Length, chunkCount);
+            LogSanitizer.Sanitize(name), LogSanitizer.Sanitize(_storeName), data.Length, chunkCount);
 
         return info;
     }
@@ -153,7 +154,7 @@ public sealed class ObjectStore
         // Delete metadata
         await bucket.DeleteAsync(name, cancellationToken);
 
-        _logger?.LogInformation("Deleted object {Name} from store {Store}", name, _storeName);
+        _logger?.LogInformation("Deleted object {Name} from store {Store}", LogSanitizer.Sanitize(name), LogSanitizer.Sanitize(_storeName));
         return true;
     }
 

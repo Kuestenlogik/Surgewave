@@ -1,6 +1,7 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
 using System.Text.RegularExpressions;
+using Kuestenlogik.Surgewave.Core.Util;
 
 namespace Kuestenlogik.Surgewave.Control.Security;
 
@@ -53,17 +54,17 @@ public sealed class LdapAuthenticationService(ILogger<LdapAuthenticationService>
         }
         catch (LdapException ex) when (ex.ErrorCode == 49) // InvalidCredentials
         {
-            logger.LogWarning("LDAP bind failed for user {Username}: invalid credentials", username);
+            logger.LogWarning("LDAP bind failed for user {Username}: invalid credentials", LogSanitizer.Sanitize(username));
             return LdapAuthResult.Failure("Invalid username or password.");
         }
         catch (LdapException ex)
         {
-            logger.LogError(ex, "LDAP error for user {Username}: {Message}", username, ex.Message);
+            logger.LogError(ex, "LDAP error for user {Username}: {Message}", LogSanitizer.Sanitize(username), ex.Message);
             return LdapAuthResult.Failure("LDAP server error. Please try again later.");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unexpected error during LDAP authentication for {Username}", username);
+            logger.LogError(ex, "Unexpected error during LDAP authentication for {Username}", LogSanitizer.Sanitize(username));
             return LdapAuthResult.Failure("Authentication service error.");
         }
     }
@@ -103,7 +104,7 @@ public sealed class LdapAuthenticationService(ILogger<LdapAuthenticationService>
 
         if (searchResponse.Entries.Count == 0)
         {
-            logger.LogWarning("LDAP user not found for username {Username}", username);
+            logger.LogWarning("LDAP user not found for username {Username}", LogSanitizer.Sanitize(username));
             return Task.FromResult(LdapAuthResult.Failure("Invalid username or password."));
         }
 

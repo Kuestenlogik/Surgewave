@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.Transactions;
@@ -53,7 +54,7 @@ public sealed class CrossTopicTransactionManager : IAsyncDisposable
             throw new InvalidOperationException("Transaction ID collision");
 
         _logger.LogDebug("Cross-topic transaction {TransactionId} started (timeout={Timeout}s, producer={ProducerId})",
-            txn.TransactionId, effectiveTimeout.TotalSeconds, producerId ?? "anonymous");
+            LogSanitizer.Sanitize(txn.TransactionId), effectiveTimeout.TotalSeconds, LogSanitizer.Sanitize(producerId ?? "anonymous"));
 
         return txn;
     }
@@ -169,7 +170,7 @@ public sealed class CrossTopicTransactionManager : IAsyncDisposable
                 catch (Exception ex)
                 {
                     // Transaction log is best-effort; data is already written
-                    _logger.LogWarning(ex, "Failed to write transaction log for {TransactionId}", transactionId);
+                    _logger.LogWarning(ex, "Failed to write transaction log for {TransactionId}", LogSanitizer.Sanitize(transactionId));
                 }
             }
 
@@ -178,14 +179,14 @@ public sealed class CrossTopicTransactionManager : IAsyncDisposable
 
             _logger.LogInformation(
                 "Cross-topic transaction {TransactionId} committed: {TopicCount} topics, {MessageCount} messages in {Duration}ms",
-                transactionId, topicsWritten.Count, messagesWritten, sw.ElapsedMilliseconds);
+                LogSanitizer.Sanitize(transactionId), topicsWritten.Count, messagesWritten, sw.ElapsedMilliseconds);
 
             return new TransactionCommitResult(
                 transactionId, true, topicsWritten.Count, messagesWritten, sw.Elapsed, null, offsets);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Cross-topic transaction {TransactionId} commit failed", transactionId);
+            _logger.LogError(ex, "Cross-topic transaction {TransactionId} commit failed", LogSanitizer.Sanitize(transactionId));
             txn.State = CrossTopicTransactionState.Aborted;
             _transactions.TryRemove(transactionId, out _);
             return new TransactionCommitResult(transactionId, false, 0, 0, sw.Elapsed, ex.Message, null);
@@ -203,7 +204,7 @@ public sealed class CrossTopicTransactionManager : IAsyncDisposable
         txn.State = CrossTopicTransactionState.Aborted;
         txn.PendingWrites.Clear();
 
-        _logger.LogInformation("Cross-topic transaction {TransactionId} aborted", transactionId);
+        _logger.LogInformation("Cross-topic transaction {TransactionId} aborted", LogSanitizer.Sanitize(transactionId));
         return Task.CompletedTask;
     }
 

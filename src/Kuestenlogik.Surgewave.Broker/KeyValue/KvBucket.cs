@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.KeyValue;
@@ -74,7 +75,7 @@ public sealed class KvBucket : IDisposable
         };
 
         await _logManager.CreateTopicAsync(_backingTopic, partitionCount: 1, config: topicConfig, cancellationToken: cancellationToken);
-        _logger?.LogInformation("Created backing topic {Topic} for KV bucket {Bucket}", _backingTopic, _name);
+        _logger?.LogInformation("Created backing topic {Topic} for KV bucket {Bucket}", LogSanitizer.Sanitize(_backingTopic), LogSanitizer.Sanitize(_name));
     }
 
     /// <summary>
@@ -357,7 +358,7 @@ public sealed class KvBucket : IDisposable
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "TTL expiry worker error in bucket {Bucket}", _name);
+                _logger?.LogWarning(ex, "TTL expiry worker error in bucket {Bucket}", LogSanitizer.Sanitize(_name));
             }
         }
     }

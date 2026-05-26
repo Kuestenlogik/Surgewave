@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.KeyValue;
@@ -40,7 +41,7 @@ public sealed class KvBucketManager : IDisposable
         }
 
         await bucket.EnsureBackingTopicAsync(cancellationToken);
-        _logger?.LogInformation("Created KV bucket {Bucket}", name);
+        _logger?.LogInformation("Created KV bucket {Bucket}", LogSanitizer.Sanitize(name));
 
         return bucket;
     }
@@ -62,7 +63,7 @@ public sealed class KvBucketManager : IDisposable
         if (_buckets.TryRemove(name, out var bucket))
         {
             bucket.Dispose();
-            _logger?.LogInformation("Deleted KV bucket {Bucket}", name);
+            _logger?.LogInformation("Deleted KV bucket {Bucket}", LogSanitizer.Sanitize(name));
             return true;
         }
         return false;

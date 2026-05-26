@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Streams.Sql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -83,7 +84,7 @@ public sealed class SurgewaveSqlService : IHostedService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "SQL execution failed: {Sql}", sql);
+            _logger.LogError(ex, "SQL execution failed: {Sql}", LogSanitizer.Sanitize(sql));
             return new SqlExecuteResponse { Error = $"Execution failed: {ex.Message}" };
         }
     }
@@ -115,7 +116,7 @@ public sealed class SurgewaveSqlService : IHostedService, IDisposable
             try
             {
                 query.Status = QueryStatus.Running;
-                _logger.LogInformation("Starting continuous query {Id}: {Sql}", queryId, sql);
+                _logger.LogInformation("Starting continuous query {Id}: {Sql}", LogSanitizer.Sanitize(queryId), LogSanitizer.Sanitize(sql));
 
                 while (!cts.Token.IsCancellationRequested)
                 {
@@ -373,7 +374,7 @@ public sealed class SurgewaveSqlService : IHostedService, IDisposable
     {
         // Placeholder: in a full implementation this would produce messages to the topic.
         // For now, just log.
-        _logger.LogDebug("Would write {Count} rows to topic {Topic}", rows.Count, topicName);
+        _logger.LogDebug("Would write {Count} rows to topic {Topic}", rows.Count, LogSanitizer.Sanitize(topicName));
         return Task.CompletedTask;
     }
 

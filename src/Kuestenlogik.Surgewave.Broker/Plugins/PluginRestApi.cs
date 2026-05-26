@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Plugins;
 using Kuestenlogik.Surgewave.Plugins.Packaging;
 
@@ -158,7 +159,7 @@ public static class PluginRestApi
                     await orchestrator.StopAsync(pipeline.Id, ct);
                     await orchestrator.StartAsync(pipeline.Id, cancellationToken: ct);
                     restarted.Add(pipeline.Id);
-                    logger.LogInformation("Restarted pipeline {PipelineId} after plugin {PluginId} hot-swap", pipeline.Id, id);
+                    logger.LogInformation("Restarted pipeline {PipelineId} after plugin {PluginId} hot-swap", LogSanitizer.Sanitize(pipeline.Id), LogSanitizer.Sanitize(id));
                 }
                 catch (Exception ex)
                 {

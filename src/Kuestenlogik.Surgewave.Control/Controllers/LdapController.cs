@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Kuestenlogik.Surgewave.Control.Security;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -41,7 +42,7 @@ public sealed class LdapController(
 
         if (!result.Succeeded)
         {
-            logger.LogWarning("LDAP login failed for user {Username} via provider {Provider}", username, providerName);
+            logger.LogWarning("LDAP login failed for user {Username} via provider {Provider}", LogSanitizer.Sanitize(username), LogSanitizer.Sanitize(providerName));
 
             var loginUrl = $"/Account/Login?provider={Uri.EscapeDataString(providerName)}" +
                            $"&returnUrl={Uri.EscapeDataString(returnUrl ?? "/")}" +
@@ -75,7 +76,7 @@ public sealed class LdapController(
                 AllowRefresh = true,
             });
 
-        logger.LogInformation("LDAP login successful for {Username} via provider {Provider}", username, providerName);
+        logger.LogInformation("LDAP login successful for {Username} via provider {Provider}", LogSanitizer.Sanitize(username), LogSanitizer.Sanitize(providerName));
 
         return Redirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
     }

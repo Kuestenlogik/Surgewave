@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -53,7 +54,7 @@ public sealed class CdcService : BackgroundService
             return false;
         }
 
-        _logger.LogInformation("CDC source added: {Id} (slot={Slot})", id, config.SlotName);
+        _logger.LogInformation("CDC source added: {Id} (slot={Slot})", LogSanitizer.Sanitize(id), LogSanitizer.Sanitize(config.SlotName));
         return true;
     }
 
@@ -69,7 +70,7 @@ public sealed class CdcService : BackgroundService
 
         entry.Cancel();
         await entry.Source.DisposeAsync();
-        _logger.LogInformation("CDC source removed: {Id}", id);
+        _logger.LogInformation("CDC source removed: {Id}", LogSanitizer.Sanitize(id));
         return true;
     }
 

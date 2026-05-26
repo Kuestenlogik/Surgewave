@@ -5,6 +5,7 @@ using ITfoxtec.Identity.Saml2.MvcCore;
 using ITfoxtec.Identity.Saml2.Schemas;
 using ITfoxtec.Identity.Saml2.Schemas.Metadata;
 using Kuestenlogik.Surgewave.Control.Security;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -51,7 +52,7 @@ public sealed class SamlController(
 
         binding.Bind(saml2AuthnRequest);
 
-        logger.LogInformation("SAML AuthnRequest initiated for provider {Provider}, redirecting to IdP", providerName);
+        logger.LogInformation("SAML AuthnRequest initiated for provider {Provider}, redirecting to IdP", LogSanitizer.Sanitize(providerName));
 
         // Store returnUrl in relay state
         binding.RelayState = returnUrl ?? "/";
@@ -85,7 +86,7 @@ public sealed class SamlController(
 
         if (saml2AuthnResponse.Status != Saml2StatusCodes.Success)
         {
-            logger.LogWarning("SAML Response status for provider {Provider}: {Status}", providerName, saml2AuthnResponse.Status);
+            logger.LogWarning("SAML Response status for provider {Provider}: {Status}", LogSanitizer.Sanitize(providerName), saml2AuthnResponse.Status);
             return Redirect("/Account/AccessDenied");
         }
 
@@ -107,7 +108,7 @@ public sealed class SamlController(
                 AllowRefresh = true,
             });
 
-        logger.LogInformation("SAML login successful for {NameId} via provider {Provider}", claimsIdentity.Name, providerName);
+        logger.LogInformation("SAML login successful for {NameId} via provider {Provider}", LogSanitizer.Sanitize(claimsIdentity.Name), LogSanitizer.Sanitize(providerName));
 
         var returnUrl = binding.RelayState;
         return Redirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
@@ -153,7 +154,7 @@ public sealed class SamlController(
 
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
 
-        logger.LogInformation("SAML logout initiated for provider {Provider}", providerName);
+        logger.LogInformation("SAML logout initiated for provider {Provider}", LogSanitizer.Sanitize(providerName));
 
         return binding.ToActionResult();
     }
@@ -179,7 +180,7 @@ public sealed class SamlController(
 
         if (saml2LogoutResponse.Status != Saml2StatusCodes.Success)
         {
-            logger.LogWarning("SAML SLO Response status for provider {Provider}: {Status}", providerName, saml2LogoutResponse.Status);
+            logger.LogWarning("SAML SLO Response status for provider {Provider}: {Status}", LogSanitizer.Sanitize(providerName), saml2LogoutResponse.Status);
         }
 
         return Redirect("/");

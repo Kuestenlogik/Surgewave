@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -69,7 +70,7 @@ public sealed class AutoTuningService : BackgroundService
         {
             _logger.LogWarning(
                 "Failed to apply auto-tuning recommendation {RuleId}: {Error}",
-                ruleId, error);
+                LogSanitizer.Sanitize(ruleId), LogSanitizer.Sanitize(error));
             // Put it back if it failed
             _activeRecommendations.TryAdd(ruleId, recommendation);
             return null;
@@ -84,7 +85,7 @@ public sealed class AutoTuningService : BackgroundService
         AddToHistory(applied);
         _logger.LogInformation(
             "Auto-tuning recommendation applied: {RuleId} - {ConfigKey} changed from {Old} to {New}",
-            ruleId, recommendation.ConfigKey, recommendation.CurrentValue, recommendation.SuggestedValue);
+            LogSanitizer.Sanitize(ruleId), LogSanitizer.Sanitize(recommendation.ConfigKey), recommendation.CurrentValue, recommendation.SuggestedValue);
 
         return applied;
     }

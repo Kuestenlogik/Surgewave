@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Kuestenlogik.Surgewave.Core.Configuration;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Pipeline;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Core.Storage;
@@ -772,7 +773,7 @@ public sealed class LogManager : IDisposable
         foreach (var hook in _topicHooks)
         {
             try { await hook.OnTopicCreatedAsync(ctx, cancellationToken).ConfigureAwait(false); }
-            catch (Exception ex) { _logger?.LogError(ex, "Topic-created hook {Hook} threw for {Topic}", hook.GetType().FullName, metadata.Name); }
+            catch (Exception ex) { _logger?.LogError(ex, "Topic-created hook {Hook} threw for {Topic}", hook.GetType().FullName, LogSanitizer.Sanitize(metadata.Name)); }
         }
     }
 
