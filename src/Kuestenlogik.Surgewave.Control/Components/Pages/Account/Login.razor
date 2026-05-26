@@ -100,7 +100,13 @@ else if (_showProviderSelection)
         if (HttpContext is null)
             return;
 
-        _returnUrl = ReturnUrl ?? "/";
+        // Open-Redirect-Schutz: ReturnUrl kommt aus dem Query-String
+        // und wird sowohl in <a href="..."> als auch in
+        // HttpContext.Response.Redirect verwendet. Wir akzeptieren
+        // nur pfad-relative URLs ("/foo"), keine absoluten
+        // ("http://evil.com") und keine protokoll-relativen
+        // ("//evil.com").
+        _returnUrl = IsLocalReturnUrl(ReturnUrl) ? ReturnUrl! : "/";
         var authConfig = AuthOptions.Value;
 
         // Handle error from LDAP login redirect
@@ -171,5 +177,24 @@ else if (_showProviderSelection)
             AuthProviderType.Ldap => Icons.Material.Filled.Domain,
             _ => Icons.Material.Filled.Login
         };
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="url"/> is a path-relative URL
+    /// suitable for redirecting back to. Rejects null/empty, absolute
+    /// URLs (http://evil.com), and protocol-relative URLs (//evil.com).
+    /// Matches the semantics of IUrlHelper.IsLocalUrl, but is usable
+    /// from a Razor Component where no IUrlHelper is in scope.
+    /// </summary>
+    private static bool IsLocalReturnUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return false;
+        if (url[0] != '/')
+            return false;
+        // Block protocol-relative "//host" and Windows path "/\host".
+        if (url.Length > 1 && (url[1] == '/' || url[1] == '\\'))
+            return false;
+        return true;
     }
 }

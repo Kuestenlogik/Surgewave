@@ -40,12 +40,18 @@ public sealed class LdapController(
         var providerConfig = GetProviderConfig(providerName);
         var result = await ldapService.AuthenticateAsync(username, password, providerConfig);
 
+        // Open-Redirect-Schutz: returnUrl muss eine *lokale* URL sein.
+        // Url.IsLocalUrl lehnt absolute URLs (http://evil.com) und
+        // protokoll-relative URLs (//evil.com) ab; akzeptiert sind
+        // pfad-relative URLs ("/foo") und Fragmentes.
+        var safeReturnUrl = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/";
+
         if (!result.Succeeded)
         {
             logger.LogWarning("LDAP login failed for user {Username} via provider {Provider}", LogSanitizer.Sanitize(username), LogSanitizer.Sanitize(providerName));
 
             var loginUrl = $"/Account/Login?provider={Uri.EscapeDataString(providerName)}" +
-                           $"&returnUrl={Uri.EscapeDataString(returnUrl ?? "/")}" +
+                           $"&returnUrl={Uri.EscapeDataString(safeReturnUrl)}" +
                            "&error=invalid_credentials";
             return Redirect(loginUrl);
         }
@@ -78,6 +84,6 @@ public sealed class LdapController(
 
         logger.LogInformation("LDAP login successful for {Username} via provider {Provider}", LogSanitizer.Sanitize(username), LogSanitizer.Sanitize(providerName));
 
-        return Redirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
+        return Redirect(safeReturnUrl);
     }
 }
