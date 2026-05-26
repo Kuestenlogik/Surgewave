@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Kuestenlogik.Surgewave.Plugins;
 using Kuestenlogik.Surgewave.Plugins.Packaging;
 
@@ -170,10 +171,28 @@ public static class PluginRestApi
         });
 
         // GET /api/plugins/{id}/{version}/download â€” download a cached .swpkg package
-        group.MapGet("/{id}/{version}/download", async (string id, string version) =>
+        group.MapGet("/{id}/{version}/download", (string id, string version) =>
         {
+            // Path-Injection-Schutz: Route-Parameter werden direkt in
+            // den Dateinamen geschrieben — ohne Allowlist koennte ein
+            // Angreifer `id=../../../etc` schicken und aus dem Cache-Dir
+            // ausbrechen. Plugin-IDs sind kebab-case ASCII, Versionen
+            // sind SemVer (Zahlen, Punkte, optional `-rc.N`).
+            if (!IsValidPluginId(id) || !IsValidPluginVersion(version))
+            {
+                return Results.BadRequest(new { error = "Invalid plugin id or version." });
+            }
+
             var fileName = $"{id}-{version}.swpkg";
-            var filePath = Path.Combine(packageCacheDir, fileName);
+            var cacheRoot = Path.GetFullPath(packageCacheDir);
+            var filePath = Path.GetFullPath(Path.Combine(cacheRoot, fileName));
+
+            // Belt-and-suspenders: auch nach Validation muss das
+            // aufgeloeste File innerhalb des Cache-Roots liegen.
+            if (!filePath.StartsWith(cacheRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { error = "Resolved path escapes the package cache directory." });
+            }
 
             if (!File.Exists(filePath))
             {
@@ -205,4 +224,20 @@ public static class PluginRestApi
 
         return app;
     }
+
+    // Plugin-IDs sind kebab-case ASCII (lowercase, optional Punkte
+    // fuer Namespace-aehnliche IDs wie 'kuestenlogik.surgewave.connector.akka').
+    private static readonly Regex PluginIdPattern =
+        new(@"^[a-z0-9](?:[a-z0-9.\-]{0,127})$", RegexOptions.Compiled);
+
+    // SemVer-Subset: 1-N.dotted-digits, optional `-` prerelease tag mit
+    // alphanumeric + dot. Schliesst Path-Trennzeichen aus.
+    private static readonly Regex PluginVersionPattern =
+        new(@"^[0-9]+(?:\.[0-9]+)*(?:-[A-Za-z0-9.]+)?$", RegexOptions.Compiled);
+
+    private static bool IsValidPluginId(string id) =>
+        !string.IsNullOrEmpty(id) && PluginIdPattern.IsMatch(id);
+
+    private static bool IsValidPluginVersion(string version) =>
+        !string.IsNullOrEmpty(version) && PluginVersionPattern.IsMatch(version);
 }

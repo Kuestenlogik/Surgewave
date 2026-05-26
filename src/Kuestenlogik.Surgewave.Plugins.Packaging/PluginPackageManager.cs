@@ -583,34 +583,50 @@ public sealed class PluginPackageManager
 
     private static string? GetTargetPath(string pluginDir, string entryPath, string pluginSettingsName)
     {
+        string? candidate = null;
+
         if (entryPath.StartsWith($"{LibDirectory}/", StringComparison.OrdinalIgnoreCase))
         {
             var relativePath = entryPath.Substring(LibDirectory.Length + 1);
-            return Path.Combine(pluginDir, relativePath);
+            candidate = Path.Combine(pluginDir, relativePath);
         }
-
-        if (entryPath.StartsWith($"{SharedDirectory}/", StringComparison.OrdinalIgnoreCase))
+        else if (entryPath.StartsWith($"{SharedDirectory}/", StringComparison.OrdinalIgnoreCase))
         {
             var relativePath = entryPath.Substring(SharedDirectory.Length + 1);
-            return Path.Combine(pluginDir, relativePath);
+            candidate = Path.Combine(pluginDir, relativePath);
         }
-
-        if (entryPath.StartsWith($"{DepsDirectory}/", StringComparison.OrdinalIgnoreCase))
+        else if (entryPath.StartsWith($"{DepsDirectory}/", StringComparison.OrdinalIgnoreCase))
         {
-            return Path.Combine(pluginDir, entryPath);
+            candidate = Path.Combine(pluginDir, entryPath);
         }
-
-        if (entryPath.Equals(ManifestFileName, StringComparison.OrdinalIgnoreCase) ||
-            entryPath.Equals(pluginSettingsName, StringComparison.OrdinalIgnoreCase) ||
-            entryPath.Equals(SbomGenerator.SbomFileName, StringComparison.OrdinalIgnoreCase) ||
-            entryPath.Equals("README.md", StringComparison.OrdinalIgnoreCase) ||
-            entryPath.Equals("LICENSE", StringComparison.OrdinalIgnoreCase) ||
-            entryPath.Equals("icon.png", StringComparison.OrdinalIgnoreCase) ||
-            entryPath.Equals("icon.svg", StringComparison.OrdinalIgnoreCase))
+        else if (entryPath.Equals(ManifestFileName, StringComparison.OrdinalIgnoreCase) ||
+                 entryPath.Equals(pluginSettingsName, StringComparison.OrdinalIgnoreCase) ||
+                 entryPath.Equals(SbomGenerator.SbomFileName, StringComparison.OrdinalIgnoreCase) ||
+                 entryPath.Equals("README.md", StringComparison.OrdinalIgnoreCase) ||
+                 entryPath.Equals("LICENSE", StringComparison.OrdinalIgnoreCase) ||
+                 entryPath.Equals("icon.png", StringComparison.OrdinalIgnoreCase) ||
+                 entryPath.Equals("icon.svg", StringComparison.OrdinalIgnoreCase))
         {
-            return Path.Combine(pluginDir, entryPath);
+            candidate = Path.Combine(pluginDir, entryPath);
         }
 
-        return null;
+        if (candidate is null)
+        {
+            return null;
+        }
+
+        // Zip-Slip-Schutz: Auch wenn entryPath mit einem der Allowlist-
+        // Prefixes anfaengt (z.B. 'lib/'), koennte der Rest des Pfads
+        // '../../..' enthalten und so aus pluginDir ausbrechen. Wir
+        // resolven beide Pfade absolut und verlangen Containment.
+        var pluginRoot = Path.GetFullPath(pluginDir);
+        var resolved = Path.GetFullPath(candidate);
+        if (!resolved.StartsWith(pluginRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !string.Equals(resolved, pluginRoot, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return resolved;
     }
 }

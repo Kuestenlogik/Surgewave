@@ -62,7 +62,19 @@ public sealed class SamlController(
     /// <summary>
     /// Assertion Consumer Service — processes SAML Response from IdP.
     /// </summary>
+    /// <remarks>
+    /// SAML POST-Bindings sind inhaerent cross-site (der IdP sendet
+    /// den signierten Response per HTTP-POST an unseren ACS-Endpoint).
+    /// ASP.NET-Anti-Forgery-Tokens funktionieren hier per Konstruktion
+    /// nicht, da der IdP unser Anti-Forgery-Cookie nicht kennt.
+    /// Replay-/Injection-Schutz uebernehmen die SAML-eigenen
+    /// Mechanismen: XML-Signature-Validation, NotBefore/NotOnOrAfter,
+    /// InResponseTo-Match, Audience-Restriction. Diese werden in
+    /// `Saml2PostBinding.ReadSamlResponse` / `Saml2AuthnResponse`
+    /// (ITfoxtec.Identity.Saml2) erzwungen.
+    /// </remarks>
     [HttpPost("acs")]
+    [IgnoreAntiforgeryToken]
     public async Task<IActionResult> AssertionConsumerService(string providerName)
     {
         var saml2Config = GetSaml2Config(providerName);
@@ -149,7 +161,14 @@ public sealed class SamlController(
     /// <summary>
     /// Single Logout Service — processes LogoutResponse from IdP.
     /// </summary>
+    /// <remarks>
+    /// Wie ACS ein inhaerent cross-site POST-Endpoint. SAML-eigene
+    /// Replay-/Injection-Schutzmechanismen (Signature + Timing)
+    /// uebernehmen den Schutz; ASP.NET-Anti-Forgery-Tokens sind hier
+    /// per Konstruktion nicht anwendbar.
+    /// </remarks>
     [HttpPost("slo")]
+    [IgnoreAntiforgeryToken]
     public IActionResult SingleLogoutService(string providerName)
     {
         var saml2Config = GetSaml2Config(providerName);

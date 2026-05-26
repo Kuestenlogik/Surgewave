@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Kuestenlogik.Surgewave.Marketplace.Models;
 
 namespace Kuestenlogik.Surgewave.Marketplace.Services;
@@ -17,12 +18,17 @@ public sealed class FileSystemMetadataService : IPackageMetadataService
         WriteIndented = true
     };
 
+    // Plugin-IDs sind kebab-case ASCII (lowercase, optional dotted
+    // Namespaces). Path-Trennzeichen sind ausgeschlossen.
+    private static readonly Regex IdPattern =
+        new(@"^[a-z0-9](?:[a-z0-9.\-]{0,127})$", RegexOptions.Compiled);
+
     private readonly string _rootDir;
     private readonly ConcurrentDictionary<string, PackageMetadata> _index = new(StringComparer.OrdinalIgnoreCase);
 
     public FileSystemMetadataService(string dataDirectory)
     {
-        _rootDir = Path.Combine(dataDirectory, "metadata");
+        _rootDir = Path.GetFullPath(Path.Combine(dataDirectory, "metadata"));
         Directory.CreateDirectory(_rootDir);
     }
 
@@ -81,7 +87,7 @@ public sealed class FileSystemMetadataService : IPackageMetadataService
 
     public async Task SaveAsync(PackageMetadata metadata, CancellationToken ct = default)
     {
-        var dir = Path.Combine(_rootDir, metadata.Id);
+        var dir = GetMetadataDir(metadata.Id);
         Directory.CreateDirectory(dir);
 
         var metaPath = Path.Combine(dir, "metadata.json");
@@ -93,12 +99,29 @@ public sealed class FileSystemMetadataService : IPackageMetadataService
 
     public Task DeleteAsync(string id, string version, CancellationToken ct = default)
     {
-        var dir = Path.Combine(_rootDir, id);
+        var dir = GetMetadataDir(id);
         if (Directory.Exists(dir))
             Directory.Delete(dir, recursive: true);
 
         _index.TryRemove(id, out _);
         return Task.CompletedTask;
+    }
+
+    // Zentralisierte Path-Konstruktion mit Whitelist-Validation +
+    // Containment-Check. Verhindert Path-Injection ueber den
+    // 'id'-Parameter: ohne diese Funktion wuerde Path.Combine(_rootDir, "../../etc")
+    // den Root-Dir verlassen.
+    private string GetMetadataDir(string id)
+    {
+        if (string.IsNullOrEmpty(id) || !IdPattern.IsMatch(id))
+            throw new ArgumentException($"Invalid plugin id: '{id}'", nameof(id));
+
+        var full = Path.GetFullPath(Path.Combine(_rootDir, id));
+        if (!full.StartsWith(_rootDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Resolved metadata path '{full}' escapes root '{_rootDir}'.");
+
+        return full;
     }
 
     public Task<IReadOnlyList<string>> GetVersionsAsync(string id, CancellationToken ct = default)
