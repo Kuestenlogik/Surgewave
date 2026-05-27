@@ -55,30 +55,39 @@ legible against the dark canvas until the user has scrolled past.
     </div>
     <div class="hero-fg-text">
       {%- comment -%}
-      H1 broad — verkauft die ganze Plattform, nicht nur "Kafka aber besser".
-      Lede ohne Tech-Deepdive (librdkafka, Confluent.Kafka, Apache CLI haben
-      hier nichts zu suchen — gehoeren in eine Migrations-Detail-Section
-      weiter unten); Hero macht das Marketing-Pitch in drei Beats: was es ist,
-      wie es laeuft, was eingebaut ist. Bowire-Pattern (klar, ohne
-      Verb-Drilldown).
+      H1 fuehrt mit dem schaerfsten Hook: Kafka-Migration. Redpanda-/
+      Estuary-Pattern (Wedge-first, Plattform-Breite folgt). Sub-Line
+      benennt den Wedge konkret in einem Satz (.NET 10, Wire-Kompat,
+      embedded). AI/Plattform-Story landet in den Feature-Sections
+      unterhalb, nicht im Hero — Hero darf nicht alles auf einmal
+      sagen, sonst sagt er nichts.
+
+      Dual-CTA (Plan-Welle B.1): Get Started = primary, Compare to
+      Kafka = secondary, GitHub als tertiaere Reference. Bootcamp
+      bleibt disabled bis v0.2.0.
       {%- endcomment -%}
-      <h1 class="hero-title">Your Streams.<br><span class="hero-accent">At Scale. In&nbsp;Control.</span></h1>
+      <h1 class="hero-title">Kafka API.<br><span class="hero-accent">No JVM.&nbsp;Native&nbsp;.NET.</span></h1>
       <p class="hero-lede">
-        The .NET-native message streaming platform. No more JVM.<br>
-        Drop-in Kafka replacement. Run it embedded, standalone, or clustered.<br>
-        AI pipelines, schemas, and a plugin marketplace &mdash; built in, not bolted on.
+        Surgewave is a drop-in replacement for Apache Kafka 4.x, written in .NET 10.<br>
+        Point unmodified Kafka clients at port 9092 and keep going &mdash; or embed Surgewave as a NuGet, scale it as a cluster, layer AI pipelines and a plugin marketplace on top.
       </p>
       <div class="hero-cta">
-        <a href="{{ '/download.html' | relative_url }}" class="btn btn-secondary">
+        <a href="{{ '/download.html' | relative_url }}" class="btn btn-primary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polygon points="12 2 19 21 12 17 5 21 12 2"/>
           </svg>
           Get Started
         </a>
+        <a href="{{ '/compare/kafka.html' | relative_url }}" class="btn btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6h18M3 12h18M3 18h18"/>
+          </svg>
+          Compare to Kafka
+        </a>
         <a href="https://github.com/Kuestenlogik/Surgewave.Bootcamp"
            class="btn btn-secondary btn-disabled"
            aria-disabled="true" tabindex="-1"
-           title="Bootcamp will become available with the v0.1.0 launch">
+           title="Bootcamp will become available with the v0.2.0 launch">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3 1 9l11 6 9-4.91V17h2V9z"/>
           </svg>
@@ -89,6 +98,7 @@ legible against the dark canvas until the user has scrolled past.
           View on GitHub
         </a>
       </div>
+      <p class="hero-reassurance">Single binary. No JVM. Runs in 30&nbsp;seconds.</p>
       <!-- Hero-Badges, Reihenfolge: Live-Hooks (NuGet+Downloads) zuerst —
            wenn sie gefuellt sind, sind das die staerksten Social-Proof-
            Signale (Bowire-Pattern). Pre-launch sind sie via CSS-Regel

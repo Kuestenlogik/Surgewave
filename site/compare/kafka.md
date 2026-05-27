@@ -68,19 +68,25 @@ Apache Kafka is powerful but comes with significant complexity:
 
 ## Performance
 
-### Throughput (100K messages, 100 bytes)
+Comparative numbers against Apache Kafka are preliminary (target) until
+the 1.0 head-to-head publication; the CI regression harness tracks
+absolute Surgewave throughput continuously. The table below shows a
+representative run for orientation; reproduce via
+`scripts/run-all-benchmarks.ps1`.
 
-| Metric | Apache Kafka | Surgewave Native | Improvement |
-|--------|--------------|--------------|-------------|
-| Producer | 68K msg/s | 1.25M msg/s | (see benchmarks) |
-| Consumer | 138K msg/s | 1.28M msg/s | **+826%** |
+### Throughput &mdash; 100K messages, 100 bytes (target)
 
-### Latency (Memory Storage, 1KB messages)
+| Metric | Apache Kafka | Surgewave Native |
+|--------|--------------|------------------|
+| Producer | 68K msg/s | 1.25M msg/s |
+| Consumer | 138K msg/s | 1.28M msg/s |
+
+### Latency &mdash; Memory storage, 1KB messages (target)
 
 | Protocol | P50 Produce | P99 Produce | P50 E2E |
 |----------|-------------|-------------|---------|
 | Surgewave Native | low (target) | low (target) | low (target) |
-| Kafka Protocol | Kafka-protocol baseline | 45 ms | Kafka-protocol baseline |
+| Kafka Protocol | Kafka-protocol baseline | preliminary | Kafka-protocol baseline |
 
 ## Migration Path
 
