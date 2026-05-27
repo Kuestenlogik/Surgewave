@@ -6,18 +6,30 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>surgewave</AssemblyName>
+    <!--
+      RootNamespace bleibt explizit Kuestenlogik.Surgewave.Cli (alle ~110
+      .cs Files in diesem Projekt sind unter `namespace Kuestenlogik.
+      Surgewave.Cli.*`). Ohne Override wuerde MSBuild vom csproj-Namen
+      'Kuestenlogik.Surgewave.Tool' ableiten und neue Files mit
+      `namespace Kuestenlogik.Surgewave.Tool` erzeugen — der bestehende
+      .Cli-Namespace ist semantisch fuer die CLI-Implementierung
+      korrekt.
+    -->
     <RootNamespace>Kuestenlogik.Surgewave.Cli</RootNamespace>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <!--
       Bei PackAsTool=true wuerde MSBuild den AssemblyName als PackageId-
       Fallback nehmen ('surgewave'). Wir setzen die PackageId explizit
-      auf 'Kuestenlogik.Surgewave.Cli' (Bowire-/Kuestenlogik-Konvention).
-      ToolCommandName bleibt 'surgewave' — der CLI-Befehl auf der
-      Kommandozeile aendert sich nicht. xunit-Pattern: PackageId und
-      ToolCommandName entkoppelt.
+      auf 'Kuestenlogik.Surgewave.Tool' (dotnet-Konvention fuer Tool-
+      Packages, analog 'Microsoft.EntityFrameworkCore.Tools'). Der
+      Top-Level-Slot 'Kuestenlogik.Surgewave' bleibt frei fuer ein
+      moegliches spaeteres Meta-Bundle. ToolCommandName bleibt
+      'surgewave' — der CLI-Befehl auf der Kommandozeile aendert sich
+      nicht. xunit-Pattern: PackageId, AssemblyName und ToolCommandName
+      sind entkoppelt.
     -->
-    <PackageId>Kuestenlogik.Surgewave.Cli</PackageId>
+    <PackageId>Kuestenlogik.Surgewave.Tool</PackageId>
     <ToolCommandName>surgewave</ToolCommandName>
     <!--
       PackAsTool runs an implicit `dotnet publish` during `dotnet pack` to

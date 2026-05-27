@@ -48,7 +48,7 @@ jobs:
           V: ${{ steps.version.outputs.VERSION }}
         run: |
           dotnet publish src/Kuestenlogik.Surgewave.Broker  -c Release -r win-x64 --self-contained -o deployments/installer/publish/broker  -p:Version=$V
-          dotnet publish src/Kuestenlogik.Surgewave.Cli     -c Release -r win-x64 --self-contained -o deployments/installer/publish/cli     -p:Version=$V
+          dotnet publish src/Kuestenlogik.Surgewave.Tool     -c Release -r win-x64 --self-contained -o deployments/installer/publish/cli     -p:Version=$V
           dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r win-x64 --self-contained -o deployments/installer/publish/control -p:Version=$V
           cp deployments/installer/config/appsettings.json            deployments/installer/publish/broker/
           cp deployments/installer/config/appsettings.Production.json deployments/installer/publish/broker/
@@ -276,11 +276,11 @@ jobs:
       # linux + win cover the Chocolatey / direct-download story.
       - name: Publish CLI binaries
         run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r linux-x64 --self-contained -o ./publish/surgewave-cli-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-cli-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r win-x64 --self-contained -o ./publish/surgewave-cli-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r osx-x64 --self-contained -o ./publish/surgewave-cli-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-cli-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r linux-x64 --self-contained -o ./publish/surgewave-cli-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-cli-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r win-x64 --self-contained -o ./publish/surgewave-cli-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r osx-x64 --self-contained -o ./publish/surgewave-cli-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-cli-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
 
       # Windows MSI kommt aus dem build-msi-Job (Windows-Runner) als Artefakt.
       # WiX v5 ist Windows-only, deshalb laesst er sich nicht im linux-basierten

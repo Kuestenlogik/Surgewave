@@ -10,7 +10,7 @@ The Surgewave CLI provides 65+ commands for complete broker management.
 
 ```bash
 # Build from source
-cd src/Kuestenlogik.Surgewave.Cli
+cd src/Kuestenlogik.Surgewave.Tool
 dotnet publish -c Release -o ~/.surgewave/bin
 export PATH="$PATH:~/.surgewave/bin"
 

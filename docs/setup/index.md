@@ -33,7 +33,7 @@ Download from [GitHub Releases](https://github.com/Kuestenlogik/Surgewave/releas
 ### .NET Tool
 
 ```bash
-dotnet tool install -g Kuestenlogik.Surgewave.Cli
+dotnet tool install -g Kuestenlogik.Surgewave.Tool
 surgewave broker start
 ```
 

@@ -55,7 +55,7 @@ if (-not $SkipPublish) {
 
     # Publish CLI (self-contained, win-x64)
     Write-Host "[3/5] Publishing Surgewave CLI..." -ForegroundColor Yellow
-    dotnet publish "$RepoRoot/src/Kuestenlogik.Surgewave.Cli" `
+    dotnet publish "$RepoRoot/src/Kuestenlogik.Surgewave.Tool" `
         -c $Configuration `
         -r win-x64 `
         --self-contained `

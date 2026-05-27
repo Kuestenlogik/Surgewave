@@ -196,7 +196,7 @@ per-feature pages, configuration knobs, and worked examples.
   `await foreach` loops.
 - **Source generators** — `[SurgewaveSchema(Topic="…")]` emits per-type codec
   + producer/consumer extensions, zero-reflection, AOT-ready.
-- **70+ CLI commands** (`Kuestenlogik.Surgewave.Cli`), available as a global
+- **70+ CLI commands** (`Kuestenlogik.Surgewave.Tool`), available as a global
   `dotnet tool`. Consistent verb aliases (`show` / `ls`), confirmation
   prompts on destructive commands with global `--yes/-y`.
 - **`Kuestenlogik.Surgewave.Sdk`** meta-package — plugin contracts, MSBuild
@@ -213,7 +213,7 @@ per-feature pages, configuration knobs, and worked examples.
 ## v0.1.0 — initial public release
 
 The Apache-2.0 core ships in version `0.1.0` (NuGet:
-`Kuestenlogik.Surgewave.Client` and friends). All capabilities listed above
+`Kuestenlogik.Surgewave.Toolent` and friends). All capabilities listed above
 are present; the public benchmark numbers and a few quality-of-life polish
 items land before `1.0.0` (see *Open Items*).
 
@@ -347,7 +347,7 @@ A separate, complementary track from the plugin SDK — the SDK is for people
 
 | Variant | Where | What it does | Priority |
 |---|---|---|---|
-| `surgewave setup` interactive CLI | `Kuestenlogik.Surgewave.Cli` subcommand | Walks the operator through choices ("Which storage engine? Which connectors? Auth method? Telemetry?"), then emits a Bash + PowerShell script with the `surgewave plugin install` calls plus an `appsettings.json` skeleton. Output is checked into the operator's deployment repo. | Medium |
+| `surgewave setup` interactive CLI | `Kuestenlogik.Surgewave.Tool` subcommand | Walks the operator through choices ("Which storage engine? Which connectors? Auth method? Telemetry?"), then emits a Bash + PowerShell script with the `surgewave plugin install` calls plus an `appsettings.json` skeleton. Output is checked into the operator's deployment repo. | Medium |
 | Browser wizard | `Surgewave.Control` page | Same logic as a Blazor form with a plugin-marketplace browser; output is a downloadable ZIP with both scripts. Discoverable for non-CLI operators. | Medium |
 | Dependency graph | New `Surgewave.Plugins.Marketplace` index | Pre-requisite for both variants: a registry of available plugins with their versions, descriptions, and dependency graph. | Medium |
 
@@ -362,7 +362,7 @@ A separate, complementary track from the plugin SDK — the SDK is for people
 | Getting-started video | 5-minute demo showcasing the USPs (AI, pipeline editor, schema inference, edge). | Medium |
 | NuGet badges (live values) | Hero-Badges fetchen NuGet-Version + Total-Downloads zur Laufzeit (`azuresearch-usnc.nuget.org`); CSS-Regel blendet leeres Badge aus wenn die API nichts liefert. | ✅ Done (2026-05-27) |
 | GitHub-Stars badge | Live-Fetch ist verdrahtet, aber Hero-Slot bleibt hinter `{% if false %}` parked bis genug Stars zusammenkommen — ein 1-Star-Counter waere ein Anti-Trust-Signal. | Low (re-evaluate when stars ≥ 20) |
-| CLI quick start | Primary Quick Start via `dotnet tool install -g Kuestenlogik.Surgewave.Cli && surgewave start`. | Low |
+| CLI quick start | Primary Quick Start via `dotnet tool install -g Kuestenlogik.Surgewave.Tool && surgewave start`. | Low |
 | Marketing-Site UX polish | Sweep 2026-05-27 (Plan `quiet-cooking-flurry.md`): multi-size `favicon.ico` (16/32/48), Pagefind ArrowDown lädt nächsten Batch nach, Hero auf Kafka-Migration-First reframt + Reassurance-Microcopy, Doc-Tone von Marketing-Sprache gesäubert, `Improvement`-Spalten in Benchmarks/Compare als `(target)` markiert, Section-Rail + Page-Outline-Modal aus Bowire 1:1 portiert (8-Dot-Sampling, Outline-Trigger, ARIA-Keyboard-Nav). | ✅ Done (2026-05-27) |
 
 ### Licensing & extension system

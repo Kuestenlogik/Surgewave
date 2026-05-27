@@ -44,7 +44,7 @@ contracts should not be forced to load the runtime.
 **Example in Surgewave:** `Kuestenlogik.Surgewave.Connect.Abstractions`
 (`src/Kuestenlogik.Surgewave.Connect.Abstractions/`)
 
-Before the extraction, the `Kuestenlogik.Surgewave.Cli` CLI tool pulled ASP.NET Core transitively
+Before the extraction, the `Kuestenlogik.Surgewave.Tool` CLI tool pulled ASP.NET Core transitively
 because it referenced `Kuestenlogik.Surgewave.Connect` for a handful of pipeline template types.
 The templates themselves had zero runtime dependencies — they were just DTOs plus
 a `PipelineTemplateManager` with in-memory + HTTP repository clients.
@@ -169,7 +169,7 @@ reads each plugin's `plugin.json` to find the declared settings filename, so the
 manifest is the single source of truth and plugins can pick any filename without the
 broker needing to glob. `surgewave config validate` calls the same helper, so what the
 broker sees at startup is what the validator checks
-(`src/Kuestenlogik.Surgewave.Cli/Commands/Config/ConfigValidateCommand.cs`).
+(`src/Kuestenlogik.Surgewave/Commands/Config/ConfigValidateCommand.cs`).
 
 The plugin assembly is also auto-discovered by `surgewave config validate` from
 `plugins/<id>/`, so a single `--assemblies` argument pointing at the broker's bin
@@ -272,7 +272,7 @@ the CLI's own bin), reads the matching `SectionName` constant on each type, bind
 the JSON subtree onto a fresh instance, and reports per-section pass/fail with
 human-readable error messages. Use `-v` to see passing sections too. Exit code is
 `1` when at least one section fails. Implementation:
-`src/Kuestenlogik.Surgewave.Cli/Commands/Config/ConfigValidateCommand.cs`.
+`src/Kuestenlogik.Surgewave/Commands/Config/ConfigValidateCommand.cs`.
 
 ---
 

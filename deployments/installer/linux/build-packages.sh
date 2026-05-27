@@ -29,7 +29,7 @@ echo "Publishing broker..."
 dotnet publish "$REPO_ROOT/src/Kuestenlogik.Surgewave.Broker" -c Release -r $RID --self-contained -o "$BUILD_DIR/broker" -p:Version=$VERSION
 
 echo "Publishing CLI..."
-dotnet publish "$REPO_ROOT/src/Kuestenlogik.Surgewave.Cli" -c Release -r $RID --self-contained -o "$BUILD_DIR/cli" -p:Version=$VERSION
+dotnet publish "$REPO_ROOT/src/Kuestenlogik.Surgewave.Tool" -c Release -r $RID --self-contained -o "$BUILD_DIR/cli" -p:Version=$VERSION
 
 echo "Publishing Control..."
 dotnet publish "$REPO_ROOT/src/Kuestenlogik.Surgewave.Control" -c Release -r $RID --self-contained -o "$BUILD_DIR/control" -p:Version=$VERSION

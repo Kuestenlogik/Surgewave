@@ -28,7 +28,7 @@ dotnet run -c Release
 
 ```bash
 # Build and publish CLI
-cd src/Kuestenlogik.Surgewave.Cli
+cd src/Kuestenlogik.Surgewave.Tool
 dotnet publish -c Release -o ~/.surgewave/bin
 
 # Add to PATH

@@ -201,7 +201,7 @@ State is held in a single Set<componentId> mutated on checkbox change.
         else lines.push('docker compose up -d');
       } else {
         lines.push('# Install Surgewave CLI as a .NET global tool');
-        lines.push('dotnet tool install -g Kuestenlogik.Surgewave.Cli');
+        lines.push('dotnet tool install -g Kuestenlogik.Surgewave.Tool');
       }
 
       if (set.has('pipelines') && !hasCluster) {

@@ -47,7 +47,7 @@ public class CliIntegrationTests : IAsyncLifetime
         var preferRelease = AppContext.BaseDirectory.Contains(
             Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar);
         var matches = Directory.GetFiles(artifactsRoot, "surgewave.dll", SearchOption.AllDirectories)
-            .Where(p => p.Contains(Path.DirectorySeparatorChar + "Kuestenlogik.Surgewave.Cli" + Path.DirectorySeparatorChar)
+            .Where(p => p.Contains(Path.DirectorySeparatorChar + "Kuestenlogik.Surgewave.Tool" + Path.DirectorySeparatorChar)
                      && !p.Contains("IntegrationTests"))
             .OrderByDescending(p => p.Contains(preferRelease ? "Release" : "Debug"))
             .ToList();

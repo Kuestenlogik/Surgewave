@@ -10,7 +10,7 @@ Core source code for the Surgewave message broker.
 |---------|-------------|
 | `Kuestenlogik.Surgewave.Core` | Core models, storage interfaces, utilities |
 | `Kuestenlogik.Surgewave.Broker` | Main broker implementation |
-| `Kuestenlogik.Surgewave.Cli` | Command-line interface (`surgewave` command) |
+| `Kuestenlogik.Surgewave.Tool` | Command-line interface (`surgewave` command) |
 
 ### Protocol Layer
 
@@ -111,7 +111,7 @@ dotnet build -c Release
 dotnet run --project src/Kuestenlogik.Surgewave.Broker
 
 # Use CLI
-dotnet run --project src/Kuestenlogik.Surgewave.Cli -- <command>
+dotnet run --project src/Kuestenlogik.Surgewave.Tool -- <command>
 ```
 
 ## Architecture

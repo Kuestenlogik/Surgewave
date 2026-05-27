@@ -31,7 +31,7 @@
             "artifacts/bin/Kuestenlogik.Surgewave.Transport/Release/Kuestenlogik.Surgewave.Transport.dll",
             "artifacts/bin/Kuestenlogik.Surgewave.Transport.Tcp/Release/Kuestenlogik.Surgewave.Transport.Tcp.dll",
             "artifacts/bin/Kuestenlogik.Surgewave.Transport.SharedMemory/Release/Kuestenlogik.Surgewave.Transport.SharedMemory.dll",
-            "artifacts/bin/Kuestenlogik.Surgewave.Cli/Release/Kuestenlogik.Surgewave.Cli.dll",
+            "artifacts/bin/Kuestenlogik.Surgewave.Tool/Release/surgewave.dll",
             "artifacts/bin/Kuestenlogik.Surgewave.Operator/Release/Kuestenlogik.Surgewave.Operator.dll"
           ],
           "src": ".."

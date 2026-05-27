@@ -104,7 +104,7 @@ dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer
 | Control | `surgewave/surgewave-control` | `dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer` |
 | Marketplace | `surgewave/surgewave-marketplace` | `dotnet publish src/Kuestenlogik.Surgewave.Marketplace -c Release /t:PublishContainer` |
 | Connect Worker | `surgewave/surgewave-connect` | `dotnet publish src/Kuestenlogik.Surgewave.Connect.Worker -c Release /t:PublishContainer` |
-| CLI | — (dotnet tool) | `dotnet tool install -g Kuestenlogik.Surgewave.Cli` |
+| CLI | — (dotnet tool) | `dotnet tool install -g Kuestenlogik.Surgewave.Tool` |
 
 ## License Management
 

@@ -83,7 +83,7 @@
     <Project Path="src/Kuestenlogik.Surgewave.Control/Kuestenlogik.Surgewave.Control.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Control.Sdk/Kuestenlogik.Surgewave.Control.Sdk.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Marketplace/Kuestenlogik.Surgewave.Marketplace.csproj" />
-    <Project Path="src/Kuestenlogik.Surgewave.Cli/Kuestenlogik.Surgewave.Cli.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Tool/Kuestenlogik.Surgewave.Tool.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Testing/Kuestenlogik.Surgewave.Testing.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Testing.Chaos/Kuestenlogik.Surgewave.Testing.Chaos.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Edge/Kuestenlogik.Surgewave.Edge.csproj" />

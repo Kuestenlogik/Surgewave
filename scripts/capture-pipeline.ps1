@@ -170,7 +170,7 @@ try {
             foreach ($pkg in $toInstall) {
                 # surgewave-CLI lokal via 'dotnet run --project ...' starten — vermeidet, dass
                 # eine global installierte (alte) Version verwendet wird.
-                & dotnet run --project src/Kuestenlogik.Surgewave.Cli --no-build -c Release -- plugins install $pkg.FullName --directory $brokerPluginsDir --force 2>&1 | Out-Null
+                & dotnet run --project src/Kuestenlogik.Surgewave.Tool --no-build -c Release -- plugins install $pkg.FullName --directory $brokerPluginsDir --force 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     $installed++
                     Write-Host "    $($pkg.BaseName)" -ForegroundColor Gray

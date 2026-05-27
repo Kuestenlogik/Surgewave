@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message download buttons (Raw + JSON) in Control UI
 - Plugin Repository Sources (NuGet, HTTP/Marketplace, GitHub Releases)
 - Plugin Sources management page in Control UI
-- `surgewave` CLI as dotnet tool (`dotnet tool install -g Kuestenlogik.Surgewave.Cli`)
+- `surgewave` CLI as dotnet tool (`dotnet tool install -g Kuestenlogik.Surgewave.Tool`)
 - Kuestenlogik.Surgewave.Sdk MSBuild package (auto .swpkg on publish)
 - Plugin Development Guide (docs/features/plugin-development.md)
 - Serializer benchmarks (MemoryPack 3.5x faster than JSON)

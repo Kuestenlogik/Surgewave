@@ -49,7 +49,7 @@ $allServices = @(
     @{ Name = "Control";     Project = "src/Kuestenlogik.Surgewave.Control";         Container = $true  }
     @{ Name = "Marketplace"; Project = "src/Kuestenlogik.Surgewave.Marketplace";     Container = $true  }
     @{ Name = "Connector";   Project = "src/Kuestenlogik.Surgewave.Connect.Worker";  Container = $true  }
-    @{ Name = "Cli";         Project = "src/Kuestenlogik.Surgewave.Cli";             Container = $true  }
+    @{ Name = "Cli";         Project = "src/Kuestenlogik.Surgewave.Tool";            Container = $true  }
 )
 # Filter to requested services if -Service was provided
 $services = if ($Service -and $Service.Count -gt 0) {

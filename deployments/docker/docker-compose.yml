@@ -14,7 +14,7 @@
 #   dotnet publish src/Kuestenlogik.Surgewave.Control        -c Release /t:PublishContainer
 #   dotnet publish src/Kuestenlogik.Surgewave.Marketplace    -c Release /t:PublishContainer
 #   dotnet publish src/Kuestenlogik.Surgewave.Connect.Worker -c Release /t:PublishContainer
-#   dotnet publish src/Kuestenlogik.Surgewave.Cli            -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Tool           -c Release /t:PublishContainer
 #
 # Run: docker compose up -d
 # CLI (on-demand, not auto-started): docker compose run --rm surgewave-cli --help

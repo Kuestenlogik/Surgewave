@@ -48,11 +48,11 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $PluginsRoot = Join-Path $RepoRoot "src\Kuestenlogik.Surgewave.Control\plugins"
-$SurgewaveCli = Join-Path $RepoRoot "artifacts\bin\Kuestenlogik.Surgewave.Cli\Release\surgewave.exe"
+$SurgewaveCli = Join-Path $RepoRoot "artifacts\bin\Kuestenlogik.Surgewave.Tool\Release\surgewave.exe"
 
 if (-not (Test-Path $SurgewaveCli)) {
     Write-Host "  surgewave CLI nicht gebaut: $SurgewaveCli" -ForegroundColor Red
-    Write-Host "  → dotnet build src/Kuestenlogik.Surgewave.Cli -c Release" -ForegroundColor Gray
+    Write-Host "  → dotnet build src/Kuestenlogik.Surgewave.Tool -c Release" -ForegroundColor Gray
     exit 1
 }
 

@@ -8,7 +8,7 @@ description: Install Surgewave via dotnet tool, Docker, or from source. Guides a
 ## CLI (dotnet tool)
 
 ```bash
-dotnet tool install -g Kuestenlogik.Surgewave.Cli
+dotnet tool install -g Kuestenlogik.Surgewave.Tool
 surgewave broker start --port 9092
 ```
 

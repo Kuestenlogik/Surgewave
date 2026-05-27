@@ -166,7 +166,7 @@ The CLI `pack` command creates an `.swpkg` from your build output:
 
 ```bash
 # Install the CLI globally
-dotnet tool install -g Kuestenlogik.Surgewave.Cli
+dotnet tool install -g Kuestenlogik.Surgewave.Tool
 
 # Build your plugin
 dotnet build -c Release
