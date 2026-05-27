@@ -6,7 +6,7 @@ Common questions about Surgewave.
 
 ### What is Surgewave?
 
-Surgewave is a high-performance message broker that serves as a drop-in replacement for Apache Kafka. Built with modern .NET, it provides 100% Kafka 4.0 protocol compatibility while offering significantly better performance and simpler operations.
+Surgewave is a Kafka-wire-compatible message broker written in .NET 10. It accepts unmodified Kafka 4.0 clients on port 9092 and adds a native binary protocol for lower-latency .NET workloads. Comparative benchmarks against Apache Kafka are tracked under [Benchmarks](performance/benchmarks.md).
 
 ### How does Surgewave compare to Kafka?
 

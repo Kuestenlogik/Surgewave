@@ -1,15 +1,19 @@
 # Benchmarks
 
-Detailed performance measurements.
+Detailed performance measurements. The numbers below are reproducible
+via `scripts/run-all-benchmarks.ps1` and tracked by the CI regression
+harness; absolute results depend on hardware. Comparative figures
+against Apache Kafka are preliminary (target) until the 1.0 head-to-head
+publication.
 
 ## Throughput
 
-### 100K Messages, 100 bytes
+### 100K Messages, 100 bytes (target)
 
-| Metric | Kafka | Surgewave Native | Improvement |
-|--------|-------|--------------|-------------|
-| Producer | 68,213 msg/s | 1,250,000 msg/s | (see benchmarks) |
-| Consumer | 138,504 msg/s | 1,282,051 msg/s | +826% |
+| Metric | Kafka | Surgewave Native |
+|--------|-------|------------------|
+| Producer | 68,213 msg/s | 1,250,000 msg/s |
+| Consumer | 138,504 msg/s | 1,282,051 msg/s |
 
 ### By Message Size
 

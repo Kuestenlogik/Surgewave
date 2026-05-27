@@ -86,14 +86,14 @@ See the [Migration Guide](../migration/index.md) for detailed migration paths:
 
 | Path | Effort | Performance |
 |------|--------|-------------|
-| Direct Compatibility | Zero | Kafka baseline |
-| API Wrapper | Minimal | much lower latency |
-| Native Client | Full rewrite | Optimal |
+| Direct Compatibility | None — point existing clients at port 9092 | Kafka protocol baseline |
+| API Wrapper | Swap NuGet package | Native protocol under the same producer/consumer API (target: lower latency than Kafka wire) |
+| Native Client | New API surface | Full native-protocol feature set |
 
 ## Next Steps
 
 - [Migration Guide](../migration/index.md) - Migrate from Apache Kafka
 - [.NET Client](dotnet.md) - Native client details
-- [Confluent.Kafka Wrapper](confluent-kafka-wrapper.md) - Zero-code migration
+- [Confluent.Kafka Wrapper](confluent-kafka-wrapper.md) - Drop-in wrapper for existing Confluent.Kafka call sites
 - [Producer API](producer.md) - Produce messages
 - [Consumer API](consumer.md) - Consume messages

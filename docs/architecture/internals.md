@@ -12,10 +12,10 @@ Surgewave uses .NET Channels as the core implementation for high-performance, sc
 
 | Benefit | Description |
 |---------|-------------|
-| Always faster | 185% throughput improvement |
-| Always lower latency | 85% reduction |
+| Higher throughput | Internal microbenchmark below (~+185%, hypothetical no-channel baseline) |
+| Lower latency | Same benchmark, ~-85% on avg/P99 |
 | Built into .NET | Not a third-party dependency |
-| No memory issues | Bounded channels with backpressure |
+| Backpressure | Bounded channels with `BoundedChannelFullMode.Wait` |
 | Universal | Works for both low and high volume |
 
 **Result**: Channels are built into `LogManager` - all users get the performance benefits automatically.
@@ -291,14 +291,15 @@ while (!cancellationToken.IsCancellationRequested)
 
 ## Conclusion
 
-.NET Channels provide:
-- **185% throughput improvement**
-- **85% latency reduction**
-- **Better resource utilization**
-- **Simpler async code**
-- **Built-in backpressure**
+.NET Channels provide, in the internal microbenchmark above (vs. a
+direct-lock baseline on the same workload):
 
-For Surgewave's use case (high-throughput message ingestion), Channels are the optimal choice and are enabled by default.
+- ~+185% throughput
+- ~-85% avg/P99 latency
+- Bounded backpressure without manual queue management
+- Native async/await ergonomics
+
+For Surgewave's use case (high-throughput message ingestion), Channels are the default ingestion path.
 
 ## References
 

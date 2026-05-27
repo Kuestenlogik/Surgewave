@@ -45,7 +45,7 @@ Build applications that produce and consume messages.
 |-------|-------------|
 | [Quickstart](quickstart/index.md) | Get started in 5 minutes |
 | [.NET Client](clients/dotnet.md) | Native Surgewave client API |
-| [Confluent.Kafka Wrapper](clients/confluent-kafka-wrapper.md) | Zero-code migration from Kafka |
+| [Confluent.Kafka Wrapper](clients/confluent-kafka-wrapper.md) | Drop-in wrapper for existing Confluent.Kafka call sites |
 | [Kafka Protocol Compatibility](clients/kafka-compat.md) | Use existing Kafka clients unchanged |
 | [Producer API](clients/producer.md) | Sending messages |
 | [Consumer API](clients/consumer.md) | Receiving messages |
@@ -90,28 +90,28 @@ Build Surgewave from source and contribute to the project.
 
 | Feature | Description |
 |---------|-------------|
-| **Kafka 4.0 Compatible** | 100% protocol compatibility with existing clients |
-| **Native Protocol** | Lower-latency .NET path alongside the Kafka wire (target — public benchmarks pending) |
+| **Kafka 4.0 Wire** | Accepts unmodified Kafka 4.0 clients on port 9092 |
+| **Native Protocol** | Binary protocol for .NET clients alongside the Kafka wire (target — public benchmarks pending) |
 | **Multi-Backend Storage** | Memory, FileSystem, Arrow, Parquet, RocksDb, Lmdb, DuckDb, Sqlite, NvmeDirect, S3, Tiered |
 | **Multiple Transports** | Kafka protocol, Native binary, gRPC, Shared Memory IPC |
-| **Enterprise Features** | Transactions, Schema Registry, Kafka Streams |
+| **Transactions & Streams** | Exactly-once semantics, Schema Registry, Kafka Streams compatibility |
 | **Kafka Connect** | 10+ built-in connectors for S3, Azure, GCS, databases, MQTT, Redis, HTTP |
 | **Clustering** | Multi-broker with KRaft consensus, automatic failover |
 | **Security** | SASL (PLAIN, SCRAM), TLS, ACL authorization |
-| **Easy Operations** | Single binary, zero ZooKeeper, embedded option |
+| **Single Binary** | No ZooKeeper, embedded option for in-process tests |
 
 ---
 
 ## Performance
 
-**Throughput (100K messages, 100 bytes):**
+Surgewave's CI regression harness tracks throughput and transport overhead; latency-percentile measurements (P50/P99) are part of the 1.0 release sign-off and will be published in [Benchmarks](performance/benchmarks.md) when available.
 
-| Metric | Apache Kafka | Surgewave Native | Improvement |
-|--------|--------------|--------------|-------------|
-| Producer | 68K msg/s | 1.25M msg/s | (see benchmarks) |
-| Consumer | 138K msg/s | 1.28M msg/s | +826% |
+A representative throughput run on 100K × 100-byte messages (Surgewave native protocol vs. Apache Kafka, single broker, same hardware) is reproduced below; for the full methodology and per-backend numbers see [Benchmarks](performance/benchmarks.md).
 
-**Latency:** The Surgewave native protocol targets lower latency than the Kafka wire on the same broker; comparative head-to-head numbers will be published with the 1.0 release.
+| Metric | Apache Kafka | Surgewave Native |
+|--------|--------------|------------------|
+| Producer | 68K msg/s | 1.25M msg/s |
+| Consumer | 138K msg/s | 1.28M msg/s |
 
 ---
 
