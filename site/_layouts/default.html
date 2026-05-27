@@ -62,8 +62,8 @@
     blau+navy und damit auf hellgrauen Browser-Tabs zu dunkel; das
     Favicon bekommt deshalb einen eigenen statischen Override mit den
     helleren Hero-Toenen.
-  * .ico fallback — multi-size bundle (16/32/48/64/128/256) for
-    legacy browsers + Windows pinning.
+  * .ico fallback — multi-size bundle (16/32/48) for legacy browsers
+    + Windows pinning. Built by `node scripts/build-favicon-ico.js`.
   * apple-touch-icon — 180x180 PNG for iOS home-screen bookmarks.
   {%- endcomment -%}
   <link rel="icon" type="image/svg+xml" href="{{ '/assets/images/favicon.svg' | relative_url }}">
