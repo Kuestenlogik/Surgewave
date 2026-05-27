@@ -9,6 +9,15 @@
     <RootNamespace>Kuestenlogik.Surgewave.Cli</RootNamespace>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
+    <!--
+      Bei PackAsTool=true wuerde MSBuild den AssemblyName als PackageId-
+      Fallback nehmen ('surgewave'). Wir setzen die PackageId explizit
+      auf 'Kuestenlogik.Surgewave.Cli' (Bowire-/Kuestenlogik-Konvention).
+      ToolCommandName bleibt 'surgewave' — der CLI-Befehl auf der
+      Kommandozeile aendert sich nicht. xunit-Pattern: PackageId und
+      ToolCommandName entkoppelt.
+    -->
+    <PackageId>Kuestenlogik.Surgewave.Cli</PackageId>
     <ToolCommandName>surgewave</ToolCommandName>
     <!--
       PackAsTool runs an implicit `dotnet publish` during `dotnet pack` to

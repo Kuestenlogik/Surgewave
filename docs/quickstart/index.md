@@ -35,8 +35,8 @@ surgewave-broker.exe
 ## Option 3: .NET Tool
 
 ```bash
-dotnet tool install -g surgewave-cli
-surgewave-broker start
+dotnet tool install -g Kuestenlogik.Surgewave.Cli
+surgewave broker start
 ```
 
 ---
