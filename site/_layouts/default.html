@@ -371,12 +371,35 @@
           e.preventDefault();
           var items = getResults();
           if (items.length === 0) return;
+          if (highlighted === items.length - 1) {
+            // At the bottom — nudge Pagefind to render the next batch
+            // (button is visually hidden but still functional). Mirrors
+            // the Mouse-Scroll-handler, so keyboard + mouse stay in sync.
+            var loadMore = document.querySelector('#search .pagefind-ui__button');
+            if (loadMore) {
+              loadMore.click();
+              var prevLen = items.length;
+              // MutationObserver resets `highlighted` to -1 when Pagefind
+              // re-renders — re-seed it onto the first new entry once the
+              // batch lands.
+              setTimeout(function () {
+                var next = getResults();
+                if (next.length > prevLen) {
+                  highlighted = prevLen;
+                  paintHighlight();
+                }
+              }, 150);
+            }
+            return;
+          }
           highlighted = Math.min(highlighted + 1, items.length - 1);
           paintHighlight();
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
+          var items = getResults();
+          if (items.length === 0) return;
           highlighted = Math.max(highlighted - 1, -1);
           paintHighlight();
           return;
