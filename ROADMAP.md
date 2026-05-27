@@ -353,15 +353,17 @@ A separate, complementary track from the plugin SDK — the SDK is for people
 
 ### Adoption & community
 
-| Feature | Description | Priority |
+| Feature | Description | Status / Priority |
 |---|---|---|
 | GitHub Pages deploy | Combined Jekyll landing + DocFX technical docs at `https://surgewave.io` (CNAME ready, workflow + Pagefind index in place). | High |
-| NuGet.org publish | All Surgewave packages live on nuget.org for public consumption. | High |
-| Public sister repos | `Surgewave.Connectors`, `Surgewave.Samples`, `Surgewave.Bootcamp`, `Surgewave.Templates` move to public — enables branch protection, public NuGet, CLA enforcement. | High |
+| NuGet.org publish | All Surgewave packages live on nuget.org for public consumption. | ✅ Done (2026-05-26, v0.1.0 + v0.1.4) |
+| Public sister repos | `Surgewave.Connectors`, `Surgewave.Bootcamp`, `Surgewave.Templates`, `Akka.Streams.Surgewave`, `Akka.Persistence.Surgewave` move to public. | ✅ Done (Connectors + Akka-Repos public 2026-05-27; `Surgewave.Samples` outstanding) |
 | Branch protection | Require CI pass for external PRs, admin bypass for maintainer. | Medium |
 | Getting-started video | 5-minute demo showcasing the USPs (AI, pipeline editor, schema inference, edge). | Medium |
-| NuGet download badge | Add NuGet version + download count badges to README (after nuget.org publish). | Low |
+| NuGet badges (live values) | Hero-Badges fetchen NuGet-Version + Total-Downloads zur Laufzeit (`azuresearch-usnc.nuget.org`); CSS-Regel blendet leeres Badge aus wenn die API nichts liefert. | ✅ Done (2026-05-27) |
+| GitHub-Stars badge | Live-Fetch ist verdrahtet, aber Hero-Slot bleibt hinter `{% if false %}` parked bis genug Stars zusammenkommen — ein 1-Star-Counter waere ein Anti-Trust-Signal. | Low (re-evaluate when stars ≥ 20) |
 | CLI quick start | Primary Quick Start via `dotnet tool install -g Kuestenlogik.Surgewave.Cli && surgewave start`. | Low |
+| Marketing-Site UX polish | Sweep 2026-05-27 (Plan `quiet-cooking-flurry.md`): multi-size `favicon.ico` (16/32/48), Pagefind ArrowDown lädt nächsten Batch nach, Hero auf Kafka-Migration-First reframt + Reassurance-Microcopy, Doc-Tone von Marketing-Sprache gesäubert, `Improvement`-Spalten in Benchmarks/Compare als `(target)` markiert, Section-Rail + Page-Outline-Modal aus Bowire 1:1 portiert (8-Dot-Sampling, Outline-Trigger, ARIA-Keyboard-Nav). | ✅ Done (2026-05-27) |
 
 ### Licensing & extension system
 
