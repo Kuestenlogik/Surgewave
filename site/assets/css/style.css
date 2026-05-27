@@ -3212,3 +3212,308 @@ html[data-theme="light"] {
         display: none !important;
     }
 }
+
+/* ===========================================================
+   Section-Rail + Page-Outline-Modal (Bowire-Port, Welle C.2)
+
+   .section-rail sits on the right edge, vertical-centred. It carries:
+     1. .section-nav — one .section-nav-dot per top-level <section>,
+        scrollspy-active. Hover reveals a tooltip-style label.
+     2. .section-tools — single .section-tools-trigger pill that opens
+        the .surgewave-page-overlay modal with the full (un-sampled)
+        section list. Dot-nav samples down to MAX_DOTS=8 entries when
+        the page has more sections than fit; the outline modal always
+        shows the complete list.
+
+   Both pills sit on the same right-edge axis as separate flex children
+   so each can grow/shrink independently. JS-Setup happens in main.js
+   (Section-Rail-Builder); the modal target is in _includes/page-outline-
+   overlay.html.
+   =========================================================== */
+.section-rail {
+    position: fixed;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    z-index: 90;
+}
+.section-rail[hidden] { display: none; }
+
+.section-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 6px;
+    background: rgba(15, 15, 23, 0.55);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 999px;
+    border: 1px solid var(--border);
+}
+:root[data-theme="light"] .section-nav,
+:root[data-theme="light"] .section-tools {
+    background: rgba(250, 250, 255, 0.7);
+}
+@media (prefers-color-scheme: light) {
+    :root[data-theme="auto"] .section-nav,
+    :root[data-theme="auto"] .section-tools {
+        background: rgba(250, 250, 255, 0.7);
+    }
+}
+
+.section-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 6px;
+    background: rgba(15, 15, 23, 0.55);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 999px;
+    border: 1px solid var(--border);
+}
+.section-tools[hidden] { display: none; }
+.section-tools-trigger {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: color 0.15s, background 0.15s;
+}
+.section-tools-trigger:hover,
+.section-tools-trigger:focus-visible,
+.section-tools-trigger[aria-expanded="true"] {
+    color: var(--accent);
+    background: rgba(14, 165, 233, 0.12);
+    outline: none;
+}
+
+.section-nav-dot {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+.section-nav-dot::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    opacity: 0.4;
+    transition: opacity 0.15s, transform 0.15s, background 0.15s;
+}
+.section-nav-dot:hover::before,
+.section-nav-dot:focus-visible::before {
+    opacity: 0.85;
+    transform: scale(1.25);
+}
+.section-nav-dot.is-active::before {
+    background: var(--accent);
+    opacity: 1;
+    transform: scale(1.35);
+}
+.section-nav-dot:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.section-nav-dot-label {
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%) translateX(4px);
+    white-space: nowrap;
+    padding: 4px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    color: var(--text);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s, transform 0.15s;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.section-nav-dot:hover .section-nav-dot-label,
+.section-nav-dot:focus-visible .section-nav-dot-label {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+}
+
+.section-nav-gap {
+    width: 24px;
+    height: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    pointer-events: none;
+}
+.section-nav-gap::before,
+.section-nav-gap::after {
+    content: '';
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    opacity: 0.35;
+}
+
+@media (max-width: 768px) {
+    /* Mobile: floating rail kollidiert mit Article-Text auf der rechten
+       Kante (kein fester Gutter). Mobile-Nutzer bekommen Outline-Funktion
+       ueber den Burger-Menue + Anchor-Links im Article. */
+    .section-rail { display: none; }
+}
+
+/* Page-Outline-Modal — geoeffnet vom .section-tools-trigger.
+   Same idiom wie das Search-Overlay (translucent backdrop, three-band
+   panel: title cap / scrollable nav / hint footer). Listet alle
+   <section>s (full, nicht sampled) so dass der Modal die Dot-Nav
+   komplementiert. */
+.surgewave-page-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: min(12vh, 120px);
+    background: rgba(15, 15, 23, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+:root[data-theme="light"] .surgewave-page-overlay {
+    background: rgba(200, 200, 220, 0.55);
+}
+@media (prefers-color-scheme: light) {
+    :root[data-theme="auto"] .surgewave-page-overlay {
+        background: rgba(200, 200, 220, 0.55);
+    }
+}
+.surgewave-page-overlay.is-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+.surgewave-page-overlay-panel {
+    width: min(560px, calc(100% - 48px));
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+    transform: translateY(-8px);
+    transition: transform 0.2s ease;
+}
+.surgewave-page-overlay.is-open .surgewave-page-overlay-panel {
+    transform: translateY(0);
+}
+.surgewave-page-overlay-title {
+    flex-shrink: 0;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin: 0;
+    font-weight: 600;
+    padding: 16px 20px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+}
+.surgewave-page-overlay nav.page-outline {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--surface);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    margin: 0;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+}
+.surgewave-page-overlay nav.page-outline::-webkit-scrollbar { width: 6px; }
+.surgewave-page-overlay nav.page-outline::-webkit-scrollbar-track { background: transparent; }
+.surgewave-page-overlay nav.page-outline::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+.surgewave-page-overlay nav.page-outline a {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 13.5px;
+    display: block;
+    padding: 6px 10px;
+    margin: 1px 0;
+    border-radius: 4px;
+    line-height: 1.45;
+    transition: color 0.15s, background 0.15s;
+}
+.surgewave-page-overlay nav.page-outline a:hover,
+.surgewave-page-overlay nav.page-outline a:focus-visible {
+    color: var(--accent);
+    background: var(--bg-elevated);
+    outline: none;
+}
+.surgewave-page-overlay nav.page-outline a.is-active {
+    color: var(--accent);
+    font-weight: 600;
+    background: var(--bg-elevated);
+}
+/* Keyboard / Hover-Highlight — separat vom "you are here"-Marker
+   damit beide koexistieren. Selber Idiom wie .pagefind-ui__result.
+   is-highlighted im Search-Overlay. */
+.surgewave-page-overlay nav.page-outline a.is-highlighted {
+    color: var(--accent);
+    background: rgba(14, 165, 233, 0.08);
+}
+.surgewave-page-overlay-hint {
+    flex: 0 0 auto;
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-align: center;
+}
+.surgewave-page-overlay-hint kbd {
+    display: inline-block;
+    min-width: 20px;
+    padding: 1px 5px;
+    margin: 0 2px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    color: var(--text);
+    line-height: 1.4;
+}

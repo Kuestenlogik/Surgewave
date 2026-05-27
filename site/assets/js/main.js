@@ -511,3 +511,250 @@
         })
         .catch(() => {});
 })();
+
+// ====================================================================
+// Floating section-rail — scrollspy dots on the right edge of long
+// pages. One dot per top-level <section>, the active one follows the
+// scroll position, hover reveals the section label, click jumps there.
+// Below the dot-nav: an Outline tools-pill that opens the
+// .surgewave-page-overlay modal with the FULL (un-sampled) section
+// list — so even when the dot-nav samples down to MAX_DOTS, every
+// section stays reachable via the modal.
+// 1:1-Port aus Bowire's section-rail + page-outline. Bowire-Accent
+// (#6366f1, indigo-500) -> Surgewave-Accent (rgba(14,165,233,...)).
+// ====================================================================
+(function () {
+    const sections = Array.from(document.querySelectorAll('main section, section'))
+        .filter(s => s.offsetParent !== null || s.classList.contains('hero'));
+    if (sections.length < 2) return;
+
+    function sectionLabel(section) {
+        // Bevorzugt <h2 class="section-title">, fallback auf h2/h1, dann
+        // h3 (deckt Pages mit nur <h3>-Headings ab — sonst zeigt der
+        // Outline-Modal n-mal 'Section'). 'Top' fuer den Hero.
+        const title = section.querySelector('h2.section-title, h2, h1, h3');
+        const text  = title ? title.textContent.trim() : '';
+        if (text) return text;
+        if (section.classList.contains('hero')) return 'Top';
+        return 'Section';
+    }
+
+    const rail = document.createElement('aside');
+    rail.className = 'section-rail';
+    rail.setAttribute('aria-label', 'Page navigation rail');
+
+    const nav = document.createElement('nav');
+    nav.className = 'section-nav';
+    nav.setAttribute('aria-label', 'Page sections');
+
+    // Sampling: max 8 dots, immer first + last, gleichmaessige Spreizung.
+    // Bei >8 Sections zeigt eine .section-nav-gap-Markierung an, dass
+    // dazwischen Eintraege ausgelassen wurden (komplette Liste im
+    // Outline-Modal).
+    const MAX_DOTS = 8;
+    let pickedIndexes;
+    if (sections.length <= MAX_DOTS) {
+        pickedIndexes = sections.map((_, i) => i);
+    } else {
+        const seen = new Set();
+        pickedIndexes = [];
+        for (let i = 0; i < MAX_DOTS; i++) {
+            const idx = Math.round(i * (sections.length - 1) / (MAX_DOTS - 1));
+            if (!seen.has(idx)) {
+                seen.add(idx);
+                pickedIndexes.push(idx);
+            }
+        }
+    }
+
+    const dots = [];
+    pickedIndexes.forEach((sectionIdx, i) => {
+        const section = sections[sectionIdx];
+        const label = sectionLabel(section);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'section-nav-dot';
+        btn.setAttribute('aria-label', `Jump to ${label}`);
+        // DOM-APIs statt innerHTML weil sectionLabel() User-content
+        // sein kann — Markup-Injection vermeiden.
+        const dotLabelSpan = document.createElement('span');
+        dotLabelSpan.className = 'section-nav-dot-label';
+        dotLabelSpan.textContent = label;
+        btn.appendChild(dotLabelSpan);
+        btn.addEventListener('click', () => jumpToSection(sectionIdx));
+        nav.appendChild(btn);
+        dots.push({ section, btn, label });
+
+        if (i < pickedIndexes.length - 1
+                && pickedIndexes[i + 1] > sectionIdx + 1) {
+            const gap = document.createElement('span');
+            gap.className = 'section-nav-gap';
+            gap.setAttribute('aria-hidden', 'true');
+            nav.appendChild(gap);
+        }
+    });
+    rail.appendChild(nav);
+
+    // Outline tools-pill — sitzt unter der Dot-Nav auf demselben Rail.
+    // Click oeffnet das Modal mit der vollstaendigen (un-sampled)
+    // Section-Liste — komplementiert die (potenziell sampled) Dot-Nav.
+    const outlineNav = document.getElementById('page-outline');
+    const overlay = document.getElementById('surgewave-page-outline-overlay');
+    let outlineLinks = [];
+    if (outlineNav && overlay) {
+        const tools = document.createElement('div');
+        tools.className = 'section-tools';
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'section-tools-trigger';
+        trigger.setAttribute('aria-controls', 'surgewave-page-outline-overlay');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-label', 'On this page');
+        trigger.title = 'On this page (Esc closes)';
+        trigger.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+        tools.appendChild(trigger);
+        rail.appendChild(tools);
+
+        sections.forEach((section, idx) => {
+            const label = sectionLabel(section);
+            const a = document.createElement('a');
+            a.href = '#';
+            a.dataset.sectionIdx = String(idx);
+            a.textContent = label;
+            outlineNav.appendChild(a);
+        });
+        outlineLinks = Array.from(outlineNav.querySelectorAll('a'));
+
+        let highlighted = -1;
+        function paintOutline() {
+            outlineLinks.forEach((el, i) => {
+                el.classList.toggle('is-highlighted', i === highlighted);
+            });
+            if (highlighted >= 0 && outlineLinks[highlighted]) {
+                outlineLinks[highlighted].scrollIntoView({ block: 'nearest' });
+            }
+        }
+        function openOutline() {
+            overlay.classList.add('is-open');
+            overlay.setAttribute('aria-hidden', 'false');
+            overlay.removeAttribute('inert');
+            trigger.setAttribute('aria-expanded', 'true');
+            highlighted = activeIndexFull();
+            paintOutline();
+        }
+        function closeOutline() {
+            overlay.classList.remove('is-open');
+            overlay.setAttribute('aria-hidden', 'true');
+            overlay.setAttribute('inert', '');
+            trigger.setAttribute('aria-expanded', 'false');
+            highlighted = -1;
+            paintOutline();
+        }
+        trigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (overlay.classList.contains('is-open')) closeOutline();
+            else openOutline();
+        });
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeOutline();
+            const link = e.target.closest('a[data-section-idx]');
+            if (!link) return;
+            e.preventDefault();
+            jumpToSection(parseInt(link.dataset.sectionIdx, 10));
+            // Defer close so the click event finishes propagating before
+            // the modal vanishes.
+            setTimeout(closeOutline, 0);
+        });
+        outlineNav.addEventListener('mouseover', (e) => {
+            const link = e.target.closest('a[data-section-idx]');
+            if (!link) return;
+            const idx = outlineLinks.indexOf(link);
+            if (idx === -1 || idx === highlighted) return;
+            highlighted = idx;
+            paintOutline();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && overlay.classList.contains('is-open')) {
+                closeOutline();
+                return;
+            }
+            if (!overlay.classList.contains('is-open')) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (outlineLinks.length === 0) return;
+                highlighted = Math.min(highlighted + 1, outlineLinks.length - 1);
+                paintOutline();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (outlineLinks.length === 0) return;
+                highlighted = Math.max(highlighted - 1, 0);
+                paintOutline();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (highlighted >= 0 && outlineLinks[highlighted]) {
+                    const idx = parseInt(outlineLinks[highlighted].dataset.sectionIdx, 10);
+                    jumpToSection(idx);
+                    setTimeout(closeOutline, 0);
+                }
+            }
+        });
+    }
+
+    document.body.appendChild(rail);
+
+    function headerOffset() {
+        // Section-tops landen am Viewport-Top; jedes section-eigene padding
+        // haelt die Headings unter dem translucent sticky-header.
+        return 0;
+    }
+
+    function activeIndexFull() {
+        // Gegen die VOLLE sections-Array (nicht nur picked) so dass
+        // scrollspy auch im sampled-Mode genau bleibt.
+        const threshold = window.scrollY + headerOffset() + 40;
+        let activeSection = 0;
+        for (let i = 0; i < sections.length; i++) {
+            const top = sections[i].getBoundingClientRect().top + window.scrollY;
+            if (top <= threshold) activeSection = i;
+            else break;
+        }
+        const docBottomReached = (window.innerHeight + window.scrollY)
+                              >= (document.documentElement.scrollHeight - 4);
+        if (docBottomReached) activeSection = sections.length - 1;
+        return activeSection;
+    }
+
+    function activeIndex() {
+        // Mapt activeSection auf den groessten gepickten Dot dessen
+        // section-index <= activeSection ist. Bei voll-gelisteter
+        // Strip ist das derselbe Index.
+        const activeSection = activeIndexFull();
+        let dotIdx = 0;
+        for (let j = 0; j < pickedIndexes.length; j++) {
+            if (pickedIndexes[j] <= activeSection) dotIdx = j;
+            else break;
+        }
+        return dotIdx;
+    }
+
+    function updateActive() {
+        const idx = activeIndex();
+        dots.forEach((d, i) => d.btn.classList.toggle('is-active', i === idx));
+        if (outlineLinks.length > 0) {
+            const fullIdx = activeIndexFull();
+            outlineLinks.forEach((el, i) => {
+                el.classList.toggle('is-active', i === fullIdx);
+            });
+        }
+    }
+
+    function jumpToSection(sectionIdx) {
+        const clamped = Math.max(0, Math.min(sections.length - 1, sectionIdx));
+        const target  = sections[clamped].getBoundingClientRect().top + window.scrollY - headerOffset();
+        window.scrollTo({ top: target, behavior: 'smooth' });
+    }
+
+    window.addEventListener('scroll', updateActive, { passive: true });
+    window.addEventListener('resize', updateActive);
+    updateActive();
+})();
