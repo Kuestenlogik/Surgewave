@@ -104,6 +104,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`RemoteQueryServer`, `RemoteQueryClient`, `StreamsMetadataState`, state store wrappers, query executor, registry from `Kuestenlogik.Surgewave.Streams` core** — moved to `Kuestenlogik.Surgewave.Streams.InteractiveQueries`.
 - Public IQ-related API methods on `StreamsApplication` (`AllMetadata`, `MetadataForKey`, `MetadataState`, `RegisterPeerAsync`, `CreateCompositeStore`, `Store<T>`) — now extension methods in `Kuestenlogik.Surgewave.Streams.InteractiveQueries` (same call sites, single `using` required).
 
+### Fixed
+- **`SurgewaveConsumer.ConsumeAsync(timeout)` honours its timeout** — the caller's `TimeSpan timeout` is now passed through to the per-partition long-poll (`maxWaitMs = max(1, min(timeout, 5000))`) instead of being ignored. Previously `ConsumeAsync(500ms)` on a drained 4-partition topic still sat in 4 × 5 s long-polls (~20 s) before returning `null`, which blew past Akka.Persistence TCK's 10 s `ExpectMsg` budget in `SurgewaveSnapshotStore.LoadAsync`. Data messages were already returned eagerly; only the end-of-topic detection was slow.
+
 ## [0.2.0] - 2025-XX-XX
 
 ### Added
