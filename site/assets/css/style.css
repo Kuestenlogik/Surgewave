@@ -3517,3 +3517,44 @@ html[data-theme="light"] {
     color: var(--text);
     line-height: 1.4;
 }
+
+/* ===========================================================
+   Section banner (Bowire-Port) — a themed maritime photo that melts
+   into the section background via a bottom-fade mask, instead of
+   clipping at a hard edge. Reusable across sections via
+   _includes/section-banner.html. The ::after layer lays a subtle
+   Surgewave-blue tint over the (desaturated) photo so it reads as
+   part of the brand rather than a stock image. Top corners rounded;
+   bottom feathers out so the content below feels continuous.
+
+   Images are supplied later (Surge/Wave-themed); the include renders
+   nothing until an `image` is passed, so there's no broken-image
+   placeholder in the meantime.
+   =========================================================== */
+.section-banner {
+    position: relative;
+    overflow: hidden;
+    margin: 0 0 12px;
+    background: transparent;
+    border-radius: var(--radius-lg, 12px) var(--radius-lg, 12px) 0 0;
+}
+.section-banner img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 5 / 2;
+    object-fit: cover;
+    filter: grayscale(0.50) saturate(0.88) brightness(0.94);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.30) 80%, rgba(0,0,0,0) 100%);
+            mask-image: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.30) 80%, rgba(0,0,0,0) 100%);
+}
+.section-banner::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(51, 188, 255, 0.16), rgba(0, 62, 96, 0.10));
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.30) 80%, rgba(0,0,0,0) 100%);
+            mask-image: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.30) 80%, rgba(0,0,0,0) 100%);
+}

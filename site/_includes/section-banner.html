@@ -1,0 +1,17 @@
+{%- comment -%}
+Themed maritime section banner (Bowire-Port). Renders a photo that
+feathers into the section background via a bottom-fade mask + a subtle
+Surgewave-blue tint. Reusable: pass an `image` (and optional `alt`).
+
+Usage:
+  {% include section-banner.html image="/assets/images/banners/roadmap.png" alt="" %}
+
+Guarded by `if include.image` so sections can wire the include in now
+and stay blank (no broken-image) until the Surge/Wave-themed photos
+land in /assets/images/banners/. CSS: `.section-banner` in style.css.
+{%- endcomment -%}
+{%- if include.image -%}
+<div class="section-banner" aria-hidden="true">
+  <img src="{{ include.image | relative_url }}" alt="{{ include.alt | default: '' }}" loading="lazy">
+</div>
+{%- endif -%}
