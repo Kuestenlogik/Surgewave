@@ -46,11 +46,12 @@ on `<html>`).
 
 ## Alternative mark — Mark-on-Circle (NuGet / app-icon use)
 
-A second packaging of the same mark on top of a filled navy circle,
-designed for surfaces that can't rely on the host theme to control the
-ink colour. **This is the variant in `icon.png`** used as the
-`<PackageIcon>` for every Surgewave NuGet package (broker, client,
-connectors, etc.).
+A second packaging of the same mark on top of a filled black circle
+(à la Bowire's small logo), designed for surfaces that can't rely on the
+host theme to control the ink colour. **This is the variant in `icon.png`**
+used as the `<PackageIcon>` for every Surgewave NuGet package (broker,
+client, connectors, etc.). The black disc sits more calmly on nuget.org's
+dark surface than the earlier navy fill.
 
 **Source:** [`scripts/icon.svg`](scripts/icon.svg)
 **Rendered output:** [`icon.png`](icon.png) (128×128)
@@ -58,10 +59,9 @@ connectors, etc.).
 see `package.json`)
 
 Composition:
-- Filled circle, fill `#003e60` (Surgewave navy), edge-to-edge in a
-  100×100 viewBox
+- Filled circle, fill `#000000` (black), edge-to-edge in a 100×100 viewBox
 - Dark-variant of the adaptive mark inside: wave `#33bcff`, ink
-  `#ffffff`
+  `#ffffff` — both at full contrast against the black disc
 - **Optical centering**: the mark is offset roughly `(+3.4, -3.8)`
   from the geometric centre to put the *visual centre of mass*
   slightly above the geometric centre of the circle. The mark is
@@ -79,7 +79,7 @@ When to use Mark-on-Circle:
   outside our control
 
 When **not** to use Mark-on-Circle:
-- Anywhere the adaptive variant works — the navy disc is a stand-in
+- Anywhere the adaptive variant works — the black disc is a stand-in
   for "we don't know your background"; if the host theme is known, use
   the transparent adaptive mark and let the host's colour scheme drive
   ink contrast.
@@ -91,7 +91,8 @@ When **not** to use Mark-on-Circle:
 | Token | Hex | Usage |
 |---|---|---|
 | Surgewave Blue (Wave) | `#33bcff` | Wave element of the mark; primary accent across UI |
-| Surgewave Navy (Ink) | `#003e60` | Ink element of the mark on light backgrounds; deep-background fill (Mark-on-Circle) |
+| Surgewave Navy (Ink) | `#003e60` | Ink element of the mark on light backgrounds |
+| Black (disc) | `#000000` | Mark-on-Circle background disc (NuGet / app-icon) |
 | White (Ink, dark) | `#ffffff` | Ink element when the surrounding surface is dark (Mark-on-Circle, dark theme) |
 
 ---
@@ -107,10 +108,10 @@ When **not** to use Mark-on-Circle:
 - Don't put the **adaptive** mark on a coloured background that isn't
   near-white or near-black; the ink colour switches on theme, not on
   contrast.
-- Don't put the **Mark-on-Circle** on an already-dark background; the
-  navy disc + dark surface kills the silhouette. That variant is for
-  unknown / light surfaces where the disc itself supplies the dark
-  field for the white ink.
+- Don't put the **Mark-on-Circle** on an already-dark background where
+  the black disc blends into the surface and kills the silhouette. That
+  variant is for unknown / light surfaces where the disc itself supplies
+  the dark field for the white ink.
 
 ---
 
@@ -126,7 +127,7 @@ node scripts/generate-icon.js        # writes icon.png
 node scripts/measure-icon.js         # sanity-check visual centre of mass
 ```
 
-The `measure-icon.js` helper rasterises the SVG, finds every non-navy
+The `measure-icon.js` helper rasterises the SVG, finds every non-background
 pixel, and reports both the geometric bounding box and the
 luminance-weighted centre of mass — so if the mark, scale, or disc
 size change, you can verify (or recompute) the optical offset without

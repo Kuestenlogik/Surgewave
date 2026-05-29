@@ -5,9 +5,11 @@
   und via Directory.Build.props in jedes Surgewave-NuGet eingebettet.
 
   Layout analog Bowire's bowire_logo_small.svg:
-    - Gefüllter Navy-Kreis (#003e60, Radius 50 in einem 100x100 viewBox)
-    - Adaptive Surgewave-Mark zentriert, Wave hellblau (#33bcff),
-      Ink weiß (Dark-Variante) für Kontrast gegen den dunkelblauen Kreis.
+    - Gefüllter schwarzer Kreis (#000000, Radius 50 in einem 100x100 viewBox)
+      — wie Bowire's small-Logo; fuegt sich auf dem dunklen nuget.org-
+      Hintergrund ruhiger ein als das frühere Navy.
+    - Surgewave-Mark zentriert, Wave hellblau (#33bcff), Ink weiß für
+      maximalen Kontrast gegen den schwarzen Kreis.
 
   Diese Datei ist NuGet-spezifisch — das allgemeine adaptive
   Brand-Mark bleibt in images/mark_adaptive.svg (transparent, theme-aware).
@@ -17,7 +19,7 @@
      viewBox="0 0 100 100"
      role="img"
      aria-label="Surgewave">
-  <circle cx="50" cy="50" r="50" fill="#003e60" />
+  <circle cx="50" cy="50" r="50" fill="#000000" />
   <!-- translate-Werte sind nicht das BBox-Center, sondern auf den
        visuellen Schwerpunkt des Marks ausgerichtet. Das Mark ist
        asymmetrisch (Wave-Tail oben-rechts klein, C-Body unten-links
