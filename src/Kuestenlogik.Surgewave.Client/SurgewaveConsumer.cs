@@ -546,7 +546,12 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
 
             try
             {
-                var result = await _client.Messaging.ReceiveAsync(topic, partition, offset, _options.FetchMaxBytes, maxWaitMs: 5000, cancellationToken);
+                // Per-partition long-poll budget: honour the caller's overall
+                // timeout. Without this, a Consume(timeout: 500ms) would still
+                // sit in a 5s long-poll per partition — N partitions × 5s on a
+                // drained topic blows past any test expectation.
+                var perPartitionWaitMs = Math.Max(1, (int)Math.Min(timeout.TotalMilliseconds, 5000));
+                var result = await _client.Messaging.ReceiveAsync(topic, partition, offset, _options.FetchMaxBytes, maxWaitMs: perPartitionWaitMs, cancellationToken);
                 _isConnected = true;
                 _reconnectAttempts = 0;
 
