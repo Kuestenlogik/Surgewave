@@ -357,7 +357,7 @@ A separate, complementary track from the plugin SDK — the SDK is for people
 |---|---|---|
 | GitHub Pages deploy | Combined Jekyll landing + DocFX technical docs at `https://surgewave.io` (CNAME ready, workflow + Pagefind index in place). | High |
 | NuGet.org publish | All Surgewave packages live on nuget.org for public consumption. | ✅ Done (2026-05-26, v0.1.0 + v0.1.4) |
-| Public sister repos | `Surgewave.Connectors`, `Surgewave.Bootcamp`, `Surgewave.Templates`, `Akka.Streams.Surgewave`, `Akka.Persistence.Surgewave` move to public. | ✅ Done (Connectors + Akka-Repos public 2026-05-27; `Surgewave.Samples` outstanding) |
+| Public sister repos | `Surgewave.Connectors`, `Surgewave.Bootcamp`, `Surgewave.Templates`, `Akka.Surgewave` move to public. | ✅ Done (Connectors 2026-05-27; Akka.Surgewave Mono-Repo v0.3.0 2026-05-28 — `Kuestenlogik.Akka.Surgewave.Streams`+`.Persistence`, ersetzt die zwei archivierten Einzelrepos; `Surgewave.Samples` outstanding) |
 | Branch protection | Require CI pass for external PRs, admin bypass for maintainer. | Medium |
 | Getting-started video | 5-minute demo showcasing the USPs (AI, pipeline editor, schema inference, edge). | Medium |
 | NuGet badges (live values) | Hero-Badges fetchen NuGet-Version + Total-Downloads zur Laufzeit (`azuresearch-usnc.nuget.org`); CSS-Regel blendet leeres Badge aus wenn die API nichts liefert. | ✅ Done (2026-05-27) |
