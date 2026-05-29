@@ -1,0 +1,75 @@
+{%- comment -%}
+FAQ section for the landing page. Native <details>/<summary> accordion —
+no JS, keyboard-accessible, and each answer is crawlable for SEO. The
+"Why not X?" entries link out to the dedicated /compare/* pages for the
+full write-up. Styling: `.faq` block in assets/css/style.css.
+{%- endcomment -%}
+<section class="faq" id="faq">
+  <div class="container narrow">
+    <p class="section-eyebrow">FAQ</p>
+    <h2 class="section-title">Questions, answered</h2>
+    <p class="section-lede">The short version. Deeper dives live in the
+    <a href="{{ '/docs/' | relative_url }}">docs</a> and the
+    <a href="{{ '/compare/kafka.html' | relative_url }}">comparison pages</a>.</p>
+
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>What is Surgewave?</summary>
+        <div class="faq-answer">
+          <p>A Kafka-wire-compatible message broker written in .NET 10. It accepts unmodified Kafka 4.x clients on port 9092 and adds a native binary protocol for lower-latency .NET workloads — broker, streams, schema registry, and control plane all on one runtime, with an embedded mode for tests and edge.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Can I use my existing Kafka clients?</summary>
+        <div class="faq-answer">
+          <p>Yes. Surgewave speaks the Kafka 4.x wire protocol, so any Kafka client (Confluent.Kafka, librdkafka, …) works unchanged — just point <code>bootstrap.servers</code> at Surgewave. Switch to the native protocol later for lower latency, no rewrite required.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Why Surgewave instead of Apache Kafka?</summary>
+        <div class="faq-answer">
+          <p>Same wire protocol, no JVM, no ZooKeeper, single binary, and an embedded mode that makes integration tests run without Docker. Full migration story on the <a href="{{ '/compare/kafka.html' | relative_url }}">Surgewave vs Kafka</a> page.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Why not Redpanda?</summary>
+        <div class="faq-answer">
+          <p>Both drop the JVM — Redpanda bets on C++, Surgewave on .NET 10. If your stack is .NET, Surgewave gives you broker, streams and plugins on the same runtime, with an Apache-2.0 core (not BSL). Details on <a href="{{ '/compare/redpanda.html' | relative_url }}">Surgewave vs Redpanda</a>.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Why not Aeron?</summary>
+        <div class="faq-answer">
+          <p>Aeron is a transport library, not a persistent broker — no durable log, no Kafka API. Surgewave is a broker with replayable storage that also offers a low-latency native transport. See <a href="{{ '/compare/aeron.html' | relative_url }}">Surgewave vs Aeron</a>.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Do I need Docker or ZooKeeper?</summary>
+        <div class="faq-answer">
+          <p>No. Coordination is built in (KRaft-style Raft, in-process). For tests you can run an embedded in-memory broker — no container, no external services:</p>
+          <pre><code>await using var surgewave = new EmbeddedSurgewave();
+await surgewave.StartAsync();</code></pre>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Which .NET version is required?</summary>
+        <div class="faq-answer">
+          <p>.NET 10 or later. Surgewave uses modern C# and is tuned for performance with <code>Span&lt;T&gt;</code>, <code>Memory&lt;T&gt;</code> and SIMD.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary>Is it open source?</summary>
+        <div class="faq-answer">
+          <p>Yes — the core is Apache-2.0 (<a href="https://github.com/Kuestenlogik/Surgewave">GitHub</a>). Enterprise features ship as separately-licensed plugins, so the broker, clients and core tooling stay permissively licensed.</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
