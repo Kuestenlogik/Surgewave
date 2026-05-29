@@ -1,0 +1,137 @@
+{%- comment -%}
+Roadmap section for the landing page (Bowire-Port). Shipped grid with
+green ✓ coins + an "Up next" divider + numbered backlog grid. Cards are
+links into the repo ROADMAP.md / relevant sections. Content mirrors the
+state in ROADMAP.md — keep them in sync on releases.
+
+The section-banner include is wired but renders nothing until a themed
+image is supplied (see _includes/section-banner.html). To activate, pass
+e.g. image="/assets/images/banners/roadmap.png".
+{%- endcomment -%}
+<section class="roadmap" id="roadmap">
+  <div class="container">
+    <p class="section-eyebrow">Roadmap</p>
+    <h2 class="section-title">On course</h2>
+    <p class="section-lede">What just shipped &mdash; and what&rsquo;s next on the chart.</p>
+
+    {% include section-banner.html %}{%- comment -%} image="/assets/images/banners/roadmap.png" {%- endcomment -%}
+
+    <p class="roadmap-section-label">Recently shipped</p>
+    <div class="roadmap-grid">
+
+      <a class="roadmap-card roadmap-card-shipped" href="{{ '/compare/kafka.html' | relative_url }}">
+        <div class="roadmap-number roadmap-number-shipped" aria-label="Shipped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>
+        </div>
+        <div class="roadmap-card-body">
+          <h3>Kafka 4.x wire compatibility <span class="roadmap-card-tag">v0.1.0</span></h3>
+          <p>Unmodified Kafka clients connect on port 9092 — Confluent.Kafka, librdkafka, tools and monitoring work unchanged. No ZooKeeper, single binary.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card roadmap-card-shipped" href="{{ '/docs/transport/native-protocol.html' | relative_url }}">
+        <div class="roadmap-number roadmap-number-shipped" aria-label="Shipped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>
+        </div>
+        <div class="roadmap-card-body">
+          <h3>Native binary protocol <span class="roadmap-card-tag">v0.1.0</span></h3>
+          <p>A low-latency framed transport for .NET clients alongside the Kafka wire, with a published spec so other languages can implement it. Magic byte <code>SRWV</code> selects the native handler on the same port.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card roadmap-card-shipped" href="{{ '/downloads.html' | relative_url }}">
+        <div class="roadmap-number roadmap-number-shipped" aria-label="Shipped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>
+        </div>
+        <div class="roadmap-card-body">
+          <h3>Public launch &mdash; NuGet + containers <span class="roadmap-card-tag">v0.1.0</span></h3>
+          <p>86 <code>Kuestenlogik.Surgewave.*</code> packages on nuget.org, multi-arch container images on GHCR + Docker Hub, Windows MSI / <code>.deb</code> / <code>.rpm</code> installers.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card roadmap-card-shipped" href="https://www.nuget.org/packages/Kuestenlogik.Surgewave.Tool" target="_blank" rel="noopener">
+        <div class="roadmap-number roadmap-number-shipped" aria-label="Shipped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>
+        </div>
+        <div class="roadmap-card-body">
+          <h3>CLI as a dotnet tool <span class="roadmap-card-tag">v0.1.5</span></h3>
+          <p><code>dotnet tool install -g Kuestenlogik.Surgewave.Tool</code> &mdash; 70+ admin commands plus broker lifecycle, all under the <code>surgewave</code> command.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card roadmap-card-shipped" href="https://github.com/Kuestenlogik/Akka.Surgewave" target="_blank" rel="noopener">
+        <div class="roadmap-number roadmap-number-shipped" aria-label="Shipped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>
+        </div>
+        <div class="roadmap-card-body">
+          <h3>Akka.NET integration <span class="roadmap-card-tag">v0.3.0</span></h3>
+          <p>Akka.Streams sources/sinks/flows and an Akka.Persistence journal + snapshot store, both backed by Surgewave &mdash; <code>Kuestenlogik.Akka.Surgewave.Streams</code> + <code>.Persistence</code>.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card roadmap-card-shipped" href="{{ '/docs/storage/' | relative_url }}">
+        <div class="roadmap-number roadmap-number-shipped" aria-label="Shipped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>
+        </div>
+        <div class="roadmap-card-body">
+          <h3>Pluggable + tiered storage <span class="roadmap-card-tag">v0.1.0</span></h3>
+          <p>FileSystem, in-memory, Arrow, RocksDB, SQLite, Parquet, LMDB, DuckDB, NVMe-direct, S3-direct &mdash; with a hot/cold tier that offloads sealed segments to S3 / Azure / GCS, transparent on the read path.</p>
+        </div>
+      </a>
+
+    </div>
+
+    <div class="roadmap-divider" aria-hidden="true">
+      <span class="roadmap-divider-line"></span>
+      <span class="roadmap-divider-label">Up next</span>
+      <span class="roadmap-divider-line"></span>
+    </div>
+
+    <div class="roadmap-grid">
+
+      <a class="roadmap-card" href="https://github.com/Kuestenlogik/Surgewave/blob/main/ROADMAP.md" target="_blank" rel="noopener">
+        <div class="roadmap-number" aria-hidden="true">1</div>
+        <div class="roadmap-card-body">
+          <h3>Public head-to-head benchmarks</h3>
+          <p>Surgewave native and the Kafka wire on identical hardware, full configuration disclosed. The CI regression harness already tracks throughput + transport overhead; the documented run lands with 1.0.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card" href="https://github.com/Kuestenlogik/Surgewave/blob/main/ROADMAP.md" target="_blank" rel="noopener">
+        <div class="roadmap-number" aria-hidden="true">2</div>
+        <div class="roadmap-card-body">
+          <h3>Native clients for Python, Go, Rust</h3>
+          <p>The native protocol has a public wire spec; first-party clients in other languages extend the compatibility story beyond .NET to the full Kafka-client ecosystem.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card" href="https://github.com/Kuestenlogik/Surgewave/blob/main/ROADMAP.md" target="_blank" rel="noopener">
+        <div class="roadmap-number" aria-hidden="true">3</div>
+        <div class="roadmap-card-body">
+          <h3>Disaggregated compute / storage</h3>
+          <p>Broker as a pure coordination layer: producers write straight to object storage without ISR replication, readers fetch from object storage. Topic-level opt-in, building on the existing S3 engine.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card" href="https://github.com/Kuestenlogik/Surgewave/blob/main/ROADMAP.md" target="_blank" rel="noopener">
+        <div class="roadmap-number" aria-hidden="true">4</div>
+        <div class="roadmap-card-body">
+          <h3>Basic AI primitives in the open core</h3>
+          <p>Five AI pipeline nodes (LLM chat, embeddings, vector read/write, prompt template) plus a single-shot RAG node move into the Apache-2.0 core, so a minimal AI pipeline runs without any commercial extension.</p>
+        </div>
+      </a>
+
+      <a class="roadmap-card" href="https://github.com/Kuestenlogik/Surgewave/blob/main/ROADMAP.md" target="_blank" rel="noopener">
+        <div class="roadmap-number" aria-hidden="true">5</div>
+        <div class="roadmap-card-body">
+          <h3>Independent Jepsen run</h3>
+          <p>The in-house linearizability checker catches anomalies in our own runs; an external Jepsen run against a clustered <code>docker-compose</code> is the industry-standard trust signal.</p>
+        </div>
+      </a>
+
+    </div>
+
+    <p class="roadmap-cta">Full detail and ordering live in the
+      <a href="https://github.com/Kuestenlogik/Surgewave/blob/main/ROADMAP.md" target="_blank" rel="noopener">ROADMAP.md</a>.</p>
+  </div>
+</section>

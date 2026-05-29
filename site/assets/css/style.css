@@ -3644,3 +3644,116 @@ html[data-theme="light"] {
   overflow-x: auto;
   font-size: 0.85rem;
 }
+
+/* ===========================================================
+   Roadmap section (Bowire-Port) — shipped grid (green ✓ coins) +
+   "Up next" divider + numbered backlog grid. Cards are links.
+   Uses the shared .section-banner for the optional themed header.
+   =========================================================== */
+.roadmap {
+  padding: 100px 0;
+  background: var(--bg-elevated);
+}
+.roadmap-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+.roadmap-section-label {
+  max-width: 800px;
+  margin: 0 auto 14px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.roadmap-divider {
+  max-width: 800px;
+  margin: 32px auto 18px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+}
+.roadmap-divider-line { height: 1px; background: var(--border); }
+.roadmap-divider-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.roadmap-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 20px;
+  align-items: start;
+  transition: border-color 0.2s, transform 0.2s;
+  color: inherit;
+  text-decoration: none;
+}
+.roadmap-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.roadmap-card:hover h3 { color: var(--accent); transition: color 0.2s; }
+.roadmap-number {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-top: 6px;
+}
+.roadmap-number.roadmap-number-shipped { background: var(--success, #22c55e); color: #fff; }
+.roadmap-number.roadmap-number-shipped svg { width: 22px; height: 22px; }
+.roadmap-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+  align-self: stretch;
+}
+.roadmap-card h3 { font-size: 1.0625rem; font-weight: 600; margin: 0; color: var(--text); }
+.roadmap-card p { font-size: 0.9375rem; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+.roadmap-card code { font-size: 0.85em; }
+.roadmap-card-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0;
+  vertical-align: 2px;
+}
+.roadmap-cta {
+  text-align: center;
+  margin: 32px 0 0;
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+}
+.roadmap-cta a { color: var(--accent); font-weight: 600; }
+.roadmap-cta a:hover { color: var(--accent-hover); text-decoration: underline; }
