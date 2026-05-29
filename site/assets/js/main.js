@@ -499,15 +499,25 @@
         .then(data => { if (data) setValue('gh-stars', formatCount(data.stargazers_count)); })
         .catch(() => {});
 
-    // NuGet azuresearch — totalDownloads + version in one CORS-enabled call.
-    fetch('https://azuresearch-usnc.nuget.org/query?q=packageid:Kuestenlogik.Surgewave.Client&prerelease=false&take=1')
+    // NuGet azuresearch (CORS-enabled). The Downloads badge aggregates the
+    // whole Kuestenlogik.Surgewave.* family — broker (Runtime), Client, Tool,
+    // protocols, storage engines, … — not just the Client, so it reflects the
+    // ecosystem rather than a single package. The Version badge stays pinned to
+    // the Client (the canonical consumer library). `take=1000` covers the full
+    // family; client-side filter drops fuzzy matches like Kuestenlogik.Akka.
+    // Surgewave.* (different prefix) that the full-text query would also return.
+    fetch('https://azuresearch-usnc.nuget.org/query?q=Kuestenlogik.Surgewave&prerelease=false&take=1000')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
-            if (data && data.data && data.data[0]) {
-                const pkg = data.data[0];
-                setValue('nuget-downloads', formatCount(pkg.totalDownloads));
-                setValue('nuget-version', 'v' + pkg.version);
-            }
+            if (!data || !Array.isArray(data.data)) return;
+            const family = data.data.filter(p =>
+                p.id === 'Kuestenlogik.Surgewave' ||
+                p.id.startsWith('Kuestenlogik.Surgewave.'));
+            if (family.length === 0) return;
+            const total = family.reduce((sum, p) => sum + (p.totalDownloads || 0), 0);
+            setValue('nuget-downloads', formatCount(total));
+            const client = family.find(p => p.id === 'Kuestenlogik.Surgewave.Client');
+            if (client) setValue('nuget-version', 'v' + client.version);
         })
         .catch(() => {});
 })();
