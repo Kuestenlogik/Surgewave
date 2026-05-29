@@ -1,6 +1,6 @@
 ---
 layout: page
-title: Download
+title: Downloads
 subtitle: Every way to get Surgewave running.
 description: Install Surgewave via dotnet tool, Docker, or from source. Guides and container images.
 ---
