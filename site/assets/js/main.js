@@ -499,13 +499,19 @@
         .then(data => { if (data) setValue('gh-stars', formatCount(data.stargazers_count)); })
         .catch(() => {});
 
-    // NuGet azuresearch (CORS-enabled). The Downloads badge aggregates the
-    // whole Kuestenlogik.Surgewave.* family — broker (Runtime), Client, Tool,
-    // protocols, storage engines, … — not just the Client, so it reflects the
-    // ecosystem rather than a single package. The Version badge stays pinned to
-    // the Client (the canonical consumer library). `take=1000` covers the full
-    // family; client-side filter drops fuzzy matches like Kuestenlogik.Akka.
-    // Surgewave.* (different prefix) that the full-text query would also return.
+    // NuGet azuresearch (CORS-enabled, no auth). The Downloads badge shows the
+    // *max* download count across the Kuestenlogik.Surgewave.* family rather
+    // than the sum. Summing double-counts: one `dotnet add package
+    // Kuestenlogik.Surgewave.Client` pulls the client plus its transitively
+    // referenced Core / Protocol / Transport packages, bumping ~10 counters for
+    // one logical install (~35× inflation measured: 53k summed vs ~1.5k real).
+    // The max — today Kuestenlogik.Surgewave.Core, on which everything depends —
+    // is an honest lower bound on distinct pulls and auto-tracks whichever
+    // package leads. The Version badge stays pinned to the Client (the canonical
+    // consumer library). take=1000 covers the family; the filter drops fuzzy
+    // full-text matches that share the "Surgewave" token but not the
+    // Kuestenlogik.Surgewave(.) prefix (e.g. Kuestenlogik.Bowire.Protocol.Surgewave,
+    // Kuestenlogik.Akka.Surgewave.*).
     fetch('https://azuresearch-usnc.nuget.org/query?q=Kuestenlogik.Surgewave&prerelease=false&take=1000')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
@@ -514,8 +520,8 @@
                 p.id === 'Kuestenlogik.Surgewave' ||
                 p.id.startsWith('Kuestenlogik.Surgewave.'));
             if (family.length === 0) return;
-            const total = family.reduce((sum, p) => sum + (p.totalDownloads || 0), 0);
-            setValue('nuget-downloads', formatCount(total));
+            const max = family.reduce((m, p) => Math.max(m, p.totalDownloads || 0), 0);
+            setValue('nuget-downloads', formatCount(max));
             const client = family.find(p => p.id === 'Kuestenlogik.Surgewave.Client');
             if (client) setValue('nuget-version', 'v' + client.version);
         })
