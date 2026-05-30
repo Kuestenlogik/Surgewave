@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-30
+
+### Added
+- **Per-message headers on the native wire protocol** — `SendBuilder.WithHeader(...)` / `SendBatchAsync` accept a header dictionary that now travels end-to-end through the native pipe. The broker carries the block verbatim onto the Kafka RecordBatch headers section, and `ReceiveAsync` returns them on `ReceivedMessage.Headers`. Previously the entire produce path silently dropped headers, which made plugins that rely on them (e.g. Akka.Persistence's seq-nr / writer-uuid / manifest envelope) unusable over the native protocol. Wire format is a single self-contained block (`int32 count` + `int32`-prefixed key/value pairs) appended after the value; new `NativeMessageHeaderCodec` shared between sender and receiver. Breaking change for native-wire consumers.
+
+### Fixed
+- **`SurgewaveMessagingOperations.ReceiveAsync` tolerates empty/null values** — the broker encodes `value.Length == 0` as `-1` on the wire (Kafka null-tombstone convention); the client now reads negative lengths as `Array.Empty<byte>()` instead of crashing in `ReadRaw(-1)` with `ArgumentOutOfRangeException`. Symptom: every consumer that saw an Akka-snapshot-style tombstone record failed with `LoadSnapshotFailed`.
+
 ## [0.1.6] - 2026-05-30
 
 ### Changed
