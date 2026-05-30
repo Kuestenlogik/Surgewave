@@ -66,9 +66,12 @@
     <Version>0.1.0</Version>
     <!-- AssemblyVersion + FileVersion folgen $(Version), damit der
          Release-Workflow per -p:Version=$V alle drei synchron bumpt.
-         Padding auf vier Stellen erledigt MSBuild (0.1.6 -> 0.1.6.0). -->
-    <AssemblyVersion>$(Version)</AssemblyVersion>
-    <FileVersion>$(Version)</FileVersion>
+         Padding auf vier Stellen erledigt MSBuild (0.1.6 -> 0.1.6.0).
+         SemVer-Prerelease-Suffix (z.B. "-ci.37.abc" aus ci.yml) wird
+         gestripped, weil AssemblyVersionAttribute strikt nur
+         major.minor.build.revision akzeptiert. -->
+    <AssemblyVersion>$([System.Text.RegularExpressions.Regex]::Replace($(Version), '-.*$', ''))</AssemblyVersion>
+    <FileVersion>$([System.Text.RegularExpressions.Regex]::Replace($(Version), '-.*$', ''))</FileVersion>
     <SourceRevisionId>$(SourceRevisionId)</SourceRevisionId>
     <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
