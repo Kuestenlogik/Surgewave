@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Text;
 using Kuestenlogik.Surgewave.Client.Native.Streaming;
 using Kuestenlogik.Surgewave.Protocol.Native;
+using Kuestenlogik.Surgewave.Protocol.Native.Serialization;
 
 namespace Kuestenlogik.Surgewave.Client.Native;
 
@@ -18,9 +19,16 @@ public sealed class SurgewaveMessagingOperations
     /// <summary>
     /// Send a single message. For high-throughput, use SendBatchAsync or SurgewaveBatchingProducer.
     /// </summary>
-    public async Task<long> SendAsync(string topic, int partition, byte[]? key, byte[] value, CancellationToken cancellationToken = default)
+    public Task<long> SendAsync(string topic, int partition, byte[]? key, byte[] value, CancellationToken cancellationToken = default)
+        => SendAsync(topic, partition, key, value, headers: null, cancellationToken);
+
+    /// <summary>
+    /// Send a single message with optional headers.
+    /// </summary>
+    public async Task<long> SendAsync(string topic, int partition, byte[]? key, byte[] value, IReadOnlyDictionary<string, byte[]>? headers, CancellationToken cancellationToken = default)
     {
-        var bufferSize = 256 + (key?.Length ?? 0) + value.Length;
+        var headerSize = NativeMessageHeaderCodec.EncodedSize(headers);
+        var bufferSize = 256 + (key?.Length ?? 0) + value.Length + headerSize;
         var payloadBuffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
@@ -39,6 +47,8 @@ public sealed class SurgewaveMessagingOperations
                 writer.WriteInt32(-1);
             }
             writer.WriteBytes(value);
+            var headerWritten = NativeMessageHeaderCodec.Encode(headers, payloadBuffer.AsSpan(writer.Position));
+            writer.Advance(headerWritten);
 
             var (header, responsePayload) = await _client.SendRequestAsync(
                 SurgewaveOpCode.Produce,
@@ -121,13 +131,25 @@ public sealed class SurgewaveMessagingOperations
     /// <summary>
     /// Send a batch of messages for high throughput.
     /// </summary>
-    public async Task<long> SendBatchAsync(string topic, int partition, IReadOnlyList<(byte[]? Key, byte[] Value)> messages, CancellationToken cancellationToken = default)
+    public Task<long> SendBatchAsync(string topic, int partition, IReadOnlyList<(byte[]? Key, byte[] Value)> messages, CancellationToken cancellationToken = default)
+    {
+        var withHeaders = new List<(byte[]? Key, byte[] Value, IReadOnlyDictionary<string, byte[]>? Headers)>(messages.Count);
+        foreach (var (k, v) in messages) withHeaders.Add((k, v, null));
+        return SendBatchAsync(topic, partition, withHeaders, cancellationToken);
+    }
+
+    /// <summary>
+    /// Send a batch of messages with per-message headers.
+    /// </summary>
+    public async Task<long> SendBatchAsync(string topic, int partition, IReadOnlyList<(byte[]? Key, byte[] Value, IReadOnlyDictionary<string, byte[]>? Headers)> messages, CancellationToken cancellationToken = default)
     {
         if (messages.Count == 0) return -1;
 
         var totalSize = 256;
-        foreach (var (key, value) in messages)
-            totalSize += 4 + (key?.Length ?? 0) + 4 + value.Length;
+        foreach (var (key, value, headers) in messages)
+            totalSize += 4 + (key?.Length ?? 0)
+                       + 4 + value.Length
+                       + NativeMessageHeaderCodec.EncodedSize(headers);
 
         var payloadBuffer = ArrayPool<byte>.Shared.Rent(totalSize);
         try
@@ -137,7 +159,7 @@ public sealed class SurgewaveMessagingOperations
             writer.WriteInt32(partition);
             writer.WriteInt32(messages.Count);
 
-            foreach (var (key, value) in messages)
+            foreach (var (key, value, headers) in messages)
             {
                 if (key != null && key.Length > 0)
                 {
@@ -149,6 +171,8 @@ public sealed class SurgewaveMessagingOperations
                     writer.WriteInt32(-1);
                 }
                 writer.WriteBytes(value);
+                var headerBytes = NativeMessageHeaderCodec.Encode(headers, payloadBuffer.AsSpan(writer.Position));
+                writer.Advance(headerBytes);
             }
 
             var (header, responsePayload) = await _client.SendRequestAsync(
@@ -225,9 +249,20 @@ public sealed class SurgewaveMessagingOperations
                 byte[]? msgKey = keyLength >= 0 ? reader.ReadRaw(keyLength).ToArray() : null;
 
                 var valueLength = reader.ReadInt32();
-                var valueBytes = reader.ReadRaw(valueLength).ToArray();
+                // Storage encodes empty/null values as length=-1 (matches the
+                // key path above). Treat anything below zero as an empty body
+                // — `ReadRaw(-1)` would otherwise crash with
+                // ArgumentOutOfRangeException, which broke every consumer that
+                // saw a tombstone-style record (e.g. Akka snapshot deletes).
+                var valueBytes = valueLength > 0
+                    ? reader.ReadRaw(valueLength).ToArray()
+                    : Array.Empty<byte>();
 
-                messages.Add(new ReceivedMessage(msgOffset, timestamp, msgKey, valueBytes));
+                // Per-message native header block.
+                var headers = NativeMessageHeaderCodec.Decode(responsePayload.Span[reader.Position..], out var headerBytes);
+                reader.Skip(headerBytes);
+
+                messages.Add(new ReceivedMessage(msgOffset, timestamp, msgKey, valueBytes, headers));
             }
 
             return new ReceiveResult(highWatermark, messages);

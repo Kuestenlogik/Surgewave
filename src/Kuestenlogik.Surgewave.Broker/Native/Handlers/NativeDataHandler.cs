@@ -5,6 +5,7 @@ using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Protocol.Native;
+using Kuestenlogik.Surgewave.Protocol.Native.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.Native.Handlers;
@@ -162,13 +163,24 @@ public sealed class NativeDataHandler : INativeRequestHandler
                 var value = valueLength > 0 ? payload.Slice(position, valueLength) : ReadOnlyMemory<byte>.Empty;
                 position += valueLength > 0 ? valueLength : 0;
 
+                // Per-message native header block — slice it verbatim so the
+                // RecordBatchSerializer can write Kafka-style record headers
+                // without re-decoding. The block layout is documented on
+                // NativeMessageHeaderCodec.
+                var headersStart = position;
+                NativeMessageHeaderCodec.Decode(span[headersStart..], out var headerBytes);
+                var headers = headerBytes > 0
+                    ? payload.Slice(headersStart, headerBytes)
+                    : ReadOnlyMemory<byte>.Empty;
+                position += headerBytes;
+
                 messages.Add(new Message
                 {
                     Offset = baseOffset + i,
                     Timestamp = baseTimestamp,
                     Key = key,
                     Value = value,
-                    Headers = ReadOnlyMemory<byte>.Empty
+                    Headers = headers
                 });
             }
 
@@ -269,7 +281,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
                                 Timestamp = baseTimestamp,
                                 Key = msg.Key,
                                 Value = msg.Value,
-                                Headers = ReadOnlyMemory<byte>.Empty
+                                Headers = msg.Headers
                             });
                         }
 
@@ -319,7 +331,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
         ListPool<ParsedTopicBatch>.Return(parsedBatch);
     }
 
-    private record struct ParsedMessage(ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value);
+    private record struct ParsedMessage(ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value, ReadOnlyMemory<byte> Headers);
     private record struct ParsedPartitionBatch(int Partition, List<ParsedMessage> Messages);
     private record struct ParsedTopicBatch(string Topic, List<ParsedPartitionBatch> Partitions);
 
@@ -373,7 +385,14 @@ public sealed class NativeDataHandler : INativeRequestHandler
             var value = valueLength > 0 ? payload.Slice(position, valueLength) : ReadOnlyMemory<byte>.Empty;
             position += valueLength > 0 ? valueLength : 0;
 
-            messages.Add(new ParsedMessage(key, value));
+            var headersStart = position;
+            NativeMessageHeaderCodec.Decode(span[headersStart..], out var headerBytes);
+            var headers = headerBytes > 0
+                ? payload.Slice(headersStart, headerBytes)
+                : ReadOnlyMemory<byte>.Empty;
+            position += headerBytes;
+
+            messages.Add(new ParsedMessage(key, value, headers));
         }
 
         // Use pooled lists for partitions and topics

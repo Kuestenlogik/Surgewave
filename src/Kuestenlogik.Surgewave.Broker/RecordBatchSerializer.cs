@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using Kuestenlogik.Surgewave.Broker.Native;
 using Kuestenlogik.Surgewave.Broker.Serialization;
 using Kuestenlogik.Surgewave.Core;
@@ -59,7 +60,9 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
         var dataSize = 0;
         foreach (var msg in messages)
         {
-            dataSize += msg.Key.Length + msg.Value.Length;
+            // Headers from the native wire arrive as a 4-byte-prefixed block;
+            // its byte count is a safe upper bound on the Kafka-encoded form.
+            dataSize += msg.Key.Length + msg.Value.Length + msg.Headers.Length;
         }
         var estimatedSize = KafkaConstants.RecordBatch.HeaderSize + (messages.Count * 35) + dataSize;
 
@@ -133,8 +136,11 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
             var recordStartPos = pos + 5; // Max 5 bytes for varint
             var recordPos = recordStartPos;
 
-            // Ensure buffer has space for this record
-            var neededSpace = 50 + message.Key.Length + message.Value.Length;
+            // Ensure buffer has space for this record (record overhead +
+            // key + value + headers translated to Kafka format — worst-case
+            // approximation: headers grow at most 1 byte per varint vs. the
+            // 4-byte native int32, so the native length is a safe upper bound).
+            var neededSpace = 50 + message.Key.Length + message.Value.Length + message.Headers.Length;
             if (recordPos + neededSpace > buffer.Length)
             {
                 var newBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
@@ -185,8 +191,10 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 recordPos += VarintCodec.WriteVarInt(span.Slice(recordPos), 1);
             }
 
-            // headers (varint count = 0)
-            recordPos += VarintCodec.WriteVarInt(span.Slice(recordPos), 0);
+            // headers — the Native-Produce wire carries them as a self-
+            // contained block (int32 count + entries). Re-encode into the
+            // Kafka RecordBatch format (varint count + per-entry varints).
+            recordPos += WriteHeadersFromNativeBlock(message.Headers.Span, span, recordPos);
 
             // Calculate actual record content length
             var recordContentLength = recordPos - recordStartPos;
@@ -677,14 +685,29 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 recordsPos += valueLength;
             }
 
-            // Skip headers
+            // Translate the Kafka-style headers back into the native wire
+            // block (int32 count + int32-prefixed entries) so the client can
+            // decode them with NativeMessageHeaderCodec. Lengths stay as raw
+            // varints on disk to stay compatible with the write-side helper
+            // and the existing skip-loops in StreamRecordsToWriter.
             var headerCount = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+            writer.Write(headerCount);
             for (int h = 0; h < headerCount; h++)
             {
                 var headerKeyLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-                if (headerKeyLen > 0) recordsPos += headerKeyLen;
+                writer.Write(headerKeyLen);
+                if (headerKeyLen > 0)
+                {
+                    writer.Write(recordsSpan.Slice(recordsPos, headerKeyLen));
+                    recordsPos += headerKeyLen;
+                }
                 var headerValueLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-                if (headerValueLen > 0) recordsPos += headerValueLen;
+                writer.Write(headerValueLen);
+                if (headerValueLen > 0)
+                {
+                    writer.Write(recordsSpan.Slice(recordsPos, headerValueLen));
+                    recordsPos += headerValueLen;
+                }
             }
         }
 
@@ -750,4 +773,49 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
     }
 
     #endregion
+
+    /// <summary>
+    /// Translate the native-wire header block (int32 count + int32-prefixed
+    /// key/value pairs, big-endian) into the Kafka RecordBatch header layout
+    /// (zigzag-varint count + zigzag-varint-prefixed pairs) at
+    /// <paramref name="destOffset"/>. Returns bytes written. An empty / null
+    /// block writes a single zigzag-encoded zero.
+    /// </summary>
+    private static int WriteHeadersFromNativeBlock(ReadOnlySpan<byte> nativeBlock, Span<byte> dest, int destOffset)
+    {
+        if (nativeBlock.Length < 4)
+        {
+            return VarintCodec.WriteVarInt(dest.Slice(destOffset), 0);
+        }
+        var srcPos = 0;
+        var count = BinaryPrimitives.ReadInt32BigEndian(nativeBlock);
+        srcPos += 4;
+        var destPos = destOffset + VarintCodec.WriteVarInt(dest.Slice(destOffset), count);
+        // Header lengths use raw (un-zigzagged) varints to match the existing
+        // skip-loop in StreamRecordsToWriter. Akka-style headers never carry
+        // null values, so non-negative lengths are fine here.
+        for (var i = 0; i < count; i++)
+        {
+            var keyLen = BinaryPrimitives.ReadInt32BigEndian(nativeBlock[srcPos..]);
+            srcPos += 4;
+            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), keyLen);
+            if (keyLen > 0)
+            {
+                nativeBlock.Slice(srcPos, keyLen).CopyTo(dest.Slice(destPos));
+                destPos += keyLen;
+                srcPos += keyLen;
+            }
+
+            var valLen = BinaryPrimitives.ReadInt32BigEndian(nativeBlock[srcPos..]);
+            srcPos += 4;
+            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), Math.Max(0, valLen));
+            if (valLen > 0)
+            {
+                nativeBlock.Slice(srcPos, valLen).CopyTo(dest.Slice(destPos));
+                destPos += valLen;
+                srcPos += valLen;
+            }
+        }
+        return destPos - destOffset;
+    }
 }

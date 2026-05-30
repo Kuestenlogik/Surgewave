@@ -214,7 +214,7 @@ public sealed class SendBuilder
     {
         if (_value == null) throw new InvalidConfigurationException("Value", null, "Use WithValue() to set the message content");
         var partition = ResolvePartition();
-        return _client.Messaging.SendAsync(_topic, partition, _key, _value, cancellationToken);
+        return _client.Messaging.SendAsync(_topic, partition, _key, _value, _headers, cancellationToken);
     }
 
     /// <summary>
@@ -233,7 +233,9 @@ public sealed class SendBuilder
             throw new InvalidConfigurationException("Messages", null, "Use WithValue() or And() to add messages");
 
         var partition = ResolvePartition();
-        var messages = _batchMessages.Select(m => (m.Key, m.Value)).ToList();
+        var messages = _batchMessages
+            .Select(m => (m.Key, m.Value, (IReadOnlyDictionary<string, byte[]>?)m.Headers))
+            .ToList();
         return _client.Messaging.SendBatchAsync(_topic, partition, messages, cancellationToken);
     }
 
