@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.7] - 2026-05-30
+## [0.1.8] - 2026-05-30
+
+### Fixed
+- **`TelemetryTopicSink` uses the native header block layout** — `BuildHeaders` previously hand-rolled Kafka-style zigzag-varint headers and stuffed them straight into `Message.Headers`. After 0.1.7 the broker treats that field as the native block (int32 count + int32-prefixed pairs) and re-encodes it on the way into Kafka, so the old layout was misread as a giant header count and crashed `SerializeMessagesPooled`. Builder now reuses `NativeMessageHeaderCodec.Encode`.
+
+## [0.1.7] - 2026-05-30 (failed release — workflow aborted on the Telemetry test above)
 
 ### Added
 - **Per-message headers on the native wire protocol** — `SendBuilder.WithHeader(...)` / `SendBatchAsync` accept a header dictionary that now travels end-to-end through the native pipe. The broker carries the block verbatim onto the Kafka RecordBatch headers section, and `ReceiveAsync` returns them on `ReceivedMessage.Headers`. Previously the entire produce path silently dropped headers, which made plugins that rely on them (e.g. Akka.Persistence's seq-nr / writer-uuid / manifest envelope) unusable over the native protocol. Wire format is a single self-contained block (`int32 count` + `int32`-prefixed key/value pairs) appended after the value; new `NativeMessageHeaderCodec` shared between sender and receiver. Breaking change for native-wire consumers.

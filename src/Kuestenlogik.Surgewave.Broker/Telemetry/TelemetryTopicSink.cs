@@ -132,44 +132,22 @@ public sealed class TelemetryTopicSink
     /// Encode a small Kafka v2 record-headers block. Each header is
     /// <c>(key-length-varint, key-bytes, value-length-varint, value-bytes)</c>;
     /// the outer record carries the count as a varint as well. The serializer
-    /// expects already-encoded headers as a single byte buffer, so we hand-roll
-    /// the encoding here rather than threading a header-list type through the
-    /// rest of the broker.
+    /// expects headers in the native wire block layout (int32 count + int32-
+    /// prefixed pairs) — the RecordBatch serializer translates them into the
+    /// Kafka v2 record-headers section on its own.
     /// </summary>
     private static ReadOnlyMemory<byte> BuildHeaders(TelemetryPushEvent push)
     {
-        var headers = new List<(string, string)>(4)
+        var headers = new Dictionary<string, byte[]>(4)
         {
-            ("client.id", push.ClientId),
-            ("compression", CompressionName(push.CompressionType)),
-            ("terminating", push.Terminating ? "1" : "0"),
-            ("subscription.id", push.SubscriptionId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            ["client.id"] = Encoding.UTF8.GetBytes(push.ClientId),
+            ["compression"] = Encoding.UTF8.GetBytes(CompressionName(push.CompressionType)),
+            ["terminating"] = Encoding.UTF8.GetBytes(push.Terminating ? "1" : "0"),
+            ["subscription.id"] = Encoding.UTF8.GetBytes(push.SubscriptionId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
         };
-
-        var ms = new MemoryStream(64);
-        WriteVarInt(ms, headers.Count);
-        foreach (var (key, value) in headers)
-        {
-            var keyBytes = Encoding.UTF8.GetBytes(key);
-            var valueBytes = Encoding.UTF8.GetBytes(value);
-            WriteVarInt(ms, keyBytes.Length);
-            ms.Write(keyBytes, 0, keyBytes.Length);
-            WriteVarInt(ms, valueBytes.Length);
-            ms.Write(valueBytes, 0, valueBytes.Length);
-        }
-        return ms.ToArray();
-    }
-
-    private static void WriteVarInt(MemoryStream ms, int value)
-    {
-        // Kafka uses ZigZag encoding for varints in the v2 record format.
-        var zz = (uint)((value << 1) ^ (value >> 31));
-        while (zz >= 0x80)
-        {
-            ms.WriteByte((byte)(zz | 0x80));
-            zz >>= 7;
-        }
-        ms.WriteByte((byte)zz);
+        var buffer = new byte[Kuestenlogik.Surgewave.Protocol.Native.Serialization.NativeMessageHeaderCodec.EncodedSize(headers)];
+        Kuestenlogik.Surgewave.Protocol.Native.Serialization.NativeMessageHeaderCodec.Encode(headers, buffer);
+        return buffer;
     }
 
     private static string CompressionName(sbyte code) => code switch
