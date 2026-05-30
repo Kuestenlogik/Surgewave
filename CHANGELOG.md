@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-30
+
 ### Changed
 - **gRPC / REST endpoint binds HTTPS by default** — broker `appsettings.json` now ships `Surgewave:GrpcUseTls=true` and `https://*:9093` in the Kestrel Grpc section. Run `dotnet dev-certs https --trust` once to trust the ASP.NET Core dev cert, or configure `Surgewave:GrpcCertificatePath` for a production cert. `Surgewave.Control` + the `ConfigValidation` page now default to `https://localhost:9093`; `GrpcProducerExample` / `GrpcConsumerExample` snippets updated; 19 documentation files swept. Operators who need cleartext for a transitional period can set `Surgewave:GrpcUseTls=false`. Tests are unaffected (they start Surgewave in-process via `SurgewaveRuntime`, not the broker's `appsettings.json`).
 
