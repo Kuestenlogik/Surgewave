@@ -74,7 +74,7 @@ jobs:
                 echo "(skip: $id $v not in registration index)"
                 continue
               fi
-              listed=$(echo "$body" | jq -r '.listed // "unknown"' 2>/dev/null || echo "unknown")
+              listed=$(echo "$body" | jq -r 'if has("listed") then .listed | tostring else "unknown" end' 2>/dev/null || echo "unknown")
               echo "(pre-check $id $v code=$code listed=$listed)"
               if [ "$listed" = "false" ]; then
                 echo "(skip: $id $v already unlisted)"
@@ -122,7 +122,7 @@ jobs:
                 echo "(skip: $id $v not in registration index)"
                 continue
               fi
-              listed=$(echo "$body" | jq -r '.listed // "unknown"' 2>/dev/null || echo "unknown")
+              listed=$(echo "$body" | jq -r 'if has("listed") then .listed | tostring else "unknown" end' 2>/dev/null || echo "unknown")
               echo "(pre-check $id $v code=$code listed=$listed)"
               if [ "$listed" = "false" ]; then
                 echo "(skip: $id $v already unlisted)"
