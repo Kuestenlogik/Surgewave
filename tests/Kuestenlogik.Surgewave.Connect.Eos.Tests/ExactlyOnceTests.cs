@@ -13,8 +13,21 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Connect.Eos.Tests;
 
 /// <summary>
+/// Marker, der die EOS-Suite seriellisiert: jeder Test startet einen
+/// in-process SurgewaveRuntime ueber WithPort(0). Ohne Collection-Marker
+/// laesst xunit alle 12 Tests parallel laufen — auf einem GitHub-Actions
+/// Linux-Runner mit 4 vCPUs trifft das Port-/Process-Exhaustion und der
+/// Test-Host haengt (lokal Windows mit mehr Reserven passt der Spawn
+/// gerade noch). Single-Threaded ueber die Suite hinweg ist hier OK,
+/// weil EOS-Tests an sich kein Parallelism testen.
+/// </summary>
+[CollectionDefinition(nameof(ExactlyOnceCollection), DisableParallelization = true)]
+public sealed class ExactlyOnceCollection { }
+
+/// <summary>
 /// Integration tests for Exactly-Once Semantics (EOS) in Surgewave Connect.
 /// </summary>
+[Collection(nameof(ExactlyOnceCollection))]
 public sealed class ExactlyOnceTests : IAsyncLifetime, IDisposable
 {
     private bool _disposed;
