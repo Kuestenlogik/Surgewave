@@ -4,9 +4,23 @@
     <OutputType>Exe</OutputType>
     <IsPackable>true</IsPackable>
     <!-- NU5104: prerelease deps in stable pack; NU5119: wwwroot/.gitkeep (dotfile) skipped during pack — Datei dient nur zum
-         Aushalten des leeren wwwroot/ Ordners im Repo (sonst crasht StaticWebAssetsLoader beim Start). -->
-    <NoWarn>$(NoWarn);NU5104;NU5119</NoWarn>
+         Aushalten des leeren wwwroot/ Ordners im Repo (sonst crasht StaticWebAssetsLoader beim Start);
+         NU5129: Web-SDK + StaticWebAssets generieren `<AssemblyName>.props` (surgewave-broker.props) ohne
+         passendes `<PackageId>.props` — irrelevant fuer Consumer, weil keiner das Broker-NuGet konsumiert,
+         um build-targets zu importieren (es ist ein self-contained Service-Artefakt). -->
+    <NoWarn>$(NoWarn);NU5104;NU5119;NU5129</NoWarn>
     <AssemblyName>surgewave-broker</AssemblyName>
+    <!--
+      Bowire-Pattern: AssemblyName bleibt kebab-case (linux-binary +
+      container-image Konvention), PackageId folgt der Kuestenlogik.*-
+      Namespace-Konvention der uebrigen NuGet-Paketen. Ohne expliziten
+      PackageId wuerde MSBuild den AssemblyName als Fallback nehmen
+      ('surgewave-broker'), was inkonsistent mit Kuestenlogik.Surgewave.
+      Tool / .Runtime / .Client / etc. waere und gegen das urspruengliche
+      "alle Library-Pakete sind Kuestenlogik.Surgewave.*"-Pattern in
+      Akka.Surgewave's packageSourceMapping verstoesst.
+    -->
+    <PackageId>Kuestenlogik.Surgewave.Broker</PackageId>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- Improve startup time - applies to all builds -->
