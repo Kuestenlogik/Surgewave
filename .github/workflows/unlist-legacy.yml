@@ -67,7 +67,20 @@ jobs:
                 echo "[dry-run] would unlist $id $v"
               else
                 echo "unlist $id $v"
-                dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive || echo "(skip: $id $v already unlisted or never published)"
+                # `dotnet nuget delete` failt mit Exit 1 fuer mehrere
+                # Bedingungen — versteckt verschluckt wuerde der Workflow
+                # einen abgelaufenen / unzureichend permittierten API-Key
+                # als "success" labeln. Wir trennen daher: 404 = bereits
+                # unlisted oder nie published (OK), alles andere = hart.
+                if out=$(dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive 2>&1); then
+                  echo "$out"
+                elif echo "$out" | grep -q "404"; then
+                  echo "(skip 404: $id $v already unlisted or never published)"
+                else
+                  echo "::error::$id $v failed:"
+                  echo "$out"
+                  exit 1
+                fi
               fi
             done
             echo "::endgroup::"
