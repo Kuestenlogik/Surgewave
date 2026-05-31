@@ -46,7 +46,11 @@ jobs:
           ids=$(
             while :; do
               page=$(curl -s "https://azuresearch-usnc.nuget.org/query?q=kuestenlogik.surgewave&take=50&skip=$skip&prerelease=true")
-              names=$(echo "$page" | jq -r '.data[].id' | grep -i '^Kuestenlogik\.Surgewave\.' || true)
+              # `Connector.*` lebt im Schwester-Repo Surgewave.Connectors,
+              # `Schema.Registry.Handlers.*` im Schema-Registry-Repo. Beide
+              # haben ihren eigenen Versions-Lebenszyklus und werden nicht
+              # mit der Hauptrepo-Generation 0.1.0–0.1.9 ent-listet.
+              names=$(echo "$page" | jq -r '.data[].id' | grep -i '^Kuestenlogik\.Surgewave\.' | grep -v -i '^Kuestenlogik\.Surgewave\.Connector\.' | grep -v -i '^Kuestenlogik\.Surgewave\.Schema\.Registry\.Handlers\.' || true)
               [ -z "$names" ] && break
               echo "$names"
               skip=$((skip + 50))
