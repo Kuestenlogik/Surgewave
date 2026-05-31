@@ -79,7 +79,7 @@ jobs:
                 # so das Quota fuer die ersten paar hundert bereits
                 # erledigten Pakete und kommen idempotent durch alle 591.
                 lower_id=$(echo "$id" | tr '[:upper:]' '[:lower:]')
-                reg=$(curl -s --compressed -w "\n%{http_code}" "https://api.nuget.org/v3/registration5-gz-semver2/$lower_id/$v.json" 2>/dev/null)
+                reg=$(curl -s -w "\n%{http_code}" "https://api.nuget.org/v3/registration5-semver1/$lower_id/$v.json" 2>/dev/null)
                 code=$(echo "$reg" | tail -n1)
                 body=$(echo "$reg" | sed '$d')
                 if [ "$code" = "404" ]; then
@@ -120,7 +120,7 @@ jobs:
                 echo "[dry-run] would unlist $id $v"
               else
                 # Pre-check listed-Status (siehe oberer Block).
-                reg=$(curl -s --compressed -w "\n%{http_code}" "https://api.nuget.org/v3/registration5-gz-semver2/$id/$v.json" 2>/dev/null)
+                reg=$(curl -s -w "\n%{http_code}" "https://api.nuget.org/v3/registration5-semver1/$id/$v.json" 2>/dev/null)
                 code=$(echo "$reg" | tail -n1)
                 body=$(echo "$reg" | sed '$d')
                 if [ "$code" = "404" ]; then
