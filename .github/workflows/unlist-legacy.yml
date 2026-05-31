@@ -72,6 +72,11 @@ jobs:
                 # einen abgelaufenen / unzureichend permittierten API-Key
                 # als "success" labeln. Wir trennen daher: 404 = bereits
                 # unlisted oder nie published (OK), alles andere = hart.
+                # 1s Pause zwischen Calls, sonst trifft uns nuget.org's
+                # Rate-Limit (~300 Unlist-Calls in 7 Min -> "Quota Exceeded
+                # retry after 1960s"). Bei 591 Versionen heisst das die
+                # gesamte Suite laeuft in ~10 Min durch.
+                sleep 1
                 if out=$(dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive 2>&1); then
                   echo "$out"
                 elif echo "$out" | grep -q "404"; then
