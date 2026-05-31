@@ -1,0 +1,89 @@
+name: Unlist legacy 0.1.x
+
+# Einmaliger Helper, um die Pre-Bowire-Pattern-Generation (Kuestenlogik.
+# Surgewave.* 0.1.0–0.1.9 plus die kebab-Altlasten surgewave / surgewave-
+# broker) auf nuget.org zu unlisten. Nach erfolgreichem Lauf darf dieser
+# Workflow wieder geloescht werden — er ist nur fuer dieses eine Cleanup
+# gedacht. `dotnet nuget delete` heisst auf nuget.org effektiv "unlist":
+# bestehende Restore-Caches und direkte Version-Pin-Anfragen funktionieren
+# weiter, aber Search/Range-Resolution uebergeht die Versionen.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Nur listen, nichts loeschen (true/false)"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  unlist:
+    runs-on: ubuntu-latest
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+    steps:
+      - name: Sanity-check
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY secret nicht gesetzt"
+            exit 1
+          fi
+          echo "Dry-run: ${{ inputs.dry_run }}"
+
+      - name: Unlist Kuestenlogik.Surgewave.* 0.1.0–0.1.9
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -e
+          # Vollstaendige Search-API durchblaettern (10er-Pages reichen, die
+          # Suchergebnisse enthalten alle Kuestenlogik.Surgewave.*-IDs).
+          skip=0
+          ids=$(
+            while :; do
+              page=$(curl -s "https://azuresearch-usnc.nuget.org/query?q=kuestenlogik.surgewave&take=50&skip=$skip&prerelease=true")
+              names=$(echo "$page" | jq -r '.data[].id' | grep -i '^Kuestenlogik\.Surgewave\.' || true)
+              [ -z "$names" ] && break
+              echo "$names"
+              skip=$((skip + 50))
+              total=$(echo "$page" | jq -r '.totalHits')
+              [ "$skip" -ge "$total" ] && break
+            done | sort -u
+          )
+
+          for id in $ids; do
+            echo "::group::$id"
+            versions=$(curl -s "https://api.nuget.org/v3-flatcontainer/$(echo $id | tr '[:upper:]' '[:lower:]')/index.json" | jq -r '.versions[]?' | grep -E '^0\.1\.[0-9]+$' | grep -v '^0\.1\.10$' || true)
+            for v in $versions; do
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "[dry-run] would unlist $id $v"
+              else
+                echo "unlist $id $v"
+                dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive || echo "(skip: $id $v already unlisted or never published)"
+              fi
+            done
+            echo "::endgroup::"
+          done
+
+      - name: Unlist legacy kebab IDs (surgewave, surgewave-broker)
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -e
+          for id in surgewave surgewave-broker; do
+            echo "::group::$id"
+            versions=$(curl -s "https://api.nuget.org/v3-flatcontainer/$id/index.json" | jq -r '.versions[]?' || true)
+            for v in $versions; do
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "[dry-run] would unlist $id $v"
+              else
+                echo "unlist $id $v"
+                dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive || echo "(skip: $id $v already unlisted)"
+              fi
+            done
+            echo "::endgroup::"
+          done
