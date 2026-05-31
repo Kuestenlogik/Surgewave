@@ -1,0 +1,45 @@
+name: Diag Connect.Eos hang
+
+# Einmaliger Diagnose-Workflow fuer den Linux-CI-Hang in
+# Connect.Eos.Tests. Laeuft die Suite mit blame-hang-Detection +
+# Hang-Dump und laedt den Dump als Artefakt hoch. Nach Ursachen-
+# Klaerung bitte wieder loeschen.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build tests/Kuestenlogik.Surgewave.Connect.Eos.Tests -c Release
+
+      - name: Test with hang dump
+        # --blame-hang-timeout 60s loest nach 60s Inaktivitaet einen
+        # Full-Dump aus und beendet den Test-Host. Der Pfad steht in
+        # TestResults/ unter einer .dmp-Datei.
+        run: dotnet test tests/Kuestenlogik.Surgewave.Connect.Eos.Tests -c Release --no-build -v normal --blame-hang-timeout 60s --blame-hang-dump-type full --logger "console;verbosity=detailed"
+        continue-on-error: true
+
+      - name: Upload hang dump + sequence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-diagnostics
+          path: |
+            tests/**/TestResults/**/*.dmp
+            tests/**/TestResults/**/*.xml
+            tests/**/TestResults/**/Sequence*
+          if-no-files-found: warn
