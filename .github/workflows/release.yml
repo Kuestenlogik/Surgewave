@@ -131,10 +131,7 @@ jobs:
         # cluster topology and are flakier on the GitHub-Actions runner than
         # on bare-metal CI. They still run on every push to main via ci.yml.
         #
-        # IntegrationTests bleiben gefiltert (in-process-Broker-Konkurrenz
-        # auf dem Linux-Runner). Connect.Eos ist seit ExactlyOnceCollection
-        # (DisableParallelization) wieder im Release-Lauf drin.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --filter "FullyQualifiedName!~IntegrationTests"
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal
 
       - name: Pack NuGet
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}

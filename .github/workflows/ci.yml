@@ -46,13 +46,7 @@ jobs:
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=$VERSION -p:SourceRevisionId=$(git rev-parse HEAD)
 
       - name: Test
-        # IntegrationTests haengen auf dem Linux GitHub-Actions Runner —
-        # vier Files spawnen eigene in-process broker ohne Collection-
-        # Marker, was unter Parallelism zu Port-/Process-Exhaustion fuehrt
-        # (gleiches Root-Cause wie der Connect.Eos-Hang, der mit
-        # ExactlyOnceCollection seriellisiert wurde). Filter bleibt fuer
-        # IntegrationTests bis die Suite analog dazu gefixt ist.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings --filter "FullyQualifiedName!~IntegrationTests"
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings
 
       - name: Pack
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=$VERSION

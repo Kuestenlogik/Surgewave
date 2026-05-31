@@ -14,6 +14,7 @@ namespace Kuestenlogik.Surgewave.IntegrationTests;
 /// Each test starts a fresh broker instance with dynamic ports.
 /// </summary>
 [Trait("Category", TestCategories.Integration)]
+[Collection(nameof(BrokerSpawningCollection))]
 public class IsolatedPerformanceTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
