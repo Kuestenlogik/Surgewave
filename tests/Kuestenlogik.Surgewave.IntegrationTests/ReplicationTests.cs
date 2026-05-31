@@ -15,6 +15,7 @@ namespace Kuestenlogik.Surgewave.IntegrationTests;
 /// and data consistency across replicas.
 /// </summary>
 [Trait("Category", TestCategories.Integration)]
+[Collection(nameof(BrokerSpawningCollection))]
 public class ReplicationTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;

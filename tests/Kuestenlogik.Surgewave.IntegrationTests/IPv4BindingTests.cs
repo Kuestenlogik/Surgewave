@@ -14,6 +14,7 @@ namespace Kuestenlogik.Surgewave.IntegrationTests;
 /// These tests verify the broker works correctly when dual-stack IPv6 is disabled.
 /// </summary>
 [Trait("Category", TestCategories.Integration)]
+[Collection(nameof(BrokerSpawningCollection))]
 public class IPv4BindingTests
 {
     private readonly ITestOutputHelper _output;

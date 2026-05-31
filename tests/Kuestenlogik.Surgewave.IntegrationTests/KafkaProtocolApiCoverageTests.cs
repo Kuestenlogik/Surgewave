@@ -14,6 +14,7 @@ namespace Kuestenlogik.Surgewave.IntegrationTests;
 /// Each test starts a fresh broker instance to ensure isolation.
 /// </summary>
 [Trait("Category", TestCategories.Integration)]
+[Collection(nameof(BrokerSpawningCollection))]
 public class KafkaProtocolApiCoverageTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
