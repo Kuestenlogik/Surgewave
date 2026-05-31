@@ -87,6 +87,7 @@ jobs:
                   continue
                 fi
                 listed=$(echo "$body" | jq -r '.listed // "unknown"' 2>/dev/null || echo "unknown")
+                echo "(pre-check $id $v code=$code listed=$listed)"
                 if [ "$listed" = "false" ]; then
                   echo "(skip: $id $v already unlisted)"
                   continue
@@ -128,6 +129,7 @@ jobs:
                   continue
                 fi
                 listed=$(echo "$body" | jq -r '.listed // "unknown"' 2>/dev/null || echo "unknown")
+                echo "(pre-check $id $v code=$code listed=$listed)"
                 if [ "$listed" = "false" ]; then
                   echo "(skip: $id $v already unlisted)"
                   continue
