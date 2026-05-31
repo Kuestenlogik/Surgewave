@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-31
+
+### Changed
+- **Broker package renamed to `Kuestenlogik.Surgewave.Broker`** — previously the NuGet package shipped with id `surgewave-broker` because the csproj only set `<AssemblyName>` and MSBuild fell back to it as PackageId. Now an explicit `<PackageId>Kuestenlogik.Surgewave.Broker</PackageId>` brings the package in line with the rest of the namespace (Bowire pattern: kebab assembly name for the linux binary and container image, dotted PackageId for the NuGet catalogue). Container repository (`kuestenlogik/surgewave-broker`), linux package names (`.deb`/`.rpm`), and the on-disk binary are unchanged. Consumers who referenced `surgewave-broker` transitively (e.g. via `Kuestenlogik.Surgewave.Runtime`) get the new id automatically on next restore; the old `surgewave-broker` versions 0.1.0–0.1.9 remain published but unlisted.
+
 ## [0.1.9] - 2026-05-30
 
 ### Changed
