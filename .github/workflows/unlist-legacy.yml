@@ -72,10 +72,26 @@ jobs:
                 # einen abgelaufenen / unzureichend permittierten API-Key
                 # als "success" labeln. Wir trennen daher: 404 = bereits
                 # unlisted oder nie published (OK), alles andere = hart.
-                # 1s Pause zwischen Calls, sonst trifft uns nuget.org's
-                # Rate-Limit (~300 Unlist-Calls in 7 Min -> "Quota Exceeded
-                # retry after 1960s"). Bei 591 Versionen heisst das die
-                # gesamte Suite laeuft in ~10 Min durch.
+                # Vor dem Unlist-Call pruefen, ob die Version ueberhaupt
+                # noch listed ist — nuget.org's Registration-API ist nicht
+                # gegen das Unlist-Quota gerechnet, der eigentliche
+                # `dotnet nuget delete` schon. Bei einem Re-run sparen wir
+                # so das Quota fuer die ersten paar hundert bereits
+                # erledigten Pakete und kommen idempotent durch alle 591.
+                lower_id=$(echo "$id" | tr '[:upper:]' '[:lower:]')
+                reg=$(curl -s --compressed -w "\n%{http_code}" "https://api.nuget.org/v3/registration5-gz-semver2/$lower_id/$v.json" 2>/dev/null)
+                code=$(echo "$reg" | tail -n1)
+                body=$(echo "$reg" | sed '$d')
+                if [ "$code" = "404" ]; then
+                  echo "(skip: $id $v not in registration index)"
+                  continue
+                fi
+                listed=$(echo "$body" | jq -r '.listed // "unknown"' 2>/dev/null || echo "unknown")
+                if [ "$listed" = "false" ]; then
+                  echo "(skip: $id $v already unlisted)"
+                  continue
+                fi
+                # 1s Pause zwischen echten Unlist-Calls (nicht nach skips).
                 sleep 1
                 if out=$(dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive 2>&1); then
                   echo "$out"
@@ -103,8 +119,30 @@ jobs:
               if [ "$DRY_RUN" = "true" ]; then
                 echo "[dry-run] would unlist $id $v"
               else
+                # Pre-check listed-Status (siehe oberer Block).
+                reg=$(curl -s --compressed -w "\n%{http_code}" "https://api.nuget.org/v3/registration5-gz-semver2/$id/$v.json" 2>/dev/null)
+                code=$(echo "$reg" | tail -n1)
+                body=$(echo "$reg" | sed '$d')
+                if [ "$code" = "404" ]; then
+                  echo "(skip: $id $v not in registration index)"
+                  continue
+                fi
+                listed=$(echo "$body" | jq -r '.listed // "unknown"' 2>/dev/null || echo "unknown")
+                if [ "$listed" = "false" ]; then
+                  echo "(skip: $id $v already unlisted)"
+                  continue
+                fi
+                sleep 1
                 echo "unlist $id $v"
-                dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive || echo "(skip: $id $v already unlisted)"
+                if out=$(dotnet nuget delete "$id" "$v" --source "$NUGET_SOURCE" --api-key "$NUGET_API_KEY" --non-interactive 2>&1); then
+                  echo "$out"
+                elif echo "$out" | grep -q "404"; then
+                  echo "(skip 404: $id $v already unlisted or never published)"
+                else
+                  echo "::error::$id $v failed:"
+                  echo "$out"
+                  exit 1
+                fi
               fi
             done
             echo "::endgroup::"
