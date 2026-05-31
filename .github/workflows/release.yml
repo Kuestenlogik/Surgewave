@@ -131,11 +131,10 @@ jobs:
         # cluster topology and are flakier on the GitHub-Actions runner than
         # on bare-metal CI. They still run on every push to main via ci.yml.
         #
-        # Connect.Eos.Tests hangs on the Linux GitHub-Actions runner after
-        # the 0.1.7 native-header wire change (passes locally on Windows in
-        # 16s). Excluded here while we figure out the linux-specific deadlock;
-        # ci.yml still runs them on every push.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~Connect.Eos"
+        # IntegrationTests bleiben gefiltert (in-process-Broker-Konkurrenz
+        # auf dem Linux-Runner). Connect.Eos ist seit ExactlyOnceCollection
+        # (DisableParallelization) wieder im Release-Lauf drin.
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --filter "FullyQualifiedName!~IntegrationTests"
 
       - name: Pack NuGet
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
