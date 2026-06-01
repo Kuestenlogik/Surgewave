@@ -46,11 +46,27 @@ jobs:
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=$VERSION -p:SourceRevisionId=$(git rev-parse HEAD)
 
       - name: Test
-        # -m:1 = MSBuild seriellisiert die test-Assemblies. Sonst werden
-        # IntegrationTests, Connect.Eos, Runtime.Tests, Broker.Tests usw.
-        # gleichzeitig hochgezogen, jeder mit eigenen in-process broker(n),
-        # und der Linux-Runner geht in Port-/Process-Exhaustion.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings -m:1
+        # -m:1 = MSBuild seriellisiert die test-Assemblies (sonst
+        # Port-/Process-Exhaustion auf dem Linux-Runner durch parallel
+        # hochgezogene in-process broker).
+        #
+        # --blame-hang-timeout / --blame-hang-dump-type: wenn ein Test
+        # 5 min keinen Output produziert, dumpt xUnit einen Full-Memory-
+        # Dump und beendet den Test-Host. Damit failt CI fail-fast statt
+        # bis zum 6h Workflow-Timeout zu blockieren — und der Dump
+        # landet als Artefakt fuer Thread-Trace-Analyse.
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings -m:1 --blame-hang-timeout 300s --blame-hang-dump-type full
+
+      - name: Upload hang dumps
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-${{ github.run_id }}
+          path: |
+            **/TestResults/**/*.dmp
+            **/TestResults/**/Sequence*
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Pack
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=$VERSION

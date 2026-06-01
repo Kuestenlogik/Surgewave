@@ -132,7 +132,9 @@ jobs:
         # on bare-metal CI. They still run on every push to main via ci.yml.
         #
         # -m:1: Assemblies seriell (siehe ci.yml).
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal -m:1
+        # --blame-hang-timeout + dump-type: fail-fast bei hängendem Test,
+        # Dump als Artifact zur Thread-Trace-Analyse.
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal -m:1 --blame-hang-timeout 300s --blame-hang-dump-type full
 
       - name: Pack NuGet
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
