@@ -46,17 +46,11 @@ jobs:
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=$VERSION -p:SourceRevisionId=$(git rev-parse HEAD)
 
       - name: Test
-        # -m:1 = MSBuild seriellisiert die test-Assemblies (sonst Port-/
-        # Process-Exhaustion auf dem Linux-Runner durch mehrere parallel
-        # hochgezogene in-process broker — lokal Windows hat mehr Reserve).
-        #
-        # IntegrationTests bleiben gefiltert: NativeProtocolIntegrationTests
-        # enthaelt einen tieferen Linux-spezifischen Deadlock im Native-
-        # Wire-Pfad (post 0.1.7 Header-Refactor), der jeden Test trifft, der
-        # nativen client mit Confluent.Kafka client auf dem gleichen broker
-        # mischt — 6 Tests einzeln zu skippen reichte nicht. Root-Cause-
-        # Analyse mit thread-dump steht aus; bis dahin Filter.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings -m:1 --filter "FullyQualifiedName!~IntegrationTests"
+        # -m:1 = MSBuild seriellisiert die test-Assemblies. Sonst werden
+        # IntegrationTests, Connect.Eos, Runtime.Tests, Broker.Tests usw.
+        # gleichzeitig hochgezogen, jeder mit eigenen in-process broker(n),
+        # und der Linux-Runner geht in Port-/Process-Exhaustion.
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings -m:1
 
       - name: Pack
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=$VERSION
