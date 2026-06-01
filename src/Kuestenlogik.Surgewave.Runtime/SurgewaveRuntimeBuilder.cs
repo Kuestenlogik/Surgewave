@@ -10,10 +10,16 @@ namespace Kuestenlogik.Surgewave.Runtime;
 /// </summary>
 public sealed class SurgewaveRuntimeBuilder
 {
-    private string _host = "localhost";
+    // Default Host ist die IPv4-Loopback-Adresse (statt "localhost"), weil
+    // Linux getaddrinfo("localhost") gerne ::1 zuerst liefert und ein
+    // librdkafka-Client auf v6-deaktivierten oder dual-stack-roulette
+    // Setups dann am Connect scheitert. Wer Dual-Stack braucht, opt-in
+    // ueber WithDualMode() — das setzt zusaetzlich den Host wieder auf
+    // "localhost" zurueck, damit Clients beide Stacks probieren.
+    private string _host = "127.0.0.1";
     private int _port = 0;
     private int _replicationPort = 0;
-    private bool _enableDualMode = true;
+    private bool _enableDualMode = false;
     private int _brokerId = 0;
     private string? _dataDirectory;
     private string _storageEngine = StorageEngines.File;
@@ -71,14 +77,21 @@ public sealed class SurgewaveRuntimeBuilder
     }
 
     /// <summary>
-    /// Enables or disables dual-stack socket binding (IPv4 + IPv6).
-    /// When enabled and Host is "localhost", binds to IPv6Any with DualMode.
-    /// When disabled, binds to IPv4 only (127.0.0.1 for localhost).
-    /// Defaults to true. Disable for environments without IPv6 support.
+    /// Aktiviert Dual-Stack-Listen (IPv4 + IPv6). Default false; in dem Fall
+    /// bindet der Broker auf 127.0.0.1 und der Host bleibt 127.0.0.1 — der
+    /// deterministische Pfad fuer Tests/Dev/CI ohne IPv6-Roulette. Mit
+    /// `enable: true` wechseln wir auf IPv6Any+DualMode und stellen den
+    /// Default-Host wieder auf "localhost", damit Clients beide Stacks
+    /// probieren koennen. Wer einen anderen Host explizit gesetzt hat,
+    /// bleibt unangetastet.
     /// </summary>
     public SurgewaveRuntimeBuilder WithDualMode(bool enable = true)
     {
         _enableDualMode = enable;
+        if (enable && _host == "127.0.0.1")
+        {
+            _host = "localhost";
+        }
         return this;
     }
 
