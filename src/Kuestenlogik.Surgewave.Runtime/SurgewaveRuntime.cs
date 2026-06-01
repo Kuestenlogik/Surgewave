@@ -84,25 +84,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     public int Port => _actualPort;
 
     /// <summary>
-    /// The host address the broker is bound to. Wenn der Caller "localhost"
-    /// gewuenscht hat, geben wir "127.0.0.1" zurueck — auf Linux loest
-    /// getaddrinfo("localhost") oft zu ::1 (IPv6) zuerst auf, und selbst
-    /// mit Dual-Mode-Listen kann ein librdkafka-Client auf manchen
-    /// Runner-Konfigurationen am Connect zu ::1 scheitern (Connection
-    /// refused → "Local: Message timed out"). Mit expliziter IPv4-
-    /// Loopback-Adresse ist die Resolution deterministisch.
+    /// The host address the broker is bound to.
     /// </summary>
-    public string Host
-    {
-        get
-        {
-            if (_options.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-            {
-                return "127.0.0.1";
-            }
-            return _options.Host;
-        }
-    }
+    public string Host => _options.Host;
 
     /// <summary>
     /// Bootstrap servers string for Kafka clients (host:port).

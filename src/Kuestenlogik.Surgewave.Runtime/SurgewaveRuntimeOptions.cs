@@ -30,11 +30,15 @@ public sealed record SurgewaveRuntimeOptions
 
     /// <summary>
     /// Enable dual-stack socket binding (IPv4 + IPv6).
-    /// When true and Host is "localhost", binds to IPv6Any with DualMode enabled.
-    /// When false, binds to IPv4 only (127.0.0.1 for localhost).
-    /// Defaults to true. Set to false for environments without IPv6 support.
+    /// When true and Host is "localhost", binds to IPv6Any with DualMode enabled,
+    /// and the runtime advertises "localhost" so clients can pick either stack.
+    /// When false (default), binds to IPv4 loopback (127.0.0.1) and advertises
+    /// 127.0.0.1 explicitly — deterministisch fuer Tests, Dev-Setups und CI-
+    /// Container, in denen Linux getaddrinfo("localhost") gerne ::1 zuerst
+    /// liefert, der ::1-Connect aber je nach Routing/Kernel-Config refused
+    /// werden kann. Opt-in fuer Dual-Stack-Setups.
     /// </summary>
-    public bool EnableDualMode { get; init; } = true;
+    public bool EnableDualMode { get; init; } = false;
 
     // ==================== Identity Options ====================
 
