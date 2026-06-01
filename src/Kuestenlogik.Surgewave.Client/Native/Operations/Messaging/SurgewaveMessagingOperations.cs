@@ -102,6 +102,11 @@ public sealed class SurgewaveMessagingOperations
             Encoding.UTF8.GetBytes(value.AsSpan(), payloadBuffer.AsSpan(writer.Position, valueByteCount));
             writer.Advance(valueByteCount);
 
+            // Leerer Native-Header-Block (Pflicht seit f609a7e — sonst
+            // liest der Server position-shifted Garbage als Header-Count
+            // und der Producer haengt im Ack-Warten).
+            writer.WriteInt32(0);
+
             var (header, responsePayload) = await _client.SendRequestAsync(
                 SurgewaveOpCode.Produce,
                 payloadBuffer.AsMemory(0, writer.Position),
