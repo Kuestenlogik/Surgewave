@@ -729,7 +729,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithBrokerId(2)
             .WithPort(0)
             .WithReplicationPort(0)
-            .WithCluster($"1:localhost:{broker1.Port}:{broker1.ReplicationPort}")
+            .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -742,8 +742,8 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster(
-                $"1:localhost:{broker1.Port}:{broker1.ReplicationPort}",
-                $"2:localhost:{broker2.Port}:{broker2.ReplicationPort}")
+                $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
+                $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -777,7 +777,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithBrokerId(2)
             .WithPort(0)
             .WithReplicationPort(0)
-            .WithCluster($"1:localhost:{broker1.Port}:{broker1.ReplicationPort}")
+            .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
             .WithRaft(true)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -791,8 +791,8 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster(
-                $"1:localhost:{broker1.Port}:{broker1.ReplicationPort}",
-                $"2:localhost:{broker2.Port}:{broker2.ReplicationPort}")
+                $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
+                $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
             .WithRaft(true)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -851,7 +851,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithBrokerId(2)
             .WithPort(0)
             .WithReplicationPort(0)
-            .WithCluster($"1:localhost:{broker1.Port}:{broker1.ReplicationPort}")
+            .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
             .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
@@ -866,8 +866,8 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster(
-                $"1:localhost:{broker1.Port}:{broker1.ReplicationPort}",
-                $"2:localhost:{broker2.Port}:{broker2.ReplicationPort}")
+                $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
+                $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
             .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
@@ -930,7 +930,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithBrokerId(2)
             .WithPort(0)
             .WithReplicationPort(0)
-            .WithCluster($"1:localhost:{broker1.Port}:{broker1.ReplicationPort}")
+            .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
             .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
@@ -945,8 +945,8 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster(
-                $"1:localhost:{broker1.Port}:{broker1.ReplicationPort}",
-                $"2:localhost:{broker2.Port}:{broker2.ReplicationPort}")
+                $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
+                $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
             .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)

@@ -18,7 +18,7 @@ public sealed class SurgewaveRuntimeTests
         var options = new SurgewaveRuntimeOptions();
 
         // Assert - verify default values
-        Assert.Equal("localhost", options.Host);
+        Assert.Equal("127.0.0.1", options.Host);
         Assert.Equal(0, options.Port);
         Assert.Equal(0, options.BrokerId);
         Assert.True(options.AutoCreateTopics);
@@ -33,7 +33,7 @@ public sealed class SurgewaveRuntimeTests
         Assert.True(options.CleanupOnDispose);
         Assert.Equal(StorageEngines.File, options.StorageEngine);
         Assert.Null(options.DataDirectory);
-        Assert.True(options.EnableDualMode); // IPv4+IPv6 enabled by default
+        Assert.False(options.EnableDualMode); // opt-in: 127.0.0.1 default, deterministisch ohne Linux-getaddrinfo-Roulette
     }
 
     [Fact]
@@ -455,14 +455,23 @@ public sealed class SurgewaveRuntimeTests
     }
 
     [Fact]
-    public void SurgewaveRuntimeBuilder_DualMode_DefaultsToTrue()
+    public void SurgewaveRuntimeBuilder_DualMode_DefaultsToFalse()
     {
         // Act
         var builder = SurgewaveRuntime.CreateBuilder();
 
-        // Assert
+        // Assert: opt-in. Default ist 127.0.0.1/IPv4-only (deterministisch
+        // ueber Linux/CI hinweg), Dual-Stack braucht .WithDualMode().
         var options = builder.Build();
+        Assert.False(options.EnableDualMode);
+    }
+
+    [Fact]
+    public void SurgewaveRuntimeBuilder_WithDualMode_EnablesAndAdvertisesLocalhost()
+    {
+        var options = SurgewaveRuntime.CreateBuilder().WithDualMode().Build();
         Assert.True(options.EnableDualMode);
+        Assert.Equal("localhost", options.Host);
     }
 
     #endregion
