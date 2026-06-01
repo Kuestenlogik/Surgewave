@@ -1,0 +1,6 @@
+{
+  "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
+
+  "// parallelizeTestCollections": "Alle Tests in diesem Assembly spawnen in-process broker (BrokerFixture, BrokerSpawningCollection, oder eigene SurgewaveRuntime.CreateBuilder()-Aufrufe). Parallel laufen Lassen heisst mehrere broker gleichzeitig auf Random-Ports → auf dem GitHub-Actions Linux-Runner (4 vCPUs) trifft das Port- und Process-Exhaustion und Tests blockieren. Lokal Windows hat mehr Reserve. Seriell ist langsamer, aber die einzige robuste Variante.",
+  "parallelizeTestCollections": false
+}
