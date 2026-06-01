@@ -314,15 +314,8 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     #endregion
 
     #region Cross-Protocol Interoperability Tests
-    // TODO Linux-Hang: alle Interop_*-Tests mischen den nativen Surgewave-
-    // client mit Confluent.Kafka clients auf derselben Partition. Lokal
-    // Windows in <20s gruen, Linux GitHub-Actions Runner blockt unbegrenzt
-    // (durch blame-hang-dump bei 120-180s nachgewiesen). Vermutlich
-    // Deadlock im Native-Wire-Pfad (post 0.1.7 Header-Refactor) unter
-    // Linux-spezifischem Socket-Timing. Bis Root-Cause-Analyse Skip,
-    // damit der Linux-CI gruen wird.
 
-    [Fact(Skip = "Linux-CI deadlock im Native/Kafka Interop — siehe Region-Kommentar")]
+    [Fact]
     public async Task Interop_NativeProducer_KafkaConsumer()
     {
         // Arrange
@@ -391,7 +384,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         Assert.Contains(messages, m => m.Message.Value == "Message from native client 2");
     }
 
-    [Fact(Skip = "Linux-CI deadlock im Native/Kafka Interop — siehe Region-Kommentar")]
+    [Fact]
     public async Task Interop_KafkaProducer_NativeConsumer()
     {
         // Arrange
@@ -438,7 +431,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         }
     }
 
-    [Fact(Skip = "Linux-CI deadlock im Native/Kafka Interop — siehe Region-Kommentar")]
+    [Fact]
     public async Task Interop_MixedProducers_MixedConsumers()
     {
         // This test uses both clients to produce and consume, demonstrating full interoperability
@@ -522,12 +515,8 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     #endregion
 
     #region Performance Comparison Tests
-    // TODO Linux-Hang: gleiches Root-Cause wie die Interop_*-Tests darueber
-    // — die Performance_NativeVsKafka_*-Tests messen beide Pfade parallel
-    // gegen denselben Broker und triggern denselben Native-Wire-Deadlock
-    // auf Linux. Skip bis Root-Cause-Analyse.
 
-    [Fact(Skip = "Linux-CI deadlock im Native/Kafka Pfad — siehe Region-Kommentar")]
+    [Fact]
     public async Task Performance_NativeVsKafka_ProduceThroughput()
     {
         // Setup
@@ -598,7 +587,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         _output.WriteLine($"Native speedup:  {kafkaMs / nativeMs:F2}x faster");
     }
 
-    [Fact(Skip = "Linux-CI deadlock im Native/Kafka Pfad — siehe Region-Kommentar")]
+    [Fact]
     public async Task Performance_NativeVsKafka_FetchLatency()
     {
         // Setup
@@ -665,7 +654,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         _output.WriteLine($"Native speedup:  {kafkaLatencies.Average() / nativeLatencies.Average():F2}x faster");
     }
 
-    [Fact(Skip = "Linux-CI deadlock im Native/Kafka Pfad — siehe Region-Kommentar")]
+    [Fact]
     public async Task Performance_NativeVsKafka_RoundTripLatency()
     {
         // Measure end-to-end latency: produce + fetch

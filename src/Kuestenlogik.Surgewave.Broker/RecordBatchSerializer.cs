@@ -380,13 +380,14 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 recordsPos += valueLength;
             }
 
-            // Read headers count and skip them
-            var headerCount = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+            // Read headers count and skip them (zigzag-signed varints, siehe
+            // WriteHeadersFromNativeBlock).
+            var headerCount = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             for (int h = 0; h < headerCount; h++)
             {
-                var headerKeyLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+                var headerKeyLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerKeyLen > 0) recordsPos += headerKeyLen;
-                var headerValueLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+                var headerValueLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerValueLen > 0) recordsPos += headerValueLen;
             }
 
@@ -520,13 +521,14 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 recordsPos += valueLength;
             }
 
-            // Skip headers
-            var headerCount = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+            // Skip headers — Kafka-v2 header lengths sind zigzag-signed
+            // varints (siehe WriteHeadersFromNativeBlock fuer den Hintergrund).
+            var headerCount = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             for (int h = 0; h < headerCount; h++)
             {
-                var headerKeyLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+                var headerKeyLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerKeyLen > 0) recordsPos += headerKeyLen;
-                var headerValueLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+                var headerValueLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerValueLen > 0) recordsPos += headerValueLen;
             }
         }
@@ -687,21 +689,21 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // Translate the Kafka-style headers back into the native wire
             // block (int32 count + int32-prefixed entries) so the client can
-            // decode them with NativeMessageHeaderCodec. Lengths stay as raw
-            // varints on disk to stay compatible with the write-side helper
-            // and the existing skip-loops in StreamRecordsToWriter.
-            var headerCount = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+            // decode them with NativeMessageHeaderCodec. Kafka-v2 header
+            // lengths sind zigzag-signed varints, der native Block ist
+            // int32 big-endian (Decoder-friendly).
+            var headerCount = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             writer.Write(headerCount);
             for (int h = 0; h < headerCount; h++)
             {
-                var headerKeyLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+                var headerKeyLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 writer.Write(headerKeyLen);
                 if (headerKeyLen > 0)
                 {
                     writer.Write(recordsSpan.Slice(recordsPos, headerKeyLen));
                     recordsPos += headerKeyLen;
                 }
-                var headerValueLen = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
+                var headerValueLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 writer.Write(headerValueLen);
                 if (headerValueLen > 0)
                 {
@@ -790,15 +792,19 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
         var srcPos = 0;
         var count = BinaryPrimitives.ReadInt32BigEndian(nativeBlock);
         srcPos += 4;
-        var destPos = destOffset + VarintCodec.WriteVarInt(dest.Slice(destOffset), count);
-        // Header lengths use raw (un-zigzagged) varints to match the existing
-        // skip-loop in StreamRecordsToWriter. Akka-style headers never carry
-        // null values, so non-negative lengths are fine here.
+        // Kafka v2 RecordBatch headers benutzen signed (zigzag-encoded)
+        // varints fuer count, key-length und value-length. Ohne Zigzag
+        // las ein Kafka-Consumer (Confluent.Kafka) z.B. count=4 als
+        // zigzag-decoded=2 → er sah nur 2 Headers, der Rest des Streams
+        // wurde als naechster Record interpretiert → unendlicher Read
+        // bzw. Linux-Deadlock im Interop-Mix (Issue gefunden 2026-06-01,
+        // war seit Header-Refactor in f609a7e drin).
+        var destPos = destOffset + VarintCodec.WriteVarInt(dest.Slice(destOffset), (int)KafkaProtocolPrimitives.ZigzagEncode(count));
         for (var i = 0; i < count; i++)
         {
             var keyLen = BinaryPrimitives.ReadInt32BigEndian(nativeBlock[srcPos..]);
             srcPos += 4;
-            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), keyLen);
+            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)KafkaProtocolPrimitives.ZigzagEncode(keyLen));
             if (keyLen > 0)
             {
                 nativeBlock.Slice(srcPos, keyLen).CopyTo(dest.Slice(destPos));
@@ -808,7 +814,10 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             var valLen = BinaryPrimitives.ReadInt32BigEndian(nativeBlock[srcPos..]);
             srcPos += 4;
-            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), Math.Max(0, valLen));
+            // Akka tombstones nutzen value-length = 0; Kafka-Spec erlaubt
+            // -1 fuer null. Wir clampen unter Null auf 0 weil Native-Wire
+            // im Kontext keine echten Nulls schickt.
+            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)KafkaProtocolPrimitives.ZigzagEncode(Math.Max(0, valLen)));
             if (valLen > 0)
             {
                 nativeBlock.Slice(srcPos, valLen).CopyTo(dest.Slice(destPos));
