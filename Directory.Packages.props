@@ -20,12 +20,12 @@
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.8" />
     <PackageVersion Include="ITfoxtec.Identity.Saml2" Version="4.18.0" />
     <PackageVersion Include="ITfoxtec.Identity.Saml2.MvcCore" Version="4.18.0" />
-    <PackageVersion Include="System.DirectoryServices.Protocols" Version="9.0.4" />
+    <PackageVersion Include="System.DirectoryServices.Protocols" Version="10.0.8" />
     <!-- Testing -->
     <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.18.0" />
     <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.18.0" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <!-- 1.3.1 schliesst GHSA-pggp-6c3x-2xmx — alle vorigen 1.x-Versionen sind verwundbar. -->
@@ -234,7 +234,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
     <!-- MSBuild task authoring -->
-    <PackageVersion Include="Microsoft.Build.Framework" Version="17.14.8" />
-    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="17.14.8" />
+    <PackageVersion Include="Microsoft.Build.Framework" Version="18.6.3" />
+    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="18.6.3" />
   </ItemGroup>
 </Project>
