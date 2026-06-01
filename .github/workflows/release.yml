@@ -131,10 +131,9 @@ jobs:
         # cluster topology and are flakier on the GitHub-Actions runner than
         # on bare-metal CI. They still run on every push to main via ci.yml.
         #
-        # -m:1: Assemblies seriell, sonst Port-/Process-Exhaustion auf
-        # dem Linux-Runner durch mehrere parallel hochgezogene
-        # in-process broker. Siehe ci.yml fuer den langen Kommentar.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal -m:1
+        # -m:1: Assemblies seriell + IntegrationTests-Filter (Native-Wire-
+        # Linux-Deadlock, siehe ci.yml).
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal -m:1 --filter "FullyQualifiedName!~IntegrationTests"
 
       - name: Pack NuGet
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
