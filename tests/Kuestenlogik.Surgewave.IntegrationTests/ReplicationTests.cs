@@ -58,7 +58,7 @@ public class ReplicationTests : IAsyncLifetime
             .WithBrokerId(2)
             .WithPort(0)
             .WithReplicationPort(0)
-            .WithCluster($"1:localhost:{broker1.Port}:{broker1.ReplicationPort}")
+            .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
             .WithPartitions(3)
             .WithReplicationFactor(3)
             .WithAutoCreateTopics()
@@ -76,8 +76,8 @@ public class ReplicationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster(
-                $"1:localhost:{broker1.Port}:{broker1.ReplicationPort}",
-                $"2:localhost:{broker2.Port}:{broker2.ReplicationPort}")
+                $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
+                $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
             .WithPartitions(3)
             .WithReplicationFactor(3)
             .WithAutoCreateTopics()
@@ -97,14 +97,14 @@ public class ReplicationTests : IAsyncLifetime
             controllerClusterState.AddBroker(new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerNode
             {
                 BrokerId = broker2.BrokerId,
-                Host = "localhost",
+                Host = broker2.Host,
                 Port = broker2.Port,
                 ReplicationPort = broker2.ReplicationPort
             });
             controllerClusterState.AddBroker(new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerNode
             {
                 BrokerId = broker3.BrokerId,
-                Host = "localhost",
+                Host = broker3.Host,
                 Port = broker3.Port,
                 ReplicationPort = broker3.ReplicationPort
             });

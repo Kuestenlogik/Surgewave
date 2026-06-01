@@ -15,7 +15,7 @@ public sealed record SurgewaveRuntimeOptions
     /// <summary>
     /// Host address to bind to. Defaults to "localhost".
     /// </summary>
-    public string Host { get; init; } = "localhost";
+    public string Host { get; init; } = "127.0.0.1";
 
     /// <summary>
     /// Port to listen on. Use 0 for automatic port assignment.
