@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-02
+
+### Fixed
+- **Native-Wire-Linux-Deadlock im single-message `SendAsync(string, string)`-Pfad** — der string-Overload aus dem 0.1.7 Header-Refactor hat den Pflicht-Header-Block (`int32 count` nach Value) vergessen. Server las dann garbage als header-count und blieb im Produce-Ack hängen; auf dem Linux-CI deadlockten alle `Interop_*`-Tests und `Performance_NativeVsKafka_*`-Tests in `NativeProtocolIntegrationTests`. Fix: 4-Byte-Empty-Block anhängen, identisch zum byte[]-Overload.
+- **`SurgewaveRuntime`-Default ist jetzt deterministisch IPv4-Loopback** — bisher war Host `"localhost"` + `EnableDualMode = true`. Auf Linux liefert `getaddrinfo("localhost")` typischerweise `::1` (IPv6) zuerst; Confluent.Kafka-Clients trafen je nach Container-Konfig auf "Connection refused" trotz Dual-Stack-Listen. Neuer Default: `Host = "127.0.0.1"`, `EnableDualMode = false`. Wer Dual-Stack braucht, opt-in via `.WithDualMode()` — das setzt den Host auch wieder auf `"localhost"`, damit Clients beide Stacks probieren können.
+- **Kafka-v2-RecordBatch-Header sind zigzag-signed varints** — `WriteHeadersFromNativeBlock` schrieb sie als raw unsigned varint (intern konsistent, aber Confluent.Kafka dekodiert zigzag und sah falsche Header-Counts → Stream-Resync-Loop). Sowohl Write-Pfad als auch die drei Read-Pfade (`StreamRecordsToWriter`, `StreamBatchRawToWriter`, `parseRecord`) jetzt mit `ZigzagEncode`/`ZigzagDecode`.
+
+### Changed
+- **CI: `--blame-hang-timeout 300s` + `--blame-hang-dump-type full`** in `ci.yml` + `release.yml`. Bei hängendem Test wird der Test-Host nach 5 Min Inaktivität gekillt, ein Full-Memory-Dump erzeugt und als Artefakt hochgeladen. Damit gibt's fail-fast statt 6h Workflow-Timeout, plus thread-trace-fähige Diagnose.
+- **CI: `dotnet test -m:1`** — MSBuild serialisiert die Test-Assemblies. Verhindert Port-/Process-Exhaustion auf 4-vCPU-Linux-Runnern, wenn mehrere Test-Assemblies gleichzeitig in-process broker hochziehen.
+
 ## [0.1.10] - 2026-05-31
 
 ### Changed
