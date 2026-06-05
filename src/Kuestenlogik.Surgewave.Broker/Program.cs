@@ -1223,7 +1223,8 @@ if (config.Telemetry.Enabled && config.Telemetry.TopicSinkEnabled)
 IKafkaRequestHandler[] handlers =
 [
     new DataApiHandler(config, logManager, transactionCoordinator, quotaManager, recordBatchSerializer, aclAuthorizer, deduplicationManager, delayIndex, ttlIndex, metrics, dataApiLogger, bandwidthQuotaManager,
-        app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>()),
+        app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
+        coldStartProfiler: app.Services.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()),
     new MetadataApiHandler(config, logManager, metadataApiLogger),
     new TopicAdminHandler(config, logManager, quotaManager, auditLogger, topicAdminLogger),
     new ConfigApiHandler(config, dynamicBrokerConfig, logManager),

@@ -50,6 +50,15 @@ public sealed class SurgewaveAutoTuningBrokerPlugin : IBrokerPlugin
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AutoTuningConfig>(configuration.GetSection(AutoTuningConfig.SectionName));
+
+        var coldStart = new ColdStartAutoTuneConfig();
+        configuration.GetSection(ColdStartAutoTuneConfig.SectionName).Bind(coldStart);
+        if (coldStart.Enabled)
+        {
+            services.AddSingleton(coldStart);
+            services.AddSingleton(sp =>
+                new ColdStartWorkloadProfiler(coldStart.ObservationWindow, TimeProvider.System));
+        }
     }
 
     /// <inheritdoc />
@@ -73,5 +82,20 @@ public sealed class SurgewaveAutoTuningBrokerPlugin : IBrokerPlugin
         app.MapAutoTuning(service);
         programLogger.LogInformation("  - Auto-Tuning API:     {Host}:{GrpcPort}/api/auto-tuning",
             config.Host, config.GrpcPort);
+
+        var coldStart = services.GetService<ColdStartAutoTuneConfig>();
+        var profiler = services.GetService<ColdStartWorkloadProfiler>();
+        if (coldStart is { Enabled: true } && profiler is not null)
+        {
+            var coldStartLogger = services.GetRequiredService<ILogger<ColdStartAutoTuneService>>();
+#pragma warning disable CA2000 // Lifecycle managed by the application (runs until broker shutdown)
+            var coldStartService = new ColdStartAutoTuneService(coldStart, config, dynamicConfig, profiler, coldStartLogger);
+#pragma warning restore CA2000
+            _ = coldStartService.StartAsync(CancellationToken.None);
+
+            programLogger.LogInformation(
+                "Cold-start auto-tune enabled (window={Window}, autoApply={AutoApply}, output={Path})",
+                coldStart.ObservationWindow, coldStart.AutoApply, coldStart.AutoTunedJsonPath);
+        }
     }
 }
