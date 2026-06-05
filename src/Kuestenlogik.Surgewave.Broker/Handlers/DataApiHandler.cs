@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using Kuestenlogik.Surgewave.Broker.AutoTuning;
 using Kuestenlogik.Surgewave.Broker.Quotas;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Core;
@@ -31,6 +32,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     private readonly BrokerMetrics? _metrics;
     private readonly SurgewaveBrokerObservability? _observability;
     private readonly IRecordTransformPipeline? _recordTransform;
+    private readonly ColdStartWorkloadProfiler? _coldStartProfiler;
     private readonly ILogger<DataApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -54,7 +56,8 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         ILogger<DataApiHandler> logger,
         BandwidthQuotaManager? bandwidthQuotaManager = null,
         SurgewaveBrokerObservability? observability = null,
-        IRecordTransformPipeline? recordTransform = null)
+        IRecordTransformPipeline? recordTransform = null,
+        ColdStartWorkloadProfiler? coldStartProfiler = null)
     {
         _config = config;
         _logManager = logManager;
@@ -69,6 +72,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         _metrics = metrics;
         _observability = observability;
         _recordTransform = recordTransform;
+        _coldStartProfiler = coldStartProfiler;
         _logger = logger;
     }
 
@@ -295,6 +299,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                     // Record produce metrics
                     var recordCount = CompressionCodec.GetRecordCount(partitionData.Records.Span);
                     _metrics?.RecordProduce(topic, partitionData.Index, recordCount, partitionData.Records.Length, 0);
+                    _coldStartProfiler?.RecordProduce(topic, recordCount, partitionData.Records.Length);
 
                     partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                     {
