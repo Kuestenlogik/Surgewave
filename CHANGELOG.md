@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Adaptive Compression — broker integration (`compression.type=auto`)** — neuer `IBrokerPlugin` (`Surgewave.AdaptiveCompression`, opt-in via `Surgewave:AdaptiveCompression:Enabled=true`) startet einen `AdaptiveCompressionService` als `BackgroundService`. Der Service enumeriert periodisch alle Topics mit `compression.type=auto`, liest die letzten Batches je Partition über `LogManager.ReadBatchesAsync`, dekomprimiert sie und füttert einen per-Topic `AdaptiveCompressionSampler`. Sobald genug Samples vorliegen, schreibt der Service den gewählten Codec via `LogManager.UpdateTopicConfig` zurück und entfernt den Sampler — der Produce-Hot-Path bleibt unangetastet. Verdrahtet G20 aus der Roadmap.
+
 ## [0.1.11] - 2026-06-02
 
 ### Fixed
