@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-06-06
+
 ### Added
 - **Adaptive Compression — broker integration (`compression.type=auto`)** — neuer `IBrokerPlugin` (`Surgewave.AdaptiveCompression`, opt-in via `Surgewave:AdaptiveCompression:Enabled=true`) startet einen `AdaptiveCompressionService` als `BackgroundService`. Der Service enumeriert periodisch alle Topics mit `compression.type=auto`, liest die letzten Batches je Partition über `LogManager.ReadBatchesAsync`, dekomprimiert sie und füttert einen per-Topic `AdaptiveCompressionSampler`. Sobald genug Samples vorliegen, schreibt der Service den gewählten Codec via `LogManager.UpdateTopicConfig` zurück und entfernt den Sampler — der Produce-Hot-Path bleibt unangetastet. Verdrahtet G20 aus der Roadmap.
 - **Cold-Start Auto-Tune — Service-Integration** — der bislang headless `ColdStartWorkloadProfiler` + `ColdStartTuningRecommender` werden jetzt über den `SurgewaveAutoTuningBrokerPlugin` lebendig: opt-in via `Surgewave:AutoTune:ColdStart:Enabled=true`. Neuer `ColdStartAutoTuneService` (`BackgroundService`) hält den Profiler, wartet auf den Ablauf des `ObservationWindow` (Default 24 h), baut das `WorkloadProfile`, ruft den Recommender, persistiert den Audit-Trail nach `auto-tuned.json` und (bei `AutoApply=true`) wendet die Empfehlungen direkt über `DynamicBrokerConfig` an. `DataApiHandler.HandleProduceAsync` füttert den Profiler allokationsfrei pro erfolgreich appendetem Batch. Verdrahtet G27.
