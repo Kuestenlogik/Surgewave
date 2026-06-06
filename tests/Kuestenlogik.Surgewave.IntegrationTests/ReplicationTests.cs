@@ -18,6 +18,13 @@ namespace Kuestenlogik.Surgewave.IntegrationTests;
 [Collection(nameof(BrokerSpawningCollection))]
 public class ReplicationTests : IAsyncLifetime
 {
+    // Defaults (3s / 10s) trip on loaded Linux CI runners: heartbeats arrive
+    // 18s+ apart under contention and HeartbeatManager kills brokers mid-test.
+    // Production hardware never sees this, but multi-broker integration tests
+    // do — give the loop room.
+    private const int HeartbeatIntervalMs = 5_000;
+    private const int HeartbeatTimeoutMs = 30_000;
+
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
     private readonly List<SurgewaveRuntime> _brokers = [];
@@ -47,6 +54,8 @@ public class ReplicationTests : IAsyncLifetime
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
+            .WithHeartbeatInterval(HeartbeatIntervalMs)
+            .WithHeartbeatTimeout(HeartbeatTimeoutMs)
             .Build()
             .StartAsync();
 
@@ -65,6 +74,8 @@ public class ReplicationTests : IAsyncLifetime
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
+            .WithHeartbeatInterval(HeartbeatIntervalMs)
+            .WithHeartbeatTimeout(HeartbeatTimeoutMs)
             .Build()
             .StartAsync();
 
@@ -84,6 +95,8 @@ public class ReplicationTests : IAsyncLifetime
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
+            .WithHeartbeatInterval(HeartbeatIntervalMs)
+            .WithHeartbeatTimeout(HeartbeatTimeoutMs)
             .Build()
             .StartAsync();
 
@@ -383,6 +396,13 @@ public class ReplicationTests : IAsyncLifetime
         {
             _output.WriteLine("Warning: Broker 3 still in metadata, proceeding with test anyway");
         }
+
+        // Wait for the cluster to re-elect leaders for partitions that broker 3
+        // led — without this the producer races against leadership recovery and
+        // times out on slow CI runners.
+        var leadersReady = await TestWaitHelpers.WaitForTopicLeadersAsync(
+            adminClient, topicName, timeout: TimeSpan.FromSeconds(60), ct: cts.Token, output: _output);
+        Assert.True(leadersReady, "Topic should have new leaders after broker 3 shutdown");
 
         // Produce more messages to remaining brokers
         // Use longer timeout and retries to handle metadata refresh after broker shutdown
