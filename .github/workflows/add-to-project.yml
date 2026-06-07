@@ -1,0 +1,52 @@
+name: Add to Surgewave Project
+
+# Whenever an issue (or PR) lands in this repo with the `roadmap`
+# label, attach it to the org-level Surgewave Project board so triage
+# happens in one place. The roadmap-sync workflow already regenerates
+# ROADMAP.md from the board on every issue event, so this is the
+# missing first step.
+#
+# Multi-repo: each sibling Surgewave.* repo with roadmap items should
+# carry the same workflow (or use the Project-side "Auto-add to
+# project" workflow in the Project Settings UI).
+#
+# Auth: needs SURGEWAVE_DISPATCH_TOKEN — org-secret PAT with the
+# scopes below on top of Contents:R/W:
+#   - Organization projects: Read and write
+#   - Issues: Read
+#   - Pull requests: Read
+# Saving as an organization secret in Kuestenlogik lets every Surgewave.*
+# sibling repo wire the same workflow without re-issuing PATs. The
+# default GITHUB_TOKEN can't write to org-level Projects, so a PAT
+# (classic or fine-grained) is required either way.
+
+on:
+  issues:
+    types: [opened, labeled]
+  pull_request:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  add-to-project:
+    name: Attach to Project board
+    runs-on: ubuntu-latest
+    # Run on items carrying any of our typed labels — roadmap items,
+    # bugs, and feature requests all land on the board so the Bugs
+    # view + Roadmap view see them. Items without any kind:* / roadmap
+    # label stay off the board until someone explicitly promotes them.
+    if: |
+      (github.event.issue && (
+        contains(github.event.issue.labels.*.name, 'roadmap') ||
+        contains(github.event.issue.labels.*.name, 'kind:bug') ||
+        contains(github.event.issue.labels.*.name, 'kind:feature') ||
+        contains(github.event.issue.labels.*.name, 'kind:concept')
+      )) ||
+      (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'roadmap'))
+    steps:
+      - uses: actions/add-to-project@v2
+        with:
+          project-url: https://github.com/orgs/Kuestenlogik/projects/4
+          github-token: ${{ secrets.SURGEWAVE_DISPATCH_TOKEN }}
