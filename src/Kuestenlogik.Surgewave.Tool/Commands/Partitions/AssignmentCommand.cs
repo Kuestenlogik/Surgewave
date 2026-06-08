@@ -36,6 +36,16 @@ public class AssignmentCommand : CommandBase
             {
                 Console.WriteLine(json);
             }
+            else if (format == OutputFormat.Plain)
+            {
+                var doc = JsonDocument.Parse(json);
+                foreach (var a in doc.RootElement.EnumerateArray())
+                {
+                    var replicas = string.Join(",", a.GetProperty("replicas").EnumerateArray().Select(r => r.GetInt32()));
+                    var isr = string.Join(",", a.GetProperty("isr").EnumerateArray().Select(r => r.GetInt32()));
+                    Console.WriteLine($"{a.GetProperty("topic").GetString()}\t{a.GetProperty("partition").GetInt32()}\t{a.GetProperty("leader").GetInt32()}\t{replicas}\t{isr}");
+                }
+            }
             else
             {
                 var doc = JsonDocument.Parse(json);

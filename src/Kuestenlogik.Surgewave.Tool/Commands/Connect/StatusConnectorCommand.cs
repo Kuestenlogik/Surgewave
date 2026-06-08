@@ -48,6 +48,11 @@ public class StatusConnectorCommand : CommandBase
                     Tasks = status.Tasks.Select(t => new { t.Id, t.State, t.WorkerId, t.Trace }).ToList()
                 }, ConnectJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                foreach (var task in status.Tasks.OrderBy(t => t.Id))
+                    Console.WriteLine($"{task.Id}\t{task.State}\t{task.WorkerId}");
+            }
             else
             {
                 var state = status.State.ToUpperInvariant() switch

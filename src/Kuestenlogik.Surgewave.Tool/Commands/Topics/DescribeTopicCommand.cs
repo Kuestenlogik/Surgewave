@@ -57,6 +57,14 @@ public class DescribeTopicCommand : CommandBase
                 };
                 Console.WriteLine(JsonSerializer.Serialize(info, JsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                for (int i = 0; i < topicInfo.PartitionCount; i++)
+                {
+                    var offset = await client.Messaging.GetLatestOffsetAsync(topic, i, ct);
+                    Console.WriteLine($"{i}\t{offset}");
+                }
+            }
             else
             {
                 AnsiConsole.MarkupLine($"[bold]Topic:[/] {topicInfo.Name}");

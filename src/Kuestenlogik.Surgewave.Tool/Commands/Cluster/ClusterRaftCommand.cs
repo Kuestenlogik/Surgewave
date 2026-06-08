@@ -59,6 +59,15 @@ public sealed class ClusterRaftCommand : CommandBase
                 };
                 Console.WriteLine(JsonSerializer.Serialize(raftState, ClusterJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                if (!clusterInfo.UseRaftConsensus) return 0;
+                Console.WriteLine($"term\t{clusterInfo.RaftTerm}");
+                Console.WriteLine($"broker\t{clusterInfo.BrokerId}\t{(clusterInfo.IsRaftLeader ? "Leader" : "Follower")}");
+                Console.WriteLine($"controller\t{clusterInfo.ControllerId}\tepoch={clusterInfo.ControllerEpoch}");
+                foreach (var broker in brokers.OrderBy(b => b.BrokerId))
+                    Console.WriteLine($"member\t{broker.BrokerId}\t{broker.Host}\t{broker.Port}\t{(broker.IsController ? "Controller" : "Voter")}\t{(broker.IsAlive ? "Online" : "Offline")}");
+            }
             else
             {
                 AnsiConsole.Write(new Rule("[bold blue]Raft Consensus State[/]").LeftJustified());

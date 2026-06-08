@@ -116,6 +116,18 @@ public class ShowPluginCommand : CommandBase
             return 0;
         }
 
+        if (format == OutputFormat.Plain)
+        {
+            System.Console.WriteLine($"{manifest.Id}\t{manifest.Name}\t{manifest.Version}\t{manifest.Description ?? string.Empty}\t{manifest.License ?? string.Empty}");
+            var manifestSetPlain = new HashSet<string>(manifest.Assemblies, StringComparer.OrdinalIgnoreCase);
+            foreach (var asm in assemblies.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var role = manifestSetPlain.Contains(asm.Name) ? "plugin" : "dependency";
+                System.Console.WriteLine($"  {asm.Name}\t{FormatBytes(asm.Length)}\t{role}");
+            }
+            return 0;
+        }
+
         // Pretty (default) output
         AnsiConsole.Write(new Rule($"[bold cyan]{Markup.Escape(manifest.Name)}[/] [dim]({Markup.Escape(manifest.Id)})[/]").LeftJustified());
 

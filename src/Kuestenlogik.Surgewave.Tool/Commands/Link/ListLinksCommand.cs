@@ -33,6 +33,12 @@ public class ListLinksCommand : CommandBase
             {
                 Console.WriteLine(JsonSerializer.Serialize(links, JsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                // Placeholder: links is currently Array.Empty&lt;object&gt;.
+                // When wired to the real API, replace with one
+                // Console.WriteLine($"{link.Id}\t{link.Remote}\t..." per row.
+            }
             else
             {
                 var table = new Table();

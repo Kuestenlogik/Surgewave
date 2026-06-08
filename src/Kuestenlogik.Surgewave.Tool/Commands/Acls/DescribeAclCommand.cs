@@ -74,6 +74,11 @@ public class DescribeAclCommand : CommandBase
                 };
                 Console.WriteLine(JsonSerializer.Serialize(output, AclsJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                foreach (var acl in result.Acls)
+                    Console.WriteLine($"{acl.Principal ?? "*"}\t{acl.Host ?? "*"}\t{acl.Operation}\t{acl.Permission}");
+            }
             else
             {
                 AnsiConsole.MarkupLine($"[bold]Resource:[/] {resourceTypeStr}:{resourceName}");

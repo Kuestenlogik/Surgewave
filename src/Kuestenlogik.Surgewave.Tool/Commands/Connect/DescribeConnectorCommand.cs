@@ -52,6 +52,12 @@ public class DescribeConnectorCommand : CommandBase
                     Tasks = info.Tasks.Select(t => new { t.Id, t.State, t.WorkerId }).ToList()
                 }, ConnectJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"{info.Name}\t{info.Type}\t{info.State}\t{info.WorkerId}");
+                foreach (var task in info.Tasks.OrderBy(t => t.Id))
+                    Console.WriteLine($"  {task.Id}\t{task.State}\t{task.WorkerId}");
+            }
             else
             {
                 var state = info.State.ToUpperInvariant() switch

@@ -51,6 +51,11 @@ public class TransportStatusCommand : CommandBase
                 };
                 Console.WriteLine(JsonSerializer.Serialize(status, TransportJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"TCP\t{tcpStatus.Connected}\t{host}\t{port}\t{tcpStatus.LatencyMs}\t{tcpStatus.Error ?? string.Empty}");
+                Console.WriteLine($"SharedMemory\t{shmStatus.Available}\t{shmStatus.Path}\t{shmStatus.Enabled}\t{shmStatus.Error ?? string.Empty}");
+            }
             else
             {
                 AnsiConsole.Write(new Rule("[bold blue]Transport Status[/]").LeftJustified());

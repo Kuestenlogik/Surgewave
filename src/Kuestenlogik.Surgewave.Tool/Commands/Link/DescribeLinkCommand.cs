@@ -44,6 +44,10 @@ public class DescribeLinkCommand : CommandBase
             {
                 Console.WriteLine(JsonSerializer.Serialize(status, JsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"{status.LinkId}\t{status.State}\t{status.Remote}\t{status.MirroredTopics}\t{status.TotalLag}");
+            }
             else
             {
                 var grid = new Grid();

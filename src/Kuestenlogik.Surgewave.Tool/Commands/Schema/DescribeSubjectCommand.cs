@@ -58,6 +58,15 @@ public class DescribeSubjectCommand : CommandBase
                 }
                 Console.WriteLine(JsonSerializer.Serialize(new { Subject = subject, Versions = schemas }, SchemaJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                foreach (var version in versions.OrderBy(v => v))
+                {
+                    var schema = await client.Schema.GetSchemaByVersionAsync(subject, version, ct);
+                    if (schema != null)
+                        Console.WriteLine($"{version}\t{schema.Id}\t{schema.SchemaType}");
+                }
+            }
             else
             {
                 AnsiConsole.MarkupLine($"[bold]Subject:[/] {subject}");
