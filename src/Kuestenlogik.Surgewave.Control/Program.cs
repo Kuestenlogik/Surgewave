@@ -122,6 +122,7 @@ AddBearerTokenHandler(builder.Services.AddHttpClient<IQuotaApiClient, QuotaApiCl
 AddBearerTokenHandler(builder.Services.AddHttpClient<IBandwidthQuotaApiClient, BandwidthQuotaApiClient>(c => ConfigureHttpClient(c)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<ISchemaRegistryClient, SchemaRegistryClient>(c => ConfigureHttpClient(c)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<IAuditApiClient, AuditApiClient>(c => ConfigureHttpClient(c)));
+AddBearerTokenHandler(builder.Services.AddHttpClient<ILicenseApiClient, LicenseApiClient>(c => ConfigureHttpClient(c)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<IMetricsClient, MetricsClient>(c => ConfigureHttpClient(c, 10)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<IChatApiClient, ChatApiClient>(c => ConfigureHttpClient(c, 120)));
 

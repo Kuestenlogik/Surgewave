@@ -1,0 +1,178 @@
+@page "/license"
+@using Kuestenlogik.Surgewave.Control.Models.License
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ILicenseApiClient LicenseClient
+
+<PageTitle>License - Surgewave Control</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">License</MudText>
+
+@if (_status is null)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Loading license information…
+    </MudAlert>
+}
+else
+{
+    @* Edition / Licensee / Expiry summary *@
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@EditionIcon"
+                                 Color="@EditionColor"
+                                 Size="Size.Large"
+                                 Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Edition</MudText>
+                            <MudText Typo="Typo.h5">@_status.Edition</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Default" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Licensed to</MudText>
+                            <MudText Typo="Typo.h6">
+                                @(string.IsNullOrEmpty(_status.LicensedTo) ? "—" : _status.LicensedTo)
+                            </MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudCard Elevation="2">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Event" Color="@ExpiryColor" Size="Size.Large" Class="mr-3" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Expires</MudText>
+                            <MudText Typo="Typo.h6">@ExpiryDisplay</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+
+    @if (!_status.HasProvider)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-4">
+            No <code>ILicenseProvider</code> is registered. The broker is running in community mode —
+            all plugins with <code>RequiresLicense = false</code> load unconditionally; plugins that
+            require a licence are skipped with a warning at startup.
+        </MudAlert>
+    }
+
+    @* Per-plugin licence + activation table *@
+    <MudText Typo="Typo.h6" Class="mb-2">Discovered broker plugins</MudText>
+
+    @if (_plugins.Count == 0)
+    {
+        <MudAlert Severity="Severity.Normal">No broker plugins were discovered.</MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_plugins" Dense="true" Hover="true" Bordered="false" Striped="true">
+            <HeaderContent>
+                <MudTh>Plugin</MudTh>
+                <MudTh>Feature ID</MudTh>
+                <MudTh>Requires licence</MudTh>
+                <MudTh>Licensed</MudTh>
+                <MudTh>Status</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Plugin">@context.DisplayName</MudTd>
+                <MudTd DataLabel="Feature ID"><code>@context.FeatureId</code></MudTd>
+                <MudTd DataLabel="Requires licence">
+                    @if (context.RequiresLicense)
+                    {
+                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">Yes</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Default" Size="Size.Small">Community</MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Licensed">
+                    @if (context.IsLicensed)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
+                    }
+                </MudTd>
+                <MudTd DataLabel="Status">
+                    @if (context.IsActive)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Active</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Default" Size="Size.Small">Inactive</MudChip>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+@code {
+    private LicenseStatusModel? _status;
+    private IReadOnlyList<LicensePluginRowModel> _plugins = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _status = await LicenseClient.GetStatusAsync()
+                  ?? new LicenseStatusModel("Community", null, null, false);
+        _plugins = await LicenseClient.GetPluginsAsync();
+    }
+
+    private string EditionIcon => _status?.Edition == "Enterprise"
+        ? Icons.Material.Filled.WorkspacePremium
+        : Icons.Material.Filled.Public;
+
+    private Color EditionColor => _status?.Edition == "Enterprise"
+        ? Color.Warning
+        : Color.Info;
+
+    private string ExpiryDisplay
+    {
+        get
+        {
+            if (_status?.ExpiresAt is null) return "—";
+            var d = _status.ExpiresAt.Value;
+            var days = (d - DateTimeOffset.UtcNow).TotalDays;
+            return days < 0
+                ? $"{d:yyyy-MM-dd} (expired)"
+                : $"{d:yyyy-MM-dd} (in {(int)days} days)";
+        }
+    }
+
+    private Color ExpiryColor
+    {
+        get
+        {
+            if (_status?.ExpiresAt is null) return Color.Default;
+            var days = (_status.ExpiresAt.Value - DateTimeOffset.UtcNow).TotalDays;
+            return days switch
+            {
+                < 0 => Color.Error,
+                < 30 => Color.Warning,
+                _ => Color.Success
+            };
+        }
+    }
+}
