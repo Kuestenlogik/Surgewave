@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-06-08
+
+### Fixed
+- **Leader-Reelection-Latenz nach Broker-Shutdown (G28)** — `ClusterController.ElectLeaderAsync` rief den `LeaderAndIsr`-Broadcast an die Replica-Brokers fire-and-forget auf (`_ = SendLeaderAndIsrAsync(...)`). Folge: der Controller's `_clusterState` hatte den neuen Leader sofort, aber die anderen Brokers brauchten mehrere Sekunden bis ihr lokaler `_clusterState` aktualisiert war. Da `MetadataApiHandler` direkt aus `_clusterState` liest, lieferten Metadata-Requests an Followers für mehrere Sekunden den toten alten Leader — Producer connecteten ins Leere und timeoute mit `Local: Message timed out`. Beide Aufrufstellen (Z. 667 + 885 in `ClusterController.cs`) jetzt awaited. Tote Replicas blockieren den `Task.WhenAll`-Broadcast nicht, weil `SendLeaderAndIsrToBrokerAsync` Connection-Refused-Exceptions in einem try/catch fängt. `ReplicationTests.Cluster_BrokerShutdown_RemainingBrokersContinue` ist wieder aktiviert (Skip-Marker aus 0.1.12 entfernt).
+
 ## [0.1.12] - 2026-06-06
 
 ### Added
