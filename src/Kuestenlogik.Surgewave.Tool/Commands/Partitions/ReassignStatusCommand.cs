@@ -61,6 +61,18 @@ public class ReassignStatusCommand : CommandBase
             return 0;
         }
 
+        if (format == OutputFormat.Plain)
+        {
+            var doc2 = JsonDocument.Parse(json);
+            var root2 = doc2.RootElement;
+            Console.WriteLine($"plan\t{root2.GetProperty("planId").GetString()}\t{root2.GetProperty("status").GetString()}\t{root2.GetProperty("completed").GetInt32()}\t{root2.GetProperty("failed").GetInt32()}");
+            foreach (var a in root2.GetProperty("assignments").EnumerateArray())
+            {
+                Console.WriteLine($"assignment\t{a.GetProperty("topic").GetString()}\t{a.GetProperty("partition").GetInt32()}\t{a.GetProperty("status").GetString()}\t{a.GetProperty("progress").GetDouble() * 100:F1}\t{a.GetProperty("bytesCopied").GetInt64()}/{a.GetProperty("totalBytes").GetInt64()}");
+            }
+            return 0;
+        }
+
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -131,6 +143,16 @@ public class ReassignStatusCommand : CommandBase
         if (format == OutputFormat.Json)
         {
             Console.WriteLine(json);
+            return 0;
+        }
+
+        if (format == OutputFormat.Plain)
+        {
+            var doc3 = JsonDocument.Parse(json);
+            foreach (var p in doc3.RootElement.EnumerateArray())
+            {
+                Console.WriteLine($"{p.GetProperty("planId").GetString()}\t{p.GetProperty("status").GetString()}\t{p.GetProperty("totalPartitions").GetInt32()}\t{p.GetProperty("completed").GetInt32()}\t{p.GetProperty("failed").GetInt32()}\t{p.GetProperty("createdAt").GetString()}");
+            }
             return 0;
         }
 

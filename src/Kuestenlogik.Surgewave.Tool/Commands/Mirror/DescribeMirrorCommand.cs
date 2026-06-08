@@ -58,6 +58,14 @@ public class DescribeMirrorCommand : CommandBase
             {
                 Console.WriteLine(JsonSerializer.Serialize(details, JsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"{details.Name}\t{details.Status}\t{details.SourceCluster.Alias}\t{details.TargetCluster.Alias}\t{details.TopicsPattern}\t{string.Join(",", details.Topics)}\t{details.Tasks}");
+                Console.WriteLine($"  SyncGroupOffsets\t{details.Config.SyncGroupOffsets}");
+                Console.WriteLine($"  EmitHeartbeats\t{details.Config.EmitHeartbeats}");
+                Console.WriteLine($"  EmitCheckpoints\t{details.Config.EmitCheckpoints}");
+                Console.WriteLine($"  ReplicationPolicy\t{details.Config.ReplicationPolicy}");
+            }
             else
             {
                 var grid = new Grid();

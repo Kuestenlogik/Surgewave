@@ -37,6 +37,11 @@ public class DescribeConfigCommand : CommandBase
                 var output = new { Topic = topic, Config = config };
                 Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                foreach (var (key, value) in config.OrderBy(kv => kv.Key))
+                    Console.WriteLine($"{key}\t{value}");
+            }
             else
             {
                 AnsiConsole.MarkupLine($"[bold]Topic:[/] {topic}");

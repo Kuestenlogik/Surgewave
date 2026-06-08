@@ -44,6 +44,11 @@ public class ClusterNodesCommand : CommandBase
                 };
                 Console.WriteLine(JsonSerializer.Serialize(output, ClusterJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                foreach (var broker in brokers.OrderBy(b => b.BrokerId))
+                    Console.WriteLine($"{broker.BrokerId}\t{broker.Host}\t{broker.Port}\t{broker.ReplicationPort}\t{(broker.IsController ? "Yes" : "No")}\t{(broker.IsAlive ? "Online" : "Offline")}\t{broker.Rack ?? "-"}");
+            }
             else
             {
                 AnsiConsole.Write(new Rule("[bold blue]Cluster Nodes[/]").LeftJustified());

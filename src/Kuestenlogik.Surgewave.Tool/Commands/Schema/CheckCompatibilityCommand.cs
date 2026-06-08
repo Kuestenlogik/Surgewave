@@ -72,6 +72,14 @@ public class CheckCompatibilityCommand : CommandBase
                     Messages = result.Messages
                 }, SchemaJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                var compatStr = result.IsCompatible ? "compatible" : "incompatible";
+                Console.WriteLine($"{subject}\t{compatStr}");
+                foreach (var message in result.Messages)
+                    Console.WriteLine($"  {message}");
+                if (!result.IsCompatible) return 1;
+            }
             else
             {
                 if (result.IsCompatible)

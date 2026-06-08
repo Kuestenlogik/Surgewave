@@ -44,6 +44,10 @@ public class GetCompatibilityCommand : CommandBase
                     IsGlobal = isGlobal
                 }, SchemaJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"{(isGlobal ? "(global)" : subject)}\t{compatibility}");
+            }
             else
             {
                 var scope = isGlobal ? "[dim](global default)[/]" : $"[bold]{subject}[/]";

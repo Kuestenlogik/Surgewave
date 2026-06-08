@@ -79,6 +79,16 @@ public class ClusterStatusCommand : CommandBase
                 };
                 Console.WriteLine(JsonSerializer.Serialize(status, ClusterJsonOptions.Indented));
             }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"connected\t{clusterInfo.Host}:{clusterInfo.Port}");
+                Console.WriteLine($"broker\t{clusterInfo.BrokerId}\t{(clusterInfo.IsController ? "controller" : "follower")}");
+                Console.WriteLine($"controller\t{clusterInfo.ControllerId}\tepoch={clusterInfo.ControllerEpoch}");
+                Console.WriteLine($"raft\t{(clusterInfo.UseRaftConsensus ? "enabled" : "disabled")}\tleader={(clusterInfo.IsRaftLeader ? "yes" : "no")}\tterm={clusterInfo.RaftTerm}");
+                Console.WriteLine($"topics\t{clusterInfo.TopicCount}\tpartitions={clusterInfo.TotalPartitions}");
+                foreach (var topic in topics.OrderBy(t => t.Name))
+                    Console.WriteLine($"topic\t{topic.Name}\t{topic.PartitionCount}");
+            }
             else
             {
                 AnsiConsole.Write(new Rule("[bold blue]Cluster Status[/]").LeftJustified());

@@ -53,6 +53,18 @@ public class ShowTemplateCommand : CommandBase
             var json = JsonSerializer.Serialize(template, JsonOptions);
             System.Console.WriteLine(json);
         }
+        else if (format == OutputFormat.Plain)
+        {
+            System.Console.WriteLine($"{template.Id}\t{template.Name}\t{template.Category}\t{template.Version}\t{template.Author ?? string.Empty}\t{string.Join(",", template.Tags)}");
+            if (template.Pipeline?.Nodes is { Count: > 0 } nodes)
+            {
+                foreach (var node in nodes)
+                {
+                    var typeName = node.ConnectorType.Split('.').LastOrDefault() ?? node.ConnectorType;
+                    System.Console.WriteLine($"  {node.Label ?? node.NodeId}\t{typeName}");
+                }
+            }
+        }
         else
         {
             // Header

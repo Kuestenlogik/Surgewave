@@ -122,6 +122,10 @@ public class ClusterBalanceCommand : CommandBase
             };
             Console.WriteLine(JsonSerializer.Serialize(status, ClusterJsonOptions.Indented));
         }
+        else if (format == OutputFormat.Plain)
+        {
+            Console.WriteLine($"{host}\t{port}\t{balanceState}\t{Math.Round(balanceScore, 2)}\t{topics.Count}\t{totalPartitions}");
+        }
         else
         {
             var stateColor = balanceState switch
