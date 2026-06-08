@@ -20,7 +20,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.2 — Production hardening
 
-- [#8](https://github.com/Kuestenlogik/Surgewave/issues/8) **G15 — CLI polish (remaining)** `kind:debt` `area:cli` `P2`
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `kind:debt` `area:multi` `P2`
 
 ### v0.3 — AI-friendly broker
