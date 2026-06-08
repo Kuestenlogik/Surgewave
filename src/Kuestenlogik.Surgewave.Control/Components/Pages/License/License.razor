@@ -5,128 +5,130 @@
 
 <PageTitle>License - Surgewave Control</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">License</MudText>
+<div class="surgewave-page-head">
+    <div>
+        <h1 class="surgewave-page-head-title">License</h1>
+        <p class="surgewave-page-head-subtitle">
+            Edition, licensee, expiry and the per-plugin licence requirement matrix.
+        </p>
+    </div>
+</div>
 
 @if (_status is null)
 {
-    <MudAlert Severity="Severity.Info" Class="mb-4">
-        Loading license information…
-    </MudAlert>
+    <MudPaper Class="surgewave-surface">
+        <MudText Typo="Typo.body2">Loading license information…</MudText>
+    </MudPaper>
 }
 else
 {
-    @* Edition / Licensee / Expiry summary *@
-    <MudGrid Class="mb-4">
-        <MudItem xs="12" md="4">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@EditionIcon"
-                                 Color="@EditionColor"
-                                 Size="Size.Large"
-                                 Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Edition</MudText>
-                            <MudText Typo="Typo.h5">@_status.Edition</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-
-        <MudItem xs="12" md="4">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Default" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Licensed to</MudText>
-                            <MudText Typo="Typo.h6">
-                                @(string.IsNullOrEmpty(_status.LicensedTo) ? "—" : _status.LicensedTo)
-                            </MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-
-        <MudItem xs="12" md="4">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Event" Color="@ExpiryColor" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Expires</MudText>
-                            <MudText Typo="Typo.h6">@ExpiryDisplay</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-    </MudGrid>
+    @* Summary strip — clean horizontal stats instead of a 3-card grid. *@
+    <div class="surgewave-summary-strip">
+        <div class="surgewave-stat">
+            <span class="surgewave-stat-label">Edition</span>
+            <span class="surgewave-stat-value">
+                <span class="surgewave-status @EditionStatusClass">
+                    <span class="surgewave-status-dot"></span>
+                    @_status.Edition
+                </span>
+            </span>
+        </div>
+        <div class="surgewave-stat">
+            <span class="surgewave-stat-label">Licensed to</span>
+            <span class="surgewave-stat-value @(string.IsNullOrEmpty(_status.LicensedTo) ? "surgewave-stat-value--muted" : "")">
+                @(string.IsNullOrEmpty(_status.LicensedTo) ? "—" : _status.LicensedTo)
+            </span>
+        </div>
+        <div class="surgewave-stat">
+            <span class="surgewave-stat-label">Expires</span>
+            <span class="surgewave-stat-value @ExpiryValueClass">
+                @ExpiryDisplay
+            </span>
+        </div>
+        <div class="surgewave-stat">
+            <span class="surgewave-stat-label">Plugins discovered</span>
+            <span class="surgewave-stat-value">@_plugins.Count</span>
+        </div>
+    </div>
 
     @if (!_status.HasProvider)
     {
-        <MudAlert Severity="Severity.Info" Class="mb-4">
-            No <code>ILicenseProvider</code> is registered. The broker is running in community mode —
-            all plugins with <code>RequiresLicense = false</code> load unconditionally; plugins that
-            require a licence are skipped with a warning at startup.
-        </MudAlert>
+        <MudPaper Class="surgewave-surface mb-4">
+            <MudText Typo="Typo.body2">
+                No <span class="surgewave-mono">ILicenseProvider</span> is registered.
+                The broker runs in community mode — plugins with
+                <span class="surgewave-mono">RequiresLicense = false</span> load
+                unconditionally; plugins that require a licence are skipped with a warning at startup.
+            </MudText>
+        </MudPaper>
     }
 
-    @* Per-plugin licence + activation table *@
-    <MudText Typo="Typo.h6" Class="mb-2">Discovered broker plugins</MudText>
+    <div class="surgewave-section-title">Discovered broker plugins</div>
 
-    @if (_plugins.Count == 0)
-    {
-        <MudAlert Severity="Severity.Normal">No broker plugins were discovered.</MudAlert>
-    }
-    else
-    {
-        <MudTable Items="_plugins" Dense="true" Hover="true" Bordered="false" Striped="true">
-            <HeaderContent>
-                <MudTh>Plugin</MudTh>
-                <MudTh>Feature ID</MudTh>
-                <MudTh>Requires licence</MudTh>
-                <MudTh>Licensed</MudTh>
-                <MudTh>Status</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd DataLabel="Plugin">@context.DisplayName</MudTd>
-                <MudTd DataLabel="Feature ID"><code>@context.FeatureId</code></MudTd>
-                <MudTd DataLabel="Requires licence">
-                    @if (context.RequiresLicense)
-                    {
-                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">Yes</MudChip>
-                    }
-                    else
-                    {
-                        <MudChip T="string" Color="Color.Default" Size="Size.Small">Community</MudChip>
-                    }
-                </MudTd>
-                <MudTd DataLabel="Licensed">
-                    @if (context.IsLicensed)
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-                    }
-                    else
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
-                    }
-                </MudTd>
-                <MudTd DataLabel="Status">
-                    @if (context.IsActive)
-                    {
-                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Active</MudChip>
-                    }
-                    else
-                    {
-                        <MudChip T="string" Color="Color.Default" Size="Size.Small">Inactive</MudChip>
-                    }
-                </MudTd>
-            </RowTemplate>
-        </MudTable>
-    }
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+        @if (_plugins.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="pa-6">No broker plugins were discovered.</MudText>
+        }
+        else
+        {
+            <MudTable Items="_plugins" Dense="true" Hover="true" Bordered="false" Elevation="0">
+                <HeaderContent>
+                    <MudTh>Plugin</MudTh>
+                    <MudTh>Feature ID</MudTh>
+                    <MudTh>Licence</MudTh>
+                    <MudTh>Status</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Plugin">
+                        <strong>@context.DisplayName</strong>
+                    </MudTd>
+                    <MudTd DataLabel="Feature ID">
+                        <span class="surgewave-mono">@context.FeatureId</span>
+                    </MudTd>
+                    <MudTd DataLabel="Licence">
+                        @if (!context.RequiresLicense)
+                        {
+                            <span class="surgewave-status">
+                                <span class="surgewave-status-dot"></span>
+                                Community
+                            </span>
+                        }
+                        else if (context.IsLicensed)
+                        {
+                            <span class="surgewave-status surgewave-status--ok">
+                                <span class="surgewave-status-dot"></span>
+                                Licensed
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="surgewave-status surgewave-status--error">
+                                <span class="surgewave-status-dot"></span>
+                                Not licensed
+                            </span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Status">
+                        @if (context.IsActive)
+                        {
+                            <span class="surgewave-status surgewave-status--ok">
+                                <span class="surgewave-status-dot"></span>
+                                Active
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="surgewave-status surgewave-status--idle">
+                                <span class="surgewave-status-dot"></span>
+                                Inactive
+                            </span>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
 }
 
 @code {
@@ -140,13 +142,18 @@ else
         _plugins = await LicenseClient.GetPluginsAsync();
     }
 
-    private string EditionIcon => _status?.Edition == "Enterprise"
-        ? Icons.Material.Filled.WorkspacePremium
-        : Icons.Material.Filled.Public;
+    private string EditionStatusClass => _status?.Edition == "Enterprise"
+        ? "surgewave-status--info"
+        : "surgewave-status--idle";
 
-    private Color EditionColor => _status?.Edition == "Enterprise"
-        ? Color.Warning
-        : Color.Info;
+    private string ExpiryValueClass
+    {
+        get
+        {
+            if (_status?.ExpiresAt is null) return "surgewave-stat-value--muted";
+            return ""; // colored via status-dot variant below if we add one later
+        }
+    }
 
     private string ExpiryDisplay
     {
@@ -157,22 +164,9 @@ else
             var days = (d - DateTimeOffset.UtcNow).TotalDays;
             return days < 0
                 ? $"{d:yyyy-MM-dd} (expired)"
-                : $"{d:yyyy-MM-dd} (in {(int)days} days)";
-        }
-    }
-
-    private Color ExpiryColor
-    {
-        get
-        {
-            if (_status?.ExpiresAt is null) return Color.Default;
-            var days = (_status.ExpiresAt.Value - DateTimeOffset.UtcNow).TotalDays;
-            return days switch
-            {
-                < 0 => Color.Error,
-                < 30 => Color.Warning,
-                _ => Color.Success
-            };
+                : days < 30
+                    ? $"{d:yyyy-MM-dd} (in {(int)days}d)"
+                    : $"{d:yyyy-MM-dd}";
         }
     }
 }

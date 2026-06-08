@@ -394,3 +394,126 @@ body {
   gap: 8px;
   flex-shrink: 0;
 }
+
+/* 7. Linear-style Density Helpers ========================================= *
+ * Compact patterns that pages can opt into instead of the MudCard-grid-
+ * with-big-icons dashboard look that ships by default. Source of the
+ * Linear-app aesthetic: tight rows, subtle borders, monospace for IDs,
+ * small status dots instead of pill chips.                                  */
+
+/* --- Summary strip: horizontal row of compact stats. Replaces a 3-4
+ *     column MudGrid of MudCards with big icons. Each stat is a
+ *     label/value pair separated by thin verticals. */
+.surgewave-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid var(--sw-border-light);
+  border-radius: 10px;
+  background: var(--sw-surface-light);
+  padding: 0;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.mud-theme-dark .surgewave-summary-strip {
+  border-color: var(--sw-border-dark);
+  background: rgba(255, 255, 255, 0.015);
+}
+.surgewave-stat {
+  flex: 1 1 0;
+  min-width: 160px;
+  padding: 18px 22px;
+  border-right: 1px solid var(--sw-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mud-theme-dark .surgewave-stat { border-right-color: var(--sw-border-dark); }
+.surgewave-stat:last-child { border-right: none; }
+.surgewave-stat-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sw-muted-light);
+}
+.mud-theme-dark .surgewave-stat-label { color: var(--sw-muted-dark); }
+.surgewave-stat-value {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--sw-text-light);
+  letter-spacing: -0.01em;
+}
+.mud-theme-dark .surgewave-stat-value { color: var(--sw-text-dark); }
+.surgewave-stat-value--mono {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.surgewave-stat-value--muted { color: var(--sw-muted-light); }
+.mud-theme-dark .surgewave-stat-value--muted { color: var(--sw-muted-dark); }
+
+/* --- Status dot: 8px coloured dot + inline label. Replaces MudChip for
+ *     binary/state markers where the chip-pill is too loud. */
+.surgewave-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.surgewave-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--sw-muted-light);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.12);
+}
+.mud-theme-dark .surgewave-status-dot { background: var(--sw-muted-dark); }
+.surgewave-status--ok    .surgewave-status-dot { background: var(--sw-success); box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18); }
+.surgewave-status--warn  .surgewave-status-dot { background: var(--sw-warning); box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18); }
+.surgewave-status--error .surgewave-status-dot { background: var(--sw-error);   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18); }
+.surgewave-status--info  .surgewave-status-dot { background: var(--sw-accent);  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.18); }
+.surgewave-status--idle  .surgewave-status-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--sw-muted-light); }
+.mud-theme-dark .surgewave-status--idle .surgewave-status-dot { box-shadow: inset 0 0 0 1px var(--sw-muted-dark); }
+
+/* --- Mono text utility: opt-in JetBrains Mono for IDs, topic names,
+ *     config keys, connection strings, anything operator-typed. */
+.surgewave-mono {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  font-size: 0.8125rem;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+}
+
+/* --- Section heading: lighter than h6, separates subsections inside a
+ *     page without using another full MudText typography weight. */
+.surgewave-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sw-muted-light);
+  margin: 24px 0 10px;
+}
+.mud-theme-dark .surgewave-section-title { color: var(--sw-muted-dark); }
+.surgewave-section-title:first-child { margin-top: 0; }
+
+/* --- Surface-only card: minimal-shadow card variant for the Linear
+ *     dense look. Apply `Class="surgewave-surface"` on MudPaper to get
+ *     a flat border-only card without the MudPaper-default elevation. */
+.mud-paper.surgewave-surface {
+  background: var(--sw-surface-light);
+  border: 1px solid var(--sw-border-light);
+  border-radius: 10px;
+  box-shadow: none !important;
+  padding: 20px 24px;
+}
+.mud-theme-dark .mud-paper.surgewave-surface {
+  background: rgba(255, 255, 255, 0.015);
+  border-color: var(--sw-border-dark);
+}
