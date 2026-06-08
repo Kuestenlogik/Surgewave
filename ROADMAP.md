@@ -49,7 +49,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `kind:feature` `area:broker` `track:transport` `P2`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `kind:debt` `area:observability` `track:transport` `P3`
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `kind:docs` `area:docs` `P2`
-- [#28](https://github.com/Kuestenlogik/Surgewave/issues/28) **Control UI license page** `kind:feature` `area:control` `P2`
 
 ---
 
