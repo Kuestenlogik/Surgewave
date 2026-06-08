@@ -8,27 +8,40 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Next up
 
-### Later
+### v0.2 — Production hardening
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `kind:feature` `area:broker` `track:performance` `P1`
-- [#10](https://github.com/Kuestenlogik/Surgewave/issues/10) **G18 — AI primitives as default-bundled Apache-2.0 plugin** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
 - [#18](https://github.com/Kuestenlogik/Surgewave/issues/18) **Plugin SDK D — surgewave sdk install --version X.Y.Z** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P1`
 - [#29](https://github.com/Kuestenlogik/Surgewave/issues/29) **G28 — Leader-reelection latency after broker shutdown** `kind:bug` `area:clustering` `track:cluster-correctness` `P2`
 
+### v0.3 — AI-friendly broker
+
+- [#10](https://github.com/Kuestenlogik/Surgewave/issues/10) **G18 — AI primitives as default-bundled Apache-2.0 plugin** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
+
 ## Backlog
 
-### Later
+### v0.2 — Production hardening
+
+- [#8](https://github.com/Kuestenlogik/Surgewave/issues/8) **G15 — CLI polish (remaining)** `kind:debt` `area:cli` `P2`
+- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `kind:debt` `area:multi` `P2`
+
+### v0.3 — AI-friendly broker
+
+- [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `kind:feature` `area:schema` `P2`
+- [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `kind:feature` `area:schema` `track:ai-pipelines` `P1`
+- [#15](https://github.com/Kuestenlogik/Surgewave/issues/15) **G26 — AI pipeline cost tracking** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
+
+### v1.0 — first stable
 
 - [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `kind:feature` `area:multi` `P1`
 - [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `kind:feature` `area:clustering` `track:cluster-correctness` `P2`
 - [#7](https://github.com/Kuestenlogik/Surgewave/issues/7) **G12 — Cluster-linking-grade geo-replication** `kind:feature` `area:clustering` `P2`
-- [#8](https://github.com/Kuestenlogik/Surgewave/issues/8) **G15 — CLI polish (remaining)** `kind:debt` `area:cli` `P2`
-- [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `kind:feature` `area:connect` `P3`
 - [#11](https://github.com/Kuestenlogik/Surgewave/issues/11) **G21 — Disaggregated compute/storage mode** `kind:feature` `area:storage` `P1`
+
+### Later
+
+- [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `kind:feature` `area:connect` `P3`
 - [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `kind:feature` `area:streams` `P2`
-- [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `kind:feature` `area:schema` `P2`
-- [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `kind:feature` `area:schema` `track:ai-pipelines` `P1`
-- [#15](https://github.com/Kuestenlogik/Surgewave/issues/15) **G26 — AI pipeline cost tracking** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
 - [#16](https://github.com/Kuestenlogik/Surgewave/issues/16) **Plugin SDK B — Schema-validation as build task** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P2`
 - [#17](https://github.com/Kuestenlogik/Surgewave/issues/17) **Plugin SDK C — surgewave plugin scaffold + dotnet new templates** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P2`
 - [#19](https://github.com/Kuestenlogik/Surgewave/issues/19) **Plugin SDK E — Roslyn analysers (SRWV-prefix rules)** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P2`
@@ -38,7 +51,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#23](https://github.com/Kuestenlogik/Surgewave/issues/23) **Operator wizard — Plugin marketplace dependency graph** `kind:feature` `area:plugin-sdk` `P2`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `kind:feature` `area:broker` `track:transport` `P2`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `kind:debt` `area:observability` `track:transport` `P3`
-- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `kind:debt` `area:multi` `P2`
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `kind:docs` `area:docs` `P2`
 - [#28](https://github.com/Kuestenlogik/Surgewave/issues/28) **Control UI license page** `kind:feature` `area:control` `P2`
 

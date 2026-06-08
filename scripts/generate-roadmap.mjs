@@ -160,7 +160,7 @@ function classify(items) {
 // "Later" milestone (not scheduled and no milestone both mean "not
 // committed"). Rendered as "Later" so readers see the same heading
 // they're used to.
-const MILESTONE_ORDER = ["v1.5", "v1.6", "v1.7", "v1.8", "v1.9", "v1.10", null];
+const MILESTONE_ORDER = ["v0.2", "v0.3", "v0.4", "v0.5", "v1.0", null];
 
 // Cache of milestone title → theme so the second section that
 // references the same milestone doesn't re-parse. Populated as
