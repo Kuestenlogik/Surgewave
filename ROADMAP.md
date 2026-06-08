@@ -11,7 +11,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 ### v0.2 — Production hardening
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `kind:feature` `area:broker` `track:performance` `P1`
-- [#18](https://github.com/Kuestenlogik/Surgewave/issues/18) **Plugin SDK D — surgewave sdk install --version X.Y.Z** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P1`
 
 ### v0.3 — AI-friendly broker
 
