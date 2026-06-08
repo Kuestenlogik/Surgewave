@@ -658,13 +658,17 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                 }
             }
 
-            // Broadcast LeaderAndIsr to remote brokers for this partition
+            // Broadcast LeaderAndIsr to remote brokers for this partition.
+            // Awaited (not fire-and-forget) so the controller's reelection
+            // returns only after the surviving brokers have updated their
+            // local _clusterState — otherwise a Metadata request landing on
+            // a follower right after reelection still sees the stale leader.
             if (_controllerClient != null)
             {
                 var partitionState = _clusterState.GetPartitionState(tp);
                 if (partitionState != null)
                 {
-                    _ = _controllerClient.SendLeaderAndIsrAsync([(tp, partitionState)], ct);
+                    await _controllerClient.SendLeaderAndIsrAsync([(tp, partitionState)], ct).ConfigureAwait(false);
                 }
             }
         }
@@ -876,13 +880,18 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             await _replicaManager.BecomeFollowerAsync(tp, newLeader, newLeaderEpoch, ct);
         }
 
-        // Broadcast LeaderAndIsr to all affected brokers
+        // Broadcast LeaderAndIsr to all affected brokers. Awaited so the
+        // controller's ElectLeaderAsync returns only after the followers
+        // have ack'd the new leader assignment; without this a Metadata
+        // request landing on a follower right after reelection still sees
+        // the stale leader and the producer times out before the next
+        // refresh cycle picks up the change.
         if (_controllerClient != null)
         {
             var updatedState = _clusterState.GetPartitionState(tp);
             if (updatedState != null)
             {
-                _ = _controllerClient.SendLeaderAndIsrAsync([(tp, updatedState)], ct);
+                await _controllerClient.SendLeaderAndIsrAsync([(tp, updatedState)], ct).ConfigureAwait(false);
             }
         }
 

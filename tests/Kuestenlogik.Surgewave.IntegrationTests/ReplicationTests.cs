@@ -327,7 +327,7 @@ public class ReplicationTests : IAsyncLifetime
         // The replica assignment is the key fix verified by this test
     }
 
-    [Fact(Timeout = 120000, Skip = "Leader-reelection latency after broker shutdown is unreliable on Linux CI — ClusterController logs 'Transferring leadership for 1 partitions' but the new assignment doesn't propagate into admin-metadata fast enough (>60s) under load. Tracked as a cluster-controller follow-up on the roadmap.")] // 2 minute timeout - multi-broker test
+    [Fact(Timeout = 120000)] // 2 minute timeout - multi-broker test
     public async Task Cluster_BrokerShutdown_RemainingBrokersContinue()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
