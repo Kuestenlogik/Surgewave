@@ -1443,6 +1443,9 @@ logger.LogInformation("  - Rolling Upgrade API: {Host}:{GrpcPort}/api/cluster/ve
 app.MapConfigValidation();
 logger.LogInformation("  - Config Validate API: {Host}:{GrpcPort}/api/config/validate", config.Host, config.GrpcPort);
 
+app.MapLicenseApi(license, activatedPlugins);
+logger.LogInformation("  - License API:        {Host}:{GrpcPort}/api/license", config.Host, config.GrpcPort);
+
 // Configure activated broker plugins (endpoint mapping, middleware)
 await BrokerPluginActivator.ConfigureBrokerPluginsAsync(app, app.Services, activatedPlugins);
 foreach (var bp in activatedPlugins)
