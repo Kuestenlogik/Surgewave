@@ -8,8 +8,6 @@
 
 <PageTitle>@TopicName - Surgewave Control</PageTitle>
 
-<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
-
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
@@ -25,113 +23,98 @@ else if (_error != null)
 }
 else if (_topic != null)
 {
-    <MudGrid>
-        @* Topic Header *@
-        <MudItem xs="12">
-            <MudPaper Elevation="2" Class="pa-4">
-                <div class="d-flex justify-space-between align-center">
-                    <div>
-                        <PageHead Title="@_topic.Name" />
-                        <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
-                            @_topic.PartitionCount partitions | Replication factor: @_topic.ReplicationFactor
-                            @if (_topic.IsInternal)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">Internal</MudChip>
-                            }
-                        </MudText>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
-                                       OnClick="OpenProducerAsync" Disabled="@_topic.IsInternal">
-                                Produce Message
-                            </MudButton>
-                        </AuthorizeView>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
-                                   StartIcon="@Icons.Material.Filled.Schema"
-                                   OnClick="InferSchemaAsync" Disabled="@(_inferring || _topic.IsInternal)">
-                            @if (_inferring)
-                            {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                            }
-                            Infer Schema
-                        </MudButton>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Settings"
-                                   Href="@($"/topics/{TopicName}/config")">
-                            Configuration
-                        </MudButton>
-                        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
-                            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
-                                       OnClick="ConfirmDeleteAsync" Disabled="@_topic.IsInternal">
-                                Delete
-                            </MudButton>
-                        </AuthorizeView>
-                    </div>
-                </div>
-            </MudPaper>
-        </MudItem>
+    <MudBreadcrumbs Items="_breadcrumbs" Class="pa-0 mb-2" />
 
-        @* Partition Overview *@
-        <MudItem xs="12">
-            <MudCard Elevation="2">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Partitions</MudText>
-                    </CardHeaderContent>
-                </MudCardHeader>
-                <MudCardContent>
-                    <MudTable Items="@_topic.Partitions" Dense="true" Hover="true" Striped="true">
-                        <HeaderContent>
-                            <MudTh>Partition</MudTh>
-                            <MudTh>Leader</MudTh>
-                            <MudTh>Replicas</MudTh>
-                            <MudTh>ISR</MudTh>
-                            <MudTh>High Watermark</MudTh>
-                            <MudTh>Log Start</MudTh>
-                            <MudTh>Messages</MudTh>
-                            <MudTh>Actions</MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd DataLabel="Partition">
-                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@context.PartitionId</MudChip>
-                            </MudTd>
-                            <MudTd DataLabel="Leader">
-                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Broker @context.Leader</MudChip>
-                            </MudTd>
-                            <MudTd DataLabel="Replicas">
-                                @foreach (var replica in context.Replicas)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="mr-1">@replica</MudChip>
-                                }
-                            </MudTd>
-                            <MudTd DataLabel="ISR">
-                                @foreach (var isr in context.Isr)
-                                {
-                                    <MudChip T="string" Size="Size.Small"
-                                             Color="@(isr == context.Leader ? Color.Success : Color.Info)" Class="mr-1">@isr</MudChip>
-                                }
-                                @if (context.Isr.Count < context.Replicas.Count)
-                                {
-                                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small"
-                                             Title="Under-replicated" />
-                                }
-                            </MudTd>
-                            <MudTd DataLabel="High Watermark">@context.HighWatermark.ToString("N0")</MudTd>
-                            <MudTd DataLabel="Log Start">@context.LogStartOffset.ToString("N0")</MudTd>
-                            <MudTd DataLabel="Messages">@((context.HighWatermark - context.LogStartOffset).ToString("N0"))</MudTd>
-                            <MudTd>
-                                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                                           StartIcon="@Icons.Material.Filled.Search"
-                                           Href="@($"/topics/{TopicName}/partitions/{context.PartitionId}/messages")"
-                                           Disabled="@(context.HighWatermark == context.LogStartOffset)">
-                                    Browse
-                                </MudButton>
-                            </MudTd>
-                        </RowTemplate>
-                    </MudTable>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
+    <PageHead Title="@_topic.Name"
+              Subtitle="@($"{_topic.PartitionCount} partitions · replication factor {_topic.ReplicationFactor}{(_topic.IsInternal ? " · internal" : "")}")">
+        <Actions>
+            <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Send"
+                           OnClick="OpenProducerAsync" Disabled="@_topic.IsInternal">
+                    Produce
+                </MudButton>
+            </AuthorizeView>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Schema"
+                       OnClick="InferSchemaAsync" Disabled="@(_inferring || _topic.IsInternal)">
+                @if (_inferring)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Infer schema
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Settings"
+                       Href="@($"/topics/{TopicName}/config")">
+                Configuration
+            </MudButton>
+            <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                <MudTooltip Text="Delete topic">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="ConfirmDeleteAsync" Disabled="@_topic.IsInternal" />
+                </MudTooltip>
+            </AuthorizeView>
+        </Actions>
+    </PageHead>
+
+    <div class="surgewave-section-title">Partitions</div>
+
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+        <MudTable Items="@_topic.Partitions" Dense="true" Hover="true" Striped="false" Elevation="0">
+            <HeaderContent>
+                <MudTh>Partition</MudTh>
+                <MudTh>Leader</MudTh>
+                <MudTh>Replicas</MudTh>
+                <MudTh>ISR</MudTh>
+                <MudTh Style="text-align: right">High Watermark</MudTh>
+                <MudTh Style="text-align: right">Log Start</MudTh>
+                <MudTh Style="text-align: right">Messages</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Partition"><span class="surgewave-mono">@context.PartitionId</span></MudTd>
+                <MudTd DataLabel="Leader">
+                    <span class="surgewave-status surgewave-status--ok">
+                        <span class="surgewave-status-dot"></span>
+                        <span class="surgewave-mono">Broker @context.Leader</span>
+                    </span>
+                </MudTd>
+                <MudTd DataLabel="Replicas">
+                    <span class="surgewave-mono">@string.Join(", ", context.Replicas)</span>
+                </MudTd>
+                <MudTd DataLabel="ISR">
+                    @{
+                        var underReplicated = context.Isr.Count < context.Replicas.Count;
+                    }
+                    <span class="surgewave-status @(underReplicated ? "surgewave-status--warn" : "surgewave-status--ok")">
+                        <span class="surgewave-status-dot"></span>
+                        <span class="surgewave-mono">@string.Join(", ", context.Isr)</span>
+                    </span>
+                </MudTd>
+                <MudTd DataLabel="High Watermark" Style="text-align: right">
+                    <span class="surgewave-mono">@context.HighWatermark.ToString("N0")</span>
+                </MudTd>
+                <MudTd DataLabel="Log Start" Style="text-align: right">
+                    <span class="surgewave-mono">@context.LogStartOffset.ToString("N0")</span>
+                </MudTd>
+                <MudTd DataLabel="Messages" Style="text-align: right">
+                    <span class="surgewave-mono">@((context.HighWatermark - context.LogStartOffset).ToString("N0"))</span>
+                </MudTd>
+                <MudTd>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Search"
+                               Href="@($"/topics/{TopicName}/partitions/{context.PartitionId}/messages")"
+                               Disabled="@(context.HighWatermark == context.LogStartOffset)">
+                        Browse
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+
+    <MudGrid>
+        @* Following sections (Configuration Preview, Inferred Schema) preserved below *@
 
         @* Configuration Preview *@
         <MudItem xs="12">
