@@ -4,7 +4,13 @@
 
 <PageTitle>Brokers - Surgewave Control</PageTitle>
 
-<PageHead Title="Brokers" />
+<PageHead Title="Brokers"
+          Subtitle="Broker inventory, controller status, and partition leadership.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadBrokersAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
@@ -21,54 +27,38 @@ else if (_error != null)
 }
 else
 {
-    <MudGrid>
-        @* Cluster Summary *@
-        <MudItem xs="12">
-            <MudPaper Elevation="2" Class="pa-4 mb-4">
-                <MudGrid>
-                    <MudItem xs="12" md="3">
-                        <div class="d-flex align-center">
-                            <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                            <div>
-                                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Brokers</MudText>
-                                <MudText Typo="Typo.h5">@_brokers.Count</MudText>
-                            </div>
-                        </div>
-                    </MudItem>
-                    <MudItem xs="12" md="3">
-                        <div class="d-flex align-center">
-                            <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                            <div>
-                                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Controller</MudText>
-                                <MudText Typo="Typo.h5">Broker @(_brokers.FirstOrDefault(b => b.IsController)?.BrokerId ?? -1)</MudText>
-                            </div>
-                        </div>
-                    </MudItem>
-                    <MudItem xs="12" md="3">
-                        <div class="d-flex align-center">
-                            <MudIcon Icon="@(_isHealthy ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
-                                     Color="@(_isHealthy ? Color.Success : Color.Error)" Size="Size.Large" Class="mr-3" />
-                            <div>
-                                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
-                                <MudText Typo="Typo.h5">@(_isHealthy ? "Healthy" : "Unhealthy")</MudText>
-                            </div>
-                        </div>
-                    </MudItem>
-                    <MudItem xs="12" md="3" Class="d-flex align-center justify-end">
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                                   OnClick="LoadBrokersAsync">
-                            Refresh
-                        </MudButton>
-                    </MudItem>
-                </MudGrid>
-            </MudPaper>
-        </MudItem>
+    <SummaryStrip>
+        <Stat Label="Total brokers" Value="@_brokers.Count.ToString()" />
+        <Stat Label="Controller">
+            @{
+                var controller = _brokers.FirstOrDefault(b => b.IsController);
+            }
+            @if (controller is not null)
+            {
+                <span class="surgewave-status surgewave-status--info">
+                    <span class="surgewave-status-dot"></span>
+                    @($"Broker {controller.BrokerId}")
+                </span>
+            }
+            else
+            {
+                <span class="surgewave-stat-value--muted">—</span>
+            }
+        </Stat>
+        <Stat Label="Status">
+            <span class="surgewave-status @(_isHealthy ? "surgewave-status--ok" : "surgewave-status--error")">
+                <span class="surgewave-status-dot"></span>
+                @(_isHealthy ? "Healthy" : "Unhealthy")
+            </span>
+        </Stat>
+    </SummaryStrip>
 
+    <MudGrid>
         @* Broker Cards *@
         @foreach (var broker in _brokers.OrderBy(b => b.BrokerId))
         {
             <MudItem xs="12" md="6" lg="4">
-                <MudCard Elevation="2">
+                <MudCard Elevation="0">
                     <MudCardHeader>
                         <CardHeaderAvatar>
                             <MudAvatar Color="@(broker.IsController ? Color.Warning : Color.Primary)">
@@ -77,7 +67,7 @@ else
                         </CardHeaderAvatar>
                         <CardHeaderContent>
                             <MudText Typo="Typo.h6">Broker @broker.BrokerId</MudText>
-                            <MudText Typo="Typo.body2" Color="Color.Secondary">@broker.Host:@broker.Port</MudText>
+                            <span class="surgewave-mono">@broker.Host:@broker.Port</span>
                         </CardHeaderContent>
                         <CardHeaderActions>
                             @if (broker.IsController)
@@ -93,26 +83,41 @@ else
                             <tbody>
                                 <tr>
                                     <td><MudText Typo="Typo.body2" Color="Color.Secondary">Host</MudText></td>
-                                    <td><MudText Typo="Typo.body2">@broker.Host</MudText></td>
+                                    <td><span class="surgewave-mono">@broker.Host</span></td>
                                 </tr>
                                 <tr>
                                     <td><MudText Typo="Typo.body2" Color="Color.Secondary">Port</MudText></td>
-                                    <td><MudText Typo="Typo.body2">@broker.Port</MudText></td>
+                                    <td><span class="surgewave-mono">@broker.Port</span></td>
                                 </tr>
                                 <tr>
                                     <td><MudText Typo="Typo.body2" Color="Color.Secondary">Rack</MudText></td>
-                                    <td><MudText Typo="Typo.body2">@(broker.Rack ?? "N/A")</MudText></td>
+                                    <td>
+                                        @if (broker.Rack is null)
+                                        {
+                                            <span class="surgewave-stat-value--muted">—</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="surgewave-mono">@broker.Rack</span>
+                                        }
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td><MudText Typo="Typo.body2" Color="Color.Secondary">Peer Transport</MudText></td>
                                     <td>
                                         @if (string.Equals(broker.PeerTransport, "quic", StringComparison.OrdinalIgnoreCase))
                                         {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Icon="@Icons.Material.Filled.Bolt">QUIC</MudChip>
+                                            <span class="surgewave-status surgewave-status--info">
+                                                <span class="surgewave-status-dot"></span>
+                                                QUIC
+                                            </span>
                                         }
                                         else
                                         {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">TCP</MudChip>
+                                            <span class="surgewave-status">
+                                                <span class="surgewave-status-dot"></span>
+                                                TCP
+                                            </span>
                                         }
                                     </td>
                                 </tr>
@@ -121,11 +126,17 @@ else
                                     <td>
                                         @if (broker.IsController)
                                         {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">Controller</MudChip>
+                                            <span class="surgewave-status surgewave-status--warn">
+                                                <span class="surgewave-status-dot"></span>
+                                                Controller
+                                            </span>
                                         }
                                         else
                                         {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">Replica</MudChip>
+                                            <span class="surgewave-status">
+                                                <span class="surgewave-status-dot"></span>
+                                                Replica
+                                            </span>
                                         }
                                     </td>
                                 </tr>
