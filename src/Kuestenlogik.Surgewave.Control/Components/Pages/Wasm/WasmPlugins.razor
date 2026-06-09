@@ -4,7 +4,8 @@
 
 <PageTitle>WASM Plugins - Surgewave Control</PageTitle>
 
-<PageHead Title="WASM Plugins" />
+<PageHead Title="WASM Plugins"
+          Subtitle="Sandboxed WebAssembly plugins running in the broker." />
 
 @if (_loading)
 {
@@ -21,65 +22,17 @@ else if (_error != null)
 }
 else
 {
-    @* Summary Cards *@
-    <MudGrid Class="mb-4">
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Memory"
-                                 Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Plugins</MudText>
-                            <MudText Typo="Typo.h5">@_plugins.Count</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
-                                 Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Running</MudText>
-                            <MudText Typo="Typo.h5">@_plugins.Count(p => p.State == "Running")</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.DataUsage"
-                                 Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Memory</MudText>
-                            <MudText Typo="Typo.h5">@FormatBytes(_plugins.Sum(p => p.MemoryUsageBytes))</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Message"
-                                 Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Messages Processed</MudText>
-                            <MudText Typo="Typo.h5">@_plugins.Sum(p => p.MessagesProcessed).ToString("N0")</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-    </MudGrid>
+    <SummaryStrip>
+        <Stat Label="Total plugins" Value="@_plugins.Count.ToString()" />
+        <Stat Label="Running">
+            <span class="surgewave-status surgewave-status--ok">
+                <span class="surgewave-status-dot"></span>
+                @_plugins.Count(p => p.State == "Running")
+            </span>
+        </Stat>
+        <Stat Label="Memory" Value="@FormatBytes(_plugins.Sum(p => p.MemoryUsageBytes))" Mono="true" />
+        <Stat Label="Messages processed" Value="@_plugins.Sum(p => p.MessagesProcessed).ToString("N0")" Mono="true" />
+    </SummaryStrip>
 
     @* Plugin Table *@
     <MudTable Items="_plugins" Hover="true" Dense="true" Elevation="2">

@@ -6,21 +6,13 @@
 
 <PageTitle>Queue Inspector - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Queue Inspector" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Monitor in-flight messages, delivery counts, and dead letter queues — auto-refreshes every 5s
-        </MudText>
-    </div>
-    <div class="d-flex gap-2 align-center">
-        <MudChip T="string" Size="Size.Small" Color="Color.Info" Icon="@Icons.Material.Filled.Autorenew">
-            Auto-refresh
-        </MudChip>
-        <MudButton Variant="Variant.Outlined" OnClick="LoadTopicsAsync"
-                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
-    </div>
-</div>
+<PageHead Title="Queue Inspector"
+          Subtitle="In-flight messages, delivery counts, and dead-letter queues — auto-refresh every 5s.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadTopicsAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading && _topics.Count == 0)
 {
@@ -34,61 +26,20 @@ else if (_error != null)
     </MudAlert>
 }
 
-@* ===== SUMMARY CARDS ===== *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Queue" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Queues</MudText>
-                        <MudText Typo="Typo.h5">@_topics.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total In-Flight</MudText>
-                        <MudText Typo="Typo.h5">@_topics.Sum(t => t.InFlightCount).ToString("N0")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total DLQ</MudText>
-                        <MudText Typo="Typo.h5">@_topics.Sum(t => t.DlqCount).ToString("N0")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Acked</MudText>
-                        <MudText Typo="Typo.h5">@_topics.Sum(t => t.TotalAcked).ToString("N0")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Active queues" Value="@_topics.Count.ToString()" />
+    <Stat Label="In-flight" Value="@_topics.Sum(t => t.InFlightCount).ToString("N0")" Mono="true" />
+    <Stat Label="DLQ">
+        @{
+            var dlq = _topics.Sum(t => t.DlqCount);
+        }
+        <span class="surgewave-status @(dlq > 0 ? "surgewave-status--error" : "surgewave-status--ok")">
+            <span class="surgewave-status-dot"></span>
+            <span class="surgewave-mono">@dlq.ToString("N0")</span>
+        </span>
+    </Stat>
+    <Stat Label="Acked" Value="@_topics.Sum(t => t.TotalAcked).ToString("N0")" Mono="true" />
+</SummaryStrip>
 
 @* ===== OVERVIEW TABLE ===== *@
 @if (_topics.Count == 0 && !_loading)

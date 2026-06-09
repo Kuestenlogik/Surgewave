@@ -11,85 +11,38 @@
 
 <PageTitle>Data Catalog - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Data Catalog" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Topic metadata, ownership, tags, and PII classification
-        </MudText>
-    </div>
-    <div class="d-flex gap-2">
-        <MudButton Variant="Variant.Outlined" OnClick="ExportCatalogAsync"
-                   StartIcon="@Icons.Material.Filled.Download" Disabled="_loading">
+<PageHead Title="Data Catalog"
+          Subtitle="Topic metadata, ownership, tags, and PII classification.">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="ExportCatalogAsync" Disabled="_loading">
             Export
         </MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
-                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
-            Refresh
-        </MudButton>
-    </div>
-</div>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
 }
 
-@* ===== SUMMARY CARDS ===== *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topics</MudText>
-                        <MudText Typo="Typo.h5">@_allTopics.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Description" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Documented</MudText>
-                        <MudText Typo="Typo.h5">@_catalogState.Entries.Count(e => !string.IsNullOrEmpty(e.Value.Description))</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.People" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Owned</MudText>
-                        <MudText Typo="Typo.h5">@_catalogState.Entries.Count(e => !string.IsNullOrEmpty(e.Value.Owner))</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.PrivacyTip" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Contains PII</MudText>
-                        <MudText Typo="Typo.h5">@_catalogState.Entries.Count(e => e.Value.PiiClassification != PiiClassification.None)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Topics" Value="@_allTopics.Count.ToString()" />
+    <Stat Label="Documented" Value="@_catalogState.Entries.Count(e => !string.IsNullOrEmpty(e.Value.Description)).ToString()" />
+    <Stat Label="Owned" Value="@_catalogState.Entries.Count(e => !string.IsNullOrEmpty(e.Value.Owner)).ToString()" />
+    <Stat Label="Contains PII">
+        @{
+            var pii = _catalogState.Entries.Count(e => e.Value.PiiClassification != PiiClassification.None);
+        }
+        <span class="surgewave-status @(pii > 0 ? "surgewave-status--warn" : "surgewave-status--ok")">
+            <span class="surgewave-status-dot"></span>
+            @pii
+        </span>
+    </Stat>
+</SummaryStrip>
 
 @* ===== FILTERS ===== *@
 <MudPaper Elevation="2" Class="pa-3 mb-4">
