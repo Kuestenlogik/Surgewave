@@ -1,0 +1,46 @@
+@*
+    Surgewave Page Header — Hopscotch-style page title block.
+
+    Renders the standard `.surgewave-page-head` markup: title +
+    optional subtitle on the left, optional Actions slot on the right
+    (e.g. an action button, dropdown, widget toggle).
+
+    Usage:
+
+        <PageHead Title="License" Subtitle="Edition, licensee and expiry.">
+            <Actions>
+                <MudButton ...>New</MudButton>
+            </Actions>
+        </PageHead>
+
+    Or minimal (no subtitle, no actions):
+
+        <PageHead Title="Dashboard" />
+*@
+
+<div class="surgewave-page-head">
+    <div>
+        <h1 class="surgewave-page-head-title">@Title</h1>
+        @if (!string.IsNullOrWhiteSpace(Subtitle))
+        {
+            <p class="surgewave-page-head-subtitle">@Subtitle</p>
+        }
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="surgewave-page-head-actions">
+            @Actions
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Page title — shown as a large heading on the left.</summary>
+    [Parameter, EditorRequired] public required string Title { get; set; }
+
+    /// <summary>Optional sub-headline shown under the title.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Optional action slot — rendered on the right of the head.</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

@@ -1,0 +1,52 @@
+@*
+    Surgewave Stat — a single label/value cell inside a SummaryStrip.
+    Use the typed `Value` parameter for plain text, or pass ChildContent
+    for rich values (e.g. a Status dot + label, an icon, a link).
+
+    Usage:
+
+        <Stat Label="Topics" Value="142" />
+
+        <Stat Label="Edition">
+            <span class="surgewave-status surgewave-status--info">
+                <span class="surgewave-status-dot"></span>
+                Enterprise
+            </span>
+        </Stat>
+
+    `Mono` switches the value font to JetBrains Mono — for IDs, hashes,
+    UUIDs etc. `Muted` greys it (e.g. for em-dash placeholders).
+*@
+
+<div class="surgewave-stat">
+    <span class="surgewave-stat-label">@Label</span>
+    <span class="@ValueClass">
+        @if (ChildContent is not null)
+        {
+            @ChildContent
+        }
+        else
+        {
+            @Value
+        }
+    </span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required string Label { get; set; }
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public bool Mono { get; set; }
+    [Parameter] public bool Muted { get; set; }
+
+    private string ValueClass
+    {
+        get
+        {
+            var c = "surgewave-stat-value";
+            if (Mono) c += " surgewave-stat-value--mono";
+            if (Muted) c += " surgewave-stat-value--muted";
+            return c;
+        }
+    }
+}

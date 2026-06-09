@@ -9,34 +9,17 @@
 
 <PageTitle>Plugins - Surgewave Control</PageTitle>
 
-<div class="surgewave-page-head">
-    <div>
-        <h1 class="surgewave-page-head-title">Plugins</h1>
-        <p class="surgewave-page-head-subtitle">Browse, install and update <code>.swpkg</code> packages.</p>
-    </div>
-</div>
+<PageHead Title="Plugins" Subtitle="Browse, install and update .swpkg packages." />
 
-<div class="surgewave-summary-strip">
-    <div class="surgewave-stat">
-        <span class="surgewave-stat-label">Available</span>
-        <span class="surgewave-stat-value">@_packages.Count</span>
-    </div>
-    <div class="surgewave-stat">
-        <span class="surgewave-stat-label">Installed</span>
-        <span class="surgewave-stat-value">@_packages.Count(p => p.IsInstalled)</span>
-    </div>
-    <div class="surgewave-stat">
-        <span class="surgewave-stat-label">Updates available</span>
-        <span class="surgewave-stat-value">@_packages.Count(p => p.IsInstalled && p.InstalledVersion != p.Version)</span>
-    </div>
+<SummaryStrip>
+    <Stat Label="Available" Value="@_packages.Count.ToString()" />
+    <Stat Label="Installed" Value="@_packages.Count(p => p.IsInstalled).ToString()" />
+    <Stat Label="Updates available" Value="@_packages.Count(p => p.IsInstalled && p.InstalledVersion != p.Version).ToString()" />
     @if (MarketplaceConfig.ReviewsEnabled)
     {
-        <div class="surgewave-stat">
-            <span class="surgewave-stat-label">Top rated</span>
-            <span class="surgewave-stat-value">@_topRated.Count</span>
-        </div>
+        <Stat Label="Top rated" Value="@_topRated.Count.ToString()" />
     }
-</div>
+</SummaryStrip>
 
 @* Search and Filters *@
 <MudCard Elevation="2" Class="mt-4">
