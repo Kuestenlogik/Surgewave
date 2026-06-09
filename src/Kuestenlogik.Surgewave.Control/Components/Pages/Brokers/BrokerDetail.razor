@@ -4,8 +4,6 @@
 
 <PageTitle>Broker @BrokerId - Surgewave Control</PageTitle>
 
-<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
-
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
@@ -21,183 +19,102 @@ else if (_error != null)
 }
 else if (_broker != null)
 {
-    <MudGrid>
-        @* Broker Header *@
-        <MudItem xs="12">
-            <MudPaper Elevation="2" Class="pa-4">
-                <div class="d-flex justify-space-between align-center">
-                    <div class="d-flex align-center">
-                        <MudAvatar Color="@(_broker.IsController ? Color.Warning : Color.Primary)" Size="Size.Large" Class="mr-4">
-                            @_broker.BrokerId
-                        </MudAvatar>
-                        <div>
-                            <PageHead Title="@($"Broker {_broker.BrokerId}")" />
-                            <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
-                                @_broker.Host:@_broker.Port
-                                @if (_broker.IsController)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-2">Controller</MudChip>
-                                }
-                            </MudText>
-                        </div>
-                    </div>
-                    <div>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                                   OnClick="LoadBrokerAsync">
-                            Refresh
-                        </MudButton>
-                    </div>
-                </div>
-            </MudPaper>
-        </MudItem>
+    <MudBreadcrumbs Items="_breadcrumbs" Class="pa-0 mb-2" />
 
-        @* Broker Information *@
-        <MudItem xs="12" md="6">
-            <MudCard Elevation="2" Style="height: 100%">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Broker Information</MudText>
-                    </CardHeaderContent>
-                </MudCardHeader>
-                <MudCardContent>
-                    <MudSimpleTable Dense="true">
-                        <tbody>
-                            <tr>
-                                <td style="width: 40%"><MudText Typo="Typo.body2" Color="Color.Secondary">Broker ID</MudText></td>
-                                <td><MudText Typo="Typo.body1">@_broker.BrokerId</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Host</MudText></td>
-                                <td><MudText Typo="Typo.body1">@_broker.Host</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Port</MudText></td>
-                                <td><MudText Typo="Typo.body1">@_broker.Port</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Rack</MudText></td>
-                                <td><MudText Typo="Typo.body1">@(_broker.Rack ?? "N/A")</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Role</MudText></td>
-                                <td>
-                                    @if (_broker.IsController)
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Controller</MudChip>
-                                    }
-                                    else
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Default">Replica</MudChip>
-                                    }
-                                </td>
-                            </tr>
-                        </tbody>
-                    </MudSimpleTable>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
+    <PageHead Title="@($"Broker {_broker.BrokerId}")"
+              Subtitle="Partition leadership and replica assignments.">
+        <Actions>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                           Size="Size.Small" OnClick="LoadBrokerAsync" Disabled="_loading" />
+        </Actions>
+    </PageHead>
 
-        @* Connection Info *@
-        <MudItem xs="12" md="6">
-            <MudCard Elevation="2" Style="height: 100%">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Connection</MudText>
-                    </CardHeaderContent>
-                </MudCardHeader>
-                <MudCardContent>
-                    <MudSimpleTable Dense="true">
-                        <tbody>
-                            <tr>
-                                <td style="width: 40%"><MudText Typo="Typo.body2" Color="Color.Secondary">Bootstrap Server</MudText></td>
-                                <td>
-                                    <MudText Typo="Typo.body1" Style="font-family: monospace;">
-                                        @_broker.Host:@_broker.Port
-                                    </MudText>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Status</MudText></td>
-                                <td>
-                                    <MudChip T="string" Size="Size.Small" Color="@(_isOnline ? Color.Success : Color.Error)">
-                                        @(_isOnline ? "Online" : "Offline")
-                                    </MudChip>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </MudSimpleTable>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
+    <SummaryStrip>
+        <Stat Label="Endpoint" Value="@($"{_broker.Host}:{_broker.Port}")" Mono="true" />
+        <Stat Label="Role">
+            @if (_broker.IsController)
+            {
+                <span class="surgewave-status surgewave-status--warn">
+                    <span class="surgewave-status-dot"></span>
+                    Controller
+                </span>
+            }
+            else
+            {
+                <span class="surgewave-status">
+                    <span class="surgewave-status-dot"></span>
+                    Replica
+                </span>
+            }
+        </Stat>
+        <Stat Label="Status">
+            <span class="surgewave-status @(_isOnline ? "surgewave-status--ok" : "surgewave-status--error")">
+                <span class="surgewave-status-dot"></span>
+                @(_isOnline ? "Online" : "Offline")
+            </span>
+        </Stat>
+        <Stat Label="Rack" Value="@(_broker.Rack ?? "—")" Muted="@(_broker.Rack is null)" />
+        <Stat Label="Leader / Replica"
+              Value="@($"{_leaderPartitions.Count} / {_replicaPartitions.Count}")" />
+    </SummaryStrip>
 
-        @* Partition Leadership *@
-        <MudItem xs="12">
-            <MudCard Elevation="2">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Partition Leadership</MudText>
-                    </CardHeaderContent>
-                    <CardHeaderActions>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">
-                            @_leaderPartitions.Count Leader / @_replicaPartitions.Count Replica
-                        </MudChip>
-                    </CardHeaderActions>
-                </MudCardHeader>
-                <MudCardContent>
-                    @if (_leaderPartitions.Count == 0 && _replicaPartitions.Count == 0)
+    <div class="surgewave-section-title">Partition leadership</div>
+
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+        @if (_leaderPartitions.Count == 0 && _replicaPartitions.Count == 0)
+        {
+            <MudText Color="Color.Secondary" Class="pa-6">No partitions assigned to this broker.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead>
+                    <tr>
+                        <th>Topic</th>
+                        <th>Partition</th>
+                        <th>Role</th>
+                        <th>Replicas</th>
+                        <th>ISR</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _leaderPartitions.Concat(_replicaPartitions).OrderBy(x => x.Topic).ThenBy(x => x.PartitionId))
                     {
-                        <MudText Color="Color.Secondary">No partitions assigned to this broker.</MudText>
-                    }
-                    else
-                    {
-                        <MudSimpleTable Dense="true" Hover="true">
-                            <thead>
-                                <tr>
-                                    <th>Topic</th>
-                                    <th>Partition</th>
-                                    <th>Role</th>
-                                    <th>Replicas</th>
-                                    <th>ISR</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var p in _leaderPartitions.Concat(_replicaPartitions).OrderBy(x => x.Topic).ThenBy(x => x.PartitionId))
+                        var isrIncomplete = p.Isr.Count != p.Replicas.Count;
+                        <tr>
+                            <td>
+                                <MudLink Href="@($"/topics/{p.Topic}")" Class="surgewave-mono">@p.Topic</MudLink>
+                            </td>
+                            <td><span class="surgewave-mono">@p.PartitionId</span></td>
+                            <td>
+                                @if (p.IsLeader)
                                 {
-                                    <tr>
-                                        <td>
-                                            <MudLink Href="@($"/topics/{p.Topic}")">@p.Topic</MudLink>
-                                        </td>
-                                        <td>@p.PartitionId</td>
-                                        <td>
-                                            @if (p.IsLeader)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Leader</MudChip>
-                                            }
-                                            else
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Replica</MudChip>
-                                            }
-                                        </td>
-                                        <td>@string.Join(", ", p.Replicas)</td>
-                                        <td>
-                                            @if (p.Isr.Count == p.Replicas.Count)
-                                            {
-                                                <MudText Color="Color.Success">@string.Join(", ", p.Isr)</MudText>
-                                            }
-                                            else
-                                            {
-                                                <MudText Color="Color.Warning">@string.Join(", ", p.Isr)</MudText>
-                                            }
-                                        </td>
-                                    </tr>
+                                    <span class="surgewave-status surgewave-status--ok">
+                                        <span class="surgewave-status-dot"></span>
+                                        Leader
+                                    </span>
                                 }
-                            </tbody>
-                        </MudSimpleTable>
+                                else
+                                {
+                                    <span class="surgewave-status">
+                                        <span class="surgewave-status-dot"></span>
+                                        Replica
+                                    </span>
+                                }
+                            </td>
+                            <td><span class="surgewave-mono">@string.Join(", ", p.Replicas)</span></td>
+                            <td>
+                                <span class="surgewave-status @(isrIncomplete ? "surgewave-status--warn" : "surgewave-status--ok")">
+                                    <span class="surgewave-status-dot"></span>
+                                    <span class="surgewave-mono">@string.Join(", ", p.Isr)</span>
+                                </span>
+                            </td>
+                        </tr>
                     }
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-    </MudGrid>
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
 }
 
 @code {
