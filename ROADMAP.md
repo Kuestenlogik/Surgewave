@@ -14,7 +14,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.3 — AI-friendly broker
 
-- [#10](https://github.com/Kuestenlogik/Surgewave/issues/10) **G18 — AI primitives as default-bundled Apache-2.0 plugin** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
+- [#10](https://github.com/Kuestenlogik/Surgewave/issues/10) **G18 — AI quickstart: 1-click install for the basic AI plugin** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
 
 ## Backlog
 
