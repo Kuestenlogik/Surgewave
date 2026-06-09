@@ -8,18 +8,22 @@
 
 <PageTitle>Dashboard - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center mb-4">
-    <MudText Typo="Typo.h4">Dashboard</MudText>
-    <MudSpacer />
-    <MudMenu Icon="@Icons.Material.Filled.Widgets" Size="Size.Small" AnchorOrigin="Origin.BottomRight">
-        @foreach (var card in _cards.OrderBy(c => c.Title))
-        {
-            <MudMenuItem>
-                <MudCheckBox T="bool" Value="card.Visible" ValueChanged="@(v => ToggleWidgetVisibility(card, v))"
-                             Label="@card.Title" Dense="true" />
-            </MudMenuItem>
-        }
-    </MudMenu>
+<div class="surgewave-page-head">
+    <div>
+        <h1 class="surgewave-page-head-title">Dashboard</h1>
+        <p class="surgewave-page-head-subtitle">Cluster state and live throughput at a glance.</p>
+    </div>
+    <div class="surgewave-page-head-actions">
+        <MudMenu Icon="@Icons.Material.Filled.Widgets" Size="Size.Small" AnchorOrigin="Origin.BottomRight">
+            @foreach (var card in _cards.OrderBy(c => c.Title))
+            {
+                <MudMenuItem>
+                    <MudCheckBox T="bool" Value="card.Visible" ValueChanged="@(v => ToggleWidgetVisibility(card, v))"
+                                 Label="@card.Title" Dense="true" />
+                </MudMenuItem>
+            }
+        </MudMenu>
+    </div>
 </div>
 
 @if (_loading)
@@ -831,15 +835,62 @@ else
     }
 
 
+    /* Hopscotch-Sweep: alle Dashboard-Cards bekommen den flachen
+       border-only-Look der License-Page. Kein Elevation-Shadow,
+       subtle border, kompakter padding. Hover liftet nur die border
+       statt einen schweren Shadow zu droppen. */
     .dashboard-card {
         height: 100%;
         display: flex;
         flex-direction: column;
-        transition: box-shadow 0.2s ease;
+        background: var(--mud-palette-surface);
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        box-shadow: none !important;
+        transition: border-color 0.15s ease, background-color 0.15s ease;
     }
 
     .dashboard-card:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        border-color: var(--mud-palette-primary);
+    }
+
+    /* Card-internals leichter: kleinere Icons (Size.Medium statt Large
+       Override), tightere Card-Content-Padding, Action-Buttons mit
+       weniger Visual-Weight. */
+    .dashboard-card .mud-card-content {
+        padding: 16px 18px !important;
+    }
+    .dashboard-card .mud-card-actions {
+        padding: 4px 10px 10px !important;
+    }
+    .dashboard-card .mud-card-content .mud-icon-size-large {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 28px !important;
+    }
+    /* Headline numbers (h5) sind aktuell sehr gross — dichter setzen. */
+    .dashboard-card .mud-card-content .mud-typography-h5 {
+        font-size: 1.25rem !important;
+        font-weight: 600 !important;
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+        margin-top: 2px;
+    }
+    /* Sub-label (Typo.subtitle2 Color=Secondary) als compact Stat-Label
+       formatieren — uppercase + tracking analog .surgewave-stat-label. */
+    .dashboard-card .mud-card-content .mud-typography-subtitle2 {
+        font-size: 0.6875rem !important;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--mud-palette-text-secondary) !important;
+        line-height: 1.3;
+    }
+    /* Action-Button "View X" - kleiner + dezenter. */
+    .dashboard-card .mud-card-actions .mud-button-root {
+        font-size: 0.75rem !important;
+        padding: 4px 8px !important;
+        min-height: 28px !important;
     }
 
     .health-details-table td {
