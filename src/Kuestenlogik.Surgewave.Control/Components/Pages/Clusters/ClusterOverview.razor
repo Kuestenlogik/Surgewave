@@ -8,81 +8,26 @@
 
 <PageTitle>Cluster Overview - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Cluster Overview" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            All clusters at a glance — health, metrics, and quick-switch
-        </MudText>
-    </div>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
-               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
-        Refresh
-    </MudButton>
-</div>
+<PageHead Title="Cluster Overview"
+          Subtitle="All clusters at a glance — health, metrics, and quick-switch.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
 }
 
-@* ===== GLOBAL SUMMARY ===== *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Clusters</MudText>
-                        <MudText Typo="Typo.h5">@_clusters.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Dns"
-                             Color="@(_clusters.All(c => c.Status == "Healthy") ? Color.Success : Color.Warning)"
-                             Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Brokers</MudText>
-                        <MudText Typo="Typo.h5">@_clusters.Sum(c => c.BrokerCount)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Topics</MudText>
-                        <MudText Typo="Typo.h5">@_clusters.Sum(c => c.TopicCount)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Throughput</MudText>
-                        <MudText Typo="Typo.h5">@_clusters.Sum(c => c.ThroughputMessagesPerSec).ToString("F0") msg/s</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Clusters" Value="@_clusters.Count.ToString()" />
+    <Stat Label="Total brokers" Value="@_clusters.Sum(c => c.BrokerCount).ToString()" />
+    <Stat Label="Total topics" Value="@_clusters.Sum(c => c.TopicCount).ToString()" />
+    <Stat Label="Total throughput"
+          Value="@($"{_clusters.Sum(c => c.ThroughputMessagesPerSec):F0} msg/s")" />
+</SummaryStrip>
 
 @* ===== CLUSTER CARDS ===== *@
 @if (_clusters.Count == 0 && !_loading)
@@ -98,72 +43,66 @@
         var isSelected = cluster.ClusterId == ClusterState.SelectedClusterId ||
                          (ClusterState.SelectedClusterId == null && cluster == _clusters.First());
         <MudItem xs="12" md="6" lg="4">
-            <MudCard Elevation="@(isSelected ? 4 : 2)" Class="@(isSelected ? "border-primary" : "")"
-                     Style="@(isSelected ? "border: 2px solid var(--mud-palette-primary);" : "cursor: pointer;")"
+            <MudCard Elevation="0" Class="@(isSelected ? "surgewave-cluster-card--active" : "")"
+                     Style="cursor: pointer;"
                      @onclick="@(() => SwitchCluster(cluster))">
                 <MudCardHeader>
-                    <CardHeaderAvatar>
-                        <MudAvatar Color="@GetHealthColor(cluster.Status)" Size="Size.Medium">
-                            <MudIcon Icon="@Icons.Material.Filled.Cloud" />
-                        </MudAvatar>
-                    </CardHeaderAvatar>
                     <CardHeaderContent>
                         <MudText Typo="Typo.h6">@cluster.DisplayName</MudText>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">@cluster.ClusterId</MudText>
+                        <span class="surgewave-mono">@cluster.ClusterId</span>
                     </CardHeaderContent>
                     <CardHeaderActions>
-                        @if (isSelected)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Active</MudChip>
-                        }
-                        <MudChip T="string" Size="Size.Small" Color="@GetHealthColor(cluster.Status)">
-                            @cluster.Status
-                        </MudChip>
+                        <span class="surgewave-status @GetHealthStatusClass(cluster.Status)">
+                            <span class="surgewave-status-dot"></span>
+                            @(isSelected ? $"Active · {cluster.Status}" : cluster.Status)
+                        </span>
                     </CardHeaderActions>
                 </MudCardHeader>
                 <MudCardContent>
-                    <MudGrid>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Brokers</MudText>
-                            <MudText Typo="Typo.body1"><strong>@cluster.BrokerCount</strong></MudText>
-                        </MudItem>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Topics</MudText>
-                            <MudText Typo="Typo.body1"><strong>@cluster.TopicCount</strong></MudText>
-                        </MudItem>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Partitions</MudText>
-                            <MudText Typo="Typo.body1">@cluster.PartitionCount</MudText>
-                        </MudItem>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Consumer Groups</MudText>
-                            <MudText Typo="Typo.body1">@cluster.ConsumerGroupCount</MudText>
-                        </MudItem>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Controller</MudText>
-                            <MudText Typo="Typo.body1">Broker @cluster.ControllerId</MudText>
-                        </MudItem>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Throughput</MudText>
-                            <MudText Typo="Typo.body1">@cluster.ThroughputMessagesPerSec.ToString("F0") msg/s</MudText>
-                        </MudItem>
-                    </MudGrid>
-
-                    @if (cluster.RaftEnabled)
-                    {
-                        <MudDivider Class="my-2" />
-                        <div class="d-flex align-center gap-2">
-                            <MudIcon Icon="@Icons.Material.Filled.HowToVote" Size="Size.Small" Color="Color.Secondary" />
-                            <MudText Typo="Typo.caption">
-                                Raft: @(cluster.RaftState ?? "Unknown") | Leader: Broker @(cluster.ControllerId)
-                            </MudText>
-                        </div>
-                    }
-
-                    <MudDivider Class="my-2" />
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">
-                        Last checked: @cluster.LastChecked.ToString("HH:mm:ss")
-                    </MudText>
+                    <MudSimpleTable Dense="true">
+                        <tbody>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Brokers</MudText></td>
+                                <td><span class="surgewave-mono">@cluster.BrokerCount</span></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Topics</MudText></td>
+                                <td><span class="surgewave-mono">@cluster.TopicCount</span></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Partitions</MudText></td>
+                                <td><span class="surgewave-mono">@cluster.PartitionCount</span></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Consumer Groups</MudText></td>
+                                <td><span class="surgewave-mono">@cluster.ConsumerGroupCount</span></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Controller</MudText></td>
+                                <td><span class="surgewave-mono">Broker @cluster.ControllerId</span></td>
+                            </tr>
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Throughput</MudText></td>
+                                <td><span class="surgewave-mono">@cluster.ThroughputMessagesPerSec.ToString("F0") msg/s</span></td>
+                            </tr>
+                            @if (cluster.RaftEnabled)
+                            {
+                                <tr>
+                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Raft</MudText></td>
+                                    <td>
+                                        <span class="surgewave-status surgewave-status--info">
+                                            <span class="surgewave-status-dot"></span>
+                                            @(cluster.RaftState ?? "Unknown")
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Last checked</MudText></td>
+                                <td><span class="surgewave-mono">@cluster.LastChecked.ToString("HH:mm:ss")</span></td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
                 </MudCardContent>
                 <MudCardActions>
                     <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
@@ -259,4 +198,19 @@
         "Unhealthy" => Color.Error,
         _ => Color.Default
     };
+
+    private static string GetHealthStatusClass(string status) => status switch
+    {
+        "Healthy" => "surgewave-status--ok",
+        "Degraded" => "surgewave-status--warn",
+        "Unhealthy" => "surgewave-status--error",
+        _ => ""
+    };
 }
+
+<style>
+    .surgewave-cluster-card--active {
+        border-color: var(--mud-palette-primary) !important;
+        box-shadow: 0 0 0 1px var(--mud-palette-primary) !important;
+    }
+</style>
