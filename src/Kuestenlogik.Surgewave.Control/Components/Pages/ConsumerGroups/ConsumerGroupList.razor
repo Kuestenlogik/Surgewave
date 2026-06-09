@@ -6,35 +6,31 @@
 
 <PageTitle>Consumer Groups - Surgewave Control</PageTitle>
 
-<PageHead Title="Consumer Groups" />
+<PageHead Title="Consumer Groups"
+          Subtitle="Consumer groups subscribing to topics in the selected cluster.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadGroupsAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
-<MudPaper Elevation="2" Class="pa-4 mb-4">
-    <MudGrid>
-        <MudItem xs="12" md="6">
-            <MudTextField @bind-Value="_searchText" Label="Search groups" Variant="Variant.Outlined"
-                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="OnSearchChanged"
-                          data-tour-id="consumer-search" />
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudSelect @bind-Value="_stateFilter" Label="State filter" Variant="Variant.Outlined"
-                       @bind-Value:after="OnFilterChanged" data-tour-id="state-filter">
-                <MudSelectItem Value="@("")">All States</MudSelectItem>
-                <MudSelectItem Value="@("Stable")">Stable</MudSelectItem>
-                <MudSelectItem Value="@("PreparingRebalance")">Preparing Rebalance</MudSelectItem>
-                <MudSelectItem Value="@("CompletingRebalance")">Completing Rebalance</MudSelectItem>
-                <MudSelectItem Value="@("Empty")">Empty</MudSelectItem>
-                <MudSelectItem Value="@("Dead")">Dead</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="3" Class="d-flex align-center justify-end">
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                       OnClick="LoadGroupsAsync">
-                Refresh
-            </MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<div class="d-flex align-center gap-3 mb-3">
+    <MudTextField @bind-Value="_searchText" Placeholder="Search groups…" Variant="Variant.Outlined"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Margin="Margin.Dense" Class="flex-grow-1"
+                  Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="OnSearchChanged"
+                  data-tour-id="consumer-search" />
+    <MudSelect @bind-Value="_stateFilter" Label="State" Variant="Variant.Outlined"
+               Margin="Margin.Dense" Style="width: 220px;"
+               @bind-Value:after="OnFilterChanged" data-tour-id="state-filter">
+        <MudSelectItem Value="@("")">All states</MudSelectItem>
+        <MudSelectItem Value="@("Stable")">Stable</MudSelectItem>
+        <MudSelectItem Value="@("PreparingRebalance")">Preparing rebalance</MudSelectItem>
+        <MudSelectItem Value="@("CompletingRebalance")">Completing rebalance</MudSelectItem>
+        <MudSelectItem Value="@("Empty")">Empty</MudSelectItem>
+        <MudSelectItem Value="@("Dead")">Dead</MudSelectItem>
+    </MudSelect>
+</div>
 
 @if (_loading)
 {
@@ -51,24 +47,30 @@ else if (_error != null)
 }
 else
 {
-    <MudTable Items="@_filteredGroups" Dense="true" Hover="true" Striped="true" Elevation="2"
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+    <MudTable Items="@_filteredGroups" Dense="true" Hover="true" Striped="false" Elevation="0"
               Loading="@_loading" LoadingProgressColor="Color.Primary">
         <HeaderContent>
             <MudTh><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.GroupId)">Group ID</MudTableSortLabel></MudTh>
             <MudTh><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.State)">State</MudTableSortLabel></MudTh>
-            <MudTh>Protocol Type</MudTh>
-            <MudTh><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.MemberCount)">Members</MudTableSortLabel></MudTh>
-            <MudTh Style="width: 120px">Actions</MudTh>
+            <MudTh>Protocol</MudTh>
+            <MudTh Style="text-align: right"><MudTableSortLabel SortBy="new Func<ConsumerGroupInfo, object>(x => x.MemberCount)">Members</MudTableSortLabel></MudTh>
+            <MudTh Style="width: 120px"></MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Group ID">
-                <MudLink Href="@($"/consumer-groups/{Uri.EscapeDataString(context.GroupId)}")">@context.GroupId</MudLink>
+                <MudLink Href="@($"/consumer-groups/{Uri.EscapeDataString(context.GroupId)}")" Class="surgewave-mono">@context.GroupId</MudLink>
             </MudTd>
             <MudTd DataLabel="State">
-                <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)">@context.State</MudChip>
+                <span class="surgewave-status @GetStateStatusClass(context.State)">
+                    <span class="surgewave-status-dot"></span>
+                    @context.State
+                </span>
             </MudTd>
-            <MudTd DataLabel="Protocol Type">@context.ProtocolType</MudTd>
-            <MudTd DataLabel="Members">@context.MemberCount</MudTd>
+            <MudTd DataLabel="Protocol"><span class="surgewave-mono">@context.ProtocolType</span></MudTd>
+            <MudTd DataLabel="Members" Style="text-align: right">
+                <span class="surgewave-mono">@context.MemberCount</span>
+            </MudTd>
             <MudTd DataLabel="Actions">
                 <MudTooltip Text="View details">
                     <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
@@ -82,12 +84,13 @@ else
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Color="Color.Secondary">No consumer groups found</MudText>
+            <MudText Color="Color.Secondary" Class="pa-4">No consumer groups found</MudText>
         </NoRecordsContent>
         <PagerContent>
             <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
         </PagerContent>
     </MudTable>
+    </MudPaper>
 }
 
 @code {
@@ -164,6 +167,15 @@ else
         "Empty" => Color.Default,
         "Dead" => Color.Error,
         _ => Color.Default
+    };
+
+    private static string GetStateStatusClass(string state) => state switch
+    {
+        "Stable" => "surgewave-status--ok",
+        "PreparingRebalance" or "CompletingRebalance" => "surgewave-status--warn",
+        "Empty" => "surgewave-status--idle",
+        "Dead" => "surgewave-status--error",
+        _ => ""
     };
 
     private async Task ConfirmDeleteAsync(ConsumerGroupInfo group)
