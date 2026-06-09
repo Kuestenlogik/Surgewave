@@ -7,10 +7,8 @@
 
 <PageTitle>Bandwidth Quotas - Surgewave Control</PageTitle>
 
-<PageHead Title="Bandwidth Quotas" />
-<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Per-client and per-user bandwidth throttling. Prevents any single client from saturating the network.
-</MudText>
+<PageHead Title="Bandwidth Quotas"
+          Subtitle="Per-client and per-user bandwidth throttling — prevents any single client from saturating the network." />
 
 @if (_loading)
 {
@@ -20,6 +18,31 @@
 @if (_error != null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@if (_config != null && _metrics != null)
+{
+    <SummaryStrip>
+        <Stat Label="Status">
+            <span class="surgewave-status @(_config.Enabled ? "surgewave-status--ok" : "surgewave-status--idle")">
+                <span class="surgewave-status-dot"></span>
+                @(_config.Enabled ? "Enabled" : "Disabled")
+            </span>
+        </Stat>
+        <Stat Label="Default produce" Value="@FormatRate(_config.DefaultProduceBytesPerSec)" Mono="true" />
+        <Stat Label="Default consume" Value="@FormatRate(_config.DefaultConsumeBytesPerSec)" Mono="true" />
+        <Stat Label="Clients tracked" Value="@_metrics.TotalClientsTracked.ToString()" />
+        <Stat Label="Throttled">
+            @{
+                var thr = _metrics.TotalClientsThrottled;
+            }
+            <span class="surgewave-status @(thr > 0 ? "surgewave-status--warn" : "surgewave-status--ok")">
+                <span class="surgewave-status-dot"></span>
+                @thr
+            </span>
+        </Stat>
+        <Stat Label="Bytes throttled" Value="@FormatBytes(_metrics.TotalBytesThrottled)" Mono="true" />
+    </SummaryStrip>
 }
 
 <MudGrid>

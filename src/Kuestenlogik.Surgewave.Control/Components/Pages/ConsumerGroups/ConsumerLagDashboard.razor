@@ -7,37 +7,28 @@
 
 <PageTitle>Consumer Lag - Surgewave Control</PageTitle>
 
-<PageHead Title="Consumer Lag Dashboard" />
+<PageHead Title="Consumer Lag"
+          Subtitle="@($"Lag per consumer group · auto-refresh: {(_refreshInterval == 0 ? "manual" : $"{_refreshInterval}s")} · last update: {_lastUpdated:HH:mm:ss}")">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="RefreshAsync" Disabled="@_loading" />
+    </Actions>
+</PageHead>
 
-@* Controls *@
-<MudPaper Elevation="2" Class="pa-4 mb-4">
-    <MudGrid>
-        <MudItem xs="12" md="4">
-            <MudSelect @bind-Value="_refreshInterval" Label="Refresh Interval" Variant="Variant.Outlined"
-                       @bind-Value:after="OnRefreshIntervalChanged">
-                <MudSelectItem Value="0">Manual</MudSelectItem>
-                <MudSelectItem Value="5">5 seconds</MudSelectItem>
-                <MudSelectItem Value="10">10 seconds</MudSelectItem>
-                <MudSelectItem Value="30">30 seconds</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="4">
-            <MudTextField @bind-Value="_searchFilter" Label="Filter Groups" Variant="Variant.Outlined"
-                          Placeholder="Search by group ID..." Adornment="Adornment.Start"
-                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true"
-                          DebounceInterval="300" />
-        </MudItem>
-        <MudItem xs="12" md="4" Class="d-flex align-center justify-end gap-2">
-            <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Last updated: @_lastUpdated.ToString("HH:mm:ss")
-            </MudText>
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                       OnClick="RefreshAsync" Disabled="@_loading">
-                Refresh
-            </MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<div class="d-flex align-center gap-3 mb-3">
+    <MudTextField @bind-Value="_searchFilter" Placeholder="Filter groups…" Variant="Variant.Outlined"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Margin="Margin.Dense" Class="flex-grow-1"
+                  Immediate="true" DebounceInterval="300" />
+    <MudSelect @bind-Value="_refreshInterval" Label="Refresh" Variant="Variant.Outlined"
+               Margin="Margin.Dense" Style="width: 160px;"
+               @bind-Value:after="OnRefreshIntervalChanged">
+        <MudSelectItem Value="0">Manual</MudSelectItem>
+        <MudSelectItem Value="5">5 seconds</MudSelectItem>
+        <MudSelectItem Value="10">10 seconds</MudSelectItem>
+        <MudSelectItem Value="30">30 seconds</MudSelectItem>
+    </MudSelect>
+</div>
 
 @if (_loading && _groups.Count == 0)
 {
@@ -52,61 +43,22 @@ else if (_error != null)
 }
 else
 {
-    @* Summary Cards *@
-    <MudGrid Class="mb-4">
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Group" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Consumer Groups</MudText>
-                            <MudText Typo="Typo.h5">@_groups.Count</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.TrendingDown" Color="@(_totalLag > 10000 ? Color.Error : _totalLag > 1000 ? Color.Warning : Color.Success)" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Lag</MudText>
-                            <MudText Typo="Typo.h5">@_totalLag.ToString("N0")</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="@(_groupsWithLag > 0 ? Color.Warning : Color.Success)" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Groups with Lag</MudText>
-                            <MudText Typo="Typo.h5">@_groupsWithLag / @_groups.Count</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Max Lag</MudText>
-                            <MudText Typo="Typo.h5">@_maxLag.ToString("N0")</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-    </MudGrid>
+    <SummaryStrip>
+        <Stat Label="Consumer groups" Value="@_groups.Count.ToString()" />
+        <Stat Label="Total lag">
+            <span class="surgewave-status @(_totalLag > 10000 ? "surgewave-status--error" : _totalLag > 1000 ? "surgewave-status--warn" : "surgewave-status--ok")">
+                <span class="surgewave-status-dot"></span>
+                <span class="surgewave-mono">@_totalLag.ToString("N0")</span>
+            </span>
+        </Stat>
+        <Stat Label="Groups with lag">
+            <span class="surgewave-status @(_groupsWithLag > 0 ? "surgewave-status--warn" : "surgewave-status--ok")">
+                <span class="surgewave-status-dot"></span>
+                @($"{_groupsWithLag} / {_groups.Count}")
+            </span>
+        </Stat>
+        <Stat Label="Max lag" Value="@_maxLag.ToString("N0")" Mono="true" />
+    </SummaryStrip>
 
     @* Lag Trend Chart *@
     @if (_lagTrendPoints.Count > 1)

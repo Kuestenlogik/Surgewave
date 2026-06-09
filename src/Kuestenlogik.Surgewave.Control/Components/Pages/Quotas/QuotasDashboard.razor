@@ -6,7 +6,8 @@
 
 <PageTitle>Quota Management - Surgewave Control</PageTitle>
 
-<PageHead Title="Quota Management" />
+<PageHead Title="Quota Management"
+          Subtitle="Producer + consumer byte-rate limits and client statistics." />
 
 @if (_loading)
 {
@@ -16,6 +17,25 @@
 @if (_error != null)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@if (_config != null)
+{
+    <SummaryStrip>
+        <Stat Label="Status">
+            <span class="surgewave-status @(_config.Enabled ? "surgewave-status--ok" : "surgewave-status--idle")">
+                <span class="surgewave-status-dot"></span>
+                @(_config.Enabled ? "Enabled" : "Disabled")
+            </span>
+        </Stat>
+        <Stat Label="Producer limit"
+              Value="@(_config.ProducerBytesPerSecond < 0 ? "unlimited" : _config.ProducerBytesPerSecond.ToString("N0") + " B/s")"
+              Mono="true" />
+        <Stat Label="Consumer limit"
+              Value="@(_config.ConsumerBytesPerSecond < 0 ? "unlimited" : _config.ConsumerBytesPerSecond.ToString("N0") + " B/s")"
+              Mono="true" />
+        <Stat Label="Active clients" Value="@_clientStats.Count.ToString()" />
+    </SummaryStrip>
 }
 
 <MudGrid>

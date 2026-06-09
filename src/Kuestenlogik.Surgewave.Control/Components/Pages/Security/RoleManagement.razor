@@ -9,27 +9,31 @@
 
 <PageTitle>Role Management - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Role Management" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Manage roles, permissions, and user assignments
-        </MudText>
-    </div>
-    <AuthorizeView Policy="@SurgewavePolicies.AclManage">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateRoleAsync"
-                   StartIcon="@Icons.Material.Filled.Add">
-            Create Role
-        </MudButton>
-    </AuthorizeView>
-</div>
+<PageHead Title="Role Management"
+          Subtitle="Manage roles, permissions, and user assignments.">
+    <Actions>
+        <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="CreateRoleAsync">
+                Create role
+            </MudButton>
+        </AuthorizeView>
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
 }
 
-<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
+<SummaryStrip>
+    <Stat Label="Total roles" Value="@_state.Roles.Count.ToString()" />
+    <Stat Label="Built-in" Value="@_state.Roles.Count(r => r.IsBuiltIn).ToString()" />
+    <Stat Label="Custom" Value="@_state.Roles.Count(r => !r.IsBuiltIn).ToString()" />
+    <Stat Label="Total members" Value="@_state.Roles.Sum(r => r.Members.Count).ToString()" />
+</SummaryStrip>
+
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" PanelClass="pt-4" Class="mb-4">
     <MudTabPanel Text="Roles" Icon="@Icons.Material.Filled.Shield" />
     <MudTabPanel Text="User Assignments" Icon="@Icons.Material.Filled.People" />
     <MudTabPanel Text="Permission Viewer" Icon="@Icons.Material.Filled.Visibility" />
