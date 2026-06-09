@@ -13,7 +13,7 @@
 
 <div class="d-flex align-center justify-space-between mb-4">
     <div>
-        <MudText Typo="Typo.h4">Broker @BrokerId Configuration</MudText>
+        <PageHead Title="@($"Broker {BrokerId} Configuration")" />
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             @_configs.Count configs | @_configs.Count(c => c.IsModified) modified from default
         </MudText>

@@ -12,7 +12,7 @@
 <MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
 
 <div class="d-flex align-center justify-space-between mb-4">
-    <MudText Typo="Typo.h4">@Subject</MudText>
+    <PageHead Title="@Subject" />
     <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
         <div class="d-flex gap-2">
             <MudButton Variant="Variant.Outlined" OnClick="ShowRegisterDialogAsync"

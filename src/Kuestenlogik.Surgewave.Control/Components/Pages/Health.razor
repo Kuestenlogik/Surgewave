@@ -4,7 +4,7 @@
 
 <PageTitle>Health - Surgewave Control</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">Cluster Health</MudText>
+<PageHead Title="Cluster Health" />
 
 @if (_loading)
 {
@@ -31,7 +31,7 @@ else if (_healthDetails != null)
                                  Color="@(_isHealthy ? Color.Success : Color.Error)"
                                  Size="Size.Large" Class="mr-3" />
                         <div>
-                            <MudText Typo="Typo.h4">@_healthDetails.Status</MudText>
+                            <PageHead Title="@_healthDetails.Status" />
                             <MudText Typo="Typo.caption" Color="Color.Secondary">
                                 Last checked: @_healthDetails.Timestamp.ToLocalTime().ToString("HH:mm:ss")
                             </MudText>
