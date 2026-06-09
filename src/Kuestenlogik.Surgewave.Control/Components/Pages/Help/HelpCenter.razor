@@ -5,14 +5,11 @@
 
 <PageTitle>Help Center - Surgewave Control</PageTitle>
 
-<PageHead Title="Help Center" />
-<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Documentation, guides, and keyboard shortcuts for Surgewave Control
-</MudText>
+<PageHead Title="Help Center"
+          Subtitle="Documentation, guides, and keyboard shortcuts for Surgewave Control." />
 
-@* ===== SEARCH ===== *@
-<MudTextField T="string" @bind-Value="_search" Placeholder="Search help topics..."
-              Variant="Variant.Outlined" Immediate="true" Class="mb-4"
+<MudTextField T="string" @bind-Value="_search" Placeholder="Search help topics…"
+              Variant="Variant.Outlined" Immediate="true" Margin="Margin.Dense" Class="mb-4"
               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
 
 @* ===== INTERACTIVE TOURS ===== *@

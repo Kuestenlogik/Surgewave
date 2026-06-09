@@ -4,61 +4,64 @@
 
 <PageTitle>Plugin Sources - Surgewave Control</PageTitle>
 
-<PageHead Title="Plugin Sources" />
+<PageHead Title="Plugin Sources"
+          Subtitle="Where Surgewave discovers and downloads plugins from — searched in order at install time." />
 
-<MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-4">
-    Configure where Surgewave discovers and downloads plugins from. Sources are searched in order when installing plugins.
-</MudText>
+<div class="surgewave-section-title">Add source</div>
 
-@* Add Source Form *@
-<MudPaper Class="pa-4 mb-4" Elevation="2">
-    <MudText Typo="Typo.h6" Class="mb-3">Add Source</MudText>
-    <MudGrid>
-        <MudItem xs="12" md="3">
-            <MudTextField @bind-Value="_newName" Label="Name" Placeholder="e.g., mycompany" Variant="Variant.Outlined" />
-        </MudItem>
-        <MudItem xs="12" md="2">
-            <MudSelect @bind-Value="_newType" Label="Type" Variant="Variant.Outlined">
-                <MudSelectItem Value="@("nuget")">NuGet Feed</MudSelectItem>
-                <MudSelectItem Value="@("http")">HTTP / Marketplace</MudSelectItem>
-                <MudSelectItem Value="@("github")">GitHub Releases</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="4">
-            <MudTextField @bind-Value="_newUrl" Label="URL" Placeholder="https://..." Variant="Variant.Outlined" />
-        </MudItem>
-        <MudItem xs="12" md="2">
-            <MudTextField @bind-Value="_newApiKey" Label="API Key" Placeholder="optional" Variant="Variant.Outlined" InputType="InputType.Password" />
-        </MudItem>
-        <MudItem xs="12" md="1" Class="d-flex align-end">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddSource" FullWidth="true">Add</MudButton>
-        </MudItem>
-    </MudGrid>
+<MudPaper Class="surgewave-surface mb-4">
+    <div class="d-flex align-center gap-2">
+        <MudTextField @bind-Value="_newName" Label="Name" Placeholder="e.g., mycompany"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 180px;" />
+        <MudSelect @bind-Value="_newType" Label="Type" Variant="Variant.Outlined"
+                   Margin="Margin.Dense" Style="width: 200px;">
+            <MudSelectItem Value="@("nuget")">NuGet Feed</MudSelectItem>
+            <MudSelectItem Value="@("http")">HTTP / Marketplace</MudSelectItem>
+            <MudSelectItem Value="@("github")">GitHub Releases</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="_newUrl" Label="URL" Placeholder="https://…"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+        <MudTextField @bind-Value="_newApiKey" Label="API key" Placeholder="optional"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 200px;"
+                      InputType="InputType.Password" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="AddSource">
+            Add
+        </MudButton>
+    </div>
 </MudPaper>
 
-@* Source List *@
-<MudTable Items="_sources" Hover="true" Elevation="2">
+<div class="surgewave-section-title">Configured sources</div>
+
+<MudPaper Class="surgewave-surface" Style="padding: 0;">
+<MudTable Items="_sources" Hover="true" Elevation="0">
     <HeaderContent>
         <MudTh>Name</MudTh>
         <MudTh>Type</MudTh>
         <MudTh>URL</MudTh>
-        <MudTh>API Key</MudTh>
-        <MudTh Style="width:100px">Actions</MudTh>
+        <MudTh>API key</MudTh>
+        <MudTh Style="width:80px"></MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd>@context.Name</MudTd>
-        <MudTd><MudChip T="string" Size="Size.Small" Color="GetTypeColor(context.Type)">@context.Type</MudChip></MudTd>
-        <MudTd><code>@context.Url</code></MudTd>
-        <MudTd>@(string.IsNullOrEmpty(context.ApiKey) ? "—" : "••••••")</MudTd>
+        <MudTd><strong>@context.Name</strong></MudTd>
+        <MudTd>
+            <span class="surgewave-status @GetTypeStatusClass(context.Type)">
+                <span class="surgewave-status-dot"></span>
+                @context.Type
+            </span>
+        </MudTd>
+        <MudTd><span class="surgewave-mono">@context.Url</span></MudTd>
+        <MudTd><span class="surgewave-mono">@(string.IsNullOrEmpty(context.ApiKey) ? "—" : "••••••")</span></MudTd>
         <MudTd>
             <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                            OnClick="@(() => RemoveSource(context.Name))" />
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
-        <MudText>No plugin sources configured. Add one above.</MudText>
+        <MudText Class="pa-4">No plugin sources configured. Add one above.</MudText>
     </NoRecordsContent>
 </MudTable>
+</MudPaper>
 
 @code {
     private PluginSourceConfig _config = new();
@@ -126,5 +129,13 @@
         "http" => Color.Info,
         "github" => Color.Dark,
         _ => Color.Default
+    };
+
+    private static string GetTypeStatusClass(string type) => type.ToLowerInvariant() switch
+    {
+        "nuget" => "surgewave-status--info",
+        "http" => "surgewave-status--info",
+        "github" => "surgewave-status--idle",
+        _ => ""
     };
 }
