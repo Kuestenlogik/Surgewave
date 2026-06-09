@@ -1,0 +1,20 @@
+@*
+    Surgewave Summary Strip — horizontaler container for compact
+    label/value stats (Stat components). Replaces the MudGrid with
+    big-icon Card pattern.
+
+    Usage:
+
+        <SummaryStrip>
+            <Stat Label="Edition" Value="@_status.Edition" />
+            <Stat Label="Plugins discovered" Value="@_plugins.Count.ToString()" />
+        </SummaryStrip>
+*@
+
+<div class="surgewave-summary-strip">
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

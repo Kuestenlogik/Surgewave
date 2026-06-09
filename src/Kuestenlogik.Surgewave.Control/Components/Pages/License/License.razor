@@ -5,14 +5,8 @@
 
 <PageTitle>License - Surgewave Control</PageTitle>
 
-<div class="surgewave-page-head">
-    <div>
-        <h1 class="surgewave-page-head-title">License</h1>
-        <p class="surgewave-page-head-subtitle">
-            Edition, licensee, expiry and the per-plugin licence requirement matrix.
-        </p>
-    </div>
-</div>
+<PageHead Title="License"
+          Subtitle="Edition, licensee, expiry and the per-plugin licence requirement matrix." />
 
 @if (_status is null)
 {
@@ -22,34 +16,21 @@
 }
 else
 {
-    @* Summary strip — clean horizontal stats instead of a 3-card grid. *@
-    <div class="surgewave-summary-strip">
-        <div class="surgewave-stat">
-            <span class="surgewave-stat-label">Edition</span>
-            <span class="surgewave-stat-value">
-                <span class="surgewave-status @EditionStatusClass">
-                    <span class="surgewave-status-dot"></span>
-                    @_status.Edition
-                </span>
+    <SummaryStrip>
+        <Stat Label="Edition">
+            <span class="surgewave-status @EditionStatusClass">
+                <span class="surgewave-status-dot"></span>
+                @_status.Edition
             </span>
-        </div>
-        <div class="surgewave-stat">
-            <span class="surgewave-stat-label">Licensed to</span>
-            <span class="surgewave-stat-value @(string.IsNullOrEmpty(_status.LicensedTo) ? "surgewave-stat-value--muted" : "")">
-                @(string.IsNullOrEmpty(_status.LicensedTo) ? "—" : _status.LicensedTo)
-            </span>
-        </div>
-        <div class="surgewave-stat">
-            <span class="surgewave-stat-label">Expires</span>
-            <span class="surgewave-stat-value @ExpiryValueClass">
-                @ExpiryDisplay
-            </span>
-        </div>
-        <div class="surgewave-stat">
-            <span class="surgewave-stat-label">Plugins discovered</span>
-            <span class="surgewave-stat-value">@_plugins.Count</span>
-        </div>
-    </div>
+        </Stat>
+        <Stat Label="Licensed to"
+              Value="@(string.IsNullOrEmpty(_status.LicensedTo) ? "—" : _status.LicensedTo)"
+              Muted="@(string.IsNullOrEmpty(_status.LicensedTo))" />
+        <Stat Label="Expires"
+              Value="@ExpiryDisplay"
+              Muted="@(_status.ExpiresAt is null)" />
+        <Stat Label="Plugins discovered" Value="@_plugins.Count.ToString()" />
+    </SummaryStrip>
 
     @if (!_status.HasProvider)
     {

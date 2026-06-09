@@ -8,12 +8,8 @@
 
 <PageTitle>Dashboard - Surgewave Control</PageTitle>
 
-<div class="surgewave-page-head">
-    <div>
-        <h1 class="surgewave-page-head-title">Dashboard</h1>
-        <p class="surgewave-page-head-subtitle">Cluster state and live throughput at a glance.</p>
-    </div>
-    <div class="surgewave-page-head-actions">
+<PageHead Title="Dashboard" Subtitle="Cluster state and live throughput at a glance.">
+    <Actions>
         <MudMenu Icon="@Icons.Material.Filled.Widgets" Size="Size.Small" AnchorOrigin="Origin.BottomRight">
             @foreach (var card in _cards.OrderBy(c => c.Title))
             {
@@ -23,8 +19,8 @@
                 </MudMenuItem>
             }
         </MudMenu>
-    </div>
-</div>
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
