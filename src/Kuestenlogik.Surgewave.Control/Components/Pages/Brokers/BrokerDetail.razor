@@ -31,7 +31,7 @@ else if (_broker != null)
                             @_broker.BrokerId
                         </MudAvatar>
                         <div>
-                            <MudText Typo="Typo.h4">Broker @_broker.BrokerId</MudText>
+                            <PageHead Title="@($"Broker {_broker.BrokerId}")" />
                             <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
                                 @_broker.Host:@_broker.Port
                                 @if (_broker.IsController)

@@ -30,7 +30,7 @@ else if (_group != null)
             <MudPaper Elevation="2" Class="pa-4">
                 <div class="d-flex justify-space-between align-center">
                     <div>
-                        <MudText Typo="Typo.h4">@_group.GroupId</MudText>
+                        <PageHead Title="@_group.GroupId" />
                         <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
                             <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_group.State)" Class="mr-2">@_group.State</MudChip>
                             @_group.Members.Count members | Coordinator: Broker @_group.CoordinatorId

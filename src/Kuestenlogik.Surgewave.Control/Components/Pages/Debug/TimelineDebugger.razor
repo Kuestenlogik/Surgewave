@@ -1,0 +1,455 @@
+@page "/debug/timeline"
+@inject ISurgewaveApiClient ApiClient
+@inject ITimelineService TimelineService
+@inject ClusterState ClusterState
+@inject NotificationState Notification
+
+<PageTitle>Timeline Debugger - Surgewave Control</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+
+<PageHead Title="Timeline Debugger" />
+
+@* Control Bar *@
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" Label="Topics" MultiSelection="true" @bind-SelectedValues="_selectedTopics"
+                       Variant="Variant.Outlined" Dense="true" AdornmentIcon="@Icons.Material.Filled.Topic"
+                       Disabled="@_loadingTopics">
+                @foreach (var topic in _availableTopics)
+                {
+                    <MudSelectItem Value="@topic">@topic</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudDatePicker Label="From Date" @bind-Date="_fromDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudTimePicker Label="From Time" @bind-Time="_fromTime" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudDatePicker Label="To Date" @bind-Date="_toDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudTimePicker Label="To Time" @bind-Time="_toTime" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+
+        <MudItem xs="12">
+            <div class="d-flex align-center gap-2 flex-wrap">
+                @* Quick presets *@
+                <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Color="Color.Default">
+                    <MudButton OnClick="@(() => ApplyPreset(TimeSpan.FromMinutes(5)))">Last 5 min</MudButton>
+                    <MudButton OnClick="@(() => ApplyPreset(TimeSpan.FromMinutes(30)))">Last 30 min</MudButton>
+                    <MudButton OnClick="@(() => ApplyPreset(TimeSpan.FromHours(1)))">Last 1 hour</MudButton>
+                    <MudButton OnClick="@(() => ApplyPreset(TimeSpan.FromHours(24)))">Last 24h</MudButton>
+                </MudButtonGroup>
+
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                           OnClick="LoadTimelineAsync" Disabled="@(_loading || !_selectedTopics.Any())">
+                    @if (_loading)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    Load
+                </MudButton>
+
+                <MudDivider Vertical="true" FlexItem="true" Class="mx-2" />
+
+                @* Playback controls *@
+                <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary">
+                    <MudButton OnClick="@(() => SetSpeed(0.25))" Disabled="@(_snapshot is null)"
+                               Color="@(_replaySpeed == 0.25 ? Color.Primary : Color.Default)">0.25x</MudButton>
+                    <MudButton OnClick="@(() => SetSpeed(0.5))" Disabled="@(_snapshot is null)"
+                               Color="@(_replaySpeed == 0.5 ? Color.Primary : Color.Default)">0.5x</MudButton>
+                    <MudButton OnClick="@(() => SetSpeed(1.0))" Disabled="@(_snapshot is null)"
+                               Color="@(_replaySpeed == 1.0 ? Color.Primary : Color.Default)">1x</MudButton>
+                    <MudButton OnClick="@(() => SetSpeed(2.0))" Disabled="@(_snapshot is null)"
+                               Color="@(_replaySpeed == 2.0 ? Color.Primary : Color.Default)">2x</MudButton>
+                    <MudButton OnClick="@(() => SetSpeed(5.0))" Disabled="@(_snapshot is null)"
+                               Color="@(_replaySpeed == 5.0 ? Color.Primary : Color.Default)">5x</MudButton>
+                </MudButtonGroup>
+
+                <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                               Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small"
+                               OnClick="TogglePlayPause" Disabled="@(_snapshot is null)" />
+
+                <MudIconButton Icon="@Icons.Material.Filled.Stop" Color="Color.Error" Variant="Variant.Outlined"
+                               Size="Size.Small" OnClick="StopReplay" Disabled="@(!_isPlaying)" />
+
+                @if (_snapshot is not null)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
+                        @_playheadPosition.LocalDateTime.ToString("HH:mm:ss.fff") |
+                        @_snapshot.Events.Count events across @_snapshot.Topics.Count topics
+                    </MudText>
+                }
+            </div>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* Timeline Visualization *@
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+@if (_snapshot is not null && _snapshot.Events.Count > 0)
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <div class="timeline-container" @ref="_timelineContainer">
+            @* Time axis *@
+            <div class="timeline-axis">
+                @foreach (var tick in _timeAxisTicks)
+                {
+                    <div class="timeline-tick" style="left: @(tick.Position.ToString("F2", System.Globalization.CultureInfo.InvariantCulture))%;">
+                        <span class="timeline-tick-label">@tick.Label</span>
+                    </div>
+                }
+            </div>
+
+            @* Playhead *@
+            <div class="timeline-playhead" style="left: @(GetPlayheadPercent().ToString("F2", System.Globalization.CultureInfo.InvariantCulture))%;"></div>
+
+            @* Topic lanes *@
+            @{ var topicIndex = 0; }
+            @foreach (var topic in _snapshot.Topics)
+            {
+                var color = TopicColors[topicIndex % TopicColors.Length];
+                <div class="timeline-lane" style="border-left-color: @color;">
+                    <div class="timeline-lane-label" style="color: @color;">
+                        <MudIcon Icon="@Icons.Material.Filled.Topic" Size="Size.Small" Style="@($"color: {color}")" />
+                        @topic
+                    </div>
+                    @foreach (var evt in _snapshot.Events.Where(e => e.Topic == topic))
+                    {
+                        var pos = GetEventPercent(evt);
+                        var isSelected = _selectedEvent == evt;
+                        var isHighlighted = IsHighlighted(evt);
+                        var isVisible = !_isPlaying || evt.Timestamp <= _playheadPosition;
+                        var evtCapture = evt;
+                        <div class="timeline-event @(isSelected ? "selected" : "") @(isHighlighted ? "highlighted" : "") @(!isVisible ? "hidden" : "")"
+                             style="left: @(pos.ToString("F2", System.Globalization.CultureInfo.InvariantCulture))%; background: @color;"
+                             title="@($"[{evt.Timestamp:HH:mm:ss.fff}] Key: {evt.Key ?? "(null)"} | Offset: {evt.Offset} | Size: {evt.ValueSize}B")"
+                             @onclick="() => SelectEvent(evtCapture)">
+                        </div>
+                    }
+                </div>
+                topicIndex++;
+            }
+
+            @* Correlation lines *@
+            @if (_traceResult is not null)
+            {
+                @foreach (var hop in _traceResult.Hops)
+                {
+                    var originPos = GetEventPercent(_traceResult.Origin);
+                    var hopPos = GetEventPercent(hop.Event);
+                    var originLane = _snapshot.Topics.IndexOf(_traceResult.Origin.Topic);
+                    var hopLane = _snapshot.Topics.IndexOf(hop.Event.Topic);
+                    if (originLane >= 0 && hopLane >= 0)
+                    {
+                        var topPx = (Math.Min(originLane, hopLane) * 44) + 40 + 20;
+                        var heightPx = Math.Abs(hopLane - originLane) * 44;
+                        var leftPct = Math.Min(originPos, hopPos);
+                        var widthPct = Math.Abs(hopPos - originPos);
+                        <div class="timeline-correlation-line"
+                             style="left: @(leftPct.ToString("F2", System.Globalization.CultureInfo.InvariantCulture))%;
+                                    width: @(widthPct.ToString("F2", System.Globalization.CultureInfo.InvariantCulture))%;
+                                    top: @(topPx)px;
+                                    height: @(heightPx)px;">
+                        </div>
+                    }
+                }
+            }
+        </div>
+    </MudPaper>
+}
+else if (_snapshot is not null)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        No messages found in the selected time range. Try expanding the range or selecting different topics.
+    </MudAlert>
+}
+
+@* Detail Panel *@
+@if (_selectedEvent is not null)
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <div class="d-flex justify-space-between align-center mb-3">
+            <MudText Typo="Typo.h6">Message Details</MudText>
+            <div class="d-flex gap-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.AccountTree"
+                           OnClick="TraceSelectedMessageAsync"
+                           Disabled="@(_tracing || string.IsNullOrEmpty(_selectedEvent.CorrelationId))">
+                    @if (_tracing)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                    }
+                    Trace
+                </MudButton>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="ClearSelection" />
+            </div>
+        </div>
+
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudSimpleTable Dense="true" Hover="true">
+                    <tbody>
+                        <tr>
+                            <td><strong>Topic</strong></td>
+                            <td>@_selectedEvent.Topic</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Partition</strong></td>
+                            <td>@_selectedEvent.Partition</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Offset</strong></td>
+                            <td>@_selectedEvent.Offset</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Timestamp</strong></td>
+                            <td>@_selectedEvent.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff")</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Key</strong></td>
+                            <td><code>@(_selectedEvent.Key ?? "(null)")</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Value Size</strong></td>
+                            <td>@FormatBytes(_selectedEvent.ValueSize)</td>
+                        </tr>
+                        @if (_selectedEvent.CorrelationId is not null)
+                        {
+                            <tr>
+                                <td><strong>Correlation ID</strong></td>
+                                <td><MudChip T="string" Size="Size.Small" Color="Color.Info">@_selectedEvent.CorrelationId</MudChip></td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                @if (_selectedEvent.Headers is { Count: > 0 })
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Headers</MudText>
+                    <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                        <thead>
+                            <tr>
+                                <th>Key</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var header in _selectedEvent.Headers)
+                            {
+                                <tr>
+                                    <td><code>@header.Key</code></td>
+                                    <td>@header.Value</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudItem>
+
+            @if (_selectedEvent.ValuePreview is not null)
+            {
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Value Preview</MudText>
+                    <pre style="font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 0; background: var(--mud-palette-background-grey); padding: 12px; border-radius: 4px; overflow: auto; max-height: 300px;">@FormatJsonPreview(_selectedEvent.ValuePreview)</pre>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudPaper>
+}
+
+@* Trace Results *@
+@if (_traceResult is not null && _traceResult.Hops.Count > 0)
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <MudText Typo="Typo.h6" Class="mb-3">
+            Message Trace
+            <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">
+                @_traceResult.Hops.Count hop(s)
+            </MudChip>
+        </MudText>
+
+        <MudTimeline TimelinePosition="TimelinePosition.Start">
+            <MudTimelineItem Color="Color.Success" Size="Size.Medium" Elevation="2">
+                <ItemContent>
+                    <MudCard Elevation="2" Class="pa-3">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Success">Origin</MudText>
+                        <MudText Typo="Typo.body2">@_traceResult.Origin.Topic [P@(_traceResult.Origin.Partition):@(_traceResult.Origin.Offset)]</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@_traceResult.Origin.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff")</MudText>
+                    </MudCard>
+                </ItemContent>
+            </MudTimelineItem>
+
+            @foreach (var hop in _traceResult.Hops)
+            {
+                <MudTimelineItem Color="Color.Primary" Size="Size.Small" Elevation="2">
+                    <ItemContent>
+                        <MudCard Elevation="2" Class="pa-3">
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.subtitle2">@hop.Event.Topic</MudText>
+                                @if (hop.TransformationType is not null)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@hop.TransformationType</MudChip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.body2">[P@(hop.Event.Partition):@(hop.Event.Offset)]</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @hop.Event.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff")
+                                | +@FormatLatency(hop.Latency)
+                            </MudText>
+                        </MudCard>
+                    </ItemContent>
+                </MudTimelineItem>
+            }
+        </MudTimeline>
+    </MudPaper>
+}
+
+<style>
+    .timeline-container {
+        position: relative;
+        overflow-x: auto;
+        min-height: 100px;
+        padding-top: 30px;
+        padding-left: 160px;
+        padding-right: 20px;
+    }
+
+    .timeline-axis {
+        position: absolute;
+        top: 0;
+        left: 160px;
+        right: 20px;
+        height: 30px;
+        border-bottom: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .timeline-tick {
+        position: absolute;
+        top: 0;
+        height: 100%;
+        border-left: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .timeline-tick-label {
+        position: absolute;
+        top: 2px;
+        left: 4px;
+        font-size: 10px;
+        color: var(--mud-palette-text-secondary);
+        white-space: nowrap;
+    }
+
+    .timeline-lane {
+        height: 40px;
+        border-bottom: 1px solid var(--mud-palette-lines-default);
+        border-left: 4px solid;
+        position: relative;
+        margin-bottom: 4px;
+    }
+
+    .timeline-lane-label {
+        position: absolute;
+        left: -160px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 150px;
+        font-size: 12px;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-left: 4px;
+    }
+
+    .timeline-event {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        cursor: pointer;
+        transform: translate(-50%, -50%);
+        top: 50%;
+        transition: all 0.15s ease;
+        z-index: 5;
+        opacity: 0.8;
+    }
+
+    .timeline-event:hover {
+        transform: translate(-50%, -50%) scale(1.6);
+        opacity: 1;
+        z-index: 15;
+        box-shadow: 0 0 8px rgba(0,0,0,0.3);
+    }
+
+    .timeline-event.selected {
+        transform: translate(-50%, -50%) scale(1.8);
+        opacity: 1;
+        z-index: 20;
+        box-shadow: 0 0 0 3px var(--mud-palette-primary), 0 0 12px rgba(0,0,0,0.3);
+    }
+
+    .timeline-event.highlighted {
+        transform: translate(-50%, -50%) scale(1.5);
+        opacity: 1;
+        z-index: 18;
+        box-shadow: 0 0 0 2px var(--mud-palette-info);
+        animation: pulse-highlight 1.5s ease-in-out infinite;
+    }
+
+    .timeline-event.hidden {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0);
+    }
+
+    @@keyframes pulse-highlight {
+        0%, 100% { box-shadow: 0 0 0 2px var(--mud-palette-info); }
+        50% { box-shadow: 0 0 0 4px var(--mud-palette-info), 0 0 12px var(--mud-palette-info); }
+    }
+
+    .timeline-playhead {
+        position: absolute;
+        width: 2px;
+        background: var(--mud-palette-error);
+        top: 0;
+        bottom: 0;
+        z-index: 10;
+        pointer-events: none;
+        transition: left 0.05s linear;
+    }
+
+    .timeline-playhead::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -4px;
+        width: 0;
+        height: 0;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 8px solid var(--mud-palette-error);
+    }
+
+    .timeline-correlation-line {
+        position: absolute;
+        border: 2px dashed var(--mud-palette-info);
+        opacity: 0.4;
+        pointer-events: none;
+        z-index: 3;
+        border-radius: 4px;
+    }
+</style>

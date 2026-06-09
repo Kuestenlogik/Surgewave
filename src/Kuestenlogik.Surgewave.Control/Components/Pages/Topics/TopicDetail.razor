@@ -31,7 +31,7 @@ else if (_topic != null)
             <MudPaper Elevation="2" Class="pa-4">
                 <div class="d-flex justify-space-between align-center">
                     <div>
-                        <MudText Typo="Typo.h4">@_topic.Name</MudText>
+                        <PageHead Title="@_topic.Name" />
                         <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
                             @_topic.PartitionCount partitions | Replication factor: @_topic.ReplicationFactor
                             @if (_topic.IsInternal)

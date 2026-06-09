@@ -9,7 +9,7 @@
 
 <div class="d-flex align-center justify-space-between mb-4">
     <div>
-        <MudText Typo="Typo.h4">Data Mesh</MudText>
+        <PageHead Title="Data Mesh" />
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             Data Products with ownership, contracts, SLOs, and quality monitoring
         </MudText>
@@ -259,7 +259,7 @@ else if (!_loading)
                     <div class="d-flex align-center gap-4 mb-4">
                         <div>
                             <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Overall Score</MudText>
-                            <MudText Typo="Typo.h4">@(_selectedProduct.QualityScore.ToString("F1"))%</MudText>
+                            <MudText Typo="Typo.h4">@_selectedProduct.QualityScore.ToString("F1")%</MudText>
                         </div>
                         <MudDivider Vertical="true" FlexItem="true" />
                         <div>
