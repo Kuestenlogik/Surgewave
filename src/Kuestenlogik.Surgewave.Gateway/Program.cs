@@ -7,7 +7,6 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Kuestenlogik.Bowire;
-using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -167,13 +166,8 @@ if (telemetryConfig.Prometheus.Enabled)
     app.MapPrometheusScrapingEndpoint(telemetryConfig.Prometheus.Path);
 }
 
-// Enable OpenAPI and Scalar UI
+// Enable OpenAPI (consumed by the Bowire workbench below alongside the gRPC services)
 app.MapOpenApi();
-app.MapScalarApiReference(options =>
-{
-    options.WithTitle("Surgewave Gateway")
-           .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient);
-});
 
 // Map gRPC services with JSON transcoding
 app.MapGrpcService<ProducerGatewayService>();
@@ -185,8 +179,8 @@ app.MapGrpcService<TransactionGatewayService>();
 app.MapGrpcReflectionService();
 app.MapBowire("/bowire", options =>
 {
-    options.Title = "Surgewave Gateway gRPC API";
-    options.Description = "Interactive gRPC browser for Surgewave Gateway";
+    options.Title = "Surgewave Gateway";
+    options.Description = "Interactive workbench for the Surgewave Gateway gRPC + REST surface";
 });
 
 // Map Health endpoints

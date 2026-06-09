@@ -7,12 +7,14 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Scalar.AspNetCore;
+using Kuestenlogik.Bowire;
 
 namespace Kuestenlogik.Surgewave.Schema.Registry;
 
 /// <summary>
 /// REST API for Schema Registry, compatible with Confluent Schema Registry API.
+/// Uses Bowire as the OpenAPI workbench (Surgewave-wide default — replaced
+/// the per-surface Scalar dependency).
 /// </summary>
 public static class SchemaRegistryRestApi
 {
@@ -165,10 +167,10 @@ public static class SchemaRegistryRestApi
     public static IEndpointRouteBuilder MapSurgewaveSchemaRegistry(this IEndpointRouteBuilder app)
     {
         app.MapOpenApi();
-        app.MapScalarApiReference(options =>
+        app.MapBowire("/bowire", options =>
         {
-            options.WithTitle("Surgewave Schema Registry API")
-                   .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient);
+            options.Title = "Surgewave Schema Registry";
+            options.Description = "Interactive browser for the Confluent-compatible Schema Registry REST API";
         });
 
         var group = app.MapGroup("")
