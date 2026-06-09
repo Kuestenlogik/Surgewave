@@ -5,18 +5,18 @@
 
 <PageTitle>Cruise Control - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Cruise Control" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Automatic partition balancing based on load, disk, and network metrics</MudText>
-    </div>
-    <div class="d-flex gap-2">
-        <MudButton Variant="Variant.Outlined" OnClick="AnalyzeNowAsync"
-                   StartIcon="@Icons.Material.Filled.Analytics" Disabled="_loading">Analyze Now</MudButton>
-        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
-                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
-    </div>
-</div>
+<PageHead Title="Cruise Control"
+          Subtitle="Automatic partition balancing based on load, disk, and network metrics.">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Analytics"
+                   OnClick="AnalyzeNowAsync" Disabled="_loading">
+            Analyze
+        </MudButton>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
@@ -27,63 +27,25 @@ else if (_error != null)
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
 }
 
-@* Score Overview Cards *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Balance"
-                             Color="@GetScoreColor(_report.Score.OverallScore)" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Overall Score</MudText>
-                        <MudText Typo="Typo.h5">@(_report.Score.OverallScore.ToString("F1"))%</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@(GetBalanceIcon(_report.IsBalanced))"
-                             Color="@(_report.IsBalanced ? Color.Success : Color.Warning)" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
-                        <MudText Typo="Typo.h5">@(_report.IsBalanced ? "Balanced" : "Imbalanced")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Imbalances</MudText>
-                        <MudText Typo="Typo.h5">@_report.Imbalances.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Settings" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Mode</MudText>
-                        <MudText Typo="Typo.h5">@_config.Mode</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Overall score" Value="@($"{_report.Score.OverallScore:F1}%")" Mono="true" />
+    <Stat Label="Status">
+        <span class="surgewave-status @(_report.IsBalanced ? "surgewave-status--ok" : "surgewave-status--warn")">
+            <span class="surgewave-status-dot"></span>
+            @(_report.IsBalanced ? "Balanced" : "Imbalanced")
+        </span>
+    </Stat>
+    <Stat Label="Imbalances">
+        @{
+            var imb = _report.Imbalances.Count;
+        }
+        <span class="surgewave-status @(imb > 0 ? "surgewave-status--warn" : "surgewave-status--ok")">
+            <span class="surgewave-status-dot"></span>
+            @imb
+        </span>
+    </Stat>
+    <Stat Label="Mode" Value="@_config.Mode" Mono="true" />
+</SummaryStrip>
 
 @* Per-Metric Balance Scores *@
 <MudCard Class="mb-4" Elevation="2">

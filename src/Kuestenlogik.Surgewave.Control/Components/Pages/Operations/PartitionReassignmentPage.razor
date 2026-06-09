@@ -5,20 +5,18 @@
 
 <PageTitle>Partition Reassignment - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Partition Reassignment" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Rebalance partitions, decommission brokers, and track reassignment progress</MudText>
-    </div>
-    <div class="d-flex gap-2">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AutoBalanceAsync"
-                   StartIcon="@Icons.Material.Filled.Balance" Disabled="_balancing">
-            @(_balancing ? "Balancing..." : "Auto-Balance")
+<PageHead Title="Partition Reassignment"
+          Subtitle="Rebalance partitions, decommission brokers, and track progress.">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Balance"
+                   OnClick="AutoBalanceAsync" Disabled="_balancing">
+            @(_balancing ? "Balancing…" : "Auto-balance")
         </MudButton>
-        <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
-                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
-    </div>
-</div>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
@@ -29,63 +27,22 @@ else if (_error != null)
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
 }
 
-@* Summary Cards *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.ViewModule" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Partitions</MudText>
-                        <MudText Typo="Typo.h5">@_assignments.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Plans</MudText>
-                        <MudText Typo="Typo.h5">@_plans.Count(p => p.Status is "InProgress" or "Pending")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Completed</MudText>
-                        <MudText Typo="Typo.h5">@_plans.Count(p => p.Status == "Completed")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Brokers</MudText>
-                        <MudText Typo="Typo.h5">@_assignments.SelectMany(a => a.Replicas).Distinct().Count()</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Partitions" Value="@_assignments.Count.ToString()" />
+    <Stat Label="Active plans">
+        @{
+            var active = _plans.Count(p => p.Status is "InProgress" or "Pending");
+        }
+        <span class="surgewave-status @(active > 0 ? "surgewave-status--info" : "surgewave-status--idle")">
+            <span class="surgewave-status-dot"></span>
+            @active
+        </span>
+    </Stat>
+    <Stat Label="Completed plans" Value="@_plans.Count(p => p.Status == "Completed").ToString()" />
+    <Stat Label="Brokers" Value="@_assignments.SelectMany(a => a.Replicas).Distinct().Count().ToString()" />
+</SummaryStrip>
 
-<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+<MudTabs Elevation="0" Rounded="true" PanelClass="pt-4">
     @* Current Assignments *@
     <MudTabPanel Text="Partition Assignments" Icon="@Icons.Material.Filled.ViewModule">
         <MudTable Items="_assignments" Hover="true" Dense="true" Class="ma-4" Filter="FilterAssignment">

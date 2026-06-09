@@ -5,14 +5,13 @@
 
 <PageTitle>Rolling Upgrades - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Rolling Upgrades" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Cluster version info, compatibility checks, and graceful shutdown</MudText>
-    </div>
-    <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
-               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
-</div>
+<PageHead Title="Rolling Upgrades"
+          Subtitle="Cluster version info, compatibility checks, and graceful shutdown.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
@@ -23,48 +22,20 @@ else if (_error != null)
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
 }
 
-@* Version Info *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="4">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Upgrade" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Local Version</MudText>
-                        <MudText Typo="Typo.h5">@_versionInfo.LocalVersion</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="4">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Local Broker ID</MudText>
-                        <MudText Typo="Typo.h5">@_versionInfo.LocalBrokerId</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="4">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Brokers</MudText>
-                        <MudText Typo="Typo.h5">@_versionInfo.Brokers.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Local version" Value="@_versionInfo.LocalVersion" Mono="true" />
+    <Stat Label="Local broker" Value="@($"Broker {_versionInfo.LocalBrokerId}")" Mono="true" />
+    <Stat Label="Brokers" Value="@_versionInfo.Brokers.Count.ToString()" />
+    <Stat Label="Mixed-version cluster">
+        @{
+            var allSame = _versionInfo.Brokers.All(b => b.Version == _versionInfo.LocalVersion);
+        }
+        <span class="surgewave-status @(allSame ? "surgewave-status--ok" : "surgewave-status--warn")">
+            <span class="surgewave-status-dot"></span>
+            @(allSame ? "All same" : "Mixed")
+        </span>
+    </Stat>
+</SummaryStrip>
 
 @* Broker Versions Table *@
 <MudText Typo="Typo.h6" Class="mb-2">Cluster Broker Versions</MudText>

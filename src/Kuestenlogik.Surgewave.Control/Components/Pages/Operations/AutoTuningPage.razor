@@ -5,14 +5,13 @@
 
 <PageTitle>Auto-Tuning - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Auto-Tuning" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Adaptive configuration tuning based on workload analysis</MudText>
-    </div>
-    <MudButton Variant="Variant.Outlined" OnClick="LoadDataAsync"
-               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">Refresh</MudButton>
-</div>
+<PageHead Title="Auto-Tuning"
+          Subtitle="Adaptive configuration tuning based on workload analysis.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
@@ -23,64 +22,27 @@ else if (_error != null)
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
 }
 
-@* Status Card *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.AutoFixHigh"
-                             Color="@(_status.Enabled ? Color.Success : Color.Default)" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Status</MudText>
-                        <MudText Typo="Typo.h5">@(_status.Enabled ? "Enabled" : "Disabled")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Settings" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Mode</MudText>
-                        <MudText Typo="Typo.h5">@_status.Mode</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Lightbulb" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Recommendations</MudText>
-                        <MudText Typo="Typo.h5">@_status.ActiveRecommendations.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Timer" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Interval</MudText>
-                        <MudText Typo="Typo.h5">@(_status.AnalysisIntervalSeconds)s</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Status">
+        <span class="surgewave-status @(_status.Enabled ? "surgewave-status--ok" : "surgewave-status--idle")">
+            <span class="surgewave-status-dot"></span>
+            @(_status.Enabled ? "Enabled" : "Disabled")
+        </span>
+    </Stat>
+    <Stat Label="Mode" Value="@_status.Mode" Mono="true" />
+    <Stat Label="Active recommendations">
+        @{
+            var recs = _status.ActiveRecommendations.Count;
+        }
+        <span class="surgewave-status @(recs > 0 ? "surgewave-status--warn" : "surgewave-status--ok")">
+            <span class="surgewave-status-dot"></span>
+            @recs
+        </span>
+    </Stat>
+    <Stat Label="Interval" Value="@($"{_status.AnalysisIntervalSeconds}s")" Mono="true" />
+</SummaryStrip>
 
-<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+<MudTabs Elevation="0" Rounded="true" PanelClass="pt-4">
     @* Active Recommendations *@
     <MudTabPanel Text="Active Recommendations" Icon="@Icons.Material.Filled.Lightbulb">
         <MudTable Items="_status.ActiveRecommendations" Hover="true" Dense="true" Class="ma-4">
