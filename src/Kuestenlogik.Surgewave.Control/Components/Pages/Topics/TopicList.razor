@@ -6,31 +6,29 @@
 
 <PageTitle>Topics - Surgewave Control</PageTitle>
 
-<PageHead Title="Topics" />
+<PageHead Title="Topics"
+          Subtitle="All Kafka topics in the selected cluster.">
+    <Actions>
+        <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Href="/topics/create" data-tour-id="create-topic-btn">
+                Create topic
+            </MudButton>
+        </AuthorizeView>
+    </Actions>
+</PageHead>
 
-<MudPaper Elevation="2" Class="pa-4 mb-4">
-    <MudGrid>
-        <MudItem xs="12" md="6">
-            <MudTextField @bind-Value="_searchText" Label="Search topics" Variant="Variant.Outlined"
-                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                          Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="OnSearchChanged"
-                          data-tour-id="topic-search" />
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudSwitch @bind-Value="_includeInternal" Label="Include internal topics" Color="Color.Primary"
-                       T="bool" @bind-Value:after="LoadTopicsAsync"
-                       data-tour-id="internal-topics-toggle" />
-        </MudItem>
-        <MudItem xs="12" md="3" Class="d-flex align-center justify-end">
-            <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                           Href="/topics/create" data-tour-id="create-topic-btn">
-                    Create Topic
-                </MudButton>
-            </AuthorizeView>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<div class="d-flex align-center gap-3 mb-3">
+    <MudTextField @bind-Value="_searchText" Placeholder="Search topics…" Variant="Variant.Outlined"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Margin="Margin.Dense" Class="flex-grow-1"
+                  Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="OnSearchChanged"
+                  data-tour-id="topic-search" />
+    <MudSwitch @bind-Value="_includeInternal" Label="Include internal" Color="Color.Primary"
+               T="bool" @bind-Value:after="LoadTopicsAsync"
+               data-tour-id="internal-topics-toggle" />
+</div>
 
 @if (_loading)
 {
@@ -47,25 +45,40 @@ else if (_error != null)
 }
 else
 {
-    <MudTable Items="@_filteredTopics" Dense="true" Hover="true" Striped="true" Elevation="2"
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+    <MudTable Items="@_filteredTopics" Dense="true" Hover="true" Striped="false" Elevation="0"
               Loading="@_loading" LoadingProgressColor="Color.Primary">
         <HeaderContent>
             <MudTh><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
-            <MudTh><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.PartitionCount)">Partitions</MudTableSortLabel></MudTh>
-            <MudTh><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.ReplicationFactor)">Replication</MudTableSortLabel></MudTh>
-            <MudTh>Internal</MudTh>
-            <MudTh Style="width: 120px">Actions</MudTh>
+            <MudTh Style="text-align: right"><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.PartitionCount)">Partitions</MudTableSortLabel></MudTh>
+            <MudTh Style="text-align: right"><MudTableSortLabel SortBy="new Func<TopicInfo, object>(x => x.ReplicationFactor)">Replication</MudTableSortLabel></MudTh>
+            <MudTh>Kind</MudTh>
+            <MudTh Style="width: 120px"></MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Name">
-                <MudLink Href="@($"/topics/{context.Name}")">@context.Name</MudLink>
+                <MudLink Href="@($"/topics/{context.Name}")" Class="surgewave-mono">@context.Name</MudLink>
             </MudTd>
-            <MudTd DataLabel="Partitions">@context.PartitionCount</MudTd>
-            <MudTd DataLabel="Replication">@context.ReplicationFactor</MudTd>
-            <MudTd DataLabel="Internal">
+            <MudTd DataLabel="Partitions" Style="text-align: right">
+                <span class="surgewave-mono">@context.PartitionCount</span>
+            </MudTd>
+            <MudTd DataLabel="Replication" Style="text-align: right">
+                <span class="surgewave-mono">@context.ReplicationFactor</span>
+            </MudTd>
+            <MudTd DataLabel="Kind">
                 @if (context.IsInternal)
                 {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Info">Internal</MudChip>
+                    <span class="surgewave-status surgewave-status--info">
+                        <span class="surgewave-status-dot"></span>
+                        Internal
+                    </span>
+                }
+                else
+                {
+                    <span class="surgewave-status">
+                        <span class="surgewave-status-dot"></span>
+                        User
+                    </span>
                 }
             </MudTd>
             <MudTd DataLabel="Actions">
@@ -83,12 +96,13 @@ else
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Color="Color.Secondary">No topics found</MudText>
+            <MudText Color="Color.Secondary" Class="pa-4">No topics found</MudText>
         </NoRecordsContent>
         <PagerContent>
             <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
         </PagerContent>
     </MudTable>
+    </MudPaper>
 }
 
 @code {
