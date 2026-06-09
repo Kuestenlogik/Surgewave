@@ -9,66 +9,34 @@
 
 <PageTitle>Plugins - Surgewave Control</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">Installed Plugins</MudText>
+<div class="surgewave-page-head">
+    <div>
+        <h1 class="surgewave-page-head-title">Plugins</h1>
+        <p class="surgewave-page-head-subtitle">Browse, install and update <code>.swpkg</code> packages.</p>
+    </div>
+</div>
 
-@* Summary Cards *@
-<MudGrid>
-    <MudItem xs="12" md="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Store" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Available</MudText>
-                        <MudText Typo="Typo.h5">@_packages.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="12" md="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Installed</MudText>
-                        <MudText Typo="Typo.h5">@_packages.Count(p => p.IsInstalled)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="12" md="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Update" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Updates Available</MudText>
-                        <MudText Typo="Typo.h5">@_packages.Count(p => p.IsInstalled && p.InstalledVersion != p.Version)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
+<div class="surgewave-summary-strip">
+    <div class="surgewave-stat">
+        <span class="surgewave-stat-label">Available</span>
+        <span class="surgewave-stat-value">@_packages.Count</span>
+    </div>
+    <div class="surgewave-stat">
+        <span class="surgewave-stat-label">Installed</span>
+        <span class="surgewave-stat-value">@_packages.Count(p => p.IsInstalled)</span>
+    </div>
+    <div class="surgewave-stat">
+        <span class="surgewave-stat-label">Updates available</span>
+        <span class="surgewave-stat-value">@_packages.Count(p => p.IsInstalled && p.InstalledVersion != p.Version)</span>
+    </div>
     @if (MarketplaceConfig.ReviewsEnabled)
     {
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Top Rated</MudText>
-                            <MudText Typo="Typo.h5">@_topRated.Count</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
+        <div class="surgewave-stat">
+            <span class="surgewave-stat-label">Top rated</span>
+            <span class="surgewave-stat-value">@_topRated.Count</span>
+        </div>
     }
-</MudGrid>
+</div>
 
 @* Search and Filters *@
 <MudCard Elevation="2" Class="mt-4">
