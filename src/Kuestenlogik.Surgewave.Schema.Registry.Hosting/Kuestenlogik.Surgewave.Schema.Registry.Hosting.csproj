@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Surgewave Schema Registry — host integration: ASP.NET Core REST endpoints (MapSurgewaveSchemaRegistry, MapSurgewaveSchemaLinking) and OpenAPI/Scalar wiring. Reference this from a host that runs the Schema Registry to expose its REST surface.</Description>
+    <Description>Surgewave Schema Registry — host integration: ASP.NET Core REST endpoints (MapSurgewaveSchemaRegistry, MapSurgewaveSchemaLinking) and OpenAPI/Bowire wiring. Reference this from a host that runs the Schema Registry to expose its REST surface.</Description>
     <PackageTags>surgewave;schema-registry;hosting;rest;http</PackageTags>
   </PropertyGroup>
 
@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Kuestenlogik.Bowire" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
 

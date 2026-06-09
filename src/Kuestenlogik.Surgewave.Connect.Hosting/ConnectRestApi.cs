@@ -9,13 +9,15 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Scalar.AspNetCore;
+using Kuestenlogik.Bowire;
 
 namespace Kuestenlogik.Surgewave.Connect;
 
 /// <summary>
 /// REST API for managing connectors, compatible with Kafka Connect REST API.
-/// Uses ASP.NET Core minimal APIs with Scalar for OpenAPI documentation.
+/// Uses ASP.NET Core minimal APIs with Bowire for interactive API browsing
+/// (replaces Scalar — same OpenAPI source, Bowire is the Surgewave-wide
+/// default workbench for both REST and gRPC surfaces).
 /// </summary>
 public static class ConnectRestApi
 {
@@ -52,10 +54,10 @@ public static class ConnectRestApi
     public static IEndpointRouteBuilder MapSurgewaveConnect(this IEndpointRouteBuilder app)
     {
         app.MapOpenApi();
-        app.MapScalarApiReference(options =>
+        app.MapBowire("/bowire", options =>
         {
-            options.WithTitle("Surgewave Connect API")
-                   .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient);
+            options.Title = "Surgewave Connect API";
+            options.Description = "Interactive browser for the Kafka-Connect-compatible REST API";
         });
 
         var group = app.MapGroup("")
