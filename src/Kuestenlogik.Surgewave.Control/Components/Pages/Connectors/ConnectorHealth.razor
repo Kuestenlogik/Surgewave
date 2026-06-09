@@ -11,88 +11,35 @@
 
 <PageTitle>Connector Health - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Connector Health Dashboard" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Task-level status, error tracking, and auto-restart configuration
-        </MudText>
-    </div>
-    <div class="d-flex gap-2 align-center">
-        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
-            Auto-refresh: @(_autoRefreshSeconds)s
-        </MudChip>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
-                   StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
-            Refresh
-        </MudButton>
-    </div>
-</div>
+<PageHead Title="Connector Health"
+          Subtitle="@($"Task-level status, error tracking, auto-restart. Auto-refresh every {_autoRefreshSeconds}s.")">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
 }
 
-@* ===== SUMMARY CARDS ===== *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Cable" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Connectors</MudText>
-                        <MudText Typo="Typo.h5">@_connectors.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
-                             Color="@(_connectors.All(c => c.State == "RUNNING") ? Color.Success : Color.Warning)"
-                             Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Healthy</MudText>
-                        <MudText Typo="Typo.h5">@_connectors.Count(c => c.State == "RUNNING" && c.FailedTasks == 0) / @_connectors.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Task" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Tasks</MudText>
-                        <MudText Typo="Typo.h5">@_connectors.Sum(c => c.RunningTasks)/@_connectors.Sum(c => c.TotalTasks)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Error"
-                             Color="@(_connectors.Sum(c => c.FailedTasks) > 0 ? Color.Error : Color.Success)"
-                             Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Failed Tasks</MudText>
-                        <MudText Typo="Typo.h5">@_connectors.Sum(c => c.FailedTasks)</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="Connectors" Value="@_connectors.Count.ToString()" />
+    <Stat Label="Healthy"
+          Value="@($"{_connectors.Count(c => c.State == "RUNNING" && c.FailedTasks == 0)} / {_connectors.Count}")" />
+    <Stat Label="Tasks running"
+          Value="@($"{_connectors.Sum(c => c.RunningTasks)} / {_connectors.Sum(c => c.TotalTasks)}")" />
+    <Stat Label="Failed tasks">
+        @{
+            var failed = _connectors.Sum(c => c.FailedTasks);
+        }
+        <span class="surgewave-status @(failed > 0 ? "surgewave-status--error" : "surgewave-status--ok")">
+            <span class="surgewave-status-dot"></span>
+            @failed
+        </span>
+    </Stat>
+</SummaryStrip>
 
 @* ===== CONNECTOR CARDS ===== *@
 @if (_connectors.Count == 0 && !_loading)

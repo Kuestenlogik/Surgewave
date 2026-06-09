@@ -7,8 +7,6 @@
 
 <PageTitle>@GroupId - Surgewave Control</PageTitle>
 
-<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
-
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
@@ -24,193 +22,145 @@ else if (_error != null)
 }
 else if (_group != null)
 {
+    <MudBreadcrumbs Items="_breadcrumbs" Class="pa-0 mb-2" />
+
+    <PageHead Title="@_group.GroupId"
+              Subtitle="Members, partition assignments and coordinator.">
+        <Actions>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Delete"
+                       OnClick="ConfirmDeleteAsync"
+                       Disabled="@(_group.State != "Empty" && _group.State != "Dead")">
+                Delete
+            </MudButton>
+        </Actions>
+    </PageHead>
+
+    <SummaryStrip>
+        <Stat Label="State">
+            <span class="surgewave-status @GetStateStatusClass(_group.State)">
+                <span class="surgewave-status-dot"></span>
+                @_group.State
+            </span>
+        </Stat>
+        <Stat Label="Members" Value="@_group.Members.Count.ToString()" />
+        <Stat Label="Coordinator" Value="@($"Broker {_group.CoordinatorId}")" Mono="true" />
+        <Stat Label="Protocol type" Value="@_group.ProtocolType" Mono="true" />
+        <Stat Label="Protocol" Value="@_group.Protocol" Mono="true" />
+    </SummaryStrip>
+
     <MudGrid>
-        @* Group Header *@
-        <MudItem xs="12">
-            <MudPaper Elevation="2" Class="pa-4">
-                <div class="d-flex justify-space-between align-center">
-                    <div>
-                        <PageHead Title="@_group.GroupId" />
-                        <MudText Typo="Typo.subtitle1" Color="Color.Secondary">
-                            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_group.State)" Class="mr-2">@_group.State</MudChip>
-                            @_group.Members.Count members | Coordinator: Broker @_group.CoordinatorId
-                        </MudText>
-                    </div>
-                    <div>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
-                                   OnClick="ConfirmDeleteAsync"
-                                   Disabled="@(_group.State != "Empty" && _group.State != "Dead")">
-                            Delete
-                        </MudButton>
-                    </div>
-                </div>
-            </MudPaper>
-        </MudItem>
-
-        @* Group Info *@
-        <MudItem xs="12" md="4">
-            <MudCard Elevation="2" Style="height: 100%">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Group Information</MudText>
-                    </CardHeaderContent>
-                </MudCardHeader>
-                <MudCardContent>
-                    <MudSimpleTable Dense="true">
-                        <tbody>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">State</MudText></td>
-                                <td>
-                                    <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_group.State)">@_group.State</MudChip>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Protocol Type</MudText></td>
-                                <td><MudText Typo="Typo.body1">@_group.ProtocolType</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Protocol</MudText></td>
-                                <td><MudText Typo="Typo.body1">@_group.Protocol</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Coordinator</MudText></td>
-                                <td><MudText Typo="Typo.body1">Broker @_group.CoordinatorId</MudText></td>
-                            </tr>
-                            <tr>
-                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Members</MudText></td>
-                                <td><MudText Typo="Typo.body1">@_group.Members.Count</MudText></td>
-                            </tr>
-                        </tbody>
-                    </MudSimpleTable>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-
         @* Members *@
-        <MudItem xs="12" md="8">
-            <MudCard Elevation="2" Style="height: 100%">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Members (@_group.Members.Count)</MudText>
-                    </CardHeaderContent>
-                </MudCardHeader>
-                <MudCardContent Style="max-height: 400px; overflow-y: auto;">
-                    @if (_group.Members.Count == 0)
-                    {
-                        <MudText Color="Color.Secondary">No active members</MudText>
-                    }
-                    else
-                    {
-                        <MudExpansionPanels MultiExpansion="true">
-                            @foreach (var member in _group.Members)
-                            {
-                                <MudExpansionPanel Text="@member.ClientId">
-                                    <TitleContent>
-                                        <div class="d-flex align-center">
-                                            <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2" />
-                                            <MudText>@member.ClientId</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">
-                                                @member.Assignments.Sum(a => a.Partitions.Count) partitions
-                                            </MudChip>
-                                        </div>
-                                    </TitleContent>
-                                    <ChildContent>
-                                        <MudSimpleTable Dense="true" Class="mb-3">
+        <MudItem xs="12">
+            <div class="surgewave-section-title">Members (@_group.Members.Count)</div>
+            <MudPaper Class="surgewave-surface" Style="padding: 0; max-height: 400px; overflow-y: auto;">
+                @if (_group.Members.Count == 0)
+                {
+                    <MudText Color="Color.Secondary" Class="pa-4">No active members</MudText>
+                }
+                else
+                {
+                    <MudExpansionPanels MultiExpansion="true">
+                        @foreach (var member in _group.Members)
+                        {
+                            <MudExpansionPanel Text="@member.ClientId">
+                                <TitleContent>
+                                    <div class="d-flex align-center">
+                                        <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2" />
+                                        <span class="surgewave-mono"><strong>@member.ClientId</strong></span>
+                                        <span class="surgewave-status surgewave-status--info ml-2">
+                                            <span class="surgewave-status-dot"></span>
+                                            @member.Assignments.Sum(a => a.Partitions.Count) partitions
+                                        </span>
+                                    </div>
+                                </TitleContent>
+                                <ChildContent>
+                                    <MudSimpleTable Dense="true" Class="mb-3">
+                                        <tbody>
+                                            <tr>
+                                                <td style="width: 120px"><MudText Typo="Typo.body2" Color="Color.Secondary">Member ID</MudText></td>
+                                                <td><span class="surgewave-mono" style="word-break: break-all;">@member.MemberId</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Client Host</MudText></td>
+                                                <td><span class="surgewave-mono">@member.ClientHost</span></td>
+                                            </tr>
+                                        </tbody>
+                                    </MudSimpleTable>
+
+                                    @if (member.Assignments.Count > 0)
+                                    {
+                                        <div class="surgewave-section-title">Topic assignments</div>
+                                        <MudSimpleTable Dense="true" Hover="true">
+                                            <thead>
+                                                <tr>
+                                                    <th>Topic</th>
+                                                    <th>Partitions</th>
+                                                </tr>
+                                            </thead>
                                             <tbody>
-                                                <tr>
-                                                    <td style="width: 120px"><MudText Typo="Typo.body2" Color="Color.Secondary">Member ID</MudText></td>
-                                                    <td><MudText Typo="Typo.body2" Style="word-break: break-all;">@member.MemberId</MudText></td>
-                                                </tr>
-                                                <tr>
-                                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Client Host</MudText></td>
-                                                    <td><MudText Typo="Typo.body2">@member.ClientHost</MudText></td>
-                                                </tr>
+                                                @foreach (var assignment in member.Assignments)
+                                                {
+                                                    <tr>
+                                                        <td>
+                                                            <MudLink Href="@($"/topics/{assignment.Topic}")" Class="surgewave-mono">@assignment.Topic</MudLink>
+                                                        </td>
+                                                        <td>
+                                                            <span class="surgewave-mono">@string.Join(", ", assignment.Partitions)</span>
+                                                        </td>
+                                                    </tr>
+                                                }
                                             </tbody>
                                         </MudSimpleTable>
-
-                                        @if (member.Assignments.Count > 0)
-                                        {
-                                            <MudText Typo="Typo.subtitle2" Class="mb-2">Topic Assignments</MudText>
-                                            <MudSimpleTable Dense="true" Hover="true">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Topic</th>
-                                                        <th>Partitions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    @foreach (var assignment in member.Assignments)
-                                                    {
-                                                        <tr>
-                                                            <td>
-                                                                <MudLink Href="@($"/topics/{assignment.Topic}")">@assignment.Topic</MudLink>
-                                                            </td>
-                                                            <td>
-                                                                @foreach (var partition in assignment.Partitions)
-                                                                {
-                                                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="mr-1 mb-1">@partition</MudChip>
-                                                                }
-                                                            </td>
-                                                        </tr>
-                                                    }
-                                                </tbody>
-                                            </MudSimpleTable>
-                                        }
-                                        else
-                                        {
-                                            <MudText Color="Color.Secondary" Typo="Typo.body2">No partition assignments</MudText>
-                                        }
-                                    </ChildContent>
-                                </MudExpansionPanel>
-                            }
-                        </MudExpansionPanels>
-                    }
-                </MudCardContent>
-            </MudCard>
+                                    }
+                                    else
+                                    {
+                                        <MudText Color="Color.Secondary" Typo="Typo.body2">No partition assignments</MudText>
+                                    }
+                                </ChildContent>
+                            </MudExpansionPanel>
+                        }
+                    </MudExpansionPanels>
+                }
+            </MudPaper>
         </MudItem>
 
         @* Assignments Summary *@
         <MudItem xs="12">
-            <MudCard Elevation="2">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">Partition Assignments by Topic</MudText>
-                    </CardHeaderContent>
-                </MudCardHeader>
-                <MudCardContent>
-                    @{
-                        var topicAssignments = GetTopicAssignmentsSummary();
-                    }
-                    @if (topicAssignments.Count == 0)
-                    {
-                        <MudText Color="Color.Secondary">No partition assignments</MudText>
-                    }
-                    else
-                    {
-                        <MudSimpleTable Dense="true" Hover="true">
-                            <thead>
+            <div class="surgewave-section-title">Partition assignments by topic</div>
+            <MudPaper Class="surgewave-surface" Style="padding: 0;">
+                @{
+                    var topicAssignments = GetTopicAssignmentsSummary();
+                }
+                @if (topicAssignments.Count == 0)
+                {
+                    <MudText Color="Color.Secondary" Class="pa-4">No partition assignments</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Topic</th>
+                                <th style="text-align: right">Assigned Partitions</th>
+                                <th style="text-align: right">Members</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var topic in topicAssignments.OrderBy(t => t.Key))
+                            {
                                 <tr>
-                                    <th>Topic</th>
-                                    <th>Assigned Partitions</th>
-                                    <th>Members</th>
+                                    <td>
+                                        <MudLink Href="@($"/topics/{topic.Key}")" Class="surgewave-mono">@topic.Key</MudLink>
+                                    </td>
+                                    <td style="text-align: right"><span class="surgewave-mono">@topic.Value.TotalPartitions</span></td>
+                                    <td style="text-align: right"><span class="surgewave-mono">@topic.Value.MemberCount</span></td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var topic in topicAssignments.OrderBy(t => t.Key))
-                                {
-                                    <tr>
-                                        <td>
-                                            <MudLink Href="@($"/topics/{topic.Key}")">@topic.Key</MudLink>
-                                        </td>
-                                        <td>@topic.Value.TotalPartitions</td>
-                                        <td>@topic.Value.MemberCount</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </MudSimpleTable>
-                    }
-                </MudCardContent>
-            </MudCard>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
         </MudItem>
     </MudGrid>
 }
@@ -298,6 +248,15 @@ else if (_group != null)
         "Empty" => Color.Default,
         "Dead" => Color.Error,
         _ => Color.Default
+    };
+
+    private static string GetStateStatusClass(string state) => state switch
+    {
+        "Stable" => "surgewave-status--ok",
+        "PreparingRebalance" or "CompletingRebalance" => "surgewave-status--warn",
+        "Empty" => "surgewave-status--idle",
+        "Dead" => "surgewave-status--error",
+        _ => ""
     };
 
     private async Task ConfirmDeleteAsync()
