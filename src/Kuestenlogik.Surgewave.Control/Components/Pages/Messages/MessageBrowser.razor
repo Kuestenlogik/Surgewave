@@ -11,28 +11,27 @@
 
 <PageTitle>Message Browser - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Message Browser" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Browse and inspect messages across all topics and partitions
-        </MudText>
-    </div>
-    <div class="d-flex gap-2 align-center">
+<PageHead Title="Message Browser"
+          Subtitle="Browse and inspect messages across all topics and partitions.">
+    <Actions>
         @if (_liveTail)
         {
-            <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.FiberManualRecord">
+            <span class="surgewave-status surgewave-status--ok">
+                <span class="surgewave-status-dot"></span>
                 Live
-            </MudChip>
+            </span>
             @if (_newMessageCount > 0)
             {
-                <MudChip T="string" Size="Size.Small" Color="Color.Info">@_newMessageCount new</MudChip>
+                <span class="surgewave-status surgewave-status--info">
+                    <span class="surgewave-status-dot"></span>
+                    @_newMessageCount new
+                </span>
             }
         }
-        <MudSwitch T="bool" @bind-Value="_liveTail" Label="Live Tail" Color="Color.Success"
+        <MudSwitch T="bool" @bind-Value="_liveTail" Label="Live tail" Color="Color.Success"
                    Size="Size.Small" @onclick="OnLiveTailToggled" />
-    </div>
-</div>
+    </Actions>
+</PageHead>
 
 @* ===== SELECTOR PANEL ===== *@
 <MudPaper Elevation="2" Class="pa-4 mb-4">

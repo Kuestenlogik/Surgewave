@@ -6,35 +6,29 @@
 
 <PageTitle>Metrics - Surgewave Control</PageTitle>
 
-<PageHead Title="Metrics Dashboard" />
+<PageHead Title="Metrics"
+          Subtitle="@($"Live broker metrics · auto-refresh: {(_refreshInterval == 0 ? "manual" : $"{_refreshInterval}s")} · last update: {_lastUpdated:HH:mm:ss}")">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="RefreshMetricsAsync" Disabled="@_loading" />
+    </Actions>
+</PageHead>
 
-<MudPaper Elevation="2" Class="pa-4 mb-4">
-    <MudGrid>
-        <MudItem xs="12" md="4">
-            <MudSelect @bind-Value="_refreshInterval" Label="Refresh Interval" Variant="Variant.Outlined"
-                       @bind-Value:after="OnRefreshIntervalChanged">
-                <MudSelectItem Value="0">Manual</MudSelectItem>
-                <MudSelectItem Value="5">5 seconds</MudSelectItem>
-                <MudSelectItem Value="10">10 seconds</MudSelectItem>
-                <MudSelectItem Value="30">30 seconds</MudSelectItem>
-                <MudSelectItem Value="60">1 minute</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="8" Class="d-flex align-center justify-end">
-            @if (_error != null)
-            {
-                <MudChip T="string" Color="Color.Error" Size="Size.Small" Class="mr-4">@_error</MudChip>
-            }
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mr-4">
-                Last updated: @_lastUpdated.ToString("HH:mm:ss")
-            </MudText>
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                       OnClick="RefreshMetricsAsync" Disabled="@_loading">
-                Refresh
-            </MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<div class="d-flex align-center gap-3 mb-3">
+    <MudSelect @bind-Value="_refreshInterval" Label="Refresh" Variant="Variant.Outlined"
+               Margin="Margin.Dense" Style="width: 180px;"
+               @bind-Value:after="OnRefreshIntervalChanged">
+        <MudSelectItem Value="0">Manual</MudSelectItem>
+        <MudSelectItem Value="5">5 seconds</MudSelectItem>
+        <MudSelectItem Value="10">10 seconds</MudSelectItem>
+        <MudSelectItem Value="30">30 seconds</MudSelectItem>
+        <MudSelectItem Value="60">1 minute</MudSelectItem>
+    </MudSelect>
+    @if (_error != null)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="flex-grow-1 ma-0">@_error</MudAlert>
+    }
+</div>
 
 @if (_loading && _throughputPoints.Count == 0)
 {
@@ -42,114 +36,23 @@
 }
 else
 {
-    <MudGrid>
-        @* Summary Cards *@
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Messages/sec</MudText>
-                            <MudText Typo="Typo.h5">@_currentMessagesPerSec.ToString("N0")</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Storage" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Bytes/sec</MudText>
-                            <MudText Typo="Typo.h5">@FormatBytes(_currentBytesPerSec)</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Timer" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">P99 Latency</MudText>
-                            <MudText Typo="Typo.h5">@_currentP99Latency.ToString("N1") ms</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.TrendingUp" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Active Connections</MudText>
-                            <MudText Typo="Typo.h5">@_activeConnections</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
+    <SummaryStrip>
+        <Stat Label="Messages/sec" Value="@_currentMessagesPerSec.ToString("N0")" Mono="true" />
+        <Stat Label="Bytes/sec" Value="@FormatBytes(_currentBytesPerSec)" Mono="true" />
+        <Stat Label="P99 latency" Value="@($"{_currentP99Latency:N1} ms")" Mono="true" />
+        <Stat Label="Active connections" Value="@_activeConnections.ToString()" Mono="true" />
+        <Stat Label="Topics / Partitions" Value="@($"{_topicCount} / {_partitionCount}")" Mono="true" />
+        <Stat Label="Consumer groups" Value="@_consumerGroups.ToString()" />
+        <Stat Label="Transactions" Value="@($"{_activeTransactions} active")" Mono="true" />
+        <Stat Label="Errors / Throttled">
+            <span class="surgewave-status @(_errorsTotal > 0 ? "surgewave-status--error" : "surgewave-status--ok")">
+                <span class="surgewave-status-dot"></span>
+                <span class="surgewave-mono">@_errorsTotal / @_throttledTotal</span>
+            </span>
+        </Stat>
+    </SummaryStrip>
 
-        @* Additional Stats Cards *@
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Tertiary" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Topics / Partitions</MudText>
-                            <MudText Typo="Typo.h5">@_topicCount / @_partitionCount</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Group" Color="Color.Secondary" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Consumer Groups</MudText>
-                            <MudText Typo="Typo.h5">@_consumerGroups</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Transactions</MudText>
-                            <MudText Typo="Typo.h5">@_activeTransactions active</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudCard Elevation="2">
-                <MudCardContent>
-                    <div class="d-flex align-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Error" Color="@(_errorsTotal > 0 ? Color.Error : Color.Default)" Size="Size.Large" Class="mr-3" />
-                        <div>
-                            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Errors / Throttled</MudText>
-                            <MudText Typo="Typo.h5">@_errorsTotal / @_throttledTotal</MudText>
-                        </div>
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
+    <MudGrid>
 
         @* Throughput Chart *@
         <MudItem xs="12" lg="6">
