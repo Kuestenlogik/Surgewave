@@ -9,23 +9,27 @@
 
 <PageTitle>@Subject - Schema Registry - Surgewave Control</PageTitle>
 
-<MudBreadcrumbs Items="_breadcrumbs" Class="mb-4" />
+<MudBreadcrumbs Items="_breadcrumbs" Class="pa-0 mb-2" />
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <PageHead Title="@Subject" />
-    <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
-        <div class="d-flex gap-2">
-            <MudButton Variant="Variant.Outlined" OnClick="ShowRegisterDialogAsync"
-                       StartIcon="@Icons.Material.Filled.Add">
-                New Version
+<PageHead Title="@Subject"
+          Subtitle="Schema versions and compatibility settings for this subject.">
+    <Actions>
+        <AuthorizeView Policy="@SurgewavePolicies.SchemasManage">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="ShowRegisterDialogAsync">
+                New version
             </MudButton>
-            <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteSubjectAsync"
-                       StartIcon="@Icons.Material.Filled.Delete">
-                Delete Subject
-            </MudButton>
-        </div>
-    </AuthorizeView>
-</div>
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
+                           Size="Size.Small" OnClick="DeleteSubjectAsync" />
+        </AuthorizeView>
+    </Actions>
+</PageHead>
+
+<SummaryStrip>
+    <Stat Label="Versions" Value="@_versions.Count.ToString()" />
+    <Stat Label="Latest" Value="@(_versions.Count > 0 ? $"v{_versions.Max()}" : "—")" Mono="true" Muted="@(_versions.Count == 0)" />
+    <Stat Label="Compatibility" Value="@(_compatibility ?? "Global default")" Mono="true" Muted="@(_compatibility is null)" />
+</SummaryStrip>
 
 @if (_loading)
 {
