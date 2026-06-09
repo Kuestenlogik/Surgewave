@@ -9,79 +9,25 @@
 
 <PageTitle>Dead Letter Queues - Surgewave Control</PageTitle>
 
-<div class="d-flex align-center justify-space-between mb-4">
-    <div>
-        <PageHead Title="Dead Letter Queue Management" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Auto-detected DLQ topics, error analysis, and message replay
-        </MudText>
-    </div>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadDataAsync"
-               StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading">
-        Refresh
-    </MudButton>
-</div>
+<PageHead Title="Dead Letter Queues"
+          Subtitle="Auto-detected DLQ topics, error analysis, and message replay.">
+    <Actions>
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Default"
+                       Size="Size.Small" OnClick="LoadDataAsync" Disabled="_loading" />
+    </Actions>
+</PageHead>
 
 @if (_loading)
 {
     <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
 }
 
-@* ===== SUMMARY CARDS ===== *@
-<MudGrid Class="mb-4">
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">DLQ Topics</MudText>
-                        <MudText Typo="Typo.h5">@_dlqTopics.Count</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Warning" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Messages</MudText>
-                        <MudText Typo="Typo.h5">@_dlqTopics.Sum(d => d.TotalMessages).ToString("N0")</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Category" Color="Color.Info" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Error Types</MudText>
-                        <MudText Typo="Typo.h5">@_dlqTopics.SelectMany(d => d.ErrorGroups.Keys).Distinct().Count()</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="6" sm="3">
-        <MudCard Elevation="2">
-            <MudCardContent>
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Topic" Color="Color.Success" Size="Size.Large" Class="mr-3" />
-                    <div>
-                        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Source Topics</MudText>
-                        <MudText Typo="Typo.h5">@_dlqTopics.Select(d => d.SourceTopic).Where(s => s != null).Distinct().Count()</MudText>
-                    </div>
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+<SummaryStrip>
+    <Stat Label="DLQ topics" Value="@_dlqTopics.Count.ToString()" />
+    <Stat Label="Total messages" Value="@_dlqTopics.Sum(d => d.TotalMessages).ToString("N0")" Mono="true" />
+    <Stat Label="Error types" Value="@_dlqTopics.SelectMany(d => d.ErrorGroups.Keys).Distinct().Count().ToString()" />
+    <Stat Label="Source topics" Value="@_dlqTopics.Select(d => d.SourceTopic).Where(s => s != null).Distinct().Count().ToString()" />
+</SummaryStrip>
 
 @* ===== DLQ TOPIC LIST ===== *@
 @if (_dlqTopics.Count == 0 && !_loading)

@@ -9,10 +9,41 @@
 
 <PageTitle>Alerts - Surgewave Control</PageTitle>
 
-<PageHead Title="Alert Management" />
+<PageHead Title="Alert Management"
+          Subtitle="Active alerts, rules, and notification channels." />
 
-<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true"
-         PanelClass="pa-4" Class="mb-4">
+<SummaryStrip>
+    <Stat Label="Active">
+        @{
+            var active = _activeAlerts.Count(a => a.AcknowledgedAt == null);
+        }
+        <span class="surgewave-status @(active > 0 ? "surgewave-status--error" : "surgewave-status--ok")">
+            <span class="surgewave-status-dot"></span>
+            @active
+        </span>
+    </Stat>
+    <Stat Label="Critical">
+        <span class="surgewave-status surgewave-status--error">
+            <span class="surgewave-status-dot"></span>
+            @_activeAlerts.Count(a => a.Severity == AlertSeverity.Critical)
+        </span>
+    </Stat>
+    <Stat Label="Warning">
+        <span class="surgewave-status surgewave-status--warn">
+            <span class="surgewave-status-dot"></span>
+            @_activeAlerts.Count(a => a.Severity == AlertSeverity.Warning)
+        </span>
+    </Stat>
+    <Stat Label="Info">
+        <span class="surgewave-status surgewave-status--info">
+            <span class="surgewave-status-dot"></span>
+            @_activeAlerts.Count(a => a.Severity == AlertSeverity.Info)
+        </span>
+    </Stat>
+    <Stat Label="Rules" Value="@_rules.Count.ToString()" />
+</SummaryStrip>
+
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" PanelClass="pt-4" Class="mb-4">
     @* Tab 1: Active Alerts *@
     <MudTabPanel Text="Active Alerts" Icon="@Icons.Material.Filled.NotificationsActive"
                  BadgeData="@_activeAlerts.Count(a => a.AcknowledgedAt == null)"
