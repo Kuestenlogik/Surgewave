@@ -26,7 +26,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `kind:feature` `area:schema` `P2`
 - [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `kind:feature` `area:schema` `track:ai-pipelines` `P1`
-- [#15](https://github.com/Kuestenlogik/Surgewave/issues/15) **G26 — AI pipeline cost tracking** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
 
 ### v1.0 — first stable
 
