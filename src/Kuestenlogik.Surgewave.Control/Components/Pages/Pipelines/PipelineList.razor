@@ -10,46 +10,44 @@
 
 <PageTitle>Pipelines - Surgewave Control</PageTitle>
 
-<PageHead Title="Pipelines" />
-
-<MudPaper Elevation="2" Class="pa-4 mb-4">
-    <MudGrid>
-        <MudItem xs="12" md="6">
-            <MudTextField @bind-Value="_searchText" Label="Search pipelines" Variant="Variant.Outlined"
-                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                          Immediate="true" DebounceInterval="300" />
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudSelect T="PipelineStatus?" @bind-Value="_statusFilter" Label="Status" Variant="Variant.Outlined">
-                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)null)">All</MudSelectItem>
-                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Draft)">Draft</MudSelectItem>
-                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Running)">Running</MudSelectItem>
-                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Stopped)">Stopped</MudSelectItem>
-                <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Failed)">Failed</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="3" Class="d-flex align-center justify-end gap-2">
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DeviceHub"
-                       Href="/pipelines/lineage">
-                Lineage View
+<PageHead Title="Pipelines"
+          Subtitle="AI + data pipelines composed from connectors and processors.">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.DeviceHub" Href="/pipelines/lineage">
+            Lineage
+        </MudButton>
+        <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Upload" OnClick="ShowImportDialog">
+                Import
             </MudButton>
-            <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage">
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload"
-                           OnClick="ShowImportDialog">
-                    Import
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Article"
-                           OnClick="ShowTemplatesDialog">
-                    Templates
-                </MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                           OnClick="CreateNewPipeline">
-                    Create Pipeline
-                </MudButton>
-            </AuthorizeView>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Article" OnClick="ShowTemplatesDialog">
+                Templates
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewPipeline">
+                Create pipeline
+            </MudButton>
+        </AuthorizeView>
+    </Actions>
+</PageHead>
+
+<div class="d-flex align-center gap-3 mb-3">
+    <MudTextField @bind-Value="_searchText" Placeholder="Search pipelines…" Variant="Variant.Outlined"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Margin="Margin.Dense" Class="flex-grow-1"
+                  Immediate="true" DebounceInterval="300" />
+    <MudSelect T="PipelineStatus?" @bind-Value="_statusFilter" Label="Status" Variant="Variant.Outlined"
+               Margin="Margin.Dense" Style="width: 180px;">
+        <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)null)">All</MudSelectItem>
+        <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Draft)">Draft</MudSelectItem>
+        <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Running)">Running</MudSelectItem>
+        <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Stopped)">Stopped</MudSelectItem>
+        <MudSelectItem T="PipelineStatus?" Value="@((PipelineStatus?)PipelineStatus.Failed)">Failed</MudSelectItem>
+    </MudSelect>
+</div>
 
 @if (_loading)
 {
@@ -66,7 +64,8 @@ else if (_error != null)
 }
 else
 {
-    <MudTable Items="@FilteredPipelines" Dense="true" Hover="true" Striped="true" Elevation="2">
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+    <MudTable Items="@FilteredPipelines" Dense="true" Hover="true" Striped="false" Elevation="0">
         <HeaderContent>
             <MudTh><MudTableSortLabel SortBy="new Func<PipelineDefinition, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
             <MudTh>Status</MudTh>
@@ -83,12 +82,14 @@ else
                 }
             </MudTd>
             <MudTd DataLabel="Status">
-                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                <span class="surgewave-status @GetStatusStatusClass(context.Status)">
+                    <span class="surgewave-status-dot"></span>
                     @context.Status
-                </MudChip>
+                </span>
                 @if (context.Schedule is { Enabled: true })
                 {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                    <span class="surgewave-status surgewave-status--info ml-2">
+                        <span class="surgewave-status-dot"></span>
                         @if (context.Schedule.NextRunAt.HasValue)
                         {
                             @($"Next: {context.Schedule.NextRunAt.Value.LocalDateTime:g}")
@@ -97,11 +98,11 @@ else
                         {
                             @("Scheduled")
                         }
-                    </MudChip>
+                    </span>
                 }
             </MudTd>
-            <MudTd DataLabel="Nodes">@context.Nodes.Count</MudTd>
-            <MudTd DataLabel="Created">@context.CreatedAt.LocalDateTime.ToString("g")</MudTd>
+            <MudTd DataLabel="Nodes"><span class="surgewave-mono">@context.Nodes.Count</span></MudTd>
+            <MudTd DataLabel="Created"><span class="surgewave-mono">@context.CreatedAt.LocalDateTime.ToString("g")</span></MudTd>
             <MudTd DataLabel="Actions">
                 <AuthorizeView Policy="@SurgewavePolicies.PipelinesManage" Context="auth">
                     @if (context.Status == PipelineStatus.Running)
@@ -154,12 +155,13 @@ else
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Color="Color.Secondary">No pipelines found. Create one to get started.</MudText>
+            <MudText Color="Color.Secondary" Class="pa-4">No pipelines found. Create one to get started.</MudText>
         </NoRecordsContent>
         <PagerContent>
             <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
         </PagerContent>
     </MudTable>
+    </MudPaper>
 }
 
 @code {
@@ -275,6 +277,15 @@ else
         PipelineStatus.Stopped => Color.Warning,
         PipelineStatus.Failed => Color.Error,
         _ => Color.Default
+    };
+
+    private static string GetStatusStatusClass(PipelineStatus status) => status switch
+    {
+        PipelineStatus.Draft => "surgewave-status--idle",
+        PipelineStatus.Running => "surgewave-status--ok",
+        PipelineStatus.Stopped => "surgewave-status--warn",
+        PipelineStatus.Failed => "surgewave-status--error",
+        _ => ""
     };
 
     private async Task ShowImportDialog()
