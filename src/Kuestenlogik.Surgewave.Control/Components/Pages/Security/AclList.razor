@@ -7,41 +7,49 @@
 
 <PageTitle>ACL Management - Surgewave Control</PageTitle>
 
-<PageHead Title="ACL Management" />
-
-<MudPaper Elevation="2" Class="pa-4 mb-4">
-    <MudGrid>
-        <MudItem xs="12" md="3">
-            <MudSelect T="AclResourceType?" Label="Resource Type" @bind-Value="_filterResourceType" Clearable="true"
-                       Variant="Variant.Outlined" Margin="Margin.Dense">
-                @foreach (var rt in Enum.GetValues<AclResourceType>().Where(r => r > AclResourceType.Any))
-                {
-                    <MudSelectItem Value="@((AclResourceType?)rt)">@rt</MudSelectItem>
-                }
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudTextField @bind-Value="_filterPrincipal" Label="Principal" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Placeholder="e.g. User:alice" Clearable="true" />
-        </MudItem>
-        <MudItem xs="12" md="3">
-            <MudTextField @bind-Value="_filterResourceName" Label="Resource Name" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Placeholder="e.g. my-topic" Clearable="true" />
-        </MudItem>
-        <MudItem xs="12" md="3" Class="d-flex align-center gap-2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAclsAsync"
-                       StartIcon="@Icons.Material.Filled.Search" Disabled="@_loading">
-                Filter
-            </MudButton>
+<PageHead Title="ACL Management"
+          Subtitle="Principal / resource / operation rules for the selected cluster.">
+    <Actions>
+        @if (_selectedAcls.Count > 0)
+        {
             <AuthorizeView Policy="@SurgewavePolicies.AclManage">
-                <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="ShowCreateDialogAsync"
-                           StartIcon="@Icons.Material.Filled.Add" data-tour-id="create-acl-btn">
-                    Add ACL
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteSelectedAsync">
+                    Delete @_selectedAcls.Count
                 </MudButton>
             </AuthorizeView>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+        }
+        <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="ShowCreateDialogAsync"
+                       data-tour-id="create-acl-btn">
+                Add ACL
+            </MudButton>
+        </AuthorizeView>
+    </Actions>
+</PageHead>
+
+<div class="d-flex align-center gap-2 mb-3">
+    <MudSelect T="AclResourceType?" Placeholder="Resource type" @bind-Value="_filterResourceType" Clearable="true"
+               Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 180px;">
+        @foreach (var rt in Enum.GetValues<AclResourceType>().Where(r => r > AclResourceType.Any))
+        {
+            <MudSelectItem Value="@((AclResourceType?)rt)">@rt</MudSelectItem>
+        }
+    </MudSelect>
+    <MudTextField @bind-Value="_filterPrincipal" Placeholder="Principal (e.g. User:alice)"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+    <MudTextField @bind-Value="_filterResourceName" Placeholder="Resource name"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+    <MudTextField @bind-Value="_searchText" Placeholder="Search…" Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Search"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1"
+                  Immediate="true" DebounceInterval="300" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+               OnClick="LoadAclsAsync" Disabled="@_loading">
+        Apply
+    </MudButton>
+</div>
 
 @if (_loading)
 {
@@ -53,25 +61,10 @@
     <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
 }
 
-<MudTable Items="@_filteredAcls" Dense="true" Hover="true" Striped="true" Bordered="true"
+<MudPaper Class="surgewave-surface" Style="padding: 0;">
+<MudTable Items="@_filteredAcls" Dense="true" Hover="true" Striped="false" Bordered="false" Elevation="0"
           Loading="@_loading" LoadingProgressColor="Color.Primary"
           MultiSelection="true" @bind-SelectedItems="_selectedAcls">
-    <ToolBarContent>
-        <MudText Typo="Typo.h6">ACL Entries</MudText>
-        <MudSpacer />
-        @if (_selectedAcls.Count > 0)
-        {
-            <AuthorizeView Policy="@SurgewavePolicies.AclManage">
-                <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="DeleteSelectedAsync"
-                           StartIcon="@Icons.Material.Filled.Delete" Class="mr-2">
-                    Delete Selected (@_selectedAcls.Count)
-                </MudButton>
-            </AuthorizeView>
-        }
-        <MudTextField @bind-Value="_searchText" Placeholder="Search..." Adornment="Adornment.Start"
-                      AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0"
-                      Immediate="true" DebounceInterval="300" />
-    </ToolBarContent>
     <HeaderContent>
         <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.Principal)">Principal</MudTableSortLabel></MudTh>
         <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.ResourceType)">Resource Type</MudTableSortLabel></MudTh>
@@ -80,28 +73,26 @@
         <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.Operation)">Operation</MudTableSortLabel></MudTh>
         <MudTh><MudTableSortLabel SortBy="new Func<AclEntryModel, object>(x => x.Permission)">Permission</MudTableSortLabel></MudTh>
         <MudTh>Host</MudTh>
-        <MudTh Style="width: 100px">Actions</MudTh>
+        <MudTh Style="width: 80px"></MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Principal">
-            <MudChip T="string" Size="Size.Small" Color="Color.Default">@context.Principal</MudChip>
-        </MudTd>
+        <MudTd DataLabel="Principal"><span class="surgewave-mono">@context.Principal</span></MudTd>
         <MudTd DataLabel="Resource Type">
-            <MudChip T="string" Size="Size.Small" Color="@GetResourceTypeColor(context.ResourceType)">
+            <span class="surgewave-status">
+                <span class="surgewave-status-dot"></span>
                 @context.ResourceType
-            </MudChip>
+            </span>
         </MudTd>
         <MudTd DataLabel="Pattern">@context.PatternType</MudTd>
-        <MudTd DataLabel="Resource Name">
-            <code>@context.ResourceName</code>
-        </MudTd>
-        <MudTd DataLabel="Operation">@context.Operation</MudTd>
+        <MudTd DataLabel="Resource Name"><span class="surgewave-mono">@context.ResourceName</span></MudTd>
+        <MudTd DataLabel="Operation"><span class="surgewave-mono">@context.Operation</span></MudTd>
         <MudTd DataLabel="Permission">
-            <MudChip T="string" Size="Size.Small" Color="@(context.Permission == AclPermission.Allow ? Color.Success : Color.Error)">
+            <span class="surgewave-status @(context.Permission == AclPermission.Allow ? "surgewave-status--ok" : "surgewave-status--error")">
+                <span class="surgewave-status-dot"></span>
                 @context.Permission
-            </MudChip>
+            </span>
         </MudTd>
-        <MudTd DataLabel="Host">@context.Host</MudTd>
+        <MudTd DataLabel="Host"><span class="surgewave-mono">@context.Host</span></MudTd>
         <MudTd DataLabel="Actions">
             <AuthorizeView Policy="@SurgewavePolicies.AclManage" Context="auth">
                 <MudTooltip Text="Delete ACL">
@@ -115,9 +106,10 @@
         <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
     </PagerContent>
     <NoRecordsContent>
-        <MudText>No ACLs found</MudText>
+        <MudText Class="pa-4">No ACLs found</MudText>
     </NoRecordsContent>
 </MudTable>
+</MudPaper>
 
 @code {
     private bool _loading = true;
