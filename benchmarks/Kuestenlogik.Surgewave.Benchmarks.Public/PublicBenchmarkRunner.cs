@@ -6,10 +6,10 @@ namespace Kuestenlogik.Surgewave.Benchmarks.Public;
 /// Orchestrates a full G3 run: captures the hardware fingerprint,
 /// iterates the curated scenarios, hands the combined result over to
 /// the reporters. Pure orchestration — no scenario logic, no I/O
-/// formatting. Both the <c>surgewave-bench</c> dotnet-tool and the
-/// <c>surgewave bench public</c> CLI subcommand call into this same
-/// runner so the report layout is identical regardless of entry
-/// point.
+/// formatting. Called by the standalone <c>surgewave-bench</c>
+/// dotnet-tool entry point; not wired into the main <c>surgewave</c>
+/// CLI on purpose to keep Testcontainers + Confluent.Kafka out of
+/// the broker/operator binary.
 /// </summary>
 public sealed class PublicBenchmarkRunner
 {

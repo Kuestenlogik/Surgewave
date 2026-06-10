@@ -4,9 +4,13 @@ using Kuestenlogik.Surgewave.Benchmarks.Public.Scenarios;
 using Spectre.Console;
 
 // Standalone dotnet-tool entry point. The actual benchmark execution
-// + reporting lives in Kuestenlogik.Surgewave.Benchmarks.Public so
-// the `surgewave bench public` CLI subcommand can call the exact
-// same engine — see src/Kuestenlogik.Surgewave.Tool/Commands/Bench.
+// + reporting lives in Kuestenlogik.Surgewave.Benchmarks.Public,
+// referenced here as a project reference. Deliberately NOT exposed
+// as a subcommand of the main `surgewave` CLI — pulling Testcontainers
+// + Confluent.Kafka into the operator/broker binary would inflate the
+// distribution and break the plugin-first architecture. Operators
+// install this as a separate tool: `dotnet tool install -g
+// Kuestenlogik.Surgewave.Benchmarks` then `surgewave-bench public`.
 
 var outputOption = new Option<FileInfo?>("--output", "-o")
 {

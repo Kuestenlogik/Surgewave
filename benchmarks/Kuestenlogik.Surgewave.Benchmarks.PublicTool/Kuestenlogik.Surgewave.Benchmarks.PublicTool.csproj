@@ -12,7 +12,7 @@
     <ToolCommandName>surgewave-bench</ToolCommandName>
     <PackageId>Kuestenlogik.Surgewave.Benchmarks</PackageId>
     <PackageTags>surgewave;benchmark;kafka;redpanda;performance</PackageTags>
-    <Description>Surgewave Public Benchmark — reproducible G3 throughput + latency runs across Surgewave Native, Surgewave Kafka-wire, Apache Kafka and Redpanda. Install with `dotnet tool install -g Kuestenlogik.Surgewave.Benchmarks` and run with `surgewave-bench public --output results.md`. Same engine as `surgewave bench public` in the main CLI.</Description>
+    <Description>Surgewave Public Benchmark — reproducible G3 throughput + latency runs across Surgewave Native, Surgewave Kafka-wire, Apache Kafka and Redpanda. Install with `dotnet tool install -g Kuestenlogik.Surgewave.Benchmarks` and run with `surgewave-bench public --output results.md`. Standalone tool — intentionally NOT a subcommand of the main `surgewave` CLI so Testcontainers + Confluent.Kafka do not bleed into the broker/operator binary (plugin-first architecture).</Description>
   </PropertyGroup>
 
   <ItemGroup>

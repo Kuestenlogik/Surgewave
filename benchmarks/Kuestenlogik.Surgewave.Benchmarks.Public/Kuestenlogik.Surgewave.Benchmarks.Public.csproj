@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <Description>Surgewave Public Benchmark Suite — curated G3 scenarios that produce reproducible numbers across identical hardware (Surgewave native + Kafka wire + Redpanda + Apache Kafka). Hardware-fingerprint, Markdown + JSON output, --compare against pinned reference baselines. Shared library used by both the standalone surgewave-bench dotnet-tool and the `surgewave bench public` CLI subcommand.</Description>
+    <Description>Surgewave Public Benchmark Suite — curated G3 scenarios that produce reproducible numbers across identical hardware (Surgewave native + Kafka wire + Redpanda + Apache Kafka). Hardware-fingerprint, Markdown + JSON output, --compare against pinned reference baselines. Library backing the standalone surgewave-bench dotnet-tool; intentionally separate from the main surgewave CLI to keep Testcontainers + Confluent.Kafka out of the broker/operator binary (plugin-first architecture, see Roadmap discussion 2026-06-10).</Description>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
