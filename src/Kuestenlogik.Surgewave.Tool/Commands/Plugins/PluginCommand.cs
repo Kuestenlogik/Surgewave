@@ -12,6 +12,7 @@ public class PluginCommand : CommandBase
         Subcommands.Add(new PluginDefaultsCommand());
         Subcommands.Add(new PluginDiffCommand());
         Subcommands.Add(new SearchPluginsCommand());
+        Subcommands.Add(new RecommendPluginsCommand());
         Subcommands.Add(new InstallPluginCommand());
         Subcommands.Add(new UninstallPluginCommand());
         Subcommands.Add(new PackPluginCommand());

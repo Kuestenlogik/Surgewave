@@ -1,0 +1,84 @@
+@*
+    Surgewave Onboarding Banner — surfaces curated plugin recommendations
+    from RecommendedPluginCatalog.ForPage(...) for the current page.
+
+    Renders one dismissible MudAlert per missing recommended plugin and
+    persists per-plugin dismissal in LocalStorage. Dismissal does NOT
+    install — the operator must run the shown CLI snippet (or use the
+    /plugins page). Plugin-first: Control never auto-installs anything.
+
+    Usage on a page:
+        <PluginRecommendationBanner PageRoute="pipelines" />
+*@
+
+@inject IConnectorMarketplaceService Marketplace
+@inject ILocalStorageService LocalStorage
+
+@if (_visible.Count > 0)
+{
+    <div class="mb-4">
+        @foreach (var r in _visible)
+        {
+            <MudAlert Severity="Severity.Info" ShowCloseIcon="true" CloseIconClicked="@(() => DismissAsync(r.Id))"
+                      Variant="Variant.Outlined" Class="mb-2">
+                <MudText Typo="Typo.subtitle1"><strong>@r.DisplayName</strong> — recommended plugin</MudText>
+                <MudText Typo="Typo.body2" Class="mt-1">@r.WhyRecommended</MudText>
+                <div class="mt-2 pa-2" style="background:var(--mud-palette-background-grey); border-radius:4px;">
+                    <code class="surgewave-mono" style="font-size:0.85rem;">surgewave plugins install @r.Id@(string.IsNullOrEmpty(r.Source) ? string.Empty : $" --source {r.Source}")</code>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(r.ProjectUrl))
+                {
+                    <MudText Typo="Typo.caption" Class="mt-1">
+                        <MudLink Href="@r.ProjectUrl" Target="_blank">Plugin source on GitHub →</MudLink>
+                    </MudText>
+                }
+            </MudAlert>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Page route to filter recommendations by (e.g. "pipelines", "connectors").</summary>
+    [Parameter, EditorRequired] public required string PageRoute { get; set; }
+
+    private readonly List<RecommendedPlugin> _visible = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var recommendations = RecommendedPluginCatalog.ForPage(PageRoute);
+        if (recommendations.Count == 0) return;
+
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var list = await Marketplace.ListInstalledAsync();
+            foreach (var p in list) installed.Add(p.PackageId);
+        }
+        catch
+        {
+            // Broker may be unreachable on a fresh install — banner falls back to
+            // showing everything as "missing". That's the right default for
+            // onboarding: surface the recommendation, let the operator decide.
+        }
+
+        foreach (var r in recommendations)
+        {
+            if (installed.Contains(r.Id)) continue;
+
+            var dismissed = await LocalStorage.GetItemAsync<bool>(DismissKey(r.Id));
+            if (dismissed) continue;
+
+            _visible.Add(r);
+        }
+    }
+
+    private async Task DismissAsync(string pluginId)
+    {
+        await LocalStorage.SetItemAsync(DismissKey(pluginId), true);
+        _visible.RemoveAll(p => string.Equals(p.Id, pluginId, StringComparison.OrdinalIgnoreCase));
+        StateHasChanged();
+    }
+
+    private static string DismissKey(string pluginId)
+        => $"surgewave.recommend.dismissed.{pluginId.ToLowerInvariant()}";
+}
