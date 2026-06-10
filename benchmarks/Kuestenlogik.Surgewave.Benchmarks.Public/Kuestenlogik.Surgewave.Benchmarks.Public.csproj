@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <Description>Surgewave Public Benchmark Suite — curated G3 scenarios that produce reproducible numbers across identical hardware (Surgewave native + Kafka wire + Redpanda + Apache Kafka). Hardware-fingerprint, Markdown + JSON output, --compare against pinned reference baselines. Shared library used by both the standalone surgewave-bench dotnet-tool and the `surgewave bench public` CLI subcommand.</Description>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HdrHistogram" />
+    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="Testcontainers.Kafka" />
+    <PackageReference Include="Testcontainers.Redpanda" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+  </ItemGroup>
+
+</Project>
