@@ -1,6 +1,8 @@
 # Performance Overview
 
-Surgewave is designed for high performance messaging.
+This page summarises the throughput numbers Surgewave currently reaches in its embedded
+benchmark harness, plus the optimisation areas the codebase is built around. For the full
+benchmark methodology and per-platform comparison see [Benchmarks](benchmarks.md).
 
 ## Key Metrics
 

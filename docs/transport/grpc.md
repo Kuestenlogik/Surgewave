@@ -4,7 +4,7 @@ Language-independent gRPC API for cross-platform clients.
 
 ## Overview
 
-Surgewave exposes a comprehensive gRPC API:
+Surgewave exposes a gRPC API:
 - **11 services** with **75 RPC methods**
 - Bidirectional streaming
 - HTTP/2 transport

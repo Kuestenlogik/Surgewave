@@ -1,6 +1,8 @@
 # Security Overview
 
-Surgewave provides enterprise-grade security features.
+Surgewave covers transport-layer encryption, client authentication, resource authorization
+and supply-chain integrity for plugin packages. The matrix below summarises each layer;
+the linked pages document the wire format, configuration knobs and operational tradeoffs.
 
 ## Security Layers
 

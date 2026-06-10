@@ -66,7 +66,7 @@ With `SurgewaveTransportType.Quic`:
 
 - Loss spikes affect only the streams carrying the lost packets, not the entire connection. Messages on other streams continue to flow.
 - Blackouts are recovered via QUIC's 0-RTT session resumption — the edge resumes sending in a single round trip without re-negotiating TLS.
-- The connection ID stays valid across IP/port changes, so if the backup 4G link comes back on a different NAT mapping it just works.
+- The connection ID stays valid across IP/port changes, so if the backup 4G link comes back on a different NAT mapping the existing QUIC connection continues without a fresh handshake.
 
 End result: same code, same topics, same offline buffer semantics — substantially better behaviour on real-world edge uplinks.
 

@@ -89,7 +89,7 @@ dotnet test --filter "FullyQualifiedName~Sasl"
 
 ## Benchmarks
 
-Surgewave includes comprehensive benchmarks for throughput measurement and protocol comparison.
+Surgewave includes benchmark projects for throughput measurement and protocol comparison; see [Benchmarks](benchmarks.md) for the full list.
 
 ### Self-Contained Benchmarks (No External Broker)
 
