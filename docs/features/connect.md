@@ -12,7 +12,7 @@ Kafka Connect enables streaming data between Surgewave and external systems:
 
 ## Built-in Connectors
 
-Surgewave provides a comprehensive set of production-ready connectors:
+The following connectors ship in-tree:
 
 | Category | Connectors | Documentation |
 |----------|------------|---------------|

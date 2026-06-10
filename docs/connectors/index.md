@@ -1,6 +1,8 @@
 # Surgewave Connectors
 
-Surgewave Connect provides a robust framework for streaming data between Surgewave and external systems. With 10+ built-in connectors and an extensible plugin architecture, you can integrate Surgewave with databases, cloud storage, messaging systems, and more.
+Surgewave Connect is the framework for streaming data between Surgewave and external
+systems. Ten connectors ship in-tree (cloud storage, databases, messaging); additional
+connectors are loaded as `.swpkg` plugins via `surgewave plugins install`.
 
 ## Overview
 

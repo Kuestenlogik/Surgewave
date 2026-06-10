@@ -135,7 +135,7 @@ surgewave_consumer_lag{topic="orders"}
 
 ## Grafana Dashboard
 
-A comprehensive Grafana dashboard is available at:
+A pre-built Grafana dashboard is shipped at:
 
 ```
 deploy/monitoring/grafana-surgewave-dashboard.json

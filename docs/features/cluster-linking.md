@@ -1,6 +1,7 @@
 # Cluster Linking
 
-Topic-level cross-cluster mirroring with offset translation for seamless failover.
+Topic-level cross-cluster mirroring with offset translation for planned failover and
+read-only data sharing across clusters.
 
 ## Overview
 
@@ -9,7 +10,7 @@ Cluster Linking creates managed, read-only mirror topics that continuously repli
 Key characteristics:
 
 - **Read-only mirrors**: Mirror topics are read-only replicas of source topics
-- **Offset translation**: Consumers can seamlessly fail over without offset confusion
+- **Offset translation**: Consumers fail over to the mirror without offset confusion — local offsets resolve to the equivalent source offsets via `OffsetTranslation`
 - **Promote for failover**: Convert a mirror to a normal writable topic with one API call
 - **Batched replication**: Configurable batch size and interval for throughput/latency tradeoff
 - **State persistence**: Mirror offsets and link metadata survive broker restarts
