@@ -12,10 +12,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `kind:feature` `area:broker` `track:performance` `P1`
 
-### v0.3 — AI-friendly broker
-
-- [#10](https://github.com/Kuestenlogik/Surgewave/issues/10) **G18 — AI quickstart: 1-click install for the basic AI plugin** `kind:feature` `area:ai` `track:ai-pipelines` `P1`
-
 ## Backlog
 
 ### v0.2 — Production hardening
@@ -51,4 +47,4 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ---
 
-*Generated 2026-06-09 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-06-10 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
