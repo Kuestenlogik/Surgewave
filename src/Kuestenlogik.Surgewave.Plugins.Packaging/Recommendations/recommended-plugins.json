@@ -1,0 +1,14 @@
+{
+  "plugins": [
+    {
+      "id": "Kuestenlogik.Surgewave.Ai.Basics",
+      "displayName": "Surgewave AI Basics",
+      "category": "ai",
+      "description": "Core AI pipeline nodes — embeddings, LLM-chat, vector-search, prompt templates. Plugs into the Pipelines editor as ready-to-use processors.",
+      "whyRecommended": "Without this plugin the Pipelines editor only offers raw transforms — no AI nodes. Install once and the AI palette becomes available without restarting the broker.",
+      "projectUrl": "https://github.com/Kuestenlogik/Surgewave.Ai",
+      "source": "nuget",
+      "relevantPages": ["pipelines", "connectors"]
+    }
+  ]
+}

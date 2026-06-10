@@ -448,3 +448,5 @@ concept/
 # Capture-Pipeline temp-state (broker/control logs, deployed plugin caches)
 .tmp/
 plugins/
+!src/**/Commands/Plugins/
+!src/**/Commands/Plugins/**
