@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Pack as dotnet-tool so `dotnet tool install -g kuestenlogik.surgewave.benchmarks`
+         exposes the executable as `surgewave-bench`. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>surgewave-bench</ToolCommandName>
+    <PackageId>Kuestenlogik.Surgewave.Benchmarks</PackageId>
+    <PackageTags>surgewave;benchmark;kafka;redpanda;performance</PackageTags>
+    <Description>Surgewave Public Benchmark — reproducible G3 throughput + latency runs across Surgewave Native, Surgewave Kafka-wire, Apache Kafka and Redpanda. Install with `dotnet tool install -g Kuestenlogik.Surgewave.Benchmarks` and run with `surgewave-bench public --output results.md`. Same engine as `surgewave bench public` in the main CLI.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Spectre.Console" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Benchmarks.Public\Kuestenlogik.Surgewave.Benchmarks.Public.csproj" />
+  </ItemGroup>
+
+</Project>

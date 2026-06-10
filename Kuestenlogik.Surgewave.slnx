@@ -142,6 +142,8 @@
     <Project Path="benchmarks/Kuestenlogik.Surgewave.Benchmarks.QuicVsTcp/Kuestenlogik.Surgewave.Benchmarks.QuicVsTcp.csproj" />
     <Project Path="benchmarks/Kuestenlogik.Surgewave.Benchmarks.Regression/Kuestenlogik.Surgewave.Benchmarks.Regression.csproj" />
     <Project Path="benchmarks/Kuestenlogik.Surgewave.Benchmarks.RealWorld/Kuestenlogik.Surgewave.Benchmarks.RealWorld.csproj" />
+    <Project Path="benchmarks/Kuestenlogik.Surgewave.Benchmarks.Public/Kuestenlogik.Surgewave.Benchmarks.Public.csproj" />
+    <Project Path="benchmarks/Kuestenlogik.Surgewave.Benchmarks.PublicTool/Kuestenlogik.Surgewave.Benchmarks.PublicTool.csproj" />
   </Folder>
   <Folder Name="/deployments/">
     <Project Path="deployments/installer/Kuestenlogik.Surgewave.Installer/Kuestenlogik.Surgewave.Installer.wixproj" />
