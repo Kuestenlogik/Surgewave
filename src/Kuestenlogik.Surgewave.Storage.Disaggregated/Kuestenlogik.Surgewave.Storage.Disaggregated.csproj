@@ -9,4 +9,8 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Storage.Disaggregated.Tests" />
+  </ItemGroup>
+
 </Project>
