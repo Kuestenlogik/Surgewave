@@ -122,6 +122,7 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Tiering\Kuestenlogik.Surgewave.Storage.Tiering.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Disaggregated\Kuestenlogik.Surgewave.Storage.Disaggregated.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />

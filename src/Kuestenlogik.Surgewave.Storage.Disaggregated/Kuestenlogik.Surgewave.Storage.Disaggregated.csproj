@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Disaggregated Storage — pure types and validation for the disaggregated-wal (AutoMQ-style) and disaggregated-stateless (WarpStream-style) topic modes. Hosts the StorageMode enum, the StreamObjectRef / PartitionManifest records, and the topic-config validator. The actual write paths live in the per-mode engine projects (P2, P3 in ADR-014).</Description>
+    <PackageTags>surgewave;storage;disaggregated;s3</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+  </ItemGroup>
+
+</Project>
