@@ -42,6 +42,25 @@ public sealed record TopicMetadata
             ? ParseCleanupPolicy(policy)
             : CleanupPolicy.Delete;
 
+    /// <summary>
+    /// Raw <c>storage.mode</c> string from config, or null if unset.
+    /// The full enum-typed accessor lives in
+    /// <c>Kuestenlogik.Surgewave.Storage.Disaggregated.StorageModeValidator.ResolveFromConfig</c>
+    /// (kept out of Core to avoid pulling the disaggregated types into
+    /// every consumer of <see cref="TopicMetadata"/>).
+    /// </summary>
+    public string? StorageModeRaw =>
+        Config.TryGetValue("storage.mode", out var mode) ? mode : null;
+
+    /// <summary>
+    /// Whether this topic opts into one of the disaggregated storage modes
+    /// (<c>disaggregated-wal</c> or <c>disaggregated-stateless</c>). Used
+    /// by code that must skip the ISR replication path without taking a
+    /// dependency on the Disaggregated project.
+    /// </summary>
+    public bool IsDisaggregated =>
+        StorageModeRaw is "disaggregated-wal" or "disaggregated-stateless";
+
     private static CleanupPolicy ParseCleanupPolicy(string policy) =>
         policy.ToLowerInvariant() switch
         {

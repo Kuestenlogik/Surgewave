@@ -4,6 +4,7 @@ using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Native;
 using Kuestenlogik.Surgewave.Protocol.Native.Payloads;
 using Kuestenlogik.Surgewave.Protocol.Native.Payloads.Topics;
+using Kuestenlogik.Surgewave.Storage.Disaggregated;
 
 namespace Kuestenlogik.Surgewave.Broker.Native.Operations.Topics;
 
@@ -25,6 +26,43 @@ public sealed class CreateTopicOperation : IVoidOperationHandler<CreateTopicRequ
     {
         if (string.IsNullOrEmpty(request.Name))
             throw new SurgewaveOperationException(SurgewaveErrorCode.InvalidRequest, "Topic name required");
+
+        // ADR-014: validate storage.mode + the replication-factor invariant.
+        // We resolve the mode here (string-level) before LogManager touches it
+        // so the error reaches the client with a useful diagnostic instead of
+        // a generic InvalidOperationException.
+        if (request.Configs is { Length: > 0 })
+        {
+            foreach (var c in request.Configs)
+            {
+                if (c.Key != StorageModeKeys.ConfigKey) continue;
+                StorageMode mode;
+                try
+                {
+                    mode = StorageModeKeys.Parse(c.Value);
+                }
+                catch (ArgumentException ex)
+                {
+                    throw new SurgewaveOperationException(SurgewaveErrorCode.InvalidRequest, ex.Message);
+                }
+                try
+                {
+                    // objectStoreConfigured + isEmbeddedRuntime stay conservatively
+                    // true/false here in P1 (no cluster-level introspection yet).
+                    // P2/P3 wire these to the actual broker config so the rejection
+                    // can also catch "disaggregated requested but no bucket configured".
+                    StorageModeValidator.Validate(
+                        mode,
+                        request.ReplicationFactor,
+                        objectStoreConfigured: true,
+                        isEmbeddedRuntime: false);
+                }
+                catch (StorageModeValidationException ex)
+                {
+                    throw new SurgewaveOperationException(SurgewaveErrorCode.InvalidRequest, ex.Message);
+                }
+            }
+        }
     }
 
     public Task ExecuteAsync(CreateTopicRequestPayload request, CancellationToken cancellationToken)

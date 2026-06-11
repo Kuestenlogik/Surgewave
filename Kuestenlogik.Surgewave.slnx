@@ -29,6 +29,7 @@
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Engine.S3/Kuestenlogik.Surgewave.Storage.Engine.S3.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Engine.Sqlite/Kuestenlogik.Surgewave.Storage.Engine.Sqlite.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Tiering/Kuestenlogik.Surgewave.Storage.Tiering.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Storage.Disaggregated/Kuestenlogik.Surgewave.Storage.Disaggregated.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Clustering/Kuestenlogik.Surgewave.Clustering.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Broker/Kuestenlogik.Surgewave.Broker.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Runtime/Kuestenlogik.Surgewave.Runtime.csproj" />

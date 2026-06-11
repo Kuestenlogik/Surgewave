@@ -21,4 +21,4 @@ ADRs document important architectural decisions, their context, and consequences
 | [ADR-011](011-community-enterprise-split.md) | Community/Enterprise Repository Split | Accepted | 2026-04 |
 | [ADR-012](012-zero-copy-high-performance.md) | Zero-Copy & High-Performance Patterns | Accepted | 2026-04 |
 | [ADR-013](013-control-ui-plugin-first.md) | Control UI Plugin-First Architecture | Accepted | 2026-05 |
-| [ADR-014](014-disaggregated-storage.md) | Disaggregated Compute/Storage — Two Modes | Proposed | 2026-06 |
+| [ADR-014](014-disaggregated-storage.md) | Disaggregated Compute/Storage — Two Modes | Accepted | 2026-06 |
