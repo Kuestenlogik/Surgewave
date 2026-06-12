@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Disaggregated\Kuestenlogik.Surgewave.Storage.Disaggregated.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Tiering\Kuestenlogik.Surgewave.Storage.Tiering.csproj" />
   </ItemGroup>
 
 </Project>
