@@ -116,6 +116,66 @@ public sealed class WalFlusherTests
         Assert.Equal("topics/orders/0/stream-00000000000000000042.so", key);
     }
 
+    [Fact]
+    public async Task TrimAfterFlush_calls_TrimAsync_when_option_enabled()
+    {
+        var source = new FakeSource();
+        var trimmed = false;
+        source.Add(Segment(0, 99, 1024) with { TrimAsync = _ => { trimmed = true; return Task.CompletedTask; } });
+        var sut = NewFlusher(source, out _, out _,
+            options: new WalFlusherOptions { TrimAfterFlush = true });
+
+        await sut.RunOnceAsync(Partition);
+
+        Assert.True(trimmed);
+    }
+
+    [Fact]
+    public async Task TrimAfterFlush_off_skips_TrimAsync_even_when_delegate_set()
+    {
+        var source = new FakeSource();
+        var trimmed = false;
+        source.Add(Segment(0, 99, 1024) with { TrimAsync = _ => { trimmed = true; return Task.CompletedTask; } });
+        var sut = NewFlusher(source, out _, out _,
+            options: new WalFlusherOptions { TrimAfterFlush = false });
+
+        await sut.RunOnceAsync(Partition);
+
+        Assert.False(trimmed);
+    }
+
+    [Fact]
+    public async Task Failed_upload_skips_trim()
+    {
+        var source = new FakeSource();
+        var trimmed = false;
+        source.Add(Segment(0, 99, 1024) with { TrimAsync = _ => { trimmed = true; return Task.CompletedTask; } });
+        var sut = new WalFlusher(source, new InMemoryPartitionManifestStore(), new FailingRemote(),
+            options: new WalFlusherOptions { TrimAfterFlush = true });
+
+        await Assert.ThrowsAsync<IOException>(() => sut.RunOnceAsync(Partition));
+
+        Assert.False(trimmed);
+    }
+
+    [Fact]
+    public async Task Trim_exception_is_swallowed_after_successful_manifest_commit()
+    {
+        // A trim error after the manifest is already committed must not
+        // surface — the manifest is the source of truth, the leftover
+        // local file is a future janitor's problem.
+        var source = new FakeSource();
+        source.Add(Segment(0, 99, 1024) with { TrimAsync = _ => throw new IOException("disk full") });
+        var sut = NewFlusher(source, out _, out var manifests,
+            options: new WalFlusherOptions { TrimAfterFlush = true });
+
+        var n = await sut.RunOnceAsync(Partition);
+
+        Assert.Equal(1, n);
+        var manifest = await manifests.GetAsync(Partition);
+        Assert.Single(manifest.Objects);
+    }
+
     // ── fakes ────────────────────────────────────────────────────────────
 
     private static WalFlusher NewFlusher(

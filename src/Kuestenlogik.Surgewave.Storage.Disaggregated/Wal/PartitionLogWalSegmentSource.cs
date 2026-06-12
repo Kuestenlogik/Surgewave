@@ -70,15 +70,32 @@ public sealed class PartitionLogWalSegmentSource : IWalSegmentSource
             var lastOffset = s.CurrentOffset - 1;
             if (lastOffset < baseOffset) continue; // empty segment, nothing to flush
 
+            var logPath = Path.Combine(dir, $"{baseOffset:D20}.log");
+            var indexPath = Path.Combine(dir, $"{baseOffset:D20}.index");
+            var timeIndexPath = Path.Combine(dir, $"{baseOffset:D20}.timeindex");
             sealedSegments.Add(new WalSealedSegment(
                 Partition: partition,
                 BaseOffset: baseOffset,
                 LastOffset: lastOffset,
                 SizeBytes: s.Size,
                 CreatedAt: s.CreatedAt,
-                ReadLogBytesAsync: ct => ReadFileOrEmptyAsync(Path.Combine(dir, $"{baseOffset:D20}.log"), ct),
-                ReadIndexBytesAsync: ct => ReadFileOrEmptyAsync(Path.Combine(dir, $"{baseOffset:D20}.index"), ct),
-                ReadTimeIndexBytesAsync: ct => ReadFileOrEmptyAsync(Path.Combine(dir, $"{baseOffset:D20}.timeindex"), ct)));
+                ReadLogBytesAsync: ct => ReadFileOrEmptyAsync(logPath, ct),
+                ReadIndexBytesAsync: ct => ReadFileOrEmptyAsync(indexPath, ct),
+                ReadTimeIndexBytesAsync: ct => ReadFileOrEmptyAsync(timeIndexPath, ct))
+            {
+                TrimAsync = _ =>
+                {
+                    // Only delete the .log; the index siblings live with it
+                    // and we want to keep the trim atomic-ish from the
+                    // observer's POV. Missing files are tolerated — File.Delete
+                    // is idempotent. Errors propagate to the flusher's
+                    // try/catch which logs + swallows.
+                    DeleteIfExists(logPath);
+                    DeleteIfExists(indexPath);
+                    DeleteIfExists(timeIndexPath);
+                    return Task.CompletedTask;
+                },
+            });
         }
 
         return ValueTask.FromResult<IReadOnlyList<WalSealedSegment>>(sealedSegments);
@@ -92,5 +109,10 @@ public sealed class PartitionLogWalSegmentSource : IWalSegmentSource
         // and its absence is a real error worth propagating.
         if (!File.Exists(path)) return [];
         return await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
     }
 }

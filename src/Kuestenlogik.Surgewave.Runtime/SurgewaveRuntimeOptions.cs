@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
@@ -197,6 +198,16 @@ public sealed record SurgewaveRuntimeOptions
     /// wrapping the default delegate plus their <c>StatelessAgent</c>).
     /// </summary>
     public IPartitionAppender? PartitionAppender { get; init; }
+
+    /// <summary>
+    /// Optional <see cref="DisaggregatedSegmentReader"/> that intercepts the
+    /// broker's Fetch read path. When the requested offset has been flushed
+    /// to the object store and the manifest knows the stream object key,
+    /// the reader hands back the bytes from S3 instead of hitting the local
+    /// WAL. Required for safe <c>WalFlusherOptions.TrimAfterFlush</c> usage.
+    /// Null = direct LogManager read (pre-G21 behaviour).
+    /// </summary>
+    public DisaggregatedSegmentReader? DisaggregatedReader { get; init; }
 
     // ==================== Internal ====================
 
