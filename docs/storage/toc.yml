@@ -8,3 +8,5 @@
   href: arrow.md
 - name: Tiered Storage
   href: tiered.md
+- name: Disaggregated Storage
+  href: disaggregated.md
