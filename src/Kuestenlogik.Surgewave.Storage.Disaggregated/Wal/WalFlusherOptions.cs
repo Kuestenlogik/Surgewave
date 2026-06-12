@@ -22,4 +22,15 @@ public sealed record WalFlusherOptions
     /// lot of catch-up to do. Default: 16.
     /// </summary>
     public int MaxSegmentsPerScan { get; init; } = 16;
+
+    /// <summary>
+    /// Whether to delete the local segment files after a successful flush
+    /// + manifest-commit. Off by default for safety: enabling this without
+    /// also wiring the disaggregated Fetch fallback
+    /// (<c>SurgewaveRuntimeBuilder.WithDisaggregatedReader</c>) would
+    /// make trimmed offsets unreachable. Turn on once the read fallback
+    /// is in place and you want the WAL footprint capped near zero
+    /// instead of following <c>retention.ms</c>.
+    /// </summary>
+    public bool TrimAfterFlush { get; init; }
 }

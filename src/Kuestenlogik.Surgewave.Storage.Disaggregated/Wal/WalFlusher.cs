@@ -142,5 +142,24 @@ public sealed class WalFlusher
             CreatedAt: segment.CreatedAt);
 
         await _manifests.AppendObjectAsync(segment.Partition, manifestRef, cancellationToken).ConfigureAwait(false);
+
+        // Trim runs strictly AFTER the manifest commit succeeds. A failed
+        // upload or commit above throws and we never reach here, so the
+        // local segment file is preserved for the next scan to retry.
+        // Trim itself is allowed to fail (logged + swallowed): the
+        // manifest is the source of truth; a stray local file just costs
+        // disk until the retention sweeper picks it up.
+        if (_options.TrimAfterFlush && segment.TrimAsync is not null)
+        {
+            try
+            {
+                await segment.TrimAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WAL-trim failed for {Topic}/{Partition} offset {Offset}; segment stays local",
+                    segment.Partition.Topic, segment.Partition.Partition, segment.BaseOffset);
+            }
+        }
     }
 }

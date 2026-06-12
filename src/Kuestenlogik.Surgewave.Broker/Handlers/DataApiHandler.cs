@@ -11,6 +11,7 @@ using Kuestenlogik.Surgewave.Core.Storage.Indexing;
 using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
@@ -36,6 +37,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     private readonly IRecordTransformPipeline? _recordTransform;
     private readonly ColdStartWorkloadProfiler? _coldStartProfiler;
     private readonly IPartitionAppender _partitionAppender;
+    private readonly DisaggregatedSegmentReader? _disaggregatedReader;
     private readonly ILogger<DataApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -61,7 +63,8 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         SurgewaveBrokerObservability? observability = null,
         IRecordTransformPipeline? recordTransform = null,
         ColdStartWorkloadProfiler? coldStartProfiler = null,
-        IPartitionAppender? partitionAppender = null)
+        IPartitionAppender? partitionAppender = null,
+        DisaggregatedSegmentReader? disaggregatedReader = null)
     {
         _config = config;
         _logManager = logManager;
@@ -82,7 +85,8 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         // enable disaggregated storage pass a RoutingPartitionAppender via
         // SurgewaveRuntimeBuilder.WithPartitionAppender(...).
         _partitionAppender = partitionAppender
-            ?? new DelegatingPartitionAppender((tp, batch, _, ct) => _logManager.AppendBatchAsync(tp, batch, ct));
+            ?? new DelegatingPartitionAppender((tp, batch, _, ct) => _logManager.AppendBatchAsync(tp, batch, ct).AsTask());
+        _disaggregatedReader = disaggregatedReader;
     }
 
     public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
@@ -270,9 +274,9 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                     // StatelessAgent. The record count is parsed from the batch
                     // header (Kafka RecordBatch v2, offset 57); stateless mode
                     // needs it for offset assignment.
-                    var recordCount = RecordHeaderParser.ParseBatchHeader(recordsToAppend.Span).RecordCount;
+                    var produceRecordCount = RecordHeaderParser.ParseBatchHeader(recordsToAppend.Span).RecordCount;
                     var baseOffset = await _partitionAppender.AppendBatchAsync(
-                        topicPartition, recordsToAppend, recordCount, cancellationToken);
+                        topicPartition, recordsToAppend, produceRecordCount, cancellationToken);
 
                     // Register hash after successful write (deduplication)
                     _deduplicationManager?.Register(topicPartition, recordsToAppend.Span, baseOffset);
@@ -482,6 +486,52 @@ public sealed class DataApiHandler : IKafkaRequestHandler
 
                     byte[] recordSet;
                     int messageCount;
+
+                    // Disaggregated read fallback: when the topic uses
+                    // disaggregated storage and the requested offset has
+                    // already been flushed to the object store (i.e. the
+                    // local WAL no longer holds it), serve from the
+                    // manifest. The reader returns HitManifest=false for
+                    // offsets past the manifest tail — those still live in
+                    // the local WAL and the normal read path below picks
+                    // them up. Skip when no reader is wired (default) or
+                    // when the topic isn't disaggregated.
+                    var fetchTopicMetadata = _logManager.GetTopicMetadata(topic);
+                    if (_disaggregatedReader is not null && fetchTopicMetadata?.IsDisaggregated == true)
+                    {
+                        var disagRead = await _disaggregatedReader.TryReadAsync(
+                            topicPartition,
+                            partitionData.FetchOffset,
+                            partitionData.MaxBytes,
+                            cancellationToken).ConfigureAwait(false);
+                        if (disagRead.HitManifest)
+                        {
+                            recordSet = disagRead.LogBytes.ToArray();
+                            messageCount = 0;
+                            // Same record-count tallying pattern as the
+                            // contiguous fast path: walk the concatenated
+                            // batches and read the count field at offset 57.
+                            var span = disagRead.LogBytes.Span;
+                            var cursor = 0;
+                            while (cursor + 61 <= span.Length)
+                            {
+                                var batchLen = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(span.Slice(cursor + 8, 4));
+                                var batchTotal = 12 + batchLen; // baseOffset(8) + batchLength(4) + body
+                                if (cursor + 57 + 4 <= span.Length)
+                                    messageCount += System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(span.Slice(cursor + 57, 4));
+                                cursor += batchTotal;
+                            }
+
+                            partitionResponses.Add(new FetchResponse.PartitionResponse
+                            {
+                                Partition = partitionData.Partition,
+                                ErrorCode = ErrorCode.None,
+                                HighWatermark = highWatermark,
+                                RecordSet = recordSet,
+                            });
+                            continue;
+                        }
+                    }
 
                     if (!needsFiltering)
                     {

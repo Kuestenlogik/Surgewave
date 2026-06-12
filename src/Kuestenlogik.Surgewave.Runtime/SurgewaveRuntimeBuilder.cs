@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
@@ -46,6 +47,7 @@ public sealed class SurgewaveRuntimeBuilder
     private bool _cleanupOnDispose = true;
     private ILoggerFactory? _loggerFactory;
     private IPartitionAppender? _partitionAppender;
+    private DisaggregatedSegmentReader? _disaggregatedReader;
 
     internal SurgewaveRuntimeBuilder() { }
 
@@ -363,6 +365,20 @@ public sealed class SurgewaveRuntimeBuilder
         return this;
     }
 
+    /// <summary>
+    /// Installs a disaggregated read fallback for the broker's Fetch path
+    /// (ADR-014, G21). When set, fetches against disaggregated topics
+    /// consult the partition manifest first and serve trimmed offsets from
+    /// the object store before falling back to the local WAL. Required
+    /// alongside <c>WalFlusherOptions.TrimAfterFlush</c> — without the
+    /// reader, trimmed offsets would be unreachable.
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithDisaggregatedReader(DisaggregatedSegmentReader reader)
+    {
+        _disaggregatedReader = reader;
+        return this;
+    }
+
     // ==================== Configuration ====================
 
     /// <summary>
@@ -424,5 +440,6 @@ public sealed class SurgewaveRuntimeBuilder
         CleanupOnDispose = _cleanupOnDispose,
         LoggerFactory = _loggerFactory,
         PartitionAppender = _partitionAppender,
+        DisaggregatedReader = _disaggregatedReader,
     };
 }
