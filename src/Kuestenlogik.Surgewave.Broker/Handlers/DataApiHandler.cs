@@ -7,9 +7,11 @@ using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Observability;
 using Kuestenlogik.Surgewave.Core.Pipeline;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Storage.Indexing;
 using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.Handlers;
@@ -33,6 +35,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     private readonly SurgewaveBrokerObservability? _observability;
     private readonly IRecordTransformPipeline? _recordTransform;
     private readonly ColdStartWorkloadProfiler? _coldStartProfiler;
+    private readonly IPartitionAppender _partitionAppender;
     private readonly ILogger<DataApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -57,7 +60,8 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         BandwidthQuotaManager? bandwidthQuotaManager = null,
         SurgewaveBrokerObservability? observability = null,
         IRecordTransformPipeline? recordTransform = null,
-        ColdStartWorkloadProfiler? coldStartProfiler = null)
+        ColdStartWorkloadProfiler? coldStartProfiler = null,
+        IPartitionAppender? partitionAppender = null)
     {
         _config = config;
         _logManager = logManager;
@@ -74,6 +78,11 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         _recordTransform = recordTransform;
         _coldStartProfiler = coldStartProfiler;
         _logger = logger;
+        // Default = direct LogManager call (pre-G21 behaviour). Operators that
+        // enable disaggregated storage pass a RoutingPartitionAppender via
+        // SurgewaveRuntimeBuilder.WithPartitionAppender(...).
+        _partitionAppender = partitionAppender
+            ?? new DelegatingPartitionAppender((tp, batch, _, ct) => _logManager.AppendBatchAsync(tp, batch, ct));
     }
 
     public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
@@ -255,8 +264,15 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                         recordsToAppend = transformed.Value;
                     }
 
-                    // Store raw RecordBatch bytes directly (no parsing needed)
-                    var baseOffset = await _logManager.AppendBatchAsync(topicPartition, recordsToAppend, cancellationToken);
+                    // Store raw RecordBatch bytes through the appender — defaults to
+                    // direct LogManager append; in disaggregated mode a routing
+                    // appender intercepts and dispatches stateless topics to the
+                    // StatelessAgent. The record count is parsed from the batch
+                    // header (Kafka RecordBatch v2, offset 57); stateless mode
+                    // needs it for offset assignment.
+                    var recordCount = RecordHeaderParser.ParseBatchHeader(recordsToAppend.Span).RecordCount;
+                    var baseOffset = await _partitionAppender.AppendBatchAsync(
+                        topicPartition, recordsToAppend, recordCount, cancellationToken);
 
                     // Register hash after successful write (deduplication)
                     _deduplicationManager?.Register(topicPartition, recordsToAppend.Span, baseOffset);

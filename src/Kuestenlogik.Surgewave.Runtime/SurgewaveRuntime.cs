@@ -290,7 +290,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _metadataApiHandler = new MetadataApiHandler(config, _logManager, metadataApiLogger);
         IKafkaRequestHandler[] handlers =
         [
-            new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, dataApiLogger),
+            new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, dataApiLogger, partitionAppender: _options.PartitionAppender),
             _metadataApiHandler,
             _topicAdminHandler,
             new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),

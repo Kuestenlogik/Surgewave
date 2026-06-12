@@ -17,6 +17,7 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Disaggregated\Kuestenlogik.Surgewave.Storage.Disaggregated.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
   </ItemGroup>
 
