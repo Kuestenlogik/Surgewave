@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Runtime;
@@ -181,6 +182,21 @@ public sealed record SurgewaveRuntimeOptions
     /// Defaults to true when DataDirectory is null (temp directory).
     /// </summary>
     public bool CleanupOnDispose { get; init; } = true;
+
+    // ==================== Storage routing ====================
+
+    /// <summary>
+    /// Optional <see cref="IPartitionAppender"/> that intercepts the broker's
+    /// Produce write path (ADR-014, G21). When null (default) the broker
+    /// uses the classical <c>LogManager.AppendBatchAsync</c> route, identical
+    /// to pre-G21 behaviour. When set, the runtime hands the appender to
+    /// the Kafka + Native produce handlers so disaggregated topics are
+    /// dispatched to the right backing store. Operators / plugins compose
+    /// this themselves (typically a
+    /// <see cref="Storage.Disaggregated.Routing.RoutingPartitionAppender"/>
+    /// wrapping the default delegate plus their <c>StatelessAgent</c>).
+    /// </summary>
+    public IPartitionAppender? PartitionAppender { get; init; }
 
     // ==================== Internal ====================
 

@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Runtime;
@@ -44,6 +45,7 @@ public sealed class SurgewaveRuntimeBuilder
     private int _shutdownTimeoutSeconds = 5;
     private bool _cleanupOnDispose = true;
     private ILoggerFactory? _loggerFactory;
+    private IPartitionAppender? _partitionAppender;
 
     internal SurgewaveRuntimeBuilder() { }
 
@@ -347,6 +349,20 @@ public sealed class SurgewaveRuntimeBuilder
         return this;
     }
 
+    /// <summary>
+    /// Installs a disaggregated-aware partition appender that intercepts the
+    /// broker's Produce write path (ADR-014, G21). Pass a
+    /// <see cref="RoutingPartitionAppender"/> composed with your
+    /// <c>StatelessAgent</c> + storage-mode-lookup; the runtime hands it to
+    /// the Kafka + Native produce handlers. Omit to keep the pre-G21
+    /// behaviour (direct <c>LogManager.AppendBatchAsync</c>).
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithPartitionAppender(IPartitionAppender partitionAppender)
+    {
+        _partitionAppender = partitionAppender;
+        return this;
+    }
+
     // ==================== Configuration ====================
 
     /// <summary>
@@ -406,6 +422,7 @@ public sealed class SurgewaveRuntimeBuilder
         EnableAcl = _enableAcl,
         ShutdownTimeoutSeconds = _shutdownTimeoutSeconds,
         CleanupOnDispose = _cleanupOnDispose,
-        LoggerFactory = _loggerFactory
+        LoggerFactory = _loggerFactory,
+        PartitionAppender = _partitionAppender,
     };
 }
