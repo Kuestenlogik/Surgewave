@@ -133,7 +133,12 @@ public sealed class ListTopicsOperation : INoRequestOperationHandler<ListTopicsR
     public Task<ListTopicsResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         var topics = _logManager.ListTopics()
-            .Select(t => new TopicInfoPayload { Name = t.Name, PartitionCount = t.PartitionCount })
+            .Select(t => new TopicInfoPayload
+            {
+                Name = t.Name,
+                PartitionCount = t.PartitionCount,
+                Strategy = MapStorageModeToStrategy(t.StorageModeRaw),
+            })
             .ToArray();
 
         return Task.FromResult(new ListTopicsResult { Topics = topics });
@@ -144,6 +149,20 @@ public sealed class ListTopicsOperation : INoRequestOperationHandler<ListTopicsR
         var responsePayload = new ListTopicsResponsePayload { Topics = response.Topics };
         responsePayload.WriteTo(writer);
     }
+
+    /// <summary>
+    /// Translate the topic's <c>storage.mode</c> config into the wire-level
+    /// <see cref="ProduceStrategy"/> hint per ADR-014. Unknown / future
+    /// values fall back to <see cref="ProduceStrategy.Replicated"/> so an
+    /// old broker reporting a value a new client added later does not
+    /// accidentally route producers through a non-existent path.
+    /// </summary>
+    private static ProduceStrategy MapStorageModeToStrategy(string? storageModeRaw) => storageModeRaw switch
+    {
+        "disaggregated-wal" => ProduceStrategy.WalViaBroker,
+        "disaggregated-stateless" => ProduceStrategy.StatelessViaBroker,
+        _ => ProduceStrategy.Replicated,
+    };
 }
 
 /// <summary>

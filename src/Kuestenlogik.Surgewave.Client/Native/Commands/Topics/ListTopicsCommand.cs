@@ -15,7 +15,7 @@ public sealed class ListTopicsCommand : NoRequestCommand<List<TopicInfo>>
     {
         var response = ListTopicsResponsePayload.Read(ref reader);
         return response.Topics
-            .Select(t => new TopicInfo(t.Name, t.PartitionCount))
+            .Select(t => new TopicInfo(t.Name, t.PartitionCount, t.Strategy))
             .ToList();
     }
 }
