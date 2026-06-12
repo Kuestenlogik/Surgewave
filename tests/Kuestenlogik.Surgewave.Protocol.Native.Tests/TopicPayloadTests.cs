@@ -98,6 +98,65 @@ public sealed class TopicPayloadTests
 
         Assert.Equal("events", parsed.Name);
         Assert.Equal(12, parsed.PartitionCount);
+        // Default strategy is Replicated — the existing pre-G21 callers that
+        // don't set the field still get the right behavior.
+        Assert.Equal(ProduceStrategy.Replicated, parsed.Strategy);
+    }
+
+    [Theory]
+    [InlineData(ProduceStrategy.Replicated)]
+    [InlineData(ProduceStrategy.WalViaBroker)]
+    [InlineData(ProduceStrategy.StatelessViaBroker)]
+    [InlineData(ProduceStrategy.StatelessDirect)]
+    public void TopicInfoPayload_RoundTrip_PreservesStrategy(ProduceStrategy strategy)
+    {
+        var payload = new TopicInfoPayload
+        {
+            Name = "orders",
+            PartitionCount = 4,
+            Strategy = strategy,
+        };
+
+        var buffer = new byte[payload.EstimateSize() + 5];
+        var writer = new SurgewavePayloadWriter(buffer);
+        payload.Write(ref writer);
+
+        var reader = new SurgewavePayloadReader(buffer);
+        var parsed = TopicInfoPayload.Read(ref reader);
+
+        Assert.Equal(strategy, parsed.Strategy);
+    }
+
+    [Fact]
+    public void ListTopicsResponse_RoundTrip_PreservesPerTopicStrategy()
+    {
+        // Verifies that the per-topic strategy survives an array round-trip.
+        // The risk regression-target: a missing per-entry byte in Write would
+        // misalign the second entry's Name and surface as a corrupted string.
+        var payload = new ListTopicsResponsePayload
+        {
+            Topics =
+            [
+                new TopicInfoPayload { Name = "fast", PartitionCount = 1, Strategy = ProduceStrategy.Replicated },
+                new TopicInfoPayload { Name = "cheap", PartitionCount = 2, Strategy = ProduceStrategy.StatelessViaBroker },
+                new TopicInfoPayload { Name = "warm", PartitionCount = 3, Strategy = ProduceStrategy.WalViaBroker },
+            ]
+        };
+
+        var buffer = new byte[payload.EstimateSize() + 10];
+        var writer = new SurgewavePayloadWriter(buffer);
+        payload.Write(ref writer);
+
+        var reader = new SurgewavePayloadReader(buffer);
+        var parsed = ListTopicsResponsePayload.Read(ref reader);
+
+        Assert.Equal(3, parsed.Topics.Length);
+        Assert.Equal("fast", parsed.Topics[0].Name);
+        Assert.Equal(ProduceStrategy.Replicated, parsed.Topics[0].Strategy);
+        Assert.Equal("cheap", parsed.Topics[1].Name);
+        Assert.Equal(ProduceStrategy.StatelessViaBroker, parsed.Topics[1].Strategy);
+        Assert.Equal("warm", parsed.Topics[2].Name);
+        Assert.Equal(ProduceStrategy.WalViaBroker, parsed.Topics[2].Strategy);
     }
 
     [Fact]
@@ -186,7 +245,7 @@ public sealed class TopicPayloadTests
     {
         var payload = new TopicInfoPayload { Name = "test-topic", PartitionCount = 4 };
         var estimated = payload.EstimateSize();
-        // Name: 2 (len prefix) + 10 (bytes) + 4 (partitions) = 16
-        Assert.Equal(16, estimated);
+        // Name: 2 (len prefix) + 10 (bytes) + 4 (partitions) + 1 (strategy byte) = 17 (G21/P4)
+        Assert.Equal(17, estimated);
     }
 }
