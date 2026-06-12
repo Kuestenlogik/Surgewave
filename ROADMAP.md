@@ -28,7 +28,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `kind:feature` `area:multi` `P1`
 - [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `kind:feature` `area:clustering` `track:cluster-correctness` `P2`
 - [#7](https://github.com/Kuestenlogik/Surgewave/issues/7) **G12 — Cluster-linking-grade geo-replication** `kind:feature` `area:clustering` `P2`
-- [#11](https://github.com/Kuestenlogik/Surgewave/issues/11) **G21 — Disaggregated compute/storage mode** `kind:feature` `area:storage` `P1`
 
 ### Later
 
