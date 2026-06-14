@@ -30,8 +30,10 @@
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Engine.Sqlite/Kuestenlogik.Surgewave.Storage.Engine.Sqlite.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Tiering/Kuestenlogik.Surgewave.Storage.Tiering.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Disaggregated/Kuestenlogik.Surgewave.Storage.Disaggregated.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Analyzers/Kuestenlogik.Surgewave.Analyzers.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Storage.Disaggregated.Tests/Kuestenlogik.Surgewave.Storage.Disaggregated.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Build.Tests/Kuestenlogik.Surgewave.Build.Tests.csproj" />
+    <Project Path="tests/Kuestenlogik.Surgewave.Analyzers.Tests/Kuestenlogik.Surgewave.Analyzers.Tests.csproj" />
     <Project Path="templates/Kuestenlogik.Surgewave.Templates/Kuestenlogik.Surgewave.Templates.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Clustering/Kuestenlogik.Surgewave.Clustering.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Broker/Kuestenlogik.Surgewave.Broker.csproj" />
