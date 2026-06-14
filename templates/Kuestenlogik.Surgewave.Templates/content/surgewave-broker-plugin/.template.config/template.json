@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Kuestenlogik",
+  "classifications": [ "Surgewave", "Plugin" ],
+  "identity": "Kuestenlogik.Surgewave.Templates.BrokerPlugin",
+  "name": "Surgewave Broker Plugin",
+  "description": "A Surgewave broker plugin scaffold (IBrokerPlugin) with plugin.json manifest, a stub class and a passing xUnit test.",
+  "shortName": "surgewave-broker-plugin",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "MyPlugin",
+  "preferNameDirectory": true,
+  "symbols": {
+    "PluginId": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "com.example.my-broker-plugin",
+      "description": "Reverse-DNS unique plugin id (matches the v1 manifest schema pattern).",
+      "replaces": "PLUGIN_ID"
+    },
+    "FeatureId": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "MyPlugin.Feature",
+      "description": "Feature id reported by the IPlugin contract.",
+      "replaces": "FEATURE_ID"
+    }
+  }
+}
