@@ -1,0 +1,12 @@
+{
+  "$schema": "https://surgewave.kuestenlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.samples.storage-engine",
+  "name": "Surgewave Sample Storage Engine",
+  "version": "0.1.0",
+  "description": "Reference IStorageEnginePlugin that wraps the in-process Memory engine under the engine name 'sample-memory'. See samples/README.md for an authoring walkthrough.",
+  "license": "Apache-2.0",
+  "authors": [ "Kuestenlogik" ],
+  "projectUrl": "https://github.com/Kuestenlogik/Surgewave",
+  "tags": [ "sample", "storage" ],
+  "assemblies": [ "Kuestenlogik.Surgewave.Samples.StorageEngine.dll" ]
+}

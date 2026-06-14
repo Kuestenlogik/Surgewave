@@ -35,6 +35,12 @@
     <Project Path="tests/Kuestenlogik.Surgewave.Build.Tests/Kuestenlogik.Surgewave.Build.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Analyzers.Tests/Kuestenlogik.Surgewave.Analyzers.Tests.csproj" />
     <Project Path="templates/Kuestenlogik.Surgewave.Templates/Kuestenlogik.Surgewave.Templates.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.BrokerPlugin/Kuestenlogik.Surgewave.Samples.BrokerPlugin.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.BrokerPlugin/tests/Kuestenlogik.Surgewave.Samples.BrokerPlugin.Tests.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.ProtocolPlugin/Kuestenlogik.Surgewave.Samples.ProtocolPlugin.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.ProtocolPlugin/tests/Kuestenlogik.Surgewave.Samples.ProtocolPlugin.Tests.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.StorageEngine/Kuestenlogik.Surgewave.Samples.StorageEngine.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.StorageEngine/tests/Kuestenlogik.Surgewave.Samples.StorageEngine.Tests.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Clustering/Kuestenlogik.Surgewave.Clustering.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Broker/Kuestenlogik.Surgewave.Broker.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Runtime/Kuestenlogik.Surgewave.Runtime.csproj" />

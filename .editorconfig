@@ -173,8 +173,8 @@ dotnet_diagnostic.CA1068.severity = suggestion
 # CA1508: Avoid dead conditional code - intentional pattern checks for optional interfaces
 dotnet_diagnostic.CA1508.severity = none
 
-[tests/**.cs]
-# Suppress test-specific warnings
+[{tests,samples/**/tests}/**.cs]
+# Suppress test-specific warnings — applies to repo-level tests/ and per-sample tests/ folders.
 dotnet_diagnostic.CA2000.severity = suggestion
 
 # xUnit1051: CancellationToken should use TestContext.Current.CancellationToken — deferred for incremental migration
