@@ -12,8 +12,9 @@
 
   <!-- TaskHostFactory runs the tasks in a separate process, preventing the DLL from being locked
        by the MSBuild worker so that Kuestenlogik.Surgewave.Build can be rebuilt without restarting the build server. -->
-  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.PackPluginTask"   AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
-  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.InstallPluginTask" AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
+  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.PackPluginTask"              AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
+  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.InstallPluginTask"           AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
+  <UsingTask TaskName="Kuestenlogik.Surgewave.Build.Tasks.ValidatePluginManifestTask"  AssemblyFile="$(_SurgewaveBuildDll)" TaskFactory="TaskHostFactory" />
 
   <!--
     Surgewave property defaults — layout-aware.
@@ -42,6 +43,31 @@
     <PropertyGroup>
       <PublishDir>$(SurgewaveStagingDir)</PublishDir>
     </PropertyGroup>
+  </Target>
+
+  <!--
+    SurgewaveValidatePluginManifest: schema-validates the plugin's plugin.json
+    against the v1 manifest schema before the .swpkg is packed. Catches missing
+    required fields, invalid id/version patterns, malformed dependency entries
+    etc. at build-time instead of at install-time (where the error would surface
+    on the operator's machine, not the plugin author's).
+
+    Auto-detects plugin.json next to the csproj. Override via:
+      $(SurgewavePluginManifest)               explicit path
+      $(SurgewaveValidatePluginManifest)=false opt out entirely
+
+    Runs BeforeTargets="Build" so IDEs render the errors inline, AND before
+    SurgewavePackPlugin as a defensive duplicate run for the publish-detected
+    manifest (covers manifest-after-publish-only setups).
+  -->
+  <PropertyGroup>
+    <SurgewavePluginManifest Condition="'$(SurgewavePluginManifest)' == '' and Exists('$(MSBuildProjectDirectory)\plugin.json')">$(MSBuildProjectDirectory)\plugin.json</SurgewavePluginManifest>
+  </PropertyGroup>
+
+  <Target Name="SurgewaveValidatePluginManifest"
+          BeforeTargets="Build"
+          Condition="'$(SurgewaveValidatePluginManifest)' != 'false' and '$(SurgewavePluginManifest)' != '' and Exists('$(SurgewavePluginManifest)')">
+    <ValidatePluginManifestTask ManifestPath="$(SurgewavePluginManifest)" />
   </Target>
 
   <!--

@@ -24,6 +24,14 @@
     -->
     <PackageReference Include="Microsoft.Build.Framework" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.Build.Utilities.Core" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="NJsonSchema" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plugin-Manifest schema shipped as embedded resource so the validation
+         task is self-contained (no schema-path probe on the build machine). -->
+    <EmbeddedResource Include="..\..\schemas\plugin-manifest\v1.json"
+                      LogicalName="Kuestenlogik.Surgewave.Build.Schemas.plugin-manifest-v1.json" />
   </ItemGroup>
 
   <ItemGroup>
@@ -56,6 +64,11 @@
     <None Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
     <None Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
     <None Include="$(OutputPath)System.IO.Hashing.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)System.IO.Hashing.dll')" />
+    <!-- NJsonSchema + its transitive deps for ValidatePluginManifestTask -->
+    <None Include="$(OutputPath)NJsonSchema.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)NJsonSchema.dll')" />
+    <None Include="$(OutputPath)NJsonSchema.Annotations.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)NJsonSchema.Annotations.dll')" />
+    <None Include="$(OutputPath)Namotion.Reflection.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Namotion.Reflection.dll')" />
+    <None Include="$(OutputPath)Newtonsoft.Json.dll" Pack="true" PackagePath="tasks\$(TargetFramework)\" Visible="false" Condition="Exists('$(OutputPath)Newtonsoft.Json.dll')" />
   </ItemGroup>
 
 </Project>
