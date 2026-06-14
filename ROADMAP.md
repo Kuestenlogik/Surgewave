@@ -33,7 +33,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `kind:feature` `area:connect` `P3`
 - [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `kind:feature` `area:streams` `P2`
-- [#17](https://github.com/Kuestenlogik/Surgewave/issues/17) **Plugin SDK C — surgewave plugin scaffold + dotnet new templates** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P2`
 - [#19](https://github.com/Kuestenlogik/Surgewave/issues/19) **Plugin SDK E — Roslyn analysers (SRWV-prefix rules)** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P2`
 - [#20](https://github.com/Kuestenlogik/Surgewave/issues/20) **Plugin SDK F — Sample plugin reference repo** `kind:feature` `area:plugin-sdk` `track:plugin-distribution` `P2`
 - [#21](https://github.com/Kuestenlogik/Surgewave/issues/21) **Operator wizard — surgewave setup (interactive CLI)** `kind:feature` `area:cli` `P2`
