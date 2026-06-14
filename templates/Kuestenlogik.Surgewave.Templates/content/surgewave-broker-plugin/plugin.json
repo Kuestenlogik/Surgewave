@@ -1,0 +1,9 @@
+{
+  "$schema": "https://surgewave.kuestenlogik.com/schemas/plugin-manifest/v1",
+  "id": "PLUGIN_ID",
+  "name": "MyPlugin",
+  "version": "0.1.0",
+  "description": "A Surgewave broker plugin.",
+  "license": "Apache-2.0",
+  "assemblies": [ "MyPlugin.dll" ]
+}

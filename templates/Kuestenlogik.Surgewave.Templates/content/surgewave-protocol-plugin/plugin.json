@@ -1,0 +1,9 @@
+{
+  "$schema": "https://surgewave.kuestenlogik.com/schemas/plugin-manifest/v1",
+  "id": "PLUGIN_ID",
+  "name": "MyProtocol",
+  "version": "0.1.0",
+  "description": "A Surgewave protocol-adapter plugin.",
+  "license": "Apache-2.0",
+  "assemblies": [ "MyProtocol.dll" ]
+}

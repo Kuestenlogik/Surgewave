@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Kuestenlogik",
+  "classifications": [ "Surgewave", "Plugin", "Protocol" ],
+  "identity": "Kuestenlogik.Surgewave.Templates.ProtocolPlugin",
+  "name": "Surgewave Protocol Plugin",
+  "description": "A Surgewave protocol-adapter plugin scaffold (IProtocolPlugin) with manifest, stub class and a passing xUnit test.",
+  "shortName": "surgewave-protocol-plugin",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "MyProtocol",
+  "preferNameDirectory": true,
+  "symbols": {
+    "PluginId": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "com.example.my-protocol",
+      "description": "Reverse-DNS unique plugin id (matches the v1 manifest schema pattern).",
+      "replaces": "PLUGIN_ID"
+    },
+    "FeatureId": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "MyProtocol.Feature",
+      "description": "Feature id reported by the IPlugin contract.",
+      "replaces": "FEATURE_ID"
+    },
+    "DefaultPort": {
+      "type": "parameter",
+      "datatype": "integer",
+      "defaultValue": "0",
+      "description": "Default TCP port the protocol listens on (0 = shares HTTP port).",
+      "replaces": "DEFAULT_PORT"
+    }
+  }
+}

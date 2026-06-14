@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Kuestenlogik",
+  "classifications": [ "Surgewave", "Plugin", "Storage" ],
+  "identity": "Kuestenlogik.Surgewave.Templates.StorageEnginePlugin",
+  "name": "Surgewave Storage Engine Plugin",
+  "description": "A Surgewave storage-engine plugin scaffold (IStorageEnginePlugin) with manifest, stub class and a passing xUnit test.",
+  "shortName": "surgewave-storage-engine",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "MyEngine",
+  "preferNameDirectory": true,
+  "symbols": {
+    "PluginId": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "com.example.my-storage-engine",
+      "description": "Reverse-DNS unique plugin id (matches the v1 manifest schema pattern).",
+      "replaces": "PLUGIN_ID"
+    },
+    "FeatureId": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "MyEngine.Feature",
+      "description": "Feature id reported by the IPlugin contract.",
+      "replaces": "FEATURE_ID"
+    },
+    "EngineName": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "my-engine",
+      "description": "Configuration value for Surgewave:Storage:Engine that selects this engine.",
+      "replaces": "ENGINE_NAME"
+    }
+  }
+}
