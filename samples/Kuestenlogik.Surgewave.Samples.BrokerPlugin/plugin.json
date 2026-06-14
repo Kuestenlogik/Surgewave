@@ -1,0 +1,12 @@
+{
+  "$schema": "https://surgewave.kuestenlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.samples.broker-plugin",
+  "name": "Surgewave Sample Broker Plugin",
+  "version": "0.1.0",
+  "description": "Reference IBrokerPlugin that registers a request-counter hosted service. See samples/README.md for an authoring walkthrough.",
+  "license": "Apache-2.0",
+  "authors": [ "Kuestenlogik" ],
+  "projectUrl": "https://github.com/Kuestenlogik/Surgewave",
+  "tags": [ "sample", "broker" ],
+  "assemblies": [ "Kuestenlogik.Surgewave.Samples.BrokerPlugin.dll" ]
+}

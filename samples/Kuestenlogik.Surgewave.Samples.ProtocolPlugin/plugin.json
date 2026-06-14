@@ -1,0 +1,12 @@
+{
+  "$schema": "https://surgewave.kuestenlogik.com/schemas/plugin-manifest/v1",
+  "id": "kuestenlogik.surgewave.samples.protocol-plugin",
+  "name": "Surgewave Sample Protocol Plugin",
+  "version": "0.1.0",
+  "description": "Reference IProtocolPlugin that adds an /echo HTTP endpoint. See samples/README.md for an authoring walkthrough.",
+  "license": "Apache-2.0",
+  "authors": [ "Kuestenlogik" ],
+  "projectUrl": "https://github.com/Kuestenlogik/Surgewave",
+  "tags": [ "sample", "protocol" ],
+  "assemblies": [ "Kuestenlogik.Surgewave.Samples.ProtocolPlugin.dll" ]
+}

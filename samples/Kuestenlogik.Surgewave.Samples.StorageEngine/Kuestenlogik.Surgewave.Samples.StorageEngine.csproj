@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests\**" />
+    <None Remove="tests\**" />
+    <Content Remove="tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
