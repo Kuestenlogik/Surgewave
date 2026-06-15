@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Plugins Marketplace — wizard-facing browse layer above Kuestenlogik.Surgewave.Plugins.Repository. Categorises Surgewave-tagged NuGet packages by plugin shape (storage / connector / protocol / broker extension) and resolves surgewaveDependencies on demand for selected entries. Pre-requisite for the operator setup wizards (Issues #21, #22).</Description>
+    <PackageTags>surgewave;marketplace;plugins;wizard</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Repository\Kuestenlogik.Surgewave.Plugins.Repository.csproj" />
+  </ItemGroup>
+
+</Project>
