@@ -24,6 +24,7 @@ using Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 using Kuestenlogik.Surgewave.Cli.Commands.Sdk;
 using Kuestenlogik.Surgewave.Cli.Commands.Produce;
 using Kuestenlogik.Surgewave.Cli.Commands.Schema;
+using Kuestenlogik.Surgewave.Cli.Commands.Setup;
 using Kuestenlogik.Surgewave.Cli.Commands.Templates;
 using Kuestenlogik.Surgewave.Cli.Commands.Topics;
 using Kuestenlogik.Surgewave.Cli.Commands.Quotas;
@@ -78,6 +79,7 @@ rootCommand.Subcommands.Add(new SdkCommand());
 rootCommand.Subcommands.Add(new TemplateCommand());
 rootCommand.Subcommands.Add(new ChatCommand());
 rootCommand.Subcommands.Add(new MessageCommand());
+rootCommand.Subcommands.Add(new SetupCommand());
 
 // Discover CLI plugins from plugins/ directory
 foreach (var command in Kuestenlogik.Surgewave.Cli.CliPluginDiscovery.DiscoverCommands("plugins"))

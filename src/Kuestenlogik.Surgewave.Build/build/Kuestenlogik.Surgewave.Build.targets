@@ -1,13 +1,17 @@
 <Project>
 
   <!--
-    Task DLL location — two cases:
-    1. NuGet package:      tasks/net10.0/ (relative to build/)
-    2. Local ProjectRef:   artifacts/bin/Kuestenlogik.Surgewave.Build/Release/ (within Surgewave solution)
+    Task DLL location — three cases:
+    1. NuGet package:        tasks/net10.0/ (relative to build/)
+    2. Local ProjectRef in Debug:   artifacts/bin/Kuestenlogik.Surgewave.Build/Debug/
+    3. Local ProjectRef in Release: artifacts/bin/Kuestenlogik.Surgewave.Build/Release/
+    The current $(Configuration) is tried first, then the other as fallback.
   -->
   <PropertyGroup>
     <_SurgewaveBuildDll>$(MSBuildThisFileDirectory)..\tasks\net10.0\Kuestenlogik.Surgewave.Build.dll</_SurgewaveBuildDll>
+    <_SurgewaveBuildDll Condition="!Exists('$(_SurgewaveBuildDll)')">$(MSBuildThisFileDirectory)..\..\..\artifacts\bin\Kuestenlogik.Surgewave.Build\$(Configuration)\Kuestenlogik.Surgewave.Build.dll</_SurgewaveBuildDll>
     <_SurgewaveBuildDll Condition="!Exists('$(_SurgewaveBuildDll)')">$(MSBuildThisFileDirectory)..\..\..\artifacts\bin\Kuestenlogik.Surgewave.Build\Release\Kuestenlogik.Surgewave.Build.dll</_SurgewaveBuildDll>
+    <_SurgewaveBuildDll Condition="!Exists('$(_SurgewaveBuildDll)')">$(MSBuildThisFileDirectory)..\..\..\artifacts\bin\Kuestenlogik.Surgewave.Build\Debug\Kuestenlogik.Surgewave.Build.dll</_SurgewaveBuildDll>
   </PropertyGroup>
 
   <!-- TaskHostFactory runs the tasks in a separate process, preventing the DLL from being locked
