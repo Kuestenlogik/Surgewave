@@ -33,7 +33,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `kind:feature` `area:connect` `P3`
 - [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `kind:feature` `area:streams` `P2`
-- [#21](https://github.com/Kuestenlogik/Surgewave/issues/21) **Operator wizard — surgewave setup (interactive CLI)** `kind:feature` `area:cli` `P2`
 - [#22](https://github.com/Kuestenlogik/Surgewave/issues/22) **Operator wizard — Browser variant in Control UI** `kind:feature` `area:control` `P2`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `kind:feature` `area:broker` `track:transport` `P2`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `kind:debt` `area:observability` `track:transport` `P3`
