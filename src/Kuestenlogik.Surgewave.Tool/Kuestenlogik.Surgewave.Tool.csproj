@@ -97,6 +97,7 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect.Abstractions\Kuestenlogik.Surgewave.Connect.Abstractions.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging\Kuestenlogik.Surgewave.Plugins.Packaging.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Repository\Kuestenlogik.Surgewave.Plugins.Repository.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Marketplace\Kuestenlogik.Surgewave.Plugins.Marketplace.csproj" />
   </ItemGroup>
 
 </Project>
