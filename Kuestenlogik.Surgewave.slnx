@@ -32,6 +32,7 @@
     <Project Path="src/Kuestenlogik.Surgewave.Storage.Disaggregated/Kuestenlogik.Surgewave.Storage.Disaggregated.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Analyzers/Kuestenlogik.Surgewave.Analyzers.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Plugins.Marketplace/Kuestenlogik.Surgewave.Plugins.Marketplace.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Setup/Kuestenlogik.Surgewave.Setup.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Storage.Disaggregated.Tests/Kuestenlogik.Surgewave.Storage.Disaggregated.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Build.Tests/Kuestenlogik.Surgewave.Build.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Analyzers.Tests/Kuestenlogik.Surgewave.Analyzers.Tests.csproj" />

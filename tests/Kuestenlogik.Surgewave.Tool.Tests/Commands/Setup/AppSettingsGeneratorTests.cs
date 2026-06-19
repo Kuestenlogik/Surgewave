@@ -1,7 +1,5 @@
 using System.Text.Json;
-using Kuestenlogik.Surgewave.Cli.Commands.Setup;
-using Kuestenlogik.Surgewave.Plugins.Marketplace;
-using Kuestenlogik.Surgewave.Plugins.Repository;
+using Kuestenlogik.Surgewave.Setup;
 using Kuestenlogik.Surgewave.Testing;
 using Xunit;
 
@@ -10,12 +8,7 @@ namespace Kuestenlogik.Surgewave.Tool.Tests.Commands.Setup;
 [Trait("Category", TestCategories.Unit)]
 public sealed class AppSettingsGeneratorTests
 {
-    private static PluginMarketplaceEntry Entry(string id) =>
-        new()
-        {
-            Package = new ConnectorPackageInfo { PackageId = id, Version = "1.0.0", Name = id },
-            Category = PluginCategory.StorageEngine,
-        };
+    private static SetupPluginRef Ref(string id) => new(id, "1.0.0");
 
     private static JsonElement RenderAndParse(SetupAnswers answers)
     {
@@ -36,7 +29,7 @@ public sealed class AppSettingsGeneratorTests
     [Fact]
     public void Render_StoragePicked_EmitsEnginePluginPackageId()
     {
-        var root = RenderAndParse(new SetupAnswers { StorageEngine = Entry("Acme.Storage.S3") });
+        var root = RenderAndParse(new SetupAnswers { StorageEngine = Ref("Acme.Storage.S3") });
 
         Assert.Equal("Acme.Storage.S3",
             root.GetProperty("Surgewave").GetProperty("Storage").GetProperty("EnginePlugin").GetString());
@@ -104,7 +97,7 @@ public sealed class AppSettingsGeneratorTests
     {
         var json = AppSettingsGenerator.Render(new SetupAnswers
         {
-            StorageEngine = Entry("Acme.Storage.S3"),
+            StorageEngine = Ref("Acme.Storage.S3"),
             Auth = SetupAuthMethod.MutualTls,
             TelemetryEnabled = true,
             OtlpEndpoint = "https://otel.example:4317",

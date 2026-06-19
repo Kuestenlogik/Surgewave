@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Kuestenlogik.Surgewave.Cli.Commands.Setup;
+namespace Kuestenlogik.Surgewave.Setup;
 
 /// <summary>
 /// Renders a <see cref="SetupAnswers"/> into a starter

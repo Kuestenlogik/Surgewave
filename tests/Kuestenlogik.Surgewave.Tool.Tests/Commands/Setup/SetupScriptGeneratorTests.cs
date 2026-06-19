@@ -1,6 +1,4 @@
-using Kuestenlogik.Surgewave.Cli.Commands.Setup;
-using Kuestenlogik.Surgewave.Plugins.Marketplace;
-using Kuestenlogik.Surgewave.Plugins.Repository;
+using Kuestenlogik.Surgewave.Setup;
 using Kuestenlogik.Surgewave.Testing;
 using Xunit;
 
@@ -9,17 +7,7 @@ namespace Kuestenlogik.Surgewave.Tool.Tests.Commands.Setup;
 [Trait("Category", TestCategories.Unit)]
 public sealed class SetupScriptGeneratorTests
 {
-    private static PluginMarketplaceEntry Entry(string id, string version, PluginCategory category) =>
-        new()
-        {
-            Package = new ConnectorPackageInfo
-            {
-                PackageId = id,
-                Version = version,
-                Name = id,
-            },
-            Category = category,
-        };
+    private static SetupPluginRef Ref(string id, string version) => new(id, version);
 
     [Fact]
     public void RenderBash_EmptyAnswers_ProducesShebangAndFailFastAndPlaceholders()
@@ -49,10 +37,10 @@ public sealed class SetupScriptGeneratorTests
     {
         var answers = new SetupAnswers
         {
-            StorageEngine = Entry("Acme.Storage", "1.0.0", PluginCategory.StorageEngine),
-            Protocols = [Entry("Acme.Proto.Mqtt", "1.0.0", PluginCategory.Protocol)],
-            SchemaHandlers = [Entry("Acme.Schema.Avro", "1.0.0", PluginCategory.SchemaHandler)],
-            Connectors = [Entry("Acme.Connector.Kafka", "1.0.0", PluginCategory.Connector)],
+            StorageEngine = Ref("Acme.Storage", "1.0.0"),
+            Protocols = [Ref("Acme.Proto.Mqtt", "1.0.0")],
+            SchemaHandlers = [Ref("Acme.Schema.Avro", "1.0.0")],
+            Connectors = [Ref("Acme.Connector.Kafka", "1.0.0")],
         };
 
         var script = SetupScriptGenerator.RenderBash(answers);
@@ -72,8 +60,8 @@ public sealed class SetupScriptGeneratorTests
     {
         var answers = new SetupAnswers
         {
-            StorageEngine = Entry("Acme.Storage", "2.1.0", PluginCategory.StorageEngine),
-            Protocols = [Entry("Acme.Proto.Mqtt", "1.0.0", PluginCategory.Protocol)],
+            StorageEngine = Ref("Acme.Storage", "2.1.0"),
+            Protocols = [Ref("Acme.Proto.Mqtt", "1.0.0")],
             TelemetryEnabled = true,
             OtlpEndpoint = "https://otel.example/v1",
         };
@@ -87,7 +75,7 @@ public sealed class SetupScriptGeneratorTests
     {
         var answers = new SetupAnswers
         {
-            Connectors = [Entry("Acme.Connector.Kafka", "3.2.1", PluginCategory.Connector)],
+            Connectors = [Ref("Acme.Connector.Kafka", "3.2.1")],
         };
 
         var script = SetupScriptGenerator.RenderBash(answers);

@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using Kuestenlogik.Surgewave.Plugins.Marketplace;
 using Kuestenlogik.Surgewave.Plugins.Repository;
+using Kuestenlogik.Surgewave.Setup;
 using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Setup;
@@ -92,15 +93,21 @@ public sealed class SetupCommand : CommandBase
 
         return new SetupAnswers
         {
-            StorageEngine = storage,
-            Protocols = protocols,
-            SchemaHandlers = schemas,
-            Connectors = connectors,
+            StorageEngine = ToRef(storage),
+            Protocols = protocols.Select(ToRefRequired).ToList(),
+            SchemaHandlers = schemas.Select(ToRefRequired).ToList(),
+            Connectors = connectors.Select(ToRefRequired).ToList(),
             Auth = auth,
             TelemetryEnabled = telemetryEnabled,
             OtlpEndpoint = otlpEndpoint,
         };
     }
+
+    private static SetupPluginRef? ToRef(PluginMarketplaceEntry? entry) =>
+        entry is null ? null : new SetupPluginRef(entry.PackageId, entry.Version);
+
+    private static SetupPluginRef ToRefRequired(PluginMarketplaceEntry entry) =>
+        new(entry.PackageId, entry.Version);
 
     private static PluginMarketplaceEntry? PickOneOptional(
         IReadOnlyList<PluginMarketplaceEntry> all, PluginCategory category, string title)

@@ -1,0 +1,35 @@
+@using Kuestenlogik.Surgewave.Client.Native.Operations.Plugins
+
+@if (Choices.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">No @EmptyNoun plugins indexed yet.</MudAlert>
+}
+else
+{
+    <MudText Typo="Typo.body2" Class="mb-3">Pick any number, or leave empty.</MudText>
+    @foreach (var p in Choices)
+    {
+        var id = p.PackageId;
+        <MudCheckBox T="bool"
+                     Value="@Picks.Contains(id)"
+                     ValueChanged="@(checkedState => Toggle(id, checkedState))"
+                     Color="Color.Primary">
+            @p.Name
+            <MudText Typo="Typo.caption" Class="ml-2" Color="Color.Secondary">v@(p.Version)</MudText>
+        </MudCheckBox>
+    }
+}
+
+@code {
+    [Parameter] public IReadOnlyList<PluginInfo> Choices { get; set; } = [];
+    [Parameter] public HashSet<string> Picks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    [Parameter] public string EmptyNoun { get; set; } = "";
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private async Task Toggle(string id, bool isChecked)
+    {
+        if (isChecked) Picks.Add(id);
+        else Picks.Remove(id);
+        if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+    }
+}

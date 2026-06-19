@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Surgewave Setup — deterministic generator that turns a SetupAnswers value into setup.sh + setup.ps1 + appsettings.json. Shared between the CLI wizard (`surgewave setup`) and the Control UI Browser-Wizard (Issues #21, #22). No marketplace or repository dependency; consumers map their own plugin types into SetupPluginRef.</Description>
+    <PackageTags>surgewave;setup;wizard;codegen</PackageTags>
+  </PropertyGroup>
+
+</Project>
