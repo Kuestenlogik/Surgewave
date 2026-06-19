@@ -1,0 +1,243 @@
+@page "/setup"
+@using System.Text
+@using Kuestenlogik.Surgewave.Client.Native.Operations.Plugins
+@using Kuestenlogik.Surgewave.Plugins.Marketplace
+@using Kuestenlogik.Surgewave.Setup
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IConnectorMarketplaceService MarketplaceService
+@inject IJSRuntime JSRuntime
+@inject NotificationState Notifications
+
+<PageTitle>Setup Wizard - Surgewave Control</PageTitle>
+
+<PageHead Title="Setup Wizard"
+          Subtitle="Pick storage, protocols, schemas, connectors, auth and telemetry — get setup.sh + setup.ps1 + appsettings.json to commit into your deployment repo." />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+}
+else
+{
+    @if (_loadError is not null)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-4">
+            Could not load the plugin marketplace (@_loadError). You can still configure auth + telemetry below;
+            re-run the wizard once the broker is reachable to fill in plugin selections.
+        </MudAlert>
+    }
+
+    <MudCard Elevation="2" Class="mt-4">
+        <MudCardContent>
+            <MudStepper @bind-ActiveIndex="_activeStep">
+
+                <MudStep Title="Storage engine" SecondaryText="@(string.IsNullOrEmpty(_storagePick) ? "(default)" : _storagePick)">
+                    <MudText Typo="Typo.body2" Class="mb-3">
+                        Optional. Leave blank to stay on the built-in in-memory engine. Production deployments
+                        should pick a persistent engine (FileSystem, RocksDB, S3, …).
+                    </MudText>
+                    @{ var storageChoices = PluginsForCategory(PluginCategory.StorageEngine); }
+                    @if (storageChoices.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info">No storage-engine plugins indexed yet.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudRadioGroup T="string" @bind-Value="_storagePick">
+                            <MudRadio T="string" Value="@SkipSentinel">Skip (built-in default)</MudRadio>
+                            @foreach (var p in storageChoices)
+                            {
+                                <MudRadio T="string" Value="@p.PackageId">
+                                    @p.Name
+                                    <MudText Typo="Typo.caption" Class="ml-2" Color="Color.Secondary">v@(p.Version)</MudText>
+                                </MudRadio>
+                            }
+                        </MudRadioGroup>
+                    }
+                </MudStep>
+
+                <MudStep Title="Protocols" SecondaryText="@CountLabel(_protocolPicks)">
+                    <PluginMultiPick Choices="PluginsForCategory(PluginCategory.Protocol)" Picks="_protocolPicks" EmptyNoun="protocol" />
+                </MudStep>
+
+                <MudStep Title="Schema handlers" SecondaryText="@CountLabel(_schemaPicks)">
+                    <PluginMultiPick Choices="PluginsForCategory(PluginCategory.SchemaHandler)" Picks="_schemaPicks" EmptyNoun="schema-handler" />
+                </MudStep>
+
+                <MudStep Title="Connectors" SecondaryText="@CountLabel(_connectorPicks)">
+                    <PluginMultiPick Choices="PluginsForCategory(PluginCategory.Connector)" Picks="_connectorPicks" EmptyNoun="connector" />
+                </MudStep>
+
+                <MudStep Title="Authentication" SecondaryText="@AuthLabel(_auth)">
+                    <MudText Typo="Typo.body2" Class="mb-3">
+                        Pick how clients authenticate against the broker. <strong>None</strong> only for trusted-LAN dev setups.
+                    </MudText>
+                    <MudRadioGroup T="SetupAuthMethod" @bind-Value="_auth">
+                        <MudRadio T="SetupAuthMethod" Value="SetupAuthMethod.None">None (development only)</MudRadio>
+                        <MudRadio T="SetupAuthMethod" Value="SetupAuthMethod.SaslPlain">SASL/PLAIN</MudRadio>
+                        <MudRadio T="SetupAuthMethod" Value="SetupAuthMethod.SaslScram">SASL/SCRAM-SHA-256</MudRadio>
+                        <MudRadio T="SetupAuthMethod" Value="SetupAuthMethod.Tls">TLS (server cert only)</MudRadio>
+                        <MudRadio T="SetupAuthMethod" Value="SetupAuthMethod.MutualTls">mTLS (mutual cert authentication)</MudRadio>
+                    </MudRadioGroup>
+                </MudStep>
+
+                <MudStep Title="Telemetry" SecondaryText="@(_telemetryEnabled ? "OTLP" : "off")">
+                    <MudSwitch T="bool" @bind-Value="_telemetryEnabled" Color="Color.Primary" Label="Enable OTLP telemetry (traces + metrics)" />
+                    @if (_telemetryEnabled)
+                    {
+                        <MudTextField T="string" @bind-Value="_otlpEndpoint" Label="OTLP endpoint URL"
+                                      Variant="Variant.Outlined" Class="mt-3"
+                                      HelperText="HTTPS preferred. Default: http://localhost:4317" />
+                    }
+                </MudStep>
+
+                <MudStep Title="Review &amp; download">
+                    <MudText Typo="Typo.body2" Class="mb-3">
+                        Below is exactly what gets written. Commit the three files into your deployment repo and
+                        run <code>setup.sh</code> (or <code>setup.ps1</code>) on the broker host.
+                    </MudText>
+
+                    <MudTabs Outlined="true" Border="true" ApplyEffectsToContainer="true">
+                        <MudTabPanel Text="setup.sh">
+                            <MudTextField T="string" Value="@BashScript" Lines="14" ReadOnly="true"
+                                          Variant="Variant.Outlined"
+                                          Style="font-family: monospace; font-size: 12px;" />
+                        </MudTabPanel>
+                        <MudTabPanel Text="setup.ps1">
+                            <MudTextField T="string" Value="@PowerShellScript" Lines="14" ReadOnly="true"
+                                          Variant="Variant.Outlined"
+                                          Style="font-family: monospace; font-size: 12px;" />
+                        </MudTabPanel>
+                        <MudTabPanel Text="appsettings.json">
+                            <MudTextField T="string" Value="@AppSettingsJson" Lines="14" ReadOnly="true"
+                                          Variant="Variant.Outlined"
+                                          Style="font-family: monospace; font-size: 12px;" />
+                        </MudTabPanel>
+                    </MudTabs>
+
+                    <MudStack Row="true" Class="mt-4" Spacing="2">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Download"
+                                   OnClick="DownloadAllAsync">
+                            Download all 3 files
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   OnClick="@(() => DownloadOneAsync("setup.sh", BashScript))">
+                            setup.sh
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   OnClick="@(() => DownloadOneAsync("setup.ps1", PowerShellScript))">
+                            setup.ps1
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   OnClick="@(() => DownloadOneAsync("appsettings.json", AppSettingsJson))">
+                            appsettings.json
+                        </MudButton>
+                    </MudStack>
+                </MudStep>
+
+            </MudStepper>
+        </MudCardContent>
+    </MudCard>
+}
+
+@code {
+    // MudRadio T="string" needs a non-null Value for the "skip" choice; empty string is the sentinel
+    // that BuildAnswers() maps back to "no storage engine picked".
+    private const string SkipSentinel = "";
+
+    private bool _loading = true;
+    private string? _loadError;
+    private List<PluginInfo> _all = [];
+    private int _activeStep;
+
+    private string _storagePick = SkipSentinel;
+    private readonly HashSet<string> _protocolPicks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _schemaPicks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _connectorPicks = new(StringComparer.OrdinalIgnoreCase);
+    private SetupAuthMethod _auth = SetupAuthMethod.None;
+    private bool _telemetryEnabled = true;
+    private string _otlpEndpoint = "http://localhost:4317";
+
+    private string BashScript => SetupScriptGenerator.RenderBash(BuildAnswers());
+    private string PowerShellScript => SetupScriptGenerator.RenderPowerShell(BuildAnswers());
+    private string AppSettingsJson => AppSettingsGenerator.Render(BuildAnswers());
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Bound the marketplace lookup so the page still renders quickly when
+        // the broker is unreachable. The catch path is the fallback UX —
+        // operator can still configure auth + telemetry without plugin picks.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            var result = await MarketplaceService.SearchAsync(take: 200, cancellationToken: cts.Token);
+            _all = result.Plugins.ToList();
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private IReadOnlyList<PluginInfo> PluginsForCategory(PluginCategory category) =>
+        _all.Where(p => PluginCategoryClassifier.Classify(p.Tags) == category)
+            .OrderBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private SetupAnswers BuildAnswers() => new()
+    {
+        StorageEngine = ToRef(_storagePick),
+        Protocols = _protocolPicks.Select(ToRef).Where(r => r is not null).Select(r => r!).ToList(),
+        SchemaHandlers = _schemaPicks.Select(ToRef).Where(r => r is not null).Select(r => r!).ToList(),
+        Connectors = _connectorPicks.Select(ToRef).Where(r => r is not null).Select(r => r!).ToList(),
+        Auth = _auth,
+        TelemetryEnabled = _telemetryEnabled,
+        OtlpEndpoint = string.IsNullOrWhiteSpace(_otlpEndpoint) ? null : _otlpEndpoint,
+    };
+
+    private SetupPluginRef? ToRef(string? packageId)
+    {
+        if (string.IsNullOrEmpty(packageId)) return null;
+        var hit = _all.FirstOrDefault(p => string.Equals(p.PackageId, packageId, StringComparison.OrdinalIgnoreCase));
+        return hit is null ? null : new SetupPluginRef(hit.PackageId, hit.Version);
+    }
+
+    private static string CountLabel(HashSet<string> picks) =>
+        picks.Count switch { 0 => "none", 1 => "1 selected", _ => $"{picks.Count} selected" };
+
+    private static string AuthLabel(SetupAuthMethod a) => a switch
+    {
+        SetupAuthMethod.None => "None",
+        SetupAuthMethod.SaslPlain => "SASL/PLAIN",
+        SetupAuthMethod.SaslScram => "SASL/SCRAM",
+        SetupAuthMethod.Tls => "TLS",
+        SetupAuthMethod.MutualTls => "mTLS",
+        _ => a.ToString(),
+    };
+
+    private async Task DownloadAllAsync()
+    {
+        await DownloadOneAsync("setup.sh", BashScript);
+        await DownloadOneAsync("setup.ps1", PowerShellScript);
+        await DownloadOneAsync("appsettings.json", AppSettingsJson);
+    }
+
+    private async Task DownloadOneAsync(string fileName, string content)
+    {
+        try
+        {
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, base64);
+            Notifications.ShowSuccess($"Downloaded {fileName}");
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Download failed: {ex.Message}");
+        }
+    }
+}

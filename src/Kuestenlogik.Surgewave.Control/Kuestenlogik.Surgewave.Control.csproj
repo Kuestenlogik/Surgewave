@@ -67,6 +67,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Marketplace\Kuestenlogik.Surgewave.Plugins.Marketplace.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Setup\Kuestenlogik.Surgewave.Setup.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Control.Sdk\Kuestenlogik.Surgewave.Control.Sdk.csproj" />
   </ItemGroup>
 
