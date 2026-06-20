@@ -1473,6 +1473,7 @@ app.MapSurgewavePlugins(
     pluginDiscoveryForApi,
     verifier: uploadVerifier,
     requireSigned: signerOptions?.RequireSignedPackages ?? false);
+app.MapSurgewaveTrustedKeys(signerOptions);
 logger.LogInformation("  - Plugin API:          {Host}:{GrpcPort}/api/plugins", config.Host, config.GrpcPort);
 
 // Prometheus HTTP service discovery endpoint
