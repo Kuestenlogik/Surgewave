@@ -36,7 +36,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `kind:feature` `area:broker` `track:transport` `P2`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `kind:debt` `area:observability` `track:transport` `P3`
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `kind:docs` `area:docs` `P2`
+- [#32](https://github.com/Kuestenlogik/Surgewave/issues/32) **Broker crashes on fresh startup: BuiltinEcdsaSignerProvider rejects empty Options** 
 
 ---
 
-*Generated 2026-06-19 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-06-20 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
