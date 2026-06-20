@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Plugins.Packaging\Kuestenlogik.Surgewave.Plugins.Packaging.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Plugins.Repository\Kuestenlogik.Surgewave.Plugins.Repository.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Plugins.Packaging.Testing\Kuestenlogik.Surgewave.Plugins.Packaging.Testing.csproj" />
   </ItemGroup>
 

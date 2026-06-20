@@ -1,141 +1,233 @@
 @page "/plugins/sources"
-@using Kuestenlogik.Surgewave.Plugins.Sources
+@using Kuestenlogik.Surgewave.Plugins.Repository
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IRepositoryApiClient Api
 @inject ISnackbar Snackbar
 
 <PageTitle>Plugin Sources - Surgewave Control</PageTitle>
 
 <PageHead Title="Plugin Sources"
-          Subtitle="Where Surgewave discovers and downloads plugins from — searched in order at install time." />
+          Subtitle="The broker's canonical repository list — searched in order at install / wizard time. Edits land directly in the broker's surgewave-repositories.json." />
 
-<div class="surgewave-section-title">Add source</div>
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" />
+}
+else if (_loadError is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4">
+        Could not reach the broker (@_loadError).
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadAsync" Class="ml-4">Retry</MudButton>
+    </MudAlert>
+}
+else
+{
+    <div class="surgewave-section-title">Add repository</div>
 
-<MudPaper Class="surgewave-surface mb-4">
-    <div class="d-flex align-center gap-2">
-        <MudTextField @bind-Value="_newName" Label="Name" Placeholder="e.g., mycompany"
-                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 180px;" />
-        <MudSelect @bind-Value="_newType" Label="Type" Variant="Variant.Outlined"
-                   Margin="Margin.Dense" Style="width: 200px;">
-            <MudSelectItem Value="@("nuget")">NuGet Feed</MudSelectItem>
-            <MudSelectItem Value="@("http")">HTTP / Marketplace</MudSelectItem>
-            <MudSelectItem Value="@("github")">GitHub Releases</MudSelectItem>
-        </MudSelect>
-        <MudTextField @bind-Value="_newUrl" Label="URL" Placeholder="https://…"
-                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
-        <MudTextField @bind-Value="_newApiKey" Label="API key" Placeholder="optional"
-                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 200px;"
-                      InputType="InputType.Password" />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.Add" OnClick="AddSource">
-            Add
-        </MudButton>
-    </div>
-</MudPaper>
+    <MudPaper Class="surgewave-surface mb-4">
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudTextField @bind-Value="_newName" Label="Name" Placeholder="e.g., mycompany"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 180px;" />
+            <MudSelect T="RepositoryType" @bind-Value="_newType" Label="Type" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Style="width: 200px;">
+                <MudSelectItem T="RepositoryType" Value="RepositoryType.NuGet">NuGet Feed</MudSelectItem>
+                <MudSelectItem T="RepositoryType" Value="RepositoryType.Http">HTTP Repository</MudSelectItem>
+                <MudSelectItem T="RepositoryType" Value="RepositoryType.Marketplace">Surgewave Marketplace</MudSelectItem>
+            </MudSelect>
+            <MudTextField @bind-Value="_newSource" Label="Source URL" Placeholder="https://…"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1"
+                          Style="min-width: 240px;" />
+            <MudTextField @bind-Value="_newPackagePrefix" Label="Package prefix" Placeholder="Kuestenlogik.Surgewave.Connector."
+                          HelperText="optional filter"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 280px;" />
+            <MudTextField @bind-Value="_newToken" Label="API token" Placeholder="optional"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 200px;"
+                          InputType="InputType.Password" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="AddRepository" Disabled="_busy">
+                Add
+            </MudButton>
+        </div>
+    </MudPaper>
 
-<div class="surgewave-section-title">Configured sources</div>
+    <div class="surgewave-section-title">Configured repositories (@_entries.Count)</div>
 
-<MudPaper Class="surgewave-surface" Style="padding: 0;">
-<MudTable Items="_sources" Hover="true" Elevation="0">
-    <HeaderContent>
-        <MudTh>Name</MudTh>
-        <MudTh>Type</MudTh>
-        <MudTh>URL</MudTh>
-        <MudTh>API key</MudTh>
-        <MudTh Style="width:80px"></MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd><strong>@context.Name</strong></MudTd>
-        <MudTd>
-            <span class="surgewave-status @GetTypeStatusClass(context.Type)">
-                <span class="surgewave-status-dot"></span>
-                @context.Type
-            </span>
-        </MudTd>
-        <MudTd><span class="surgewave-mono">@context.Url</span></MudTd>
-        <MudTd><span class="surgewave-mono">@(string.IsNullOrEmpty(context.ApiKey) ? "—" : "••••••")</span></MudTd>
-        <MudTd>
-            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                           OnClick="@(() => RemoveSource(context.Name))" />
-        </MudTd>
-    </RowTemplate>
-    <NoRecordsContent>
-        <MudText Class="pa-4">No plugin sources configured. Add one above.</MudText>
-    </NoRecordsContent>
-</MudTable>
-</MudPaper>
+    <MudPaper Class="surgewave-surface" Style="padding: 0;">
+        <MudTable Items="_entries" Hover="true" Elevation="0">
+            <HeaderContent>
+                <MudTh>Enabled</MudTh>
+                <MudTh>Name</MudTh>
+                <MudTh>Type</MudTh>
+                <MudTh>Source URL</MudTh>
+                <MudTh>Package prefix</MudTh>
+                <MudTh>Credentials</MudTh>
+                <MudTh Style="width:80px"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Enabled">
+                    <MudSwitch T="bool"
+                               Value="@context.Enabled"
+                               ValueChanged="@(v => ToggleEnabled(context, v))"
+                               Color="Color.Primary"
+                               Disabled="_busy" />
+                </MudTd>
+                <MudTd DataLabel="Name"><strong>@context.Name</strong></MudTd>
+                <MudTd DataLabel="Type">
+                    <span class="surgewave-status @GetTypeStatusClass(context.Type)">
+                        <span class="surgewave-status-dot"></span>
+                        @context.Type
+                    </span>
+                </MudTd>
+                <MudTd DataLabel="Source"><span class="surgewave-mono">@context.Source</span></MudTd>
+                <MudTd DataLabel="Package prefix">
+                    <span class="surgewave-mono">@(string.IsNullOrEmpty(context.PackagePrefix) ? "—" : context.PackagePrefix)</span>
+                </MudTd>
+                <MudTd DataLabel="Credentials">
+                    @if (HasCredentials(context.Credentials))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Lock">set</MudChip>
+                    }
+                    else
+                    {
+                        <span class="surgewave-mono">—</span>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => RemoveRepository(context.Name))"
+                                   Disabled="_busy" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4">No repositories configured. Add one above.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
 
 @code {
-    private PluginSourceConfig _config = new();
-    private List<PluginSourceConfig.SourceEntry> _sources = [];
-    private string _newName = "";
-    private string _newType = "nuget";
-    private string _newUrl = "";
-    private string? _newApiKey;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _loadError;
+    private List<RepositoryEntry> _entries = [];
 
-    protected override void OnInitialized()
+    private string _newName = "";
+    private RepositoryType _newType = RepositoryType.NuGet;
+    private string _newSource = "";
+    private string? _newPackagePrefix;
+    private string? _newToken;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
     {
-        _config = PluginSourceConfig.Load();
-        _sources = _config.Sources;
+        _loading = true;
+        _loadError = null;
+        StateHasChanged();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            _entries = (await Api.ListAsync(cts.Token)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+            _entries = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
-    private void AddSource()
+    private async Task AddRepository()
     {
-        if (string.IsNullOrWhiteSpace(_newName))
-        {
-            Snackbar.Add("Name is required.", Severity.Warning);
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(_newName)) { Snackbar.Add("Name is required.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_newSource)) { Snackbar.Add("Source URL is required.", Severity.Warning); return; }
 
-        if (string.IsNullOrWhiteSpace(_newUrl))
-        {
-            Snackbar.Add("URL is required.", Severity.Warning);
-            return;
-        }
-
-        if (_sources.Any(s => s.Name.Equals(_newName, StringComparison.OrdinalIgnoreCase)))
-        {
-            Snackbar.Add($"A source named '{_newName}' already exists.", Severity.Warning);
-            return;
-        }
-
-        _sources.Add(new PluginSourceConfig.SourceEntry
+        var entry = new RepositoryEntry
         {
             Name = _newName,
             Type = _newType,
-            Url = _newUrl,
-            ApiKey = string.IsNullOrWhiteSpace(_newApiKey) ? null : _newApiKey
-        });
+            Source = _newSource,
+            Enabled = true,
+            PackagePrefix = string.IsNullOrWhiteSpace(_newPackagePrefix) ? null : _newPackagePrefix,
+            Credentials = string.IsNullOrWhiteSpace(_newToken) ? null : new RepositoryCredentials { Token = _newToken },
+        };
 
-        _config.Save();
-        Snackbar.Add($"Source '{_newName}' added.", Severity.Success);
-
-        _newName = "";
-        _newUrl = "";
-        _newApiKey = null;
+        _busy = true;
+        try
+        {
+            await Api.AddAsync(entry);
+            Snackbar.Add($"Repository '{_newName}' added.", Severity.Success);
+            _newName = ""; _newSource = ""; _newPackagePrefix = null; _newToken = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Add failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
-    private void RemoveSource(string name)
+    private async Task ToggleEnabled(RepositoryEntry entry, bool enabled)
     {
-        var entry = _sources.FirstOrDefault(s => s.Name == name);
-        if (entry is null) return;
-
-        _sources.Remove(entry);
-        _config.Save();
-        Snackbar.Add($"Source '{name}' removed.", Severity.Info);
+        _busy = true;
+        try
+        {
+            var updated = new RepositoryEntry
+            {
+                Name = entry.Name,
+                Type = entry.Type,
+                Source = entry.Source,
+                Enabled = enabled,
+                PackagePrefix = entry.PackagePrefix,
+                Credentials = entry.Credentials,
+            };
+            await Api.UpdateAsync(entry.Name, updated);
+            entry.Enabled = enabled;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Toggle failed: {ex.Message}", Severity.Error);
+            await LoadAsync(); // sync with server truth
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
-    private static Color GetTypeColor(string type) => type.ToLowerInvariant() switch
+    private async Task RemoveRepository(string name)
     {
-        "nuget" => Color.Secondary,
-        "http" => Color.Info,
-        "github" => Color.Dark,
-        _ => Color.Default
-    };
+        _busy = true;
+        try
+        {
+            await Api.DeleteAsync(name);
+            Snackbar.Add($"Repository '{name}' removed.", Severity.Info);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
-    private static string GetTypeStatusClass(string type) => type.ToLowerInvariant() switch
+    private static bool HasCredentials(RepositoryCredentials? c)
+        => c is not null && (!string.IsNullOrEmpty(c.Token) || !string.IsNullOrEmpty(c.Username) || !string.IsNullOrEmpty(c.Password));
+
+    private static string GetTypeStatusClass(RepositoryType type) => type switch
     {
-        "nuget" => "surgewave-status--info",
-        "http" => "surgewave-status--info",
-        "github" => "surgewave-status--idle",
-        _ => ""
+        RepositoryType.NuGet => "surgewave-status--info",
+        RepositoryType.Http => "surgewave-status--info",
+        RepositoryType.Marketplace => "surgewave-status--idle",
+        _ => "",
     };
 }
