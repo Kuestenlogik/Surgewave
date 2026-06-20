@@ -1476,6 +1476,13 @@ app.MapSurgewavePlugins(
 app.MapSurgewaveTrustedKeys(signerOptions);
 var repositoryStore = new Kuestenlogik.Surgewave.Plugins.Repository.RepositoryStore(
     Path.Combine(config.DataDirectory, "surgewave-repositories.json"));
+// Hydrate the broker's marketplace-search repositories from the canonical
+// store so the operator's /plugins/sources edits actually flow into the
+// SearchPlugins Native op. Without this, the manager keeps the hard-coded
+// NuGet.org default and the Control's marketplace browse silently ignores
+// configured feeds. MVP: startup-only sync — live re-sync on store mutate
+// is a follow-up.
+surgewaveBroker.ConnectorRepositoryManager.SyncFromStore(repositoryStore);
 app.MapSurgewaveRepositories(repositoryStore);
 logger.LogInformation("  - Plugin API:          {Host}:{GrpcPort}/api/plugins", config.Host, config.GrpcPort);
 

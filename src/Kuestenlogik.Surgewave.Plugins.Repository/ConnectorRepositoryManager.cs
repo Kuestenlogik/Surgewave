@@ -59,6 +59,57 @@ public sealed class ConnectorRepositoryManager : IDisposable
     }
 
     /// <summary>
+    /// Replaces the registered repository list with the enabled entries from
+    /// <paramref name="store"/>. The broker calls this at startup so the
+    /// operator's edits in <c>/plugins/sources</c> (which land in the broker's
+    /// canonical <c>surgewave-repositories.json</c>) actually flow into the
+    /// SearchPlugins handler — without sync, the manager would keep its
+    /// hard-coded NuGet.org default and ignore everything the operator
+    /// configured. Disabled entries are skipped so toggling <c>Enabled</c>
+    /// in the UI takes effect on the next sync. Disposes any previously
+    /// registered <see cref="IDisposable"/> repositories.
+    /// </summary>
+    public void SyncFromStore(RepositoryStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        foreach (var repo in _repositories)
+        {
+            (repo as IDisposable)?.Dispose();
+        }
+        _repositories.Clear();
+
+        foreach (var entry in store.List())
+        {
+            if (!entry.Enabled) continue;
+            var repo = CreateRepository(entry);
+            if (repo is not null) _repositories.Add(repo);
+        }
+    }
+
+    private static IConnectorRepository? CreateRepository(RepositoryEntry entry)
+    {
+        return entry.Type switch
+        {
+            RepositoryType.NuGet => new NuGetConnectorRepository(
+                entry.Name,
+                entry.Source,
+                entry.PackagePrefix ?? "Kuestenlogik.Surgewave.Connector."),
+
+            RepositoryType.Http => new HttpConnectorRepository(
+                entry.Name,
+                entry.Source,
+                entry.PackagePrefix ?? "Kuestenlogik.Surgewave.Connector."),
+
+            RepositoryType.Marketplace => new SurgewaveMarketplaceRepository(
+                entry.Name,
+                entry.Source),
+
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Search all repositories for connectors.
     /// </summary>
     /// <param name="query">Search query.</param>
