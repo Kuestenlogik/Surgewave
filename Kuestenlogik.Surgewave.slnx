@@ -130,6 +130,7 @@
     <Project Path="tests/Kuestenlogik.Surgewave.Connect.Eos.Tests/Kuestenlogik.Surgewave.Connect.Eos.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Marketplace.Tests/Kuestenlogik.Surgewave.Marketplace.Tests.csproj" />
+    <Project Path="tests/Kuestenlogik.Surgewave.Control.Tests/Kuestenlogik.Surgewave.Control.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Cli.IntegrationTests/Kuestenlogik.Surgewave.Cli.IntegrationTests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Tool.Tests/Kuestenlogik.Surgewave.Tool.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Tests/Kuestenlogik.Surgewave.Tests.csproj" />
