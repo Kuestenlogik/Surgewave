@@ -1,0 +1,46 @@
+@using System.Text.RegularExpressions
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            The broker will generate an ECDSA P-256 keypair, store the public key in
+            the trust store as <code>{name}.pub</code>, and stream the private key
+            back to your browser as a one-time download. The broker never persists
+            the private key — if you lose the downloaded file, the key is gone.
+        </MudText>
+        <MudTextField T="string" @bind-Value="_name"
+                      Label="Key name"
+                      HelperText="Letters, digits, dot, hyphen, underscore. Used as the filename ({name}.pub)."
+                      Variant="Variant.Outlined"
+                      Immediate="true"
+                      Error="@(!string.IsNullOrEmpty(_name) && !IsValid(_name))"
+                      ErrorText="Invalid key name."
+                      AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(!IsValid(_name))"
+                   OnClick="Submit">
+            Generate
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private string _name = "";
+
+    private static readonly Regex Pattern = new(@"^[A-Za-z0-9._\-]{1,128}$", RegexOptions.Compiled);
+
+    private static bool IsValid(string s) => !string.IsNullOrEmpty(s) && Pattern.IsMatch(s);
+
+    private void Submit()
+    {
+        if (!IsValid(_name)) return;
+        MudDialog.Close(DialogResult.Ok(_name));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

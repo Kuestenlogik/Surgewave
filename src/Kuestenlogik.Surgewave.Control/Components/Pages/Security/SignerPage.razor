@@ -1,0 +1,258 @@
+@page "/security/signer"
+@using System.Text
+@using Kuestenlogik.Surgewave.Control.Models.TrustStore
+@using Kuestenlogik.Surgewave.Control.Services
+@inject ITrustStoreApiClient TrustStore
+@inject IJSRuntime JSRuntime
+@inject NotificationState Notifications
+@inject IDialogService DialogService
+
+<PageTitle>Signer - Surgewave Control</PageTitle>
+
+<PageHead Title="Plugin Signer"
+          Subtitle="Manage the BuiltinEcdsaSigner trust store — public keys that grant install-time signature verification for plugin packages." />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" />
+}
+else if (_status is null)
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4">
+        Could not reach the broker (@_loadError).
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="ReloadAsync" Class="ml-4">Retry</MudButton>
+    </MudAlert>
+}
+else
+{
+    <MudCard Elevation="2" Class="mt-4">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudText Typo="Typo.h6">Trust store status</MudText>
+            </CardHeaderContent>
+        </MudCardHeader>
+        <MudCardContent>
+            <MudGrid>
+                <MudItem xs="12" md="4">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Provider</MudText>
+                    <MudText Typo="Typo.body1">@_status.ProviderName</MudText>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Trusted-keys directory</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                        @(_status.TrustedKeysDir ?? "(not configured)")
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">RequireSignedPackages</MudText>
+                    @if (_status.RequireSigned)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.VerifiedUser">enforced</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Default" Size="Size.Small" Icon="@Icons.Material.Filled.NoEncryption">advisory</MudChip>
+                    }
+                </MudItem>
+            </MudGrid>
+            @if (_status.TrustedKeysDir is null)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mt-3">
+                    No <code>trusted-keys-dir</code> is configured. Set
+                    <code>Surgewave:Plugins:Signer:Options:trusted-keys-dir</code>
+                    in the broker's appsettings.json (or via env var) and restart the
+                    broker. The directory will be created on first key upload.
+                </MudAlert>
+            }
+        </MudCardContent>
+    </MudCard>
+
+    @if (_status.TrustedKeysDir is not null)
+    {
+        <MudCard Elevation="2" Class="mt-4">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Trusted keys (@_status.Keys.Count)</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudFileUpload T="IBrowserFile" Accept=".pub,.pem" FilesChanged="OnPubSelected">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.UploadFile"
+                                       Disabled="_busy">
+                                Upload .pub
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.VpnKey"
+                               OnClick="OpenGenerateDialog"
+                               Disabled="_busy"
+                               Class="ml-2">
+                        Generate keypair
+                    </MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Default"
+                                   OnClick="ReloadAsync"
+                                   Disabled="_busy"
+                                   Class="ml-2" />
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_status.Keys.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">
+                        No trusted keys yet. Generate a keypair (server stores the public key,
+                        you download the private key once) or upload an existing <code>.pub</code> file.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudTable Items="_status.Keys" Dense="true" Hover="true" Striped="true">
+                        <HeaderContent>
+                            <MudTh>Name</MudTh>
+                            <MudTh>Fingerprint (SHA-256)</MudTh>
+                            <MudTh>Last modified (UTC)</MudTh>
+                            <MudTh Style="text-align: right;">Actions</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Name">
+                                <MudText Typo="Typo.body2" Class="font-weight-bold">@context.Name</MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Fingerprint">
+                                <MudText Typo="Typo.caption" Style="font-family: monospace;">
+                                    @(context.Fingerprint ?? "(unreadable)")
+                                </MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Last modified">
+                                @context.LastModifiedUtc.ToString("yyyy-MM-dd HH:mm")
+                            </MudTd>
+                            <MudTd Style="text-align: right;">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Color="Color.Error"
+                                               Size="Size.Small"
+                                               OnClick="@(() => DeleteKey(context.Name))"
+                                               Disabled="_busy" />
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudCardContent>
+        </MudCard>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _loadError;
+    private TrustStoreStatus? _status;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        StateHasChanged();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            _status = await TrustStore.GetStatusAsync(cts.Token);
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+            _status = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnPubSelected(IBrowserFile? file)
+    {
+        if (file is null) return;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            // Strip .pub / .pem extension to derive the key name. The broker
+            // re-applies .pub on disk.
+            var name = Path.GetFileNameWithoutExtension(file.Name);
+            await using var stream = file.OpenReadStream(maxAllowedSize: 16 * 1024);
+            await TrustStore.UploadAsync(name, stream);
+            Notifications.ShowSuccess($"Uploaded trusted key '{name}'");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Upload failed: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteKey(string name)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Revoke trusted key",
+            $"Revoking '{name}' will reject any package signed only by this key starting with the next install. Continue?",
+            yesText: "Revoke",
+            cancelText: "Cancel");
+        if (confirmed != true) return;
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await TrustStore.DeleteAsync(name);
+            Notifications.ShowSuccess($"Revoked trusted key '{name}'");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Delete failed: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenGenerateDialog()
+    {
+        var dialog = await DialogService.ShowAsync<GenerateKeyDialog>("Generate signing keypair");
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not string keyName) return;
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var pair = await TrustStore.GenerateAsync(keyName);
+            // Stream the private key back to the operator as a one-time download.
+            // The broker never persists it; if they lose this file, the key is unrecoverable.
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(pair.PrivateKeyPem));
+            await JSRuntime.InvokeVoidAsync("downloadFile", $"{pair.Name}.key", base64);
+            Notifications.ShowSuccess($"Generated '{pair.Name}'. Private key downloaded — keep it safe.");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.ShowError($"Generate failed: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+}

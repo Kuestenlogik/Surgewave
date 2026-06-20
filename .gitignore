@@ -452,3 +452,5 @@ plugins/
 !src/**/Commands/Plugins/**
 !src/**/Components/Pages/Plugins/
 !src/**/Components/Pages/Plugins/**
+!src/Kuestenlogik.Surgewave.Broker/Plugins/
+!src/Kuestenlogik.Surgewave.Broker/Plugins/**
