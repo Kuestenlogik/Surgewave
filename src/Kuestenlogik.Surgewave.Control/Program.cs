@@ -140,7 +140,8 @@ builder.Services.AddSingleton<IConnectorMarketplaceService, ConnectorMarketplace
 // Register Marketplace config and Review service (scoped per Blazor circuit, uses browser LocalStorage)
 var marketplaceConfig = builder.Configuration.GetSection("Surgewave:Marketplace").Get<MarketplaceConfig>() ?? new MarketplaceConfig();
 builder.Services.AddSingleton(marketplaceConfig);
-builder.Services.AddScoped<IReviewService, ReviewService>();
+AddBearerTokenHandler(
+    builder.Services.AddHttpClient<IReviewService, MarketplaceReviewService>(c => c.Timeout = TimeSpan.FromSeconds(15)));
 
 // Register Agent config service
 builder.Services.AddScoped<IAgentConfigService, AgentConfigService>();
