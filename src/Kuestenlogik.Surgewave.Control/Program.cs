@@ -129,6 +129,7 @@ AddBearerTokenHandler(builder.Services.AddHttpClient<IChatApiClient, ChatApiClie
 // Register application state
 builder.Services.AddScoped<ClusterState>();
 builder.Services.AddScoped<NotificationState>();
+builder.Services.AddScoped<PluginChangeTracker>();
 builder.Services.AddScoped<ShepherdService>();
 
 // Register Marketplace service (singleton because it manages repository connections)

@@ -2,6 +2,7 @@
 @using Kuestenlogik.Surgewave.Control.Models.Marketplace
 @inject IReviewService ReviewService
 @inject NotificationState Notifications
+@inject PluginChangeTracker ChangeTracker
 
 <MudDialog>
     <DialogContent>
@@ -398,6 +399,7 @@
             if (result.IsSuccess)
             {
                 Notifications.ShowSuccess($"Installed {Package.Name} v{Package.Version}");
+                ChangeTracker.MarkChanged(Package.PackageId);
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
@@ -430,6 +432,7 @@
             if (result.IsSuccess)
             {
                 Notifications.ShowSuccess($"Installed {Package.Name} v{version}");
+                ChangeTracker.MarkChanged(Package.PackageId);
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
@@ -458,6 +461,7 @@
             if (result.IsSuccess)
             {
                 Notifications.ShowSuccess($"Uninstalled {Package.Name}");
+                ChangeTracker.MarkChanged(Package.PackageId);
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
