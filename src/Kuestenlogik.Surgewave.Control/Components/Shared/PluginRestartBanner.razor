@@ -1,0 +1,53 @@
+@using Kuestenlogik.Surgewave.Control.State
+@inject PluginChangeTracker Tracker
+@inject NavigationManager Navigation
+@implements IDisposable
+
+@if (Tracker.PendingRestart)
+{
+    <MudAlert Severity="Severity.Warning"
+              Variant="Variant.Filled"
+              Dense="true"
+              ShowCloseIcon="true"
+              CloseIconClicked="OnAcknowledge"
+              Class="mb-3">
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.RestartAlt" />
+            <div>
+                <MudText Typo="Typo.body2" Class="font-weight-bold">
+                    Restart the broker to load @PluginCountLabel
+                </MudText>
+                <MudText Typo="Typo.caption">
+                    Plugin changes in this session take effect after the broker process restarts:
+                    @string.Join(", ", Tracker.ChangedPackages)
+                </MudText>
+            </div>
+            <MudSpacer />
+            <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("/health"))">
+                Check broker health
+            </MudButton>
+        </div>
+    </MudAlert>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Tracker.StateChanged += OnStateChanged;
+    }
+
+    public void Dispose()
+    {
+        Tracker.StateChanged -= OnStateChanged;
+    }
+
+    private string PluginCountLabel =>
+        Tracker.ChangedPackages.Count == 1 ? "1 plugin change" : $"{Tracker.ChangedPackages.Count} plugin changes";
+
+    private void OnAcknowledge()
+    {
+        Tracker.Acknowledge();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+}

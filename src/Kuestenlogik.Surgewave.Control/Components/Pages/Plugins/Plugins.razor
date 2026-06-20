@@ -6,6 +6,7 @@
 @inject MarketplaceConfig MarketplaceConfig
 @inject NotificationState Notifications
 @inject IDialogService DialogService
+@inject PluginChangeTracker ChangeTracker
 
 <PageTitle>Plugins - Surgewave Control</PageTitle>
 
@@ -390,11 +391,13 @@ else
             {
                 Notifications.ShowSuccess($"Installed {package.Name} v{package.Version}" +
                     (result.InstalledPackages.Count > 1 ? $" with {result.InstalledPackages.Count - 1} dependencies" : ""));
+                foreach (var installed in result.InstalledPackages) ChangeTracker.MarkChanged(installed.PackageId);
                 await LoadPackagesAsync();
             }
             else if (result.IsPartialSuccess)
             {
                 Notifications.ShowWarning($"Partially installed {package.Name}: {string.Join(", ", result.Errors)}");
+                foreach (var installed in result.InstalledPackages) ChangeTracker.MarkChanged(installed.PackageId);
                 await LoadPackagesAsync();
             }
             else
@@ -429,6 +432,7 @@ else
             if (result.IsSuccess)
             {
                 Notifications.ShowSuccess($"Uninstalled {package.Name}");
+                ChangeTracker.MarkChanged(package.PackageId);
                 await LoadPackagesAsync();
             }
             else
@@ -471,6 +475,7 @@ else
             if (result.IsSuccess)
             {
                 Notifications.ShowSuccess($"Plugin {result.PluginId} v{result.Version} installed successfully");
+                if (result.PluginId is not null) ChangeTracker.MarkChanged(result.PluginId);
                 await LoadPackagesAsync();
             }
             else

@@ -450,3 +450,5 @@ concept/
 plugins/
 !src/**/Commands/Plugins/
 !src/**/Commands/Plugins/**
+!src/**/Components/Pages/Plugins/
+!src/**/Components/Pages/Plugins/**
