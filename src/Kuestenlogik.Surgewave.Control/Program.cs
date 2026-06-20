@@ -126,6 +126,7 @@ AddBearerTokenHandler(builder.Services.AddHttpClient<ILicenseApiClient, LicenseA
 AddBearerTokenHandler(builder.Services.AddHttpClient<IMetricsClient, MetricsClient>(c => ConfigureHttpClient(c, 10)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<IChatApiClient, ChatApiClient>(c => ConfigureHttpClient(c, 120)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<ITrustStoreApiClient, TrustStoreApiClient>(c => ConfigureHttpClient(c, 10)));
+AddBearerTokenHandler(builder.Services.AddHttpClient<IRepositoryApiClient, RepositoryApiClient>(c => ConfigureHttpClient(c, 10)));
 
 // Register application state
 builder.Services.AddScoped<ClusterState>();

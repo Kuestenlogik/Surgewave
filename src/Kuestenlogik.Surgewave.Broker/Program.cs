@@ -1474,6 +1474,9 @@ app.MapSurgewavePlugins(
     verifier: uploadVerifier,
     requireSigned: signerOptions?.RequireSignedPackages ?? false);
 app.MapSurgewaveTrustedKeys(signerOptions);
+var repositoryStore = new Kuestenlogik.Surgewave.Plugins.Repository.RepositoryStore(
+    Path.Combine(config.DataDirectory, "surgewave-repositories.json"));
+app.MapSurgewaveRepositories(repositoryStore);
 logger.LogInformation("  - Plugin API:          {Host}:{GrpcPort}/api/plugins", config.Host, config.GrpcPort);
 
 // Prometheus HTTP service discovery endpoint
