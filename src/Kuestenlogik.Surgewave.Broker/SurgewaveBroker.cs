@@ -58,6 +58,17 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     private readonly ILoggerFactory _nativeLoggerFactory;
     private readonly ConnectorRepositoryManager _connectorRepositoryManager;
 
+    /// <summary>
+    /// Connector-repository manager backing the Native <c>SearchPlugins</c>
+    /// operation. Exposed so Program.cs can call
+    /// <see cref="ConnectorRepositoryManager.SyncFromStore"/> with the
+    /// broker's <c>RepositoryStore</c> singleton at startup — without that
+    /// hop the manager would keep its hard-coded NuGet.org default and
+    /// silently ignore everything the operator edits in
+    /// <c>/plugins/sources</c>.
+    /// </summary>
+    public ConnectorRepositoryManager ConnectorRepositoryManager => _connectorRepositoryManager;
+
     // Enterprise plugin: Kuestenlogik.Surgewave.Transport.SharedMemory
     // private readonly SharedMemoryNativeHandler? _sharedMemoryHandler;
 
