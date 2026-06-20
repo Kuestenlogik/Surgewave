@@ -17,8 +17,10 @@ builder.Services.Configure<MarketplaceSignerOptions>(
 // Storage + Metadata
 var storage = new FileSystemPackageStorage(dataDir);
 var metadata = new FileSystemMetadataService(dataDir);
+var reviews = new FileSystemReviewService(dataDir);
 builder.Services.AddSingleton<IPackageStorageService>(storage);
 builder.Services.AddSingleton<IPackageMetadataService>(metadata);
+builder.Services.AddSingleton<IReviewService>(reviews);
 
 // Blazor + MudBlazor
 builder.Services.AddRazorComponents()
@@ -48,6 +50,7 @@ app.UseAntiforgery();
 // REST API
 var signerOptions = app.Services.GetRequiredService<IOptions<MarketplaceSignerOptions>>().Value;
 app.MapMarketplaceApi(storage, metadata, signerOptions);
+app.MapMarketplaceReviews(reviews);
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { service = "Surgewave Marketplace", status = "running" }));

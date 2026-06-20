@@ -185,7 +185,7 @@ else
     {
         try
         {
-            await ReviewService.MarkHelpfulAsync(reviewId);
+            await ReviewService.MarkHelpfulAsync(ConnectorId, reviewId);
             await LoadReviewsAsync();
         }
         catch (Exception ex)
