@@ -44,11 +44,13 @@ GlobalOptions.Verbose.Recursive = true;
 GlobalOptions.Format.Recursive = true;
 GlobalOptions.Timeout.Recursive = true;
 GlobalOptions.AssumeYes.Recursive = true;
+GlobalOptions.BrokerUrl.Recursive = true;
 rootCommand.Options.Add(GlobalOptions.BootstrapServers);
 rootCommand.Options.Add(GlobalOptions.Verbose);
 rootCommand.Options.Add(GlobalOptions.Format);
 rootCommand.Options.Add(GlobalOptions.Timeout);
 rootCommand.Options.Add(GlobalOptions.AssumeYes);
+rootCommand.Options.Add(GlobalOptions.BrokerUrl);
 
 // Add commands
 rootCommand.Subcommands.Add(new TopicsCommand());
