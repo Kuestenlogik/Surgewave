@@ -9,6 +9,9 @@ public sealed class ConnectorRepositoryManager : IDisposable
 {
     private readonly List<IConnectorRepository> _repositories = new();
     private readonly ConnectorInstaller _installer;
+    private readonly Lock _syncGate = new();
+    private RepositoryStore? _store;
+    private DateTime _lastSyncMtime = DateTime.MinValue;
 
     /// <summary>
     /// Creates a new repository manager.
@@ -72,19 +75,53 @@ public sealed class ConnectorRepositoryManager : IDisposable
     public void SyncFromStore(RepositoryStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
+        lock (_syncGate)
+        {
+            _store = store;
+            SyncLocked();
+        }
+    }
 
+    /// <summary>
+    /// If the associated <see cref="RepositoryStore"/> has been mutated since
+    /// the last sync (file mtime changed), reload the repository list from
+    /// it. Cheap when the file is unchanged (one mtime stat); called before
+    /// every search / package-lookup so REST add/remove takes effect without
+    /// a broker restart. No-op when no store has been associated via
+    /// <see cref="SyncFromStore"/>.
+    /// </summary>
+    public void EnsureSynced()
+    {
+        if (_store is null) return;
+        // Read mtime outside the lock — File.GetLastWriteTimeUtc is cheap
+        // and idempotent. Only acquire the lock when a change is detected.
+        var current = _store.LastModifiedUtc;
+        if (current == _lastSyncMtime) return;
+        lock (_syncGate)
+        {
+            // Re-check inside the lock: another thread may have already synced.
+            if (_store is null || _store.LastModifiedUtc == _lastSyncMtime) return;
+            SyncLocked();
+        }
+    }
+
+    private void SyncLocked()
+    {
+        // Caller already holds _syncGate.
         foreach (var repo in _repositories)
         {
             (repo as IDisposable)?.Dispose();
         }
         _repositories.Clear();
 
-        foreach (var entry in store.List())
+        if (_store is null) return;
+        foreach (var entry in _store.List())
         {
             if (!entry.Enabled) continue;
             var repo = CreateRepository(entry);
             if (repo is not null) _repositories.Add(repo);
         }
+        _lastSyncMtime = _store.LastModifiedUtc;
     }
 
     private static IConnectorRepository? CreateRepository(RepositoryEntry entry)
@@ -123,6 +160,7 @@ public sealed class ConnectorRepositoryManager : IDisposable
         int take = 20,
         CancellationToken cancellationToken = default)
     {
+        EnsureSynced();
         var results = new List<ConnectorPackageInfo>();
 
         foreach (var repo in _repositories)
@@ -174,6 +212,7 @@ public sealed class ConnectorRepositoryManager : IDisposable
         string? version = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureSynced();
         foreach (var repo in _repositories)
         {
             try
