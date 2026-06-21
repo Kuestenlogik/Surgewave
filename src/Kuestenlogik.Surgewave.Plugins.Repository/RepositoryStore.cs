@@ -24,6 +24,16 @@ public sealed class RepositoryStore
     public string ConfigPath => _configPath;
 
     /// <summary>
+    /// Last-write time of the underlying config file. Returns
+    /// <see cref="DateTime.MinValue"/> when the file has not yet been
+    /// materialised — used by <see cref="ConnectorRepositoryManager"/> to
+    /// decide whether the in-memory repository list needs to be re-hydrated
+    /// from the store (live-resync after REST mutations, no broker restart).
+    /// </summary>
+    public DateTime LastModifiedUtc =>
+        File.Exists(_configPath) ? File.GetLastWriteTimeUtc(_configPath) : DateTime.MinValue;
+
+    /// <summary>
     /// Snapshot of all repositories. Returned list is a copy so callers can
     /// freely enumerate without holding the store's lock.
     /// </summary>
