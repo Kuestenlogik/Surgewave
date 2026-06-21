@@ -32,19 +32,15 @@ public static class SurgewavePluginsSignerExtensions
         services.AddSingleton(sp => PluginPackageSignerRegistry.LoadFrom(pluginsDir));
         services.AddSingleton<ISppSigner>(sp =>
         {
+            // OptionsTrackingSigner re-builds the underlying concrete signer
+            // whenever Surgewave:Plugins:Signer changes via the standard
+            // IOptionsMonitor reload mechanism — operator can rotate the
+            // trusted-keys-dir or swap providers without restarting the host.
+            // The no-op-vs-provider fallback (empty options → BuiltinEcdsaSigner)
+            // lives inside the wrapper.
             var registry = sp.GetRequiredService<PluginPackageSignerRegistry>();
-            var options = sp.GetRequiredService<IOptions<SignerOptions>>().Value;
-            // Operator hasn't configured a signer (no Surgewave:Plugins:Signer:Options
-            // section) — fall back to the no-op BuiltinEcdsaSigner so a fresh checkout
-            // boots without a trust store, as SignerOptions.RequireSignedPackages's
-            // doc comment promises. Once the operator fills in `private-key` /
-            // `trusted-keys-dir`, the provider path takes over.
-            if (options.Options.Count == 0)
-            {
-                return new BuiltinEcdsaSigner();
-            }
-            var provider = registry.GetProvider(options.Name);
-            return provider.Create(options.Options);
+            var monitor = sp.GetRequiredService<IOptionsMonitor<SignerOptions>>();
+            return new OptionsTrackingSigner(registry, monitor);
         });
 
         return services;
