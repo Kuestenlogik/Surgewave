@@ -10,11 +10,22 @@ namespace Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 /// </summary>
 public class SourceCommand : CommandBase
 {
-    public SourceCommand() : base("source", "Manage plugin sources")
+    public SourceCommand() : base("source", "[deprecated] Manage CLI-local plugin sources — use 'plugins repo' instead")
     {
         Subcommands.Add(new SourceListCommand());
         Subcommands.Add(new SourceAddCommand());
         Subcommands.Add(new SourceRemoveCommand());
+    }
+
+    internal static void WriteDeprecationBanner()
+    {
+        AnsiConsole.MarkupLine(
+            "[yellow]⚠[/] [dim]`plugins source` writes to a CLI-local ~/.surgewave/plugin-sources.json[/]");
+        AnsiConsole.MarkupLine(
+            "[yellow] [/] [dim]that the broker no longer reads. Use [bold]`surgewave plugins repo`[/] to[/]");
+        AnsiConsole.MarkupLine(
+            "[yellow] [/] [dim]edit the broker's canonical repository list instead.[/]");
+        AnsiConsole.WriteLine();
     }
 }
 
@@ -31,6 +42,7 @@ public class SourceListCommand : CommandBase
 
     private Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
+        SourceCommand.WriteDeprecationBanner();
         var config = PluginSourceConfig.Load();
 
         if (config.Sources.Count == 0)
@@ -97,6 +109,7 @@ public class SourceAddCommand : CommandBase
 
     private Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
+        SourceCommand.WriteDeprecationBanner();
         var name = parseResult.GetValue(_nameArg);
         var url = parseResult.GetValue(_urlArg);
         var type = parseResult.GetValue(_typeOpt) ?? "nuget";
@@ -158,6 +171,7 @@ public class SourceRemoveCommand : CommandBase
 
     private Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
+        SourceCommand.WriteDeprecationBanner();
         var name = parseResult.GetValue(_nameArg);
 
         if (string.IsNullOrEmpty(name))

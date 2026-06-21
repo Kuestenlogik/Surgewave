@@ -6,11 +6,22 @@ using Spectre.Console;
 namespace Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 
 /// <summary>
-/// Command group for managing plugin repositories (surgewave plugins repo ...)
+/// `surgewave plugins repo …` — manages the broker's canonical repository
+/// list at <c>/api/plugins/repositories</c>. Edits land in the broker's
+/// <c>surgewave-repositories.json</c> in its DataDirectory; the broker's
+/// own SearchPlugins handler re-syncs on every search via the live-resync
+/// added in commit fcac93a, so additions take effect immediately on the
+/// next browse without a broker restart.
+///
+/// Replaces the previous <see cref="RepositoryConfiguration"/>-Load/Save
+/// flow that wrote to a CLI-local <c>~/.surgewave/surgewave-repositories.json</c>
+/// nothing else read. Backwards-compat shim for the old file is intentionally
+/// not provided — there's no use-case where the old file should win over the
+/// broker's truth.
 /// </summary>
 public class RepoCommand : CommandBase
 {
-    public RepoCommand() : base("repo", "Manage plugin repositories")
+    public RepoCommand() : base("repo", "Manage the broker's plugin repositories")
     {
         Subcommands.Add(new RepoListCommand());
         Subcommands.Add(new RepoAddCommand());
@@ -18,53 +29,65 @@ public class RepoCommand : CommandBase
     }
 }
 
-/// <summary>
-/// List configured repositories (surgewave plugins repo list)
-/// </summary>
+internal static class RepoClientFactory
+{
+    public static BrokerRepositoryClient Create(ParseResult parseResult)
+    {
+        var url = parseResult.GetValue(GlobalOptions.BrokerUrl) ?? "https://localhost:9093";
+        return new BrokerRepositoryClient(url);
+    }
+}
+
 public class RepoListCommand : CommandBase
 {
-    public RepoListCommand() : base("list", "List configured repositories")
+    public RepoListCommand() : base("list", "List repositories the broker is searching")
     {
         Aliases.Add("ls");
         this.SetAction(ExecuteAsync);
     }
 
-    private Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
+    private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
-        var config = RepositoryConfiguration.Load();
-
-        if (config.Repositories.Count == 0)
+        using var client = RepoClientFactory.Create(parseResult);
+        IReadOnlyList<RepositoryEntry> repos;
+        try
         {
-            WriteWarning("No repositories configured.");
-            return Task.FromResult(0);
+            repos = await client.ListAsync(ct);
+        }
+        catch (BrokerUnreachableException ex)
+        {
+            WriteError(ex.Message);
+            return 1;
+        }
+
+        if (repos.Count == 0)
+        {
+            WriteWarning("No repositories configured on the broker.");
+            return 0;
         }
 
         var table = new Table();
         table.AddColumn("Name");
         table.AddColumn("Type");
         table.AddColumn("Source");
+        table.AddColumn("Prefix");
         table.AddColumn("Status");
 
-        foreach (var repo in config.Repositories)
+        foreach (var repo in repos)
         {
             var status = repo.Enabled ? "[green]enabled[/]" : "[dim]disabled[/]";
-            var isDefault = repo.Name == config.DefaultRepository ? " [yellow](default)[/]" : "";
-
             table.AddRow(
-                $"{repo.Name}{isDefault}",
+                $"[bold]{repo.Name}[/]",
                 repo.Type.ToString(),
                 $"[dim]{repo.Source}[/]",
+                string.IsNullOrEmpty(repo.PackagePrefix) ? "[dim]—[/]" : $"[dim]{repo.PackagePrefix}[/]",
                 status);
         }
-
         AnsiConsole.Write(table);
-        return Task.FromResult(0);
+        return 0;
     }
 }
 
-/// <summary>
-/// Add a new repository (surgewave plugins repo add)
-/// </summary>
 public class RepoAddCommand : CommandBase
 {
     private readonly Argument<string> _nameArg = new("name")
@@ -79,8 +102,8 @@ public class RepoAddCommand : CommandBase
 
     private readonly Option<string> _typeOpt = new("--type", "-t")
     {
-        Description = "Repository type (nuget, http)",
-        DefaultValueFactory = _ => "nuget"
+        Description = "Repository type (NuGet, Http, Marketplace)",
+        DefaultValueFactory = _ => "NuGet"
     };
 
     private readonly Option<string?> _prefixOpt = new("--prefix", "-p")
@@ -88,72 +111,54 @@ public class RepoAddCommand : CommandBase
         Description = "Package ID prefix filter"
     };
 
-    private readonly Option<bool> _defaultOpt = new("--default")
-    {
-        Description = "Set as default repository"
-    };
-
-    public RepoAddCommand() : base("add", "Add a new repository")
+    public RepoAddCommand() : base("add", "Add a repository to the broker")
     {
         Arguments.Add(_nameArg);
         Arguments.Add(_sourceArg);
         Options.Add(_typeOpt);
         Options.Add(_prefixOpt);
-        Options.Add(_defaultOpt);
         this.SetAction(ExecuteAsync);
     }
 
-    private Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
+    private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var name = parseResult.GetValue(_nameArg);
         var source = parseResult.GetValue(_sourceArg);
-        var typeStr = parseResult.GetValue(_typeOpt) ?? "nuget";
+        var typeStr = parseResult.GetValue(_typeOpt) ?? "NuGet";
         var prefix = parseResult.GetValue(_prefixOpt);
-        var setDefault = parseResult.GetValue(_defaultOpt);
 
         if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(source))
         {
             WriteError("Name and source are required.");
-            return Task.FromResult(1);
+            return 1;
         }
-
         if (!Enum.TryParse<RepositoryType>(typeStr, ignoreCase: true, out var type))
         {
-            WriteError($"Invalid repository type: {typeStr}. Valid types: nuget, http");
-            return Task.FromResult(1);
+            WriteError($"Invalid repository type: {typeStr}. Valid: NuGet, Http, Marketplace");
+            return 1;
         }
 
-        var config = RepositoryConfiguration.Load();
-
-        config.AddRepository(new RepositoryEntry
+        var entry = new RepositoryEntry
         {
             Name = name,
             Type = type,
             Source = source,
             PackagePrefix = prefix,
-            Enabled = true
-        });
+            Enabled = true,
+        };
 
-        if (setDefault)
+        using var client = RepoClientFactory.Create(parseResult);
+        try
         {
-            config.DefaultRepository = name;
+            var saved = await client.AddAsync(entry, ct);
+            WriteSuccess($"Added repository '{saved.Name}' on the broker.");
+            return 0;
         }
-
-        config.Save();
-        WriteSuccess($"Added repository '{name}'");
-
-        if (setDefault)
-        {
-            WriteMarkup("[dim]Set as default repository[/]");
-        }
-
-        return Task.FromResult(0);
+        catch (BrokerUnreachableException ex) { WriteError(ex.Message); return 1; }
+        catch (InvalidOperationException ex) { WriteError(ex.Message); return 1; }
     }
 }
 
-/// <summary>
-/// Remove a repository (surgewave plugins repo remove)
-/// </summary>
 public class RepoRemoveCommand : CommandBase
 {
     private readonly Argument<string> _nameArg = new("name")
@@ -161,45 +166,35 @@ public class RepoRemoveCommand : CommandBase
         Description = "Repository name to remove"
     };
 
-    public RepoRemoveCommand() : base("remove", "Remove a repository")
+    public RepoRemoveCommand() : base("remove", "Remove a repository from the broker")
     {
         Arguments.Add(_nameArg);
         this.SetAction(ExecuteAsync);
     }
 
-    private Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
+    private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var name = parseResult.GetValue(_nameArg);
-
         if (string.IsNullOrEmpty(name))
         {
             WriteError("Repository name is required.");
-            return Task.FromResult(1);
+            return 1;
         }
-
-        if (!ConfirmDestructive(parseResult, $"Remove repository '[cyan]{name}[/]'?"))
+        if (!ConfirmDestructive(parseResult, $"Remove repository '[cyan]{name}[/]' from the broker?"))
         {
             WriteWarning("Remove cancelled.");
-            return Task.FromResult(0);
+            return 0;
         }
 
-        var config = RepositoryConfiguration.Load();
-
-        if (!config.RemoveRepository(name))
+        using var client = RepoClientFactory.Create(parseResult);
+        try
         {
-            WriteError($"Repository not found: {name}");
-            return Task.FromResult(1);
+            await client.RemoveAsync(name, ct);
+            WriteSuccess($"Removed repository '{name}'.");
+            return 0;
         }
-
-        // Clear default if we removed it
-        if (config.DefaultRepository == name)
-        {
-            config.DefaultRepository = config.Repositories.FirstOrDefault()?.Name;
-        }
-
-        config.Save();
-        WriteSuccess($"Removed repository '{name}'");
-
-        return Task.FromResult(0);
+        catch (BrokerUnreachableException ex) { WriteError(ex.Message); return 1; }
+        catch (RepositoryNotFoundException) { WriteError($"Repository not found: {name}"); return 1; }
+        catch (InvalidOperationException ex) { WriteError(ex.Message); return 1; }
     }
 }

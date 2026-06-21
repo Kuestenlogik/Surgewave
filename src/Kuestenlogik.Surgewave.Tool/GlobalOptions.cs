@@ -55,6 +55,22 @@ public static class GlobalOptions
         Description = "Skip confirmation prompts for destructive operations",
         DefaultValueFactory = _ => false,
     };
+
+    /// <summary>
+    /// Broker REST endpoint for plugin-management ops (repositories, signer
+    /// trust store, plugin upload). Distinct from <see cref="BootstrapServers"/>
+    /// because the Kafka-protocol port (9092) and the REST/gRPC port (9093)
+    /// are different listeners. Falls back to <c>SURGEWAVE_BROKER_URL</c> if
+    /// the flag isn't set and the env var is, otherwise defaults to
+    /// <c>https://localhost:9093</c> (the broker's dev cert).
+    /// </summary>
+    public static readonly Option<string> BrokerUrl = new("--broker-url")
+    {
+        Description = "Broker REST endpoint (overrides $SURGEWAVE_BROKER_URL)",
+        DefaultValueFactory = _ =>
+            Environment.GetEnvironmentVariable("SURGEWAVE_BROKER_URL")
+            ?? "https://localhost:9093",
+    };
 }
 
 public enum OutputFormat
