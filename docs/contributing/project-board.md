@@ -120,7 +120,7 @@ Configure once in the Project UI — these aren't exposed via API yet, so they l
 3. **Pull request merged** → enable → Set status to `Done`.
 4. **Auto-add to project** → leave **disabled** for `Kuestenlogik/Surgewave` (the GitHub Action above handles that with the label filter). For sibling Surgewave.* repos that don't carry the workflow file, enable Auto-add with filter `repo:Kuestenlogik/<RepoName> label:roadmap is:issue,pr`.
 
-Sibling-repo wiring options (Project-side vs Action-side vs back-fill) are documented separately in [`multi-repo-project-add.md`](multi-repo-project-add.md).
+Sibling-repo wiring options (Project-side auto-add vs Action-side label-filter vs back-fill) are picked per-repo; the Project-side default works for most cases.
 
 ## Migration from `ROADMAP.md`
 
