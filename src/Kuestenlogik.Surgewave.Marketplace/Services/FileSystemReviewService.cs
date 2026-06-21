@@ -230,7 +230,12 @@ public sealed class FileSystemReviewService : IReviewService
     private static void ValidateConnectorId(string connectorId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectorId);
-        if (connectorId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        // Path.GetInvalidFileNameChars() on Linux only excludes '/' and NUL —
+        // '\' passes through. Reject both separators explicitly so a Linux
+        // marketplace can't write reviews/with\back.json that would resolve
+        // to a path-traversal target on a Windows-side mirror.
+        if (connectorId.IndexOfAny(['/', '\\', '\0']) >= 0
+            || connectorId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             throw new ArgumentException("Connector id must not contain path separators or invalid file chars.", nameof(connectorId));
         }

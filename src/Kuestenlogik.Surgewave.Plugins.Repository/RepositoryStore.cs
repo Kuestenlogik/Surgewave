@@ -152,7 +152,13 @@ public sealed class RepositoryStore
         {
             throw new ArgumentException("Repository name must be ≤ 128 characters.", nameof(entry));
         }
-        if (entry.Name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        // Reject path separators cross-platform — Path.GetInvalidFileNameChars()
+        // on Linux only excludes '/' and NUL; '\' is a legal filename char there,
+        // so a Windows-side broker reading a Linux-written config could otherwise
+        // see entries like "..\..\etc\passwd". Block both explicitly, then layer
+        // the platform-specific invalid-chars on top for everything else.
+        if (entry.Name.IndexOfAny(['/', '\\', '\0']) >= 0
+            || entry.Name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             throw new ArgumentException("Repository name must not contain path separators or invalid file chars.", nameof(entry));
         }
