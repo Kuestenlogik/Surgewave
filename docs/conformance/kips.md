@@ -33,6 +33,7 @@ RPC; this page is the higher-level KIP view.
 | KIP-1071 | Streams Groups (topology-aware)         | Done    | `StreamsGroupApiHandler`, `StreamsGroupCoordinator` |
 | KIP-1106 | ListConfigResources for KIP-714          | Done | `TelemetryApiHandler.HandleListConfigResources` returns the configured metric subscriptions when telemetry is enabled. |
 | KIP-1152 | TransactionalIdPattern filter            | Done | Wire-parsed at v2+; the regex DoS defence (timeout + exception swallow) fires on this code path too. |
+| KIP-1242 | ApiVersions v5 (ClusterId/NodeId + REBOOTSTRAP_REQUIRED) | Wire parsed; mismatch-detection deferred | `ApiVersionsRequest.cs` reads + writes the v5 `ClusterId` (nullable compact string) + `NodeId` (int32) fields so the trailing tagged-fields varint stays aligned. `ErrorCode.RebootstrapRequired` (129) is in the enum and ready to be returned by the handler. Actually triggering REBOOTSTRAP_REQUIRED on a ClusterId/NodeId mismatch is a follow-up — Surgewave today services any client that connects, and the IP-reuse-after-rebirth path (the KIP's motivating case) only matters once cluster-cross-replay is on the operator's radar. `Kip1242ApiVersionsV5Tests` pins the wire round-trip + the error-code value. |
 
 ## Conformance test infrastructure
 
