@@ -315,7 +315,7 @@ public sealed class ApiVersionsResponse : KafkaResponse
                 new SupportedApiVersion { ApiKey = (short)ApiKey.AddPartitionsToTxn, MinVersion = 0, MaxVersion = 5 },     // Kafka: 0-5 (was 0-3)
                 new SupportedApiVersion { ApiKey = (short)ApiKey.AddOffsetsToTxn, MinVersion = 0, MaxVersion = 4 },        // Kafka: 0-4
                 new SupportedApiVersion { ApiKey = (short)ApiKey.EndTxn, MinVersion = 0, MaxVersion = 5 },                 // Kafka: 0-5 (was 0-3)
-                new SupportedApiVersion { ApiKey = (short)ApiKey.TxnOffsetCommit, MinVersion = 0, MaxVersion = 5 },        // Kafka: 0-5
+                new SupportedApiVersion { ApiKey = (short)ApiKey.TxnOffsetCommit, MinVersion = 0, MaxVersion = 6 },        // Kafka: 0-6 (KIP-1319: topic IDs)
                 new SupportedApiVersion { ApiKey = (short)ApiKey.DescribeTransactions, MinVersion = 0, MaxVersion = 0 },    // Kafka: 0
                 new SupportedApiVersion { ApiKey = (short)ApiKey.ListTransactions, MinVersion = 0, MaxVersion = 2 },        // Kafka: 0-2
 

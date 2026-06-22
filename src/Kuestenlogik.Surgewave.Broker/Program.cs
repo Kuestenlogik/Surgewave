@@ -844,15 +844,19 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
     },
     txnOffsetCommit: (transactionalId, groupId, producerId, producerEpoch, generationId, memberId, offsets) =>
     {
-        var topicsDict = offsets.GroupBy(o => o.Topic)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Select(o => new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest.TxnOffsetCommitPartition
+        // gRPC path is name-keyed; v6 (TopicId) is a wire-only concern.
+        var topicEntries = offsets.GroupBy(o => o.Topic)
+            .Select(g => new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest.TxnOffsetCommitTopic
+            {
+                Name = g.Key,
+                Partitions = g.Select(o => new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest.TxnOffsetCommitPartition
                 {
                     Partition = o.Partition,
                     CommittedOffset = o.Offset,
                     Metadata = o.Metadata
-                }).ToList());
+                }).ToList()
+            })
+            .ToList();
         var request = new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest
         {
             ApiKey = Kuestenlogik.Surgewave.Protocol.Kafka.ApiKey.TxnOffsetCommit,
@@ -865,11 +869,11 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch,
             GenerationId = generationId,
             MemberId = memberId,
-            Topics = topicsDict
+            Topics = topicEntries
         };
         var response = transactionCoordinator.HandleTxnOffsetCommit(request);
-        var results = response.Topics.SelectMany(kvp =>
-            kvp.Value.Select(p => (kvp.Key, p.Partition, (int)p.ErrorCode))).ToList();
+        var results = response.Topics.SelectMany(t =>
+            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, (int)p.ErrorCode))).ToList();
         return new TxnOffsetCommitResultDto(results);
     },
     endTxn: (transactionalId, producerId, producerEpoch, commit) =>
