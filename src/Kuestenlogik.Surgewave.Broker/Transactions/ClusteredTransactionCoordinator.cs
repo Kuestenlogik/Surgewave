@@ -343,54 +343,96 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
     /// </summary>
     public TxnOffsetCommitResponse HandleTxnOffsetCommit(TxnOffsetCommitRequest request)
     {
-        var results = new Dictionary<string, List<TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult>>();
+        // KIP-1319 (v6): resolve each topic's identity once so the
+        // pending-offset store sees a Name and the response wire can echo
+        // back either Name (v0-5) or TopicId (v6+).
+        var resolved = new List<(string? Name, Guid TopicId, ErrorCode ResolveError, List<TxnOffsetCommitRequest.TxnOffsetCommitPartition> Partitions)>(request.Topics.Count);
+        foreach (var t in request.Topics)
+        {
+            string? name = t.Name;
+            var topicId = t.TopicId;
+            var resolveError = ErrorCode.None;
+            if (topicId != Guid.Empty && string.IsNullOrEmpty(name))
+            {
+                var meta = _logManager.GetTopicMetadataById(topicId);
+                if (meta is null)
+                {
+                    resolveError = ErrorCode.UnknownTopicId;
+                }
+                else
+                {
+                    name = meta.Name;
+                }
+            }
+            else if (!string.IsNullOrEmpty(name) && topicId == Guid.Empty)
+            {
+                topicId = _logManager.GetTopicId(name);
+            }
+            resolved.Add((name, topicId, resolveError, t.Partitions));
+        }
 
         var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
         if (errorCode != ErrorCode.None)
         {
-            foreach (var (topic, partitions) in request.Topics)
-            {
-                results[topic] = partitions.Select(p => new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                {
-                    Partition = p.Partition,
-                    ErrorCode = errorCode
-                }).ToList();
-            }
-
             return new TxnOffsetCommitResponse
             {
                 CorrelationId = request.CorrelationId,
                 ApiVersion = request.ApiVersion,
                 ThrottleTimeMs = 0,
-                Topics = results
+                Topics = resolved.Select(r => new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult
+                {
+                    Name = r.Name,
+                    TopicId = r.TopicId,
+                    Partitions = r.Partitions.Select(p => new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
+                    {
+                        Partition = p.Partition,
+                        ErrorCode = errorCode,
+                    }).ToList(),
+                }).ToList(),
             };
         }
 
-        // Store pending offsets
-        foreach (var (topic, partitions) in request.Topics)
+        var topics = new List<TxnOffsetCommitResponse.TxnOffsetCommitTopicResult>(resolved.Count);
+        var stagedCount = 0;
+        foreach (var r in resolved)
         {
-            var partitionResults = new List<TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult>();
-            foreach (var partition in partitions)
+            var partitionResults = new List<TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult>(r.Partitions.Count);
+            foreach (var partition in r.Partitions)
             {
+                if (r.ResolveError != ErrorCode.None)
+                {
+                    partitionResults.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
+                    {
+                        Partition = partition.Partition,
+                        ErrorCode = r.ResolveError,
+                    });
+                    continue;
+                }
                 txnMetadata!.PendingOffsets.Add(new PendingTxnOffset
                 {
                     GroupId = request.GroupId,
-                    Topic = topic,
+                    Topic = r.Name ?? string.Empty,
                     Partition = partition.Partition,
                     Offset = partition.CommittedOffset,
-                    Metadata = partition.Metadata
+                    Metadata = partition.Metadata,
                 });
+                stagedCount++;
                 partitionResults.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
                 {
                     Partition = partition.Partition,
-                    ErrorCode = ErrorCode.None
+                    ErrorCode = ErrorCode.None,
                 });
             }
-            results[topic] = partitionResults;
+            topics.Add(new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult
+            {
+                Name = r.Name,
+                TopicId = r.TopicId,
+                Partitions = partitionResults,
+            });
         }
 
         _logger.LogDebug("Staged {Count} offsets for transaction {TransactionalId}, group {GroupId}",
-            request.Topics.Values.Sum(p => p.Count), request.TransactionalId, request.GroupId);
+            stagedCount, request.TransactionalId, request.GroupId);
 
         _statePersistence.PersistState(txnMetadata!);
 
@@ -399,7 +441,7 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
             ThrottleTimeMs = 0,
-            Topics = results
+            Topics = topics,
         };
     }
 

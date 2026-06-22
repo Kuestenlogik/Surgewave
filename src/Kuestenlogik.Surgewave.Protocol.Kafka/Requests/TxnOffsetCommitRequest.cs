@@ -1,10 +1,15 @@
 namespace Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 
 /// <summary>
-/// TxnOffsetCommit request - Commits consumer offsets as part of a transaction.
-/// This is the second part of exactly-once consumer semantics - after AddOffsetsToTxn
-/// registers the consumer group, TxnOffsetCommit actually commits the offsets atomically
-/// with any produced messages when the transaction commits.
+/// TxnOffsetCommit request — commits consumer offsets as part of a transaction.
+/// Pairs with AddOffsetsToTxn so consumer-group offsets land atomically with
+/// any produced messages when the transaction commits.
+///
+/// At v0-5 the topic is identified by its name (compact string). KIP-1319
+/// (v6) replaces Name with a TopicId (uuid); the broker resolves the UUID via
+/// its log manager and returns UNKNOWN_TOPIC_ID when unresolvable. The model
+/// here carries BOTH fields and the wire methods pick the right one per
+/// version so callers don't have to branch.
 /// </summary>
 public sealed class TxnOffsetCommitRequest : KafkaRequest
 {
@@ -15,7 +20,18 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
     public int? GenerationId { get; init; }  // v3+
     public string? MemberId { get; init; }    // v3+
     public string? GroupInstanceId { get; init; }  // v3+
-    public required Dictionary<string, List<TxnOffsetCommitPartition>> Topics { get; init; }
+    public required List<TxnOffsetCommitTopic> Topics { get; init; }
+
+    public sealed class TxnOffsetCommitTopic
+    {
+        /// <summary>Topic name (v0-5). Null at v6+ on the wire; populated server-side after TopicId resolution.</summary>
+        public string? Name { get; init; }
+
+        /// <summary>Topic UUID (v6+). <see cref="Guid.Empty"/> at v0-5.</summary>
+        public Guid TopicId { get; init; }
+
+        public required List<TxnOffsetCommitPartition> Partitions { get; init; }
+    }
 
     public sealed class TxnOffsetCommitPartition
     {
@@ -68,11 +84,18 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
         if (isFlexible)
         {
             writer.WriteVarInt(Topics.Count + 1);
-            foreach (var (topic, partitions) in Topics)
+            foreach (var topic in Topics)
             {
-                writer.WriteCompactString(topic);
-                writer.WriteVarInt(partitions.Count + 1);
-                foreach (var partition in partitions)
+                if (ApiVersion >= 6)
+                {
+                    writer.WriteUuid(topic.TopicId);
+                }
+                else
+                {
+                    writer.WriteCompactString(topic.Name);
+                }
+                writer.WriteVarInt(topic.Partitions.Count + 1);
+                foreach (var partition in topic.Partitions)
                 {
                     writer.WriteInt32(partition.Partition);
                     writer.WriteInt64(partition.CommittedOffset);
@@ -81,20 +104,21 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
                         writer.WriteInt32(partition.CommittedLeaderEpoch ?? -1);
                     }
                     writer.WriteCompactString(partition.Metadata);
-                    writer.WriteVarInt(0); // Tagged fields
+                    writer.WriteVarInt(0); // Partition tagged fields
                 }
-                writer.WriteVarInt(0); // Tagged fields
+                writer.WriteVarInt(0); // Topic tagged fields
             }
-            writer.WriteVarInt(0); // Tagged fields
+            writer.WriteVarInt(0); // Body tagged fields
         }
         else
         {
             writer.WriteInt32(Topics.Count);
-            foreach (var (topic, partitions) in Topics)
+            foreach (var topic in Topics)
             {
-                writer.WriteString(topic);
-                writer.WriteInt32(partitions.Count);
-                foreach (var partition in partitions)
+                // Non-flexible versions are <= v2 so always Name-based.
+                writer.WriteString(topic.Name);
+                writer.WriteInt32(topic.Partitions.Count);
+                foreach (var partition in topic.Partitions)
                 {
                     writer.WriteInt32(partition.Partition);
                     writer.WriteInt64(partition.CommittedOffset);
@@ -118,7 +142,7 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
         int? generationId = null;
         string? memberId = null;
         string? groupInstanceId = null;
-        var topics = new Dictionary<string, List<TxnOffsetCommitPartition>>();
+        var topics = new List<TxnOffsetCommitTopic>();
 
         if (isFlexible)
         {
@@ -142,7 +166,17 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
             var topicCount = protocolReader.ReadVarInt() - 1;
             for (int i = 0; i < topicCount; i++)
             {
-                var topic = protocolReader.ReadCompactString() ?? string.Empty;
+                string? topicName = null;
+                Guid topicId = Guid.Empty;
+                if (apiVersion >= 6)
+                {
+                    topicId = protocolReader.ReadUuid();
+                }
+                else
+                {
+                    topicName = protocolReader.ReadCompactString() ?? string.Empty;
+                }
+
                 var partitionCount = protocolReader.ReadVarInt() - 1;
                 var partitions = new List<TxnOffsetCommitPartition>();
 
@@ -156,15 +190,7 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
                         committedLeaderEpoch = protocolReader.ReadInt32();
                     }
                     var metadata = protocolReader.ReadCompactString();
-
-                    // Skip partition tagged fields
-                    var tagCount = protocolReader.ReadVarInt();
-                    for (int t = 0; t < tagCount; t++)
-                    {
-                        protocolReader.ReadVarInt();
-                        var size = protocolReader.ReadVarInt();
-                        protocolReader.Skip(size);
-                    }
+                    protocolReader.SkipTaggedFields(); // partition tagged fields
 
                     partitions.Add(new TxnOffsetCommitPartition
                     {
@@ -175,26 +201,17 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
                     });
                 }
 
-                // Skip topic tagged fields
-                var topicTagCount = protocolReader.ReadVarInt();
-                for (int t = 0; t < topicTagCount; t++)
+                protocolReader.SkipTaggedFields(); // topic tagged fields
+
+                topics.Add(new TxnOffsetCommitTopic
                 {
-                    protocolReader.ReadVarInt();
-                    var size = protocolReader.ReadVarInt();
-                    protocolReader.Skip(size);
-                }
-
-                topics[topic] = partitions;
+                    Name = topicName,
+                    TopicId = topicId,
+                    Partitions = partitions
+                });
             }
 
-            // Skip request tagged fields
-            var requestTagCount = protocolReader.ReadVarInt();
-            for (int t = 0; t < requestTagCount; t++)
-            {
-                protocolReader.ReadVarInt();
-                var size = protocolReader.ReadVarInt();
-                protocolReader.Skip(size);
-            }
+            protocolReader.SkipTaggedFields(); // request tagged fields
         }
         else
         {
@@ -218,7 +235,7 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
             for (int i = 0; i < topicCount; i++)
             {
                 var topicLength = BinaryHelpers.ReadInt16BigEndian(reader);
-                var topic = System.Text.Encoding.UTF8.GetString(reader.ReadBytes(topicLength));
+                var topicName = System.Text.Encoding.UTF8.GetString(reader.ReadBytes(topicLength));
                 var partitionCount = BinaryHelpers.ReadInt32BigEndian(reader);
                 var partitions = new List<TxnOffsetCommitPartition>();
 
@@ -243,7 +260,12 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
                     });
                 }
 
-                topics[topic] = partitions;
+                topics.Add(new TxnOffsetCommitTopic
+                {
+                    Name = topicName,
+                    TopicId = Guid.Empty,
+                    Partitions = partitions
+                });
             }
         }
 
@@ -266,12 +288,26 @@ public sealed class TxnOffsetCommitRequest : KafkaRequest
 }
 
 /// <summary>
-/// TxnOffsetCommit response
+/// TxnOffsetCommit response. KIP-1319 (v6) replaces topic Name with TopicId
+/// on the response side too. The model carries both fields so a coordinator
+/// can populate Name (its working identifier) and TopicId (the wire identity
+/// echoed from the request) independently.
 /// </summary>
 public sealed class TxnOffsetCommitResponse : KafkaResponse
 {
     public int ThrottleTimeMs { get; init; }
-    public required Dictionary<string, List<TxnOffsetCommitPartitionResult>> Topics { get; init; }
+    public required List<TxnOffsetCommitTopicResult> Topics { get; init; }
+
+    public sealed class TxnOffsetCommitTopicResult
+    {
+        /// <summary>Topic name (v0-5). Null at v6+ on the wire.</summary>
+        public string? Name { get; init; }
+
+        /// <summary>Topic UUID (v6+). <see cref="Guid.Empty"/> at v0-5.</summary>
+        public Guid TopicId { get; init; }
+
+        public required List<TxnOffsetCommitPartitionResult> Partitions { get; init; }
+    }
 
     public sealed class TxnOffsetCommitPartitionResult
     {
@@ -295,28 +331,35 @@ public sealed class TxnOffsetCommitResponse : KafkaResponse
         if (isFlexible)
         {
             writer.WriteVarInt(Topics.Count + 1);
-            foreach (var (topic, partitions) in Topics)
+            foreach (var topic in Topics)
             {
-                writer.WriteCompactString(topic);
-                writer.WriteVarInt(partitions.Count + 1);
-                foreach (var partition in partitions)
+                if (ApiVersion >= 6)
+                {
+                    writer.WriteUuid(topic.TopicId);
+                }
+                else
+                {
+                    writer.WriteCompactString(topic.Name);
+                }
+                writer.WriteVarInt(topic.Partitions.Count + 1);
+                foreach (var partition in topic.Partitions)
                 {
                     writer.WriteInt32(partition.Partition);
                     writer.WriteInt16((short)partition.ErrorCode);
-                    writer.WriteVarInt(0); // Tagged fields
+                    writer.WriteVarInt(0); // Partition tagged fields
                 }
-                writer.WriteVarInt(0); // Tagged fields
+                writer.WriteVarInt(0); // Topic tagged fields
             }
-            writer.WriteVarInt(0); // Tagged fields
+            writer.WriteVarInt(0); // Body tagged fields
         }
         else
         {
             writer.WriteInt32(Topics.Count);
-            foreach (var (topic, partitions) in Topics)
+            foreach (var topic in Topics)
             {
-                writer.WriteString(topic);
-                writer.WriteInt32(partitions.Count);
-                foreach (var partition in partitions)
+                writer.WriteString(topic.Name);
+                writer.WriteInt32(topic.Partitions.Count);
+                foreach (var partition in topic.Partitions)
                 {
                     writer.WriteInt32(partition.Partition);
                     writer.WriteInt16((short)partition.ErrorCode);

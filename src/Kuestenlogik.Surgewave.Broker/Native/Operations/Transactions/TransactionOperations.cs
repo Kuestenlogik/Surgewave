@@ -262,7 +262,11 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
 
     public Task<TxnOffsetCommitResult> ExecuteAsync(TxnOffsetCommitRequestPayload request, CancellationToken cancellationToken)
     {
-        var kafkaTopics = new Dictionary<string, List<TxnOffsetCommitRequest.TxnOffsetCommitPartition>>();
+        // The Surgewave native protocol's TxnOffsetCommit payload still
+        // identifies topics by name. We construct the v0-style Kafka request
+        // (Name set, TopicId left empty) — the v6 wire path only kicks in for
+        // Kafka-protocol clients negotiated up to v6+, not the native one.
+        var kafkaTopics = new List<TxnOffsetCommitRequest.TxnOffsetCommitTopic>(request.Topics.Count);
         foreach (var (topic, partitions) in request.Topics)
         {
             var kafkaPartitions = new List<TxnOffsetCommitRequest.TxnOffsetCommitPartition>();
@@ -275,7 +279,11 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
                     Metadata = partition.Metadata
                 });
             }
-            kafkaTopics[topic] = kafkaPartitions;
+            kafkaTopics.Add(new TxnOffsetCommitRequest.TxnOffsetCommitTopic
+            {
+                Name = topic,
+                Partitions = kafkaPartitions
+            });
         }
 
         var kafkaRequest = new TxnOffsetCommitRequest
@@ -294,10 +302,10 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
         var kafkaResponse = _coordinator.HandleTxnOffsetCommit(kafkaRequest);
 
         var results = new Dictionary<string, List<PartitionResult>>();
-        foreach (var (topic, partitionResults) in kafkaResponse.Topics)
+        foreach (var topic in kafkaResponse.Topics)
         {
             var payloadResults = new List<PartitionResult>();
-            foreach (var partitionResult in partitionResults)
+            foreach (var partitionResult in topic.Partitions)
             {
                 payloadResults.Add(new PartitionResult
                 {
@@ -305,7 +313,9 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
                     ErrorCode = (ushort)KafkaErrorMapper.MapKafkaErrorToSurgewave(partitionResult.ErrorCode)
                 });
             }
-            results[topic] = payloadResults;
+            // Topic.Name is the working identifier server-side; even after a
+            // v6 wire read the coordinator resolves it before storing.
+            results[topic.Name ?? string.Empty] = payloadResults;
         }
 
         var responsePayload = new TxnOffsetCommitResponsePayload { Topics = results };
