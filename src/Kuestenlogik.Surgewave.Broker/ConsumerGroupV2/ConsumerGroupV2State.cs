@@ -89,4 +89,23 @@ public sealed class TopicPartitionAssignment
 
     [JsonInclude]
     public List<int> Partitions { get; set; } = [];
+
+    /// <summary>
+    /// KIP-1251 — per-partition assignment epoch, same length as
+    /// <see cref="Partitions"/>. The epoch at which each partition was last
+    /// (re-)assigned to this member: stable across rebalances when the
+    /// partition stays with the same member, bumped to the group's current
+    /// AssignmentEpoch when newly assigned. <c>null</c> on records persisted
+    /// before KIP-1251 landed; <see cref="TargetAssignmentComputer"/>
+    /// repopulates it on the next assignment compute.
+    ///
+    /// Today this is used as a forward-compat persistence shape and assignor
+    /// signal. Per-partition fencing on the OffsetCommit / TxnOffsetCommit
+    /// path — the KIP's motivating use case — is a documented follow-up:
+    /// Surgewave currently fences at group level (strictly more
+    /// conservative), so adding the state now enables the finer-grained
+    /// fence to be wired in a separate, narrowly-scoped change.
+    /// </summary>
+    [JsonInclude]
+    public List<int>? AssignmentEpochs { get; set; }
 }

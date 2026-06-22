@@ -107,13 +107,29 @@ internal sealed class TargetAssignmentComputer(LogManager logManager)
                 continue;
             }
 
-            member.TargetAssignment = GroupByTopic(partitions, topicNameToId);
+            // KIP-1251 — snapshot the previous (topic, partition) -> epoch map
+            // BEFORE overwriting TargetAssignment so partitions that stay with
+            // the same member keep their stable per-partition epoch. Newly
+            // assigned partitions get the group's current AssignmentEpoch.
+            var previousEpochs = new Dictionary<(Guid TopicId, int Partition), int>();
+            foreach (var prev in member.TargetAssignment)
+            {
+                if (prev.AssignmentEpochs is null || prev.AssignmentEpochs.Count != prev.Partitions.Count) continue;
+                for (int i = 0; i < prev.Partitions.Count; i++)
+                {
+                    previousEpochs[(prev.TopicId, prev.Partitions[i])] = prev.AssignmentEpochs[i];
+                }
+            }
+
+            member.TargetAssignment = GroupByTopic(partitions, topicNameToId, group.GroupEpoch, previousEpochs);
         }
     }
 
     private static List<TopicPartitionAssignment> GroupByTopic(
         List<AssignedPartition> partitions,
-        Dictionary<string, Guid> topicNameToId)
+        Dictionary<string, Guid> topicNameToId,
+        int currentGroupEpoch,
+        Dictionary<(Guid TopicId, int Partition), int> previousEpochs)
     {
         if (partitions.Count == 0) return [];
 
@@ -133,7 +149,19 @@ internal sealed class TargetAssignmentComputer(LogManager logManager)
         {
             if (!topicNameToId.TryGetValue(topic, out var id)) continue;
             parts.Sort();
-            result.Add(new TopicPartitionAssignment { TopicId = id, Partitions = parts });
+            // KIP-1251 — pair every partition with an epoch: stable when the
+            // member still owns it, fresh group-epoch when newly assigned.
+            var epochs = new List<int>(parts.Count);
+            foreach (var p in parts)
+            {
+                epochs.Add(previousEpochs.TryGetValue((id, p), out var e) ? e : currentGroupEpoch);
+            }
+            result.Add(new TopicPartitionAssignment
+            {
+                TopicId = id,
+                Partitions = parts,
+                AssignmentEpochs = epochs,
+            });
         }
         return result;
     }
