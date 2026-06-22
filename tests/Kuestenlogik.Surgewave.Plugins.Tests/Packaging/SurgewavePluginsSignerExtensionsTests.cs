@@ -14,6 +14,12 @@ namespace Kuestenlogik.Surgewave.Plugins.Tests.Packaging;
 /// intent ("a fresh install can run without a configured trust store"),
 /// the empty-options path now resolves to the no-op <c>BuiltinEcdsaSigner</c>
 /// without going through the provider.
+///
+/// After 56769ca the DI returns an <see cref="OptionsTrackingSigner"/>
+/// wrapper that holds the concrete signer and swaps it on options reload;
+/// the asserts here target the externally visible contract
+/// (Name + HasSignature behaviour) rather than the wrapper type so the
+/// tests pass through either implementation shape.
 /// </summary>
 public sealed class SurgewavePluginsSignerExtensionsTests
 {
@@ -30,7 +36,6 @@ public sealed class SurgewavePluginsSignerExtensionsTests
 
             var signer = provider.GetRequiredService<ISppSigner>();
 
-            Assert.IsType<BuiltinEcdsaSigner>(signer);
             Assert.Equal("builtin-ecdsa", signer.Name);
             // No-op signer has neither key nor trust dir → HasSignature on a
             // non-existent path just returns false, never throws.
@@ -62,7 +67,11 @@ public sealed class SurgewavePluginsSignerExtensionsTests
 
             var signer = provider.GetRequiredService<ISppSigner>();
 
-            Assert.IsType<BuiltinEcdsaSigner>(signer);
+            // Goes through BuiltinEcdsaSignerProvider successfully → provider
+            // path is wired. Reaching this line without a throw is the
+            // assertion; Name == "builtin-ecdsa" double-checks the registry
+            // resolved the provider with the configured Name.
+            Assert.Equal("builtin-ecdsa", signer.Name);
         }
         finally
         {
