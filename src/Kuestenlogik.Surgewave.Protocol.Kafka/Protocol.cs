@@ -227,6 +227,14 @@ public enum ErrorCode : short
 
     /// <summary>The member epoch is stale. The member must retry after receiving its updated member epoch via the ConsumerGroupHeartbeat API.</summary>
     StaleMemberEpoch = 113,
+
+    /// <summary>
+    /// Client metadata is stale; the client should rebootstrap to obtain new metadata (KIP-1242).
+    /// Surfaced from <see cref="ApiKey.ApiVersions"/> v5+ when the client's supplied
+    /// ClusterId / NodeId hint disagrees with the broker's own identity — typically after an
+    /// IP-reuse where the client cached the wrong broker's bootstrap address.
+    /// </summary>
+    RebootstrapRequired = 129,
 }
 
 /// <summary>

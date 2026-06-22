@@ -8,6 +8,22 @@ public sealed class ApiVersionsRequest : KafkaRequest
     public string? ClientSoftwareName { get; init; }
     public string? ClientSoftwareVersion { get; init; }
 
+    /// <summary>
+    /// The cluster ID the client intends to connect to (KIP-1242 / v5+).
+    /// Nullable: clients that don't yet know the cluster ID send null.
+    /// The broker compares against its own ClusterController.ClusterId and
+    /// returns <see cref="ErrorCode.RebootstrapRequired"/> on mismatch so
+    /// the client can drop stale metadata and re-bootstrap.
+    /// </summary>
+    public string? ClusterId { get; init; }
+
+    /// <summary>
+    /// The node ID the client intends to connect to (KIP-1242 / v5+).
+    /// -1 when unknown. Mismatch against the broker's own ID triggers
+    /// <see cref="ErrorCode.RebootstrapRequired"/>.
+    /// </summary>
+    public int NodeId { get; init; } = -1;
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         // For ApiVersions, clients often send version 0-3
@@ -17,6 +33,11 @@ public sealed class ApiVersionsRequest : KafkaRequest
         {
             writer.WriteCompactString(ClientSoftwareName);
             writer.WriteCompactString(ClientSoftwareVersion);
+            if (ApiVersion >= 5)
+            {
+                writer.WriteCompactString(ClusterId); // null encodes as length 0 in compact form
+                writer.WriteInt32(NodeId);
+            }
             writer.WriteVarInt(0); // Tagged fields (empty)
         }
         // Versions 0-2 have no body
@@ -26,11 +47,21 @@ public sealed class ApiVersionsRequest : KafkaRequest
     {
         string? clientSoftwareName = null;
         string? clientSoftwareVersion = null;
+        string? clusterId = null;
+        var nodeId = -1;
 
         if (apiVersion >= 3)
         {
             clientSoftwareName = reader.ReadCompactString();
             clientSoftwareVersion = reader.ReadCompactString();
+            if (apiVersion >= 5)
+            {
+                // KIP-1242 — both fields are flagged ignorable in the upstream
+                // schema; we still parse them so the wire framing stays aligned
+                // for the trailing tagged-fields varint.
+                clusterId = reader.ReadCompactString();
+                nodeId = reader.ReadInt32();
+            }
             // Skip tagged fields
             var taggedFieldCount = reader.ReadVarInt();
             for (int i = 0; i < taggedFieldCount; i++)
@@ -48,7 +79,9 @@ public sealed class ApiVersionsRequest : KafkaRequest
             CorrelationId = correlationId,
             ClientId = clientId ?? string.Empty,
             ClientSoftwareName = clientSoftwareName,
-            ClientSoftwareVersion = clientSoftwareVersion
+            ClientSoftwareVersion = clientSoftwareVersion,
+            ClusterId = clusterId,
+            NodeId = nodeId,
         };
     }
 }
