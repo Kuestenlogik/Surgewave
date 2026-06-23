@@ -68,6 +68,12 @@ public sealed class DynamicBrokerConfig
         // Background thread pool sizes
         "background.threads",
 
+        // KIP-1161 — num.replica.fetchers has a new lower bound of 1.
+        // Surgewave registers it as a dynamic config so admins can tune it
+        // via IncrementalAlterConfigs; the lower bound is enforced in
+        // ValidateConfigValue.
+        "num.replica.fetchers",
+
         // Request handling
         "queued.max.requests",
         "request.timeout.ms",
@@ -232,6 +238,7 @@ public sealed class DynamicBrokerConfig
             lowerName.EndsWith(".seconds") || lowerName.EndsWith(".hours") ||
             lowerName == "num.partitions" || lowerName == "default.replication.factor" ||
             lowerName == "min.insync.replicas" || lowerName == "max.connections.per.ip" ||
+            lowerName == "num.replica.fetchers" ||
             lowerName.EndsWith(".messages") || lowerName.EndsWith(".threads"))
         {
             if (!long.TryParse(value, out var numValue))
@@ -249,6 +256,13 @@ public sealed class DynamicBrokerConfig
                 return $"Config '{name}' must be at least 1";
             }
             if (lowerName == "min.insync.replicas" && numValue < 1)
+            {
+                return $"Config '{name}' must be at least 1";
+            }
+            // KIP-1161 — num.replica.fetchers has a new lower bound of 1.
+            // Setting it to 0 silently disabled replica fetching pre-1161;
+            // upstream now rejects that at config-bind time.
+            if (lowerName == "num.replica.fetchers" && numValue < 1)
             {
                 return $"Config '{name}' must be at least 1";
             }

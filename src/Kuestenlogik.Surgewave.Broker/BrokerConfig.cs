@@ -392,7 +392,59 @@ public sealed class BrokerConfig : IValidatableConfig
                        $"{nameof(DefaultReplicationFactor)} ({DefaultReplicationFactor}).");
         }
 
+        // KIP-1161 — stricter LIST-type config validation. The four
+        // string-array configs Surgewave exposes (SaslMechanisms, Users,
+        // SuperUsers, AllowedAlgorithms) must not contain null/blank
+        // entries; duplicates are deduplicated in-place with the dropped
+        // count surfaced as a warning-shaped error (Kafka logs a warning
+        // and proceeds; Surgewave routes it through the same validation
+        // channel so admins can't miss it on startup).
+        ValidateListConfig(nameof(Security.SaslMechanisms), Security.SaslMechanisms, errors, StringComparer.OrdinalIgnoreCase, deduplicateInPlace: true, value => Security.SaslMechanisms = value);
+        ValidateListConfig(nameof(Security.Users), Security.Users, errors, StringComparer.Ordinal, deduplicateInPlace: true, value => Security.Users = value);
+        ValidateListConfig(nameof(Security.SuperUsers), Security.SuperUsers, errors, StringComparer.Ordinal, deduplicateInPlace: true, value => Security.SuperUsers = value);
+        ValidateListConfig(nameof(Security.OAuth2.AllowedAlgorithms), Security.OAuth2.AllowedAlgorithms, errors, StringComparer.OrdinalIgnoreCase, deduplicateInPlace: true, value => Security.OAuth2.AllowedAlgorithms = value);
+
         return errors;
+    }
+
+    /// <summary>
+    /// KIP-1161 — generic LIST-type validator. Rejects null/blank entries
+    /// outright, deduplicates the array in-place (case-folded per the
+    /// supplied comparer) and emits a single "warning-shaped" error per
+    /// list with the dropped count so admins notice on startup.
+    /// </summary>
+    private static void ValidateListConfig(
+        string propertyName,
+        string[] current,
+        List<string> errors,
+        StringComparer comparer,
+        bool deduplicateInPlace,
+        Action<string[]> writeBack)
+    {
+        for (int i = 0; i < current.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(current[i]))
+            {
+                errors.Add($"{propertyName} contains a null or blank entry at index {i}; LIST-type configs reject null entries (KIP-1161).");
+                return;
+            }
+        }
+
+        if (!deduplicateInPlace) return;
+
+        var seen = new HashSet<string>(comparer);
+        var deduped = new List<string>(current.Length);
+        int duplicates = 0;
+        foreach (var entry in current)
+        {
+            if (seen.Add(entry)) deduped.Add(entry);
+            else duplicates++;
+        }
+        if (duplicates > 0)
+        {
+            writeBack(deduped.ToArray());
+            errors.Add($"{propertyName} contained {duplicates} duplicate entry(s); LIST-type configs deduplicate (KIP-1161). Surviving values: [{string.Join(", ", deduped)}].");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
