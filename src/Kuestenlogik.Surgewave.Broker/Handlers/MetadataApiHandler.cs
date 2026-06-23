@@ -70,6 +70,40 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
 
     private ApiVersionsResponse HandleApiVersions(ApiVersionsRequest request)
     {
+        // KIP-1242 — at v5+ a client may pin the cluster identity it expects
+        // to be talking to (ClusterId + NodeId). If the broker the request
+        // landed on doesn't match, return REBOOTSTRAP_REQUIRED so the client
+        // re-resolves the bootstrap endpoint instead of silently continuing
+        // against the wrong cluster (the motivating case: IP reuse after a
+        // cluster is replaced — old DNS still points at it).
+        if (request.ApiVersion >= 5)
+        {
+            var brokerClusterId = _config.ClusterId ?? "surgewave-cluster";
+            if (!string.IsNullOrEmpty(request.ClusterId) &&
+                !string.Equals(request.ClusterId, brokerClusterId, StringComparison.Ordinal))
+            {
+                return new ApiVersionsResponse
+                {
+                    CorrelationId = request.CorrelationId,
+                    ApiVersion = request.ApiVersion,
+                    ErrorCode = ErrorCode.RebootstrapRequired,
+                    ApiVersions = [],
+                    ThrottleTimeMs = 0,
+                };
+            }
+            if (request.NodeId != -1 && request.NodeId != _config.BrokerId)
+            {
+                return new ApiVersionsResponse
+                {
+                    CorrelationId = request.CorrelationId,
+                    ApiVersion = request.ApiVersion,
+                    ErrorCode = ErrorCode.RebootstrapRequired,
+                    ApiVersions = [],
+                    ThrottleTimeMs = 0,
+                };
+            }
+        }
+
         return ApiVersionsResponse.CreateDefault(request.CorrelationId, request.ApiVersion);
     }
 
