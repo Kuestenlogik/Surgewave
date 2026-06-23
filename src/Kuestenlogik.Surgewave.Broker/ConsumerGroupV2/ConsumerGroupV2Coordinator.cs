@@ -416,11 +416,6 @@ public sealed class ConsumerGroupV2Coordinator
                 return ErrorCode.UnknownMemberId;
             }
 
-            if (memberEpoch < member.MemberEpoch)
-            {
-                return ErrorCode.StaleMemberEpoch;
-            }
-
             if (memberEpoch > member.MemberEpoch)
             {
                 // Future epoch — the member is ahead of what we recorded. Treat as fenced
@@ -428,7 +423,58 @@ public sealed class ConsumerGroupV2Coordinator
                 return ErrorCode.FencedMemberEpoch;
             }
 
+            // KIP-1251 — pre-flight no longer fences on memberEpoch <
+            // member.MemberEpoch. Older epochs are accepted at this layer
+            // and the per-partition check (IsPartitionAssignmentValid) does
+            // the fine-grained fence. The motivating case: an old member
+            // tries to commit for a partition it still holds across a
+            // rebalance — the group-level epoch moved, but the partition's
+            // assignment epoch didn't (it stayed with this member). Today
+            // we let that commit through.
             return ErrorCode.None;
+        }
+    }
+
+    /// <summary>
+    /// KIP-1251 — per-partition fence-check for offset commits. Returns
+    /// <c>true</c> if the member's claimed memberEpoch is at-least the
+    /// per-partition assignment epoch (i.e., the partition was assigned
+    /// to this member at an epoch the member knows about and hasn't
+    /// been re-assigned since). Returns <c>false</c> if the member
+    /// doesn't own this partition at all, or if a newer assignment epoch
+    /// has bumped past the member's claimed epoch.
+    ///
+    /// When the group has no per-partition assignment epochs populated
+    /// (e.g. legacy persisted state from before KIP-1251 landed), the
+    /// check falls back to group-level equality with the member's epoch.
+    /// </summary>
+    public bool IsPartitionAssignmentValid(string groupId, string? memberId, int memberEpoch, Guid topicId, int partition)
+    {
+        lock (_groupLock)
+        {
+            if (!_groups.TryGetValue(groupId, out var group)) return false;
+            if (string.IsNullOrEmpty(memberId) || !group.Members.TryGetValue(memberId, out var member)) return false;
+
+            // Walk the member's TARGET assignment — that's the broker's view
+            // of "what this member owns at the current group epoch". The
+            // committed Assignment may lag behind during reconciliation;
+            // commits should be fenced against the target, not the
+            // already-reconciled view.
+            var topicAssignment = member.TargetAssignment.FirstOrDefault(t => t.TopicId == topicId);
+            if (topicAssignment is null) return false;
+            var partitionIndex = topicAssignment.Partitions.IndexOf(partition);
+            if (partitionIndex < 0) return false;
+
+            // KIP-1251 path: per-partition epoch from the assignor.
+            if (topicAssignment.AssignmentEpochs is { Count: > 0 } epochs
+                && partitionIndex < epochs.Count)
+            {
+                var partitionEpoch = epochs[partitionIndex];
+                return memberEpoch >= partitionEpoch;
+            }
+
+            // Fallback for pre-KIP-1251 persisted state without per-partition epochs.
+            return memberEpoch == member.MemberEpoch;
         }
     }
 
