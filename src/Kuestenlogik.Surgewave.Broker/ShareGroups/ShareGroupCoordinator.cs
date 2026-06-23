@@ -877,6 +877,61 @@ public sealed class ShareGroupCoordinator
     }
 
     /// <summary>
+    /// KIP-1240 — mutate a share-group config via IncrementalAlterConfigs.
+    /// Returns null on success or an error message describing why the
+    /// mutation was rejected. The group is auto-created with default state
+    /// if it doesn't exist yet (matches upstream's "configs precede group"
+    /// behaviour — an admin may set retention before the first consumer joins).
+    /// Supported configs:
+    /// <list type="bullet">
+    ///   <item><c>share.delivery.count.limit</c> — int, clamp [2, 10]</item>
+    ///   <item><c>share.partition.max.record.locks</c> — int, clamp [100, 10000]</item>
+    ///   <item><c>share.renew.acknowledge.enable</c> — bool</item>
+    /// </list>
+    /// </summary>
+    public string? SetShareGroupConfig(string groupId, string name, string? value)
+    {
+        if (string.IsNullOrEmpty(groupId)) return "Group name must not be empty.";
+
+        lock (_groupLock)
+        {
+            if (!_shareGroups.TryGetValue(groupId, out var group))
+            {
+                group = new ShareGroupState { GroupId = groupId };
+                _shareGroups[groupId] = group;
+            }
+
+            switch (name)
+            {
+                case "share.delivery.count.limit":
+                    if (!int.TryParse(value, out var deliveryCount))
+                        return $"Config '{name}' must be an integer.";
+                    if (deliveryCount < 2 || deliveryCount > 10)
+                        return $"Config '{name}' must be between 2 and 10 (KIP-1240 clamp).";
+                    group.MaxDeliveryCount = deliveryCount;
+                    return null;
+
+                case "share.partition.max.record.locks":
+                    if (!int.TryParse(value, out var maxLocks))
+                        return $"Config '{name}' must be an integer.";
+                    if (maxLocks < 100 || maxLocks > 10000)
+                        return $"Config '{name}' must be between 100 and 10000 (KIP-1240 clamp).";
+                    group.MaxRecordLocks = maxLocks;
+                    return null;
+
+                case "share.renew.acknowledge.enable":
+                    if (!bool.TryParse(value, out var renewEnabled))
+                        return $"Config '{name}' must be 'true' or 'false'.";
+                    group.RenewAcknowledgeEnabled = renewEnabled;
+                    return null;
+
+                default:
+                    return $"Config '{name}' is not a recognized share-group config (KIP-1240).";
+            }
+        }
+    }
+
+    /// <summary>
     /// Removes members whose last heartbeat exceeds the stale timeout.
     /// </summary>
     public void SweepStaleMembers()

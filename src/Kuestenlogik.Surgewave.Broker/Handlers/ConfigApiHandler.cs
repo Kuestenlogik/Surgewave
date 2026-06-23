@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
@@ -13,6 +14,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
     private readonly BrokerConfig _config;
     private readonly DynamicBrokerConfig _dynamicConfig;
     private readonly LogManager _logManager;
+    private readonly ShareGroupCoordinator? _shareGroupCoordinator;
 
     private static readonly HashSet<string> ValidTopicConfigs =
     [
@@ -26,11 +28,12 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
 
     public IEnumerable<ApiKey> SupportedApiKeys => [ApiKey.DescribeConfigs, ApiKey.AlterConfigs, ApiKey.IncrementalAlterConfigs];
 
-    public ConfigApiHandler(BrokerConfig config, DynamicBrokerConfig dynamicConfig, LogManager logManager)
+    public ConfigApiHandler(BrokerConfig config, DynamicBrokerConfig dynamicConfig, LogManager logManager, ShareGroupCoordinator? shareGroupCoordinator = null)
     {
         _config = config;
         _dynamicConfig = dynamicConfig;
         _logManager = logManager;
+        _shareGroupCoordinator = shareGroupCoordinator;
     }
 
     public Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
@@ -526,6 +529,78 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                         ResourceName = resource.ResourceName
                     });
                 }
+            }
+            else if (resourceType == ConfigResourceType.Group)
+            {
+                // KIP-1240 (+ KIP-848 / KIP-932 ResourceType.GROUP) — allow
+                // admins to set per-group configs via IncrementalAlterConfigs.
+                // Today only share-group configs are wired; consumer-group
+                // ResourceType.GROUP support is a separate follow-up.
+                var errors = new List<string>();
+                if (_shareGroupCoordinator is null)
+                {
+                    errors.Add("Share-group coordinator not available on this broker.");
+                }
+                else if (!request.ValidateOnly)
+                {
+                    foreach (var config in resource.Configs)
+                    {
+                        switch (config.ConfigOperation)
+                        {
+                            case 0: // SET
+                            {
+                                var error = _shareGroupCoordinator.SetShareGroupConfig(resource.ResourceName, config.Name, config.Value);
+                                if (error != null) errors.Add(error);
+                                break;
+                            }
+                            case 1: // DELETE — reset to default by setting the upstream default
+                            {
+                                string? defaultValue = config.Name switch
+                                {
+                                    "share.delivery.count.limit" => "5",
+                                    "share.partition.max.record.locks" => "2000",
+                                    "share.renew.acknowledge.enable" => "true",
+                                    _ => null,
+                                };
+                                if (defaultValue is null)
+                                {
+                                    errors.Add($"Config '{config.Name}' is not a recognized share-group config (KIP-1240).");
+                                }
+                                else
+                                {
+                                    var error = _shareGroupCoordinator.SetShareGroupConfig(resource.ResourceName, config.Name, defaultValue);
+                                    if (error != null) errors.Add(error);
+                                }
+                                break;
+                            }
+                            default:
+                                errors.Add($"Operation {config.ConfigOperation} is not supported for share-group configs.");
+                                break;
+                        }
+                    }
+                }
+                else
+                {
+                    // ValidateOnly path — sanity-check the config names
+                    foreach (var config in resource.Configs)
+                    {
+                        if (config.Name is not (
+                            "share.delivery.count.limit"
+                            or "share.partition.max.record.locks"
+                            or "share.renew.acknowledge.enable"))
+                        {
+                            errors.Add($"Config '{config.Name}' is not a recognized share-group config (KIP-1240).");
+                        }
+                    }
+                }
+
+                responses.Add(new IncrementalAlterConfigsResponse.AlterConfigsResourceResponse
+                {
+                    ErrorCode = errors.Count > 0 ? ErrorCode.InvalidConfig : ErrorCode.None,
+                    ErrorMessage = errors.Count > 0 ? string.Join("; ", errors) : null,
+                    ResourceType = resource.ResourceType,
+                    ResourceName = resource.ResourceName,
+                });
             }
             else
             {
