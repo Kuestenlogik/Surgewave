@@ -394,6 +394,36 @@ public sealed class BrokerConfig : IValidatableConfig
 
         return errors;
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Coordinator-internal buffer pools (KIP-1196)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// KIP-1196 — maximum buffer size (in bytes) that the
+    /// <c>ConsumerGroupCoordinator</c> / <c>ConsumerGroupV2Coordinator</c> /
+    /// <c>TransactionCoordinator</c> retain for reuse across writes. Upstream
+    /// Kafka maps this 1:1 to <c>group.coordinator.cached.buffer.max.bytes</c>
+    /// with a default of 1 MiB + 12-byte log-record overhead and a lower
+    /// bound of 512 KiB.
+    ///
+    /// Captured as config today so admins can tune from the outside; the
+    /// actual buffer-reuse pool inside the coordinators is a documented
+    /// follow-up (Surgewave allocates per-write today, which is fine for
+    /// the current throughput envelope but loses a few % at sustained
+    /// high-rate group-metadata churn).
+    /// </summary>
+    [Range(524288, int.MaxValue)]
+    public int GroupCoordinatorCachedBufferMaxBytes { get; set; } = 1024 * 1024 + 12;
+
+    /// <summary>
+    /// KIP-1196 — same as <see cref="GroupCoordinatorCachedBufferMaxBytes"/>
+    /// but for the <c>ShareGroupCoordinator</c>. Maps to
+    /// <c>share.coordinator.cached.buffer.max.bytes</c> upstream. Default
+    /// matches the consumer-group coordinator (1 MiB + 12-byte overhead).
+    /// </summary>
+    [Range(524288, int.MaxValue)]
+    public int ShareCoordinatorCachedBufferMaxBytes { get; set; } = 1024 * 1024 + 12;
 }
 
 /// <summary>
