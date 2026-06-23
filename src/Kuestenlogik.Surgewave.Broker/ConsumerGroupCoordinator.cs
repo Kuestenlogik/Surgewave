@@ -663,6 +663,32 @@ public sealed class ConsumerGroupCoordinator(
             var partitions = new List<PartitionCommitResult>(topic.Partitions.Count);
             foreach (var partition in topic.Partitions)
             {
+                // KIP-1251 — per-partition fence. The member's claimed
+                // memberEpoch must be at least the per-partition
+                // assignment epoch for (topicId, partition). Older
+                // commits for partitions the member still owns are
+                // accepted (the KIP's whole point); older commits for
+                // partitions that got re-assigned are rejected as
+                // STALE_MEMBER_EPOCH.
+                var partitionTopicId = topicId != Guid.Empty
+                    ? topicId
+                    : (logManager?.GetTopicId(topicName) ?? Guid.Empty);
+                if (v2Coordinator is not null && partitionTopicId != Guid.Empty
+                    && !v2Coordinator.IsPartitionAssignmentValid(
+                        request.GroupId,
+                        request.MemberId,
+                        request.GenerationIdOrMemberEpoch,
+                        partitionTopicId,
+                        partition.PartitionIndex))
+                {
+                    partitions.Add(new PartitionCommitResult
+                    {
+                        PartitionIndex = partition.PartitionIndex,
+                        ErrorCode = ErrorCode.StaleMemberEpoch,
+                    });
+                    continue;
+                }
+
                 offsetStore?.CommitOffset(request.GroupId, topicName, partition.PartitionIndex, partition.CommittedOffset);
                 partitions.Add(new PartitionCommitResult
                 {
