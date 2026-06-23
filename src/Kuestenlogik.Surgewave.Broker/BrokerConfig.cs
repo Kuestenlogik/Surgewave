@@ -424,6 +424,58 @@ public sealed class BrokerConfig : IValidatableConfig
     /// </summary>
     [Range(524288, int.MaxValue)]
     public int ShareCoordinatorCachedBufferMaxBytes { get; set; } = 1024 * 1024 + 12;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Coordinator background threads + assignment intervals (KIP-1263)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// KIP-1263 — size of the group coordinator's background thread pool
+    /// used for regex-subscription updates. Upstream Kafka:
+    /// <c>group.coordinator.background.threads</c>, default 2,
+    /// lower bound 1. Prior to KIP-1263 this was hard-wired to a single
+    /// thread.
+    ///
+    /// Captured as config today; Surgewave's regex-subscription path runs
+    /// inline on the heartbeat thread, so the pool isn't wired yet. The
+    /// follow-up is a `BackgroundWorkScheduler` that fans regex resolution
+    /// out to <see cref="GroupCoordinatorBackgroundThreads"/> workers.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int GroupCoordinatorBackgroundThreads { get; set; } = 2;
+
+    /// <summary>
+    /// KIP-1263 — interval between assignment recomputes for a consumer
+    /// group. Upstream: <c>group.consumer.assignment.interval.ms</c>,
+    /// default 1000 ms, lower bound 0. Prior to this KIP the effective
+    /// interval was 0 ms — the assignor ran on every heartbeat that
+    /// changed membership, which caused thrash during high-churn rebalance
+    /// storms.
+    ///
+    /// Captured as config; the `TargetAssignmentComputer` already only
+    /// runs when membership/subscription changed materially (Surgewave is
+    /// less prone to the upstream thrash pattern), so the additional
+    /// time-based gate is a documented follow-up rather than a critical
+    /// gap.
+    /// </summary>
+    [Range(0, int.MaxValue)]
+    public int ConsumerGroupAssignmentIntervalMs { get; set; } = 1000;
+
+    /// <summary>
+    /// KIP-1263 — same as <see cref="ConsumerGroupAssignmentIntervalMs"/>
+    /// but for share groups. Maps to <c>group.share.assignment.interval.ms</c>
+    /// upstream. Default 1000 ms.
+    /// </summary>
+    [Range(0, int.MaxValue)]
+    public int ShareGroupAssignmentIntervalMs { get; set; } = 1000;
+
+    /// <summary>
+    /// KIP-1263 — same as <see cref="ConsumerGroupAssignmentIntervalMs"/>
+    /// but for streams groups. Maps to <c>group.streams.assignment.interval.ms</c>
+    /// upstream. Default 1000 ms.
+    /// </summary>
+    [Range(0, int.MaxValue)]
+    public int StreamsGroupAssignmentIntervalMs { get; set; } = 1000;
 }
 
 /// <summary>
