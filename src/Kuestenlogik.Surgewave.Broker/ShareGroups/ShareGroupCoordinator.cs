@@ -242,6 +242,8 @@ public sealed class ShareGroupCoordinator
     public async Task<ShareFetchResponse> HandleShareFetch(ShareFetchRequest request, CancellationToken cancellationToken)
     {
         var responses = new List<ShareFetchResponse.ShareFetchableTopicResponse>(request.Topics.Count);
+        // KIP-1240 — group-level renew gate, looked up once per request.
+        var renewEnabled = LookupRenewEnabled(request.GroupId);
 
         foreach (var fetchTopic in request.Topics)
         {
@@ -256,7 +258,7 @@ public sealed class ShareGroupCoordinator
                 if (fetchPartition.AcknowledgementBatches.Count > 0 && topicName != null)
                 {
                     acknowledgeErrorCode = ProcessAcknowledgementBatches(
-                        topicName, fetchPartition.PartitionIndex, fetchPartition.AcknowledgementBatches);
+                        topicName, fetchPartition.PartitionIndex, fetchPartition.AcknowledgementBatches, renewEnabled);
                 }
 
                 // KAFKA-20533: Bei Topic-Loeschung waehrend ShareFetch muss der Per-Partition-
@@ -408,6 +410,8 @@ public sealed class ShareGroupCoordinator
     public ShareAcknowledgeResponse HandleShareAcknowledge(ShareAcknowledgeRequest request)
     {
         var responses = new List<ShareAcknowledgeResponse.ShareAcknowledgeTopicResponse>(request.Topics.Count);
+        // KIP-1240 — group-level renew gate, looked up once per request.
+        var renewEnabled = LookupRenewEnabled(request.GroupId);
 
         foreach (var ackTopic in request.Topics)
         {
@@ -428,7 +432,7 @@ public sealed class ShareGroupCoordinator
                 }
 
                 var errorCode = ProcessAcknowledgementBatches(
-                    topicName, ackPartition.PartitionIndex, ackPartition.AcknowledgementBatches);
+                    topicName, ackPartition.PartitionIndex, ackPartition.AcknowledgementBatches, renewEnabled);
 
                 partitions.Add(new ShareAcknowledgeResponse.PartitionData
                 {
@@ -766,8 +770,24 @@ public sealed class ShareGroupCoordinator
         string topicName,
         int partitionIndex,
         List<TBatch> batches,
-        Func<TBatch, AckBatch> project)
+        Func<TBatch, AckBatch> project,
+        bool renewAcknowledgeEnabled)
     {
+        // KIP-1240 — RENEW gate is checked up-front so it takes precedence
+        // over QueueView absence: the AckType is invalid because the group
+        // config says so, regardless of whether the queue happens to exist.
+        if (!renewAcknowledgeEnabled)
+        {
+            foreach (var batch in batches)
+            {
+                var ack = project(batch);
+                foreach (var ackType in ack.AcknowledgeTypes)
+                {
+                    if (ackType == 4) return ErrorCode.InvalidRequest;
+                }
+            }
+        }
+
         var queueView = queueViewManager.Get(topicName);
         if (queueView == null)
         {
@@ -802,7 +822,9 @@ public sealed class ShareGroupCoordinator
                         case 3: // Reject - route to DLQ
                             _ = queueView.RejectAsync(messageId, CancellationToken.None);
                             break;
-                        case 4: // Renew - extend visibility timeout (lease keeps the same delivery count)
+                        case 4: // Renew (KIP-1222) - extend visibility timeout.
+                            // KIP-1240 gate was already enforced above; the
+                            // queueView path here is the success branch.
                             queueView.ExtendVisibility(messageId);
                             break;
                     }
@@ -822,16 +844,37 @@ public sealed class ShareGroupCoordinator
     private ErrorCode ProcessAcknowledgementBatches(
         string topicName,
         int partitionIndex,
-        List<ShareFetchRequest.AcknowledgementBatch> batches) =>
+        List<ShareFetchRequest.AcknowledgementBatch> batches,
+        bool renewAcknowledgeEnabled) =>
         ProcessAcknowledgementBatches(topicName, partitionIndex, batches,
-            b => new AckBatch(b.FirstOffset, b.LastOffset, b.AcknowledgeTypes));
+            b => new AckBatch(b.FirstOffset, b.LastOffset, b.AcknowledgeTypes),
+            renewAcknowledgeEnabled);
 
     private ErrorCode ProcessAcknowledgementBatches(
         string topicName,
         int partitionIndex,
-        List<ShareAcknowledgeRequest.AcknowledgementBatch> batches) =>
+        List<ShareAcknowledgeRequest.AcknowledgementBatch> batches,
+        bool renewAcknowledgeEnabled) =>
         ProcessAcknowledgementBatches(topicName, partitionIndex, batches,
-            b => new AckBatch(b.FirstOffset, b.LastOffset, b.AcknowledgeTypes));
+            b => new AckBatch(b.FirstOffset, b.LastOffset, b.AcknowledgeTypes),
+            renewAcknowledgeEnabled);
+
+    /// <summary>
+    /// KIP-1240 — look up a group's <see cref="ShareGroupState.RenewAcknowledgeEnabled"/>
+    /// once at the entry of an ack-bearing request. If the group hasn't been
+    /// established yet we return the broker default (<c>true</c>) so first-time
+    /// clients aren't surprised by a Renew rejection.
+    /// </summary>
+    private bool LookupRenewEnabled(string? groupId)
+    {
+        if (string.IsNullOrEmpty(groupId)) return true;
+        lock (_groupLock)
+        {
+            return _shareGroups.TryGetValue(groupId, out var group)
+                ? group.RenewAcknowledgeEnabled
+                : true;
+        }
+    }
 
     /// <summary>
     /// Removes members whose last heartbeat exceeds the stale timeout.
