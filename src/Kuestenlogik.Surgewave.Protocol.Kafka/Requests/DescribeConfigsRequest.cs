@@ -151,7 +151,14 @@ public enum ConfigResourceType : sbyte
     Unknown = 0,
     Topic = 2,
     Broker = 4,
-    BrokerLogger = 8
+    BrokerLogger = 8,
+    ClientMetrics = 16,
+    /// <summary>
+    /// Group-level config resource (KIP-848 / KIP-932 / KIP-1240).
+    /// Used by IncrementalAlterConfigs to mutate per-group settings like
+    /// <c>share.delivery.count.limit</c>, <c>share.renew.acknowledge.enable</c>.
+    /// </summary>
+    Group = 32,
 }
 
 /// <summary>
