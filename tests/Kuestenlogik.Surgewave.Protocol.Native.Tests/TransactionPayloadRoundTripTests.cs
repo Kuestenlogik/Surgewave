@@ -88,19 +88,50 @@ public sealed class TransactionPayloadRoundTripTests
     // CrossTopicTxnAddWrite (carries the actual record)
     // ───────────────────────────────────────────────────────────────
 
-    // Note: CrossTopicTxnAddWriteRequest round-trip tests are skipped — they
-    // catch a real wire-side bug in the production Write path. The Write
-    // method (line 113/121 of CrossTopicTxnPayloads.cs) calls
-    // `writer.WriteInt32(len); writer.WriteBytes(span)` but
-    // SurgewavePayloadWriter.WriteBytes ALREADY prefixes with an int32
-    // length — so Key + Value end up with two length prefixes on the wire
-    // and Read can't recover them. Tracked as a separate fix; the test
-    // file's class doc-comment notes it.
-    [Fact(Skip = "Wire bug — Write inserts double length prefix for Key/Value (CrossTopicTxnPayloads.cs:113/121). Tracked for fix.")]
-    public void CrossTopicTxnAddWriteRequest_WithKey_RoundTrips() { }
+    [Fact]
+    public void CrossTopicTxnAddWriteRequest_WithKey_RoundTrips()
+    {
+        var key = System.Text.Encoding.UTF8.GetBytes("order-123");
+        var value = new byte[] { 0x01, 0x02, 0x03, 0x04 };
+        var original = new CrossTopicTxnAddWriteRequestPayload
+        {
+            TransactionId = "txn-1",
+            Topic = "orders",
+            Partition = 0,
+            Key = key,
+            Value = value,
+        };
+        var parsed = RoundTrip(
+            original.EstimateSize(),
+            buf => { var w = new SurgewavePayloadWriter(buf); original.Write(ref w); },
+            buf => { var r = new SurgewavePayloadReader(buf); return CrossTopicTxnAddWriteRequestPayload.Read(ref r); });
 
-    [Fact(Skip = "Wire bug — Write inserts double length prefix for Value (CrossTopicTxnPayloads.cs:121). Tracked for fix.")]
-    public void CrossTopicTxnAddWriteRequest_NullKey_RoundTrips() { }
+        Assert.Equal("orders", parsed.Topic);
+        Assert.Equal(key, parsed.Key);
+        Assert.Equal(value, parsed.Value);
+    }
+
+    [Fact]
+    public void CrossTopicTxnAddWriteRequest_NullKey_RoundTrips()
+    {
+        // Tombstone or compaction-target with no key.
+        var value = new byte[] { 0xAB };
+        var original = new CrossTopicTxnAddWriteRequestPayload
+        {
+            TransactionId = "txn-1",
+            Topic = "events",
+            Partition = 3,
+            Key = null,
+            Value = value,
+        };
+        var parsed = RoundTrip(
+            original.EstimateSize(),
+            buf => { var w = new SurgewavePayloadWriter(buf); original.Write(ref w); },
+            buf => { var r = new SurgewavePayloadReader(buf); return CrossTopicTxnAddWriteRequestPayload.Read(ref r); });
+
+        Assert.Null(parsed.Key);
+        Assert.Equal(value, parsed.Value);
+    }
 
     [Fact]
     public void CrossTopicTxnAddWriteResponse_RoundTrip_PreservesAllFields()

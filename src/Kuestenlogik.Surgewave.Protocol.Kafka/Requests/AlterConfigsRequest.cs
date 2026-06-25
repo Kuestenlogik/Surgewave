@@ -24,24 +24,57 @@ public sealed class AlterConfigsRequest : KafkaRequest
 
     public override void WriteTo(KafkaProtocolWriter writer)
     {
+        bool isFlexible = ApiVersion >= 2;
+
         writer.WriteInt16((short)ApiKey);
         writer.WriteInt16(ApiVersion);
         writer.WriteInt32(CorrelationId);
-        writer.WriteString(ClientId);
 
-        writer.WriteInt32(Resources.Count);
-        foreach (var resource in Resources)
+        if (isFlexible)
         {
-            writer.WriteInt8((sbyte)resource.ResourceType);
-            writer.WriteString(resource.ResourceName);
-            writer.WriteInt32(resource.Configs.Count);
-            foreach (var config in resource.Configs)
+            writer.WriteCompactString(ClientId);
+            writer.WriteVarInt(0); // Header tagged fields
+
+            // Resources COMPACT_ARRAY (count + 1)
+            writer.WriteVarInt(Resources.Count + 1);
+            foreach (var resource in Resources)
             {
-                writer.WriteString(config.Name);
-                writer.WriteString(config.Value);
+                writer.WriteInt8((sbyte)resource.ResourceType);
+                writer.WriteCompactString(resource.ResourceName);
+
+                // Configs COMPACT_ARRAY
+                writer.WriteVarInt(resource.Configs.Count + 1);
+                foreach (var config in resource.Configs)
+                {
+                    writer.WriteCompactString(config.Name);
+                    writer.WriteCompactString(config.Value);
+                    writer.WriteVarInt(0); // Config-entry tagged fields
+                }
+
+                writer.WriteVarInt(0); // Resource tagged fields
             }
+
+            writer.WriteInt8(ValidateOnly ? (sbyte)1 : (sbyte)0);
+            writer.WriteVarInt(0); // Body tagged fields
         }
-        writer.WriteInt8(ValidateOnly ? (sbyte)1 : (sbyte)0);
+        else
+        {
+            writer.WriteString(ClientId);
+
+            writer.WriteInt32(Resources.Count);
+            foreach (var resource in Resources)
+            {
+                writer.WriteInt8((sbyte)resource.ResourceType);
+                writer.WriteString(resource.ResourceName);
+                writer.WriteInt32(resource.Configs.Count);
+                foreach (var config in resource.Configs)
+                {
+                    writer.WriteString(config.Name);
+                    writer.WriteString(config.Value);
+                }
+            }
+            writer.WriteInt8(ValidateOnly ? (sbyte)1 : (sbyte)0);
+        }
     }
 
     public static AlterConfigsRequest ReadFrom(BinaryReader reader, short apiVersion, int correlationId, string clientId)

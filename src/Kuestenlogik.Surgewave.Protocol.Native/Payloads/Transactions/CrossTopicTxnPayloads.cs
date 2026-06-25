@@ -111,7 +111,14 @@ public readonly record struct CrossTopicTxnAddWriteRequestPayload
         {
             writer.WriteUInt8(1);
             writer.WriteInt32(Key.Length);
-            writer.WriteBytes(Key);
+            // WriteRaw, not WriteBytes — SurgewavePayloadWriter.WriteBytes
+            // emits an int32 length prefix of its own, which would double
+            // up with the explicit one above and break the Read side
+            // (Read expects [len][raw]). The WriteTo(IPayloadWriter) path
+            // below uses WriteBytes against BigEndianWriter, whose
+            // WriteBytes contract is "raw bytes, no prefix" — so the two
+            // produce the same wire bytes by design.
+            writer.WriteRaw(Key);
         }
         else
         {
@@ -119,7 +126,7 @@ public readonly record struct CrossTopicTxnAddWriteRequestPayload
         }
 
         writer.WriteInt32(Value.Length);
-        writer.WriteBytes(Value);
+        writer.WriteRaw(Value);
     }
 
     public void WriteTo(IPayloadWriter writer)

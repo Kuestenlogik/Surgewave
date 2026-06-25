@@ -85,8 +85,84 @@ public sealed class AdminConfigWireRoundTripTests
         Assert.False(parsed.ValidateOnly);
     }
 
-    [Fact(Skip = "Wire bug — AlterConfigsRequest.WriteTo writes non-flexible bytes unconditionally, but ReadFrom switches to flexible mode at apiVersion>=2. WriteTo at v2 emits the non-flexible shape while ReadFrom expects a flexible one — they don't round-trip. Tracked for fix.")]
-    public void AlterConfigsRequest_V2_Flexible_RoundTrip_PreservesAllFields() { }
+    [Fact]
+    public void AlterConfigsRequest_V2_Flexible_RoundTrip_PreservesAllFields()
+    {
+        // v2+ is flexible: COMPACT_ARRAY for resource/config lists + per-
+        // element tagged-fields varints (=0). The header is also flexible
+        // (CompactString ClientId + header tagged-fields varint).
+        var original = new AlterConfigsRequest
+        {
+            ApiKey = ApiKey.AlterConfigs,
+            ApiVersion = 2,
+            CorrelationId = 7,
+            ClientId = "admin-flex",
+            ValidateOnly = true,
+            Resources =
+            [
+                new AlterConfigsRequest.AlterConfigResource
+                {
+                    ResourceType = ConfigResourceType.Broker,
+                    ResourceName = "0",
+                    Configs =
+                    [
+                        new AlterConfigsRequest.AlterConfigEntry { Name = "log.retention.hours", Value = "168" },
+                    ],
+                },
+                new AlterConfigsRequest.AlterConfigResource
+                {
+                    ResourceType = ConfigResourceType.Topic,
+                    ResourceName = "events",
+                    Configs =
+                    [
+                        new AlterConfigsRequest.AlterConfigEntry { Name = "retention.ms", Value = "86400000" },
+                    ],
+                },
+            ],
+        };
+
+        var writer = new KafkaProtocolWriter();
+        original.WriteTo(writer);
+        // For v2+ the request header is flexible: skip [ApiKey(2)][ApiVersion(2)]
+        // [CorrelationId(4)][ClientId compact-string][header tagged-fields varint].
+        var bytes = writer.ToArray();
+        using var ms = new MemoryStream(bytes);
+        using var br = new BinaryReader(ms);
+        br.ReadInt16(); br.ReadInt16(); br.ReadInt32();
+        // The body's flexible path is read via KafkaProtocolReader; the
+        // ReadFrom switches into it after our header skip. For the flexible
+        // header, ClientId is a compact-string (varint length + bytes) and
+        // there's a trailing header tagged-fields varint. Read both inline.
+        var clientIdLenPlus1 = ReadVarInt(br);
+        if (clientIdLenPlus1 > 0) br.ReadBytes(clientIdLenPlus1 - 1);
+        ReadVarInt(br); // header tagged fields varint
+        var parsed = AlterConfigsRequest.ReadFrom(br, apiVersion: 2, correlationId: 7, clientId: "admin-flex");
+
+        Assert.True(parsed.ValidateOnly);
+        Assert.Equal(2, parsed.Resources.Count);
+        Assert.Equal(ConfigResourceType.Broker, parsed.Resources[0].ResourceType);
+        Assert.Equal("0", parsed.Resources[0].ResourceName);
+        Assert.Equal("168", parsed.Resources[0].Configs[0].Value);
+        Assert.Equal(ConfigResourceType.Topic, parsed.Resources[1].ResourceType);
+        Assert.Equal("events", parsed.Resources[1].ResourceName);
+    }
+
+    /// <summary>
+    /// Helper — reads a Kafka unsigned varint from a BinaryReader.
+    /// Mirrors KafkaProtocolReader.ReadVarInt without needing one.
+    /// </summary>
+    private static int ReadVarInt(BinaryReader reader)
+    {
+        int value = 0;
+        int shift = 0;
+        while (true)
+        {
+            var b = reader.ReadByte();
+            value |= (b & 0x7F) << shift;
+            if ((b & 0x80) == 0) return value;
+            shift += 7;
+        }
+    }
 
     [Fact]
     public void AlterConfigsResponse_V1_WriteTo_EmitsResultArrayInOrder()
