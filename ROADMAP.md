@@ -39,4 +39,4 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ---
 
-*Generated 2026-06-29 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-06-30 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
