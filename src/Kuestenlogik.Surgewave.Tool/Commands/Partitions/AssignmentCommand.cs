@@ -22,7 +22,7 @@ public class AssignmentCommand : CommandBase
 
         try
         {
-            using var http = new HttpClient { BaseAddress = new Uri($"http://{host}:{port}") };
+            using var http = BrokerAdminHttp.Create(host);
             var response = await http.GetAsync("/api/partitions/assignment", ct);
             var json = await response.Content.ReadAsStringAsync(ct);
 

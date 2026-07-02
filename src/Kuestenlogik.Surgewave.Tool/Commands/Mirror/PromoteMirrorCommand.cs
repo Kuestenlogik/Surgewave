@@ -1,6 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using Spectre.Console;
+using Kuestenlogik.Surgewave.Cli.Commands.Link;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Mirror;
 
@@ -10,12 +10,12 @@ namespace Kuestenlogik.Surgewave.Cli.Commands.Mirror;
 public class PromoteMirrorCommand : CommandBase
 {
     private readonly Argument<string> _topicArgument = new("topic") { Description = "Name of the mirror topic to promote" };
-    private readonly Option<int> _timeoutOption = new("--timeout", "-t") { Description = "Timeout in seconds to wait for zero lag", DefaultValueFactory = _ => 60 };
+    private readonly Option<string> _linkOption = new("--link", "-l") { Description = "Cluster link ID the mirror topic belongs to", Required = true };
 
     public PromoteMirrorCommand() : base("promote", "Promote a mirror topic to writable (planned migration)")
     {
         Arguments.Add(_topicArgument);
-        Options.Add(_timeoutOption);
+        Options.Add(_linkOption);
         this.SetAction(ExecuteAsync);
     }
 
@@ -23,24 +23,37 @@ public class PromoteMirrorCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var topic = parseResult.GetValue(_topicArgument)!;
-        var timeout = parseResult.GetValue(_timeoutOption);
+        var linkId = parseResult.GetValue(_linkOption)!;
+        var format = GetFormat(parseResult);
 
         try
         {
-            await using var client = new Kuestenlogik.Surgewave.Client.Native.SurgewaveNativeClient(host, port);
-            await client.ConnectAsync(ct);
+            using var http = BrokerAdminHttp.Create(host);
+            var response = await http.PostAsync(
+                $"/api/cluster-links/{Uri.EscapeDataString(linkId)}/mirror-topics/{Uri.EscapeDataString(topic)}/promote",
+                null,
+                ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
 
-            AnsiConsole.Status()
-                .Start($"Promoting mirror topic '{topic}'...", ctx =>
-                {
-                    ctx.Spinner(Spinner.Known.Dots);
-                    ctx.SpinnerStyle(Style.Parse("green"));
-                    // In a real implementation, this would call the broker API
-                    Thread.Sleep(1000);
-                });
+            if (!response.IsSuccessStatusCode)
+            {
+                WriteError($"Failed to promote mirror topic '{topic}': {response.StatusCode} — {LinkApi.ExtractErrorMessage(body)}");
+                return 1;
+            }
 
-            WriteSuccess($"Mirror topic '{topic}' promoted to writable.");
-            WriteWarning("Consumers may need to restart to pick up the new state.");
+            if (format == OutputFormat.Json)
+            {
+                Console.WriteLine(body);
+            }
+            else if (format == OutputFormat.Plain)
+            {
+                Console.WriteLine($"promoted {topic} link={linkId}");
+            }
+            else
+            {
+                WriteSuccess($"Mirror topic '{topic}' promoted to writable.");
+                WriteWarning("Consumers may need to restart to pick up the new state.");
+            }
 
             return 0;
         }

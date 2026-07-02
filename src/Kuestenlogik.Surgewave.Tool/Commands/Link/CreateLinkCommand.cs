@@ -1,7 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Net.Http.Json;
 using System.Text.Json;
-using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Link;
 
@@ -12,9 +12,7 @@ public class CreateLinkCommand : CommandBase
 {
     private readonly Option<string> _linkIdOption = new("--link-id", "-l") { Description = "Unique identifier for this cluster link", Required = true };
     private readonly Option<string> _remoteOption = new("--remote", "-r") { Description = "Remote bootstrap servers (host:port,...)", Required = true };
-    private readonly Option<string> _topicFilterOption = new("--topic-filter") { Description = "Regex filter for topics to replicate", DefaultValueFactory = _ => ".*" };
-    private readonly Option<int> _fetcherThreadsOption = new("--fetcher-threads") { Description = "Number of fetcher threads", DefaultValueFactory = _ => 4 };
-    private readonly Option<int> _fetchIntervalOption = new("--fetch-interval-ms") { Description = "Fetch interval in milliseconds", DefaultValueFactory = _ => 500 };
+    private readonly Option<string?> _topicFilterOption = new("--topic-filter") { Description = "Regex filter for topics to replicate (default: all topics)" };
     private readonly Option<bool> _syncOffsetsOption = new("--sync-offsets") { Description = "Sync consumer group offsets", DefaultValueFactory = _ => true };
     private readonly Option<bool> _syncConfigsOption = new("--sync-configs") { Description = "Sync topic configurations", DefaultValueFactory = _ => true };
 
@@ -23,8 +21,6 @@ public class CreateLinkCommand : CommandBase
         Options.Add(_linkIdOption);
         Options.Add(_remoteOption);
         Options.Add(_topicFilterOption);
-        Options.Add(_fetcherThreadsOption);
-        Options.Add(_fetchIntervalOption);
         Options.Add(_syncOffsetsOption);
         Options.Add(_syncConfigsOption);
         this.SetAction(ExecuteAsync);
@@ -36,8 +32,6 @@ public class CreateLinkCommand : CommandBase
         var linkId = parseResult.GetValue(_linkIdOption)!;
         var remote = parseResult.GetValue(_remoteOption)!;
         var topicFilter = parseResult.GetValue(_topicFilterOption);
-        var fetcherThreads = parseResult.GetValue(_fetcherThreadsOption);
-        var fetchIntervalMs = parseResult.GetValue(_fetchIntervalOption);
         var syncOffsets = parseResult.GetValue(_syncOffsetsOption);
         var syncConfigs = parseResult.GetValue(_syncConfigsOption);
         var format = GetFormat(parseResult);
@@ -46,23 +40,29 @@ public class CreateLinkCommand : CommandBase
 
         try
         {
-            await using var client = new Kuestenlogik.Surgewave.Client.Native.SurgewaveNativeClient(host, port);
-            await client.ConnectAsync(ct);
+            using var http = BrokerAdminHttp.Create(host);
 
-            var config = new
+            var request = new
             {
-                LinkId = linkId,
-                RemoteBootstrapServers = remote,
-                TopicFilter = topicFilter,
-                FetcherThreads = fetcherThreads,
-                FetchIntervalMs = fetchIntervalMs,
-                SyncConsumerOffsets = syncOffsets,
-                SyncTopicConfigs = syncConfigs
+                linkId,
+                remoteBootstrapServers = remote,
+                topicFilter,
+                syncConsumerOffsets = syncOffsets,
+                syncTopicConfigs = syncConfigs
             };
+
+            var response = await http.PostAsJsonAsync("/api/cluster-links", request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                WriteError($"Failed to create cluster link: {response.StatusCode} — {LinkApi.ExtractErrorMessage(json)}");
+                return 1;
+            }
 
             if (format == OutputFormat.Json)
             {
-                Console.WriteLine(JsonSerializer.Serialize(config, JsonOptions.Indented));
+                Console.WriteLine(json);
             }
             else if (format == OutputFormat.Plain)
             {
@@ -70,20 +70,8 @@ public class CreateLinkCommand : CommandBase
             }
             else
             {
-                var table = new Table();
-                table.AddColumn("Property");
-                table.AddColumn("Value");
-                table.Title = new TableTitle($"[bold]Cluster Link: {linkId}[/]");
-
-                table.AddRow("Link ID", linkId);
-                table.AddRow("Remote", remote);
-                table.AddRow("Topic Filter", topicFilter ?? ".*");
-                table.AddRow("Fetcher Threads", fetcherThreads.ToString());
-                table.AddRow("Fetch Interval", $"{fetchIntervalMs}ms");
-                table.AddRow("Sync Offsets", syncOffsets.ToString());
-                table.AddRow("Sync Configs", syncConfigs.ToString());
-
-                AnsiConsole.Write(table);
+                using var doc = JsonDocument.Parse(json);
+                LinkApi.WriteStatusGrid(doc.RootElement);
                 WriteSuccess($"Cluster link '{linkId}' created.");
             }
 

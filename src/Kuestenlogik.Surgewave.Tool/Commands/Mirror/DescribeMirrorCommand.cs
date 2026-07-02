@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Json;
+using Kuestenlogik.Surgewave.Client.Native;
 using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Mirror;
@@ -22,35 +23,52 @@ public class DescribeMirrorCommand : CommandBase
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var name = parseResult.GetValue(_nameArgument);
+        var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
 
         WriteVerbose(parseResult, $"Fetching details for replication flow '{name}'...");
 
         try
         {
-            // In a real implementation, this would query Connect API
+            await using var client = new SurgewaveNativeClient(host, port);
+            await client.ConnectAsync(ct);
+
+            var info = await client.Connect.GetConnectorAsync($"{name}-source", ct);
+            if (info == null)
+            {
+                WriteError($"Replication flow '{name}' not found (no connector '{name}-source')");
+                return 1;
+            }
+
+            var config = info.Config;
+
+            // Companion connectors are optional — check what actually exists
+            var checkpointStatus = await client.Connect.GetConnectorStatusAsync($"{name}-checkpoint", ct);
+            var heartbeatStatus = await client.Connect.GetConnectorStatusAsync($"{name}-heartbeat", ct);
+
             var details = new
             {
                 Name = name,
-                Status = "RUNNING",
-                SourceCluster = new { Alias = "dc1", BootstrapServers = "dc1-kafka:9092" },
-                TargetCluster = new { Alias = "dc2", BootstrapServers = "dc2-kafka:9092" },
-                Topics = new[] { "orders", "payments", "users" },
-                TopicsPattern = ".*",
-                Tasks = 4,
-                Config = new
+                Status = info.State.ToUpperInvariant(),
+                SourceCluster = new
                 {
-                    SyncGroupOffsets = true,
-                    EmitHeartbeats = true,
-                    EmitCheckpoints = true,
-                    ReplicationPolicy = "DefaultReplicationPolicy"
+                    Alias = config.GetValueOrDefault("source.cluster.alias", "unknown"),
+                    BootstrapServers = config.GetValueOrDefault("source.bootstrap.servers", "unknown")
                 },
-                Metrics = new
+                TargetCluster = new
                 {
-                    RecordsReplicated = 1234567,
-                    BytesReplicated = 567890123,
-                    CurrentLagMs = 150,
-                    LastHeartbeat = DateTimeOffset.UtcNow.AddSeconds(-5)
+                    Alias = config.GetValueOrDefault("target.cluster.alias", "unknown"),
+                    BootstrapServers = config.GetValueOrDefault("target.bootstrap.servers", "unknown")
+                },
+                TopicsPattern = config.GetValueOrDefault("topics", ".*"),
+                TopicsWhitelist = config.GetValueOrDefault("topics.whitelist", ""),
+                TopicsBlacklist = config.GetValueOrDefault("topics.blacklist", ""),
+                Tasks = info.Tasks.Count,
+                Connectors = new
+                {
+                    Source = info.State.ToUpperInvariant(),
+                    Checkpoint = checkpointStatus?.State.ToUpperInvariant(),
+                    Heartbeat = heartbeatStatus?.State.ToUpperInvariant()
                 }
             };
 
@@ -60,62 +78,56 @@ public class DescribeMirrorCommand : CommandBase
             }
             else if (format == OutputFormat.Plain)
             {
-                Console.WriteLine($"{details.Name}\t{details.Status}\t{details.SourceCluster.Alias}\t{details.TargetCluster.Alias}\t{details.TopicsPattern}\t{string.Join(",", details.Topics)}\t{details.Tasks}");
-                Console.WriteLine($"  SyncGroupOffsets\t{details.Config.SyncGroupOffsets}");
-                Console.WriteLine($"  EmitHeartbeats\t{details.Config.EmitHeartbeats}");
-                Console.WriteLine($"  EmitCheckpoints\t{details.Config.EmitCheckpoints}");
-                Console.WriteLine($"  ReplicationPolicy\t{details.Config.ReplicationPolicy}");
+                Console.WriteLine($"{details.Name}\t{details.Status}\t{details.SourceCluster.Alias}\t{details.TargetCluster.Alias}\t{details.TopicsPattern}\t{details.Tasks}");
+                Console.WriteLine($"  Checkpoint\t{details.Connectors.Checkpoint ?? "not deployed"}");
+                Console.WriteLine($"  Heartbeat\t{details.Connectors.Heartbeat ?? "not deployed"}");
             }
             else
             {
-                var grid = new Grid();
-                grid.AddColumn();
-                grid.AddColumn();
-
                 AnsiConsole.MarkupLine($"[bold]Replication Flow: {name}[/]\n");
+
+                var statusColor = details.Status switch
+                {
+                    "RUNNING" => "green",
+                    "PAUSED" => "yellow",
+                    "FAILED" => "red",
+                    _ => "dim"
+                };
 
                 var table = new Table();
                 table.AddColumn("Property");
                 table.AddColumn("Value");
                 table.Border = TableBorder.Rounded;
 
-                table.AddRow("Status", $"[green]{details.Status}[/]");
+                table.AddRow("Status", $"[{statusColor}]{details.Status}[/]");
                 table.AddRow("Source Cluster", $"{details.SourceCluster.Alias} ({details.SourceCluster.BootstrapServers})");
                 table.AddRow("Target Cluster", $"{details.TargetCluster.Alias} ({details.TargetCluster.BootstrapServers})");
                 table.AddRow("Topics Pattern", details.TopicsPattern);
-                table.AddRow("Active Topics", string.Join(", ", details.Topics));
+
+                if (!string.IsNullOrEmpty(details.TopicsWhitelist))
+                    table.AddRow("Topics Whitelist", details.TopicsWhitelist);
+                if (!string.IsNullOrEmpty(details.TopicsBlacklist))
+                    table.AddRow("Topics Blacklist", details.TopicsBlacklist);
+
                 table.AddRow("Tasks", details.Tasks.ToString());
 
                 AnsiConsole.Write(table);
 
-                AnsiConsole.MarkupLine("\n[bold]Configuration[/]");
-                var configTable = new Table();
-                configTable.AddColumn("Setting");
-                configTable.AddColumn("Value");
-                configTable.Border = TableBorder.Simple;
+                AnsiConsole.MarkupLine("\n[bold]Connectors[/]");
+                var connectorTable = new Table();
+                connectorTable.AddColumn("Connector");
+                connectorTable.AddColumn("State");
+                connectorTable.Border = TableBorder.Simple;
 
-                configTable.AddRow("Sync Group Offsets", details.Config.SyncGroupOffsets ? "yes" : "no");
-                configTable.AddRow("Emit Heartbeats", details.Config.EmitHeartbeats ? "yes" : "no");
-                configTable.AddRow("Emit Checkpoints", details.Config.EmitCheckpoints ? "yes" : "no");
-                configTable.AddRow("Replication Policy", details.Config.ReplicationPolicy);
+                connectorTable.AddRow($"{name}-source", $"[{statusColor}]{details.Connectors.Source}[/]");
+                connectorTable.AddRow($"{name}-checkpoint", details.Connectors.Checkpoint ?? "[dim]not deployed[/]");
+                connectorTable.AddRow($"{name}-heartbeat", details.Connectors.Heartbeat ?? "[dim]not deployed[/]");
 
-                AnsiConsole.Write(configTable);
+                AnsiConsole.Write(connectorTable);
 
-                AnsiConsole.MarkupLine("\n[bold]Metrics[/]");
-                var metricsTable = new Table();
-                metricsTable.AddColumn("Metric");
-                metricsTable.AddColumn("Value");
-                metricsTable.Border = TableBorder.Simple;
-
-                metricsTable.AddRow("Records Replicated", details.Metrics.RecordsReplicated.ToString("N0"));
-                metricsTable.AddRow("Bytes Replicated", FormatBytes(details.Metrics.BytesReplicated));
-                metricsTable.AddRow("Current Lag", $"{details.Metrics.CurrentLagMs}ms");
-                metricsTable.AddRow("Last Heartbeat", details.Metrics.LastHeartbeat.ToString("o"));
-
-                AnsiConsole.Write(metricsTable);
+                AnsiConsole.MarkupLine("\n[dim]Use 'surgewave mirror status' for per-task states.[/]");
             }
 
-            await Task.CompletedTask;
             return 0;
         }
         catch (Exception ex)
@@ -123,20 +135,5 @@ public class DescribeMirrorCommand : CommandBase
             WriteError(ex);
             return 1;
         }
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        string[] suffixes = ["B", "KB", "MB", "GB", "TB"];
-        int index = 0;
-        double size = bytes;
-
-        while (size >= 1024 && index < suffixes.Length - 1)
-        {
-            size /= 1024;
-            index++;
-        }
-
-        return $"{size:F2} {suffixes[index]}";
     }
 }

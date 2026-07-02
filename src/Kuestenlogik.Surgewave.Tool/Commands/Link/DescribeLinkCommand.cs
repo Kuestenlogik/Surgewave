@@ -1,7 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Json;
-using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Link;
 
@@ -27,38 +26,33 @@ public class DescribeLinkCommand : CommandBase
 
         try
         {
-            await using var client = new Kuestenlogik.Surgewave.Client.Native.SurgewaveNativeClient(host, port);
-            await client.ConnectAsync(ct);
+            using var http = BrokerAdminHttp.Create(host);
+            var response = await http.GetAsync($"/api/cluster-links/{Uri.EscapeDataString(linkId)}", ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
 
-            // Placeholder
-            var status = new
+            if (!response.IsSuccessStatusCode)
             {
-                LinkId = linkId,
-                State = "ACTIVE",
-                Remote = "unknown",
-                MirroredTopics = 0,
-                TotalLag = 0L
-            };
+                WriteError($"Failed to describe cluster link '{linkId}': {response.StatusCode} — {LinkApi.ExtractErrorMessage(json)}");
+                return 1;
+            }
 
             if (format == OutputFormat.Json)
             {
-                Console.WriteLine(JsonSerializer.Serialize(status, JsonOptions.Indented));
+                Console.WriteLine(json);
             }
             else if (format == OutputFormat.Plain)
             {
-                Console.WriteLine($"{status.LinkId}\t{status.State}\t{status.Remote}\t{status.MirroredTopics}\t{status.TotalLag}");
+                using var doc = JsonDocument.Parse(json);
+                var status = doc.RootElement;
+                Console.WriteLine(
+                    $"{LinkApi.GetString(status, "linkId")}\t{LinkApi.GetString(status, "state")}\t" +
+                    $"{LinkApi.GetString(status, "remoteClusterId")}\t{LinkApi.GetInt64(status, "mirroredTopicCount")}\t" +
+                    $"{LinkApi.GetInt64(status, "totalLag")}\t{LinkApi.GetString(status, "lastFetch")}");
             }
             else
             {
-                var grid = new Grid();
-                grid.AddColumn();
-                grid.AddColumn();
-                grid.AddRow("[bold]Link ID:[/]", status.LinkId);
-                grid.AddRow("[bold]State:[/]", $"[green]{status.State}[/]");
-                grid.AddRow("[bold]Remote:[/]", status.Remote);
-                grid.AddRow("[bold]Mirrored Topics:[/]", status.MirroredTopics.ToString());
-                grid.AddRow("[bold]Total Lag:[/]", $"{status.TotalLag} messages");
-                AnsiConsole.Write(grid);
+                using var doc = JsonDocument.Parse(json);
+                LinkApi.WriteStatusGrid(doc.RootElement);
             }
 
             return 0;
