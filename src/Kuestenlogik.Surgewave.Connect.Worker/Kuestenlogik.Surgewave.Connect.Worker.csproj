@@ -29,7 +29,7 @@
   <!-- Container Publishing (.NET Native) -->
   <PropertyGroup>
     <ContainerRepository>surgewave/surgewave-connect</ContainerRepository>
-    <ContainerImageTag>0.1.0</ContainerImageTag>
+    <ContainerImageTag>$(Version)</ContainerImageTag>
     <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>
     <ContainerFamily>jammy</ContainerFamily>
   </PropertyGroup>

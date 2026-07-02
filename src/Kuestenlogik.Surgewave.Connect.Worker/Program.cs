@@ -1,3 +1,4 @@
+using System.Reflection;
 using Kuestenlogik.Surgewave.Api.Grpc.Server;
 using Kuestenlogik.Surgewave.Client;
 using Kuestenlogik.Surgewave.Connect;
@@ -64,8 +65,14 @@ builder.Services.AddSingleton(_ => ConnectServiceHolder.Instance
 var app = builder.Build();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
-logger.LogInformation("Surgewave Connect Worker v0.1.0 — {Mode} Kafka Connect runtime",
-    distributed ? "Distributed" : "Standalone");
+// Version aus der Assembly (SemVer inkl. Prerelease, Build-Metadaten nach '+' entfernt)
+var workerVersion = typeof(Program).Assembly
+    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion is { } informational
+    ? informational.Split('+')[0]
+    : typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+
+logger.LogInformation("Surgewave Connect Worker v{Version} — {Mode} Kafka Connect runtime",
+    workerVersion, distributed ? "Distributed" : "Standalone");
 
 // Initialize plugin discovery
 var pluginLoader = app.Services.GetRequiredService<PluginLoader>();
@@ -197,7 +204,7 @@ app.MapGrpcService<ConnectServiceImpl>();
 // Root endpoint for health/info
 app.MapGet("/", () => Results.Ok(new
 {
-    version = "0.1.0",
+    version = workerVersion,
     protocol = surgewaveClient.Protocol.ToString().ToLowerInvariant(),
     grpc = true,
     distributed,
