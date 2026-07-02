@@ -121,6 +121,11 @@
          nicht (Bowire serviert die Tap-UI zur Laufzeit aus EmbeddedResources)
          und wuerde die Datei sonst als Static-Web-Asset mitverpacken. -->
     <PackageReference Include="Kuestenlogik.Bowire" ExcludeAssets="contentFiles" />
+    <!-- surgewave://-Protokoll fuer den /bowire-Browser (inkl. embedded-Tap).
+         Wird von BowireProtocolRegistry per Assembly-Scan entdeckt; die
+         Surgewave.Client-Abhaengigkeit des Pakets wird durch die lokale
+         ProjectReference ersetzt. -->
+    <PackageReference Include="Kuestenlogik.Bowire.Protocol.Surgewave" ExcludeAssets="contentFiles" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <PackageReference Include="OpenTelemetry" />
