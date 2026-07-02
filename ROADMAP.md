@@ -16,7 +16,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.3 — Runnable end-to-end
 
-- [#46](https://github.com/Kuestenlogik/Surgewave/issues/46) **v0.3: Wire orphaned Control features (HttpClient base address, PipelineChat/Queue/CDC, ClusterMembershipHandler)** 
 - [#47](https://github.com/Kuestenlogik/Surgewave/issues/47) **v0.3: Message produce, offset-for-timestamp and consumer-lag APIs (REST + native)** 
 - [#48](https://github.com/Kuestenlogik/Surgewave/issues/48) **v0.3: Remove fake-success admin surfaces (broker config, reassignments, ElectLeader, ACL, compaction)** 
 - [#49](https://github.com/Kuestenlogik/Surgewave/issues/49) **v0.3: Cluster-links management API (/api/cluster-links)** 
