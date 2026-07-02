@@ -10,13 +10,17 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.4 — Production hardening & trustworthy admin
 
-- [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `kind:feature` `area:broker` `track:performance` `P1`
+- [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `area:broker` `track:performance`
 
 ## Backlog
 
+### v0.3 — Runnable end-to-end
+
+- [#46](https://github.com/Kuestenlogik/Surgewave/issues/46) **v0.3: Wire orphaned Control features (HttpClient base address, PipelineChat/Queue/CDC, ClusterMembershipHandler)** 
+
 ### v0.4 — Production hardening & trustworthy admin
 
-- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `kind:debt` `area:multi` `P2`
+- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
 - [#37](https://github.com/Kuestenlogik/Surgewave/issues/37) **Server-side role enforcement — RoleManagement page is Preview** 
 - [#38](https://github.com/Kuestenlogik/Surgewave/issues/38) **Server-side alert rule evaluation — alert rules only evaluate while UI is open** 
 - [#39](https://github.com/Kuestenlogik/Surgewave/issues/39) **Control UI for KV Store (/api/kv) ** 
@@ -24,22 +28,22 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.5 — AI-friendly broker
 
-- [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `kind:feature` `area:schema` `P2`
-- [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `kind:feature` `area:schema` `track:ai-pipelines` `P1`
+- [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `area:schema`
+- [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `area:schema` `track:ai-pipelines`
 
 ### v1.0 — first stable
 
-- [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `kind:feature` `area:multi` `P1`
-- [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `kind:feature` `area:clustering` `track:cluster-correctness` `P2`
-- [#7](https://github.com/Kuestenlogik/Surgewave/issues/7) **G12 — Cluster-linking-grade geo-replication** `kind:feature` `area:clustering` `P2`
+- [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `area:multi`
+- [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `area:clustering` `track:cluster-correctness`
+- [#7](https://github.com/Kuestenlogik/Surgewave/issues/7) **G12 — Cluster-linking-grade geo-replication** `area:clustering`
 
 ### Later
 
-- [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `kind:feature` `area:connect` `P3`
-- [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `kind:feature` `area:streams` `P2`
-- [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `kind:feature` `area:broker` `track:transport` `P2`
-- [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `kind:debt` `area:observability` `track:transport` `P3`
-- [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `kind:docs` `area:docs` `P2`
+- [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `area:connect`
+- [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
+- [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
+- [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
+- [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
 - [#41](https://github.com/Kuestenlogik/Surgewave/issues/41) **Decouple Kafka protocol behind the IProtocolPlugin boundary (broker must run without Protocol.Kafka assembly)** 
