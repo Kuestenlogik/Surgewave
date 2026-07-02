@@ -64,18 +64,28 @@ internal sealed class GenericKafkaConsumer<TKey, TValue> : IConsumer<TKey, TValu
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _inner.Subscribe(topics);
-        _assignment.Clear();
-        foreach (var topic in topics)
-        {
-            _assignment.Add((topic, 0)); // Kafka consumer handles partition discovery
-        }
+        SyncAssignmentFromInner();
     }
 
     /// <inheritdoc />
-    public Task SubscribeAsync(CancellationToken cancellationToken = default, params string[] topics)
+    public async Task SubscribeAsync(CancellationToken cancellationToken = default, params string[] topics)
     {
-        Subscribe(topics);
-        return Task.CompletedTask;
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        await _inner.SubscribeAsync(topics, cancellationToken).ConfigureAwait(false);
+        SyncAssignmentFromInner();
+    }
+
+    /// <summary>
+    /// Mirror the partitions discovered by the inner consumer's metadata
+    /// lookup into this consumer's assignment view.
+    /// </summary>
+    private void SyncAssignmentFromInner()
+    {
+        _assignment.Clear();
+        foreach (var tp in _inner.Assignment)
+        {
+            _assignment.Add((tp.Topic, tp.Partition));
+        }
     }
 
     /// <inheritdoc />

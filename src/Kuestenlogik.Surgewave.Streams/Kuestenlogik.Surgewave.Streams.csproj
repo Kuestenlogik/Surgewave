@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
   </ItemGroup>
 
 </Project>
