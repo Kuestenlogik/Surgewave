@@ -21,6 +21,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#38](https://github.com/Kuestenlogik/Surgewave/issues/38) **Server-side alert rule evaluation — alert rules only evaluate while UI is open** 
 - [#39](https://github.com/Kuestenlogik/Surgewave/issues/39) **Control UI for KV Store (/api/kv) ** 
 - [#40](https://github.com/Kuestenlogik/Surgewave/issues/40) **Control UI for transactions (/v3/transactions, cross-topic)** 
+- [#54](https://github.com/Kuestenlogik/Surgewave/issues/54) **Vulnerable transitives shipped by 0.3.0 packages: Microsoft.OpenApi 2.0.0 (fix available) + SQLitePCLRaw.lib.e_sqlite3 2.1.11 (no upstream fix yet)** 
 
 ### v0.5 — AI-friendly broker
 
