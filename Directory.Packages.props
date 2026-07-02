@@ -53,7 +53,11 @@
     <!-- OpenAPI + interactive workbench: Bowire ist Surgewave-weiter Default
          fuer REST/OpenAPI und gRPC Discovery (Scalar.AspNetCore wurde 2026-06
          abgeloest — Bowire deckt beide Surfaces ab + Mock-Recordings + Replay). -->
-    <PackageVersion Include="Kuestenlogik.Bowire" Version="1.5.1" />
+    <PackageVersion Include="Kuestenlogik.Bowire" Version="2.1.1" />
+    <!-- Surgewave-Protokoll-Plugin fuer Bowire: liefert das surgewave://-Schema
+         inkl. des surgewave://embedded-Taps auf ISurgewaveBrokerObservability.
+         Ohne dieses Paket kennt der /bowire-Browser nur gRPC. -->
+    <PackageVersion Include="Kuestenlogik.Bowire.Protocol.Surgewave" Version="0.1.4" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
     <!-- Utilities -->
     <PackageVersion Include="Cronos" Version="0.13.0" />

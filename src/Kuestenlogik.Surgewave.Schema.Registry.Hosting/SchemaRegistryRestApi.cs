@@ -164,14 +164,25 @@ public static class SchemaRegistryRestApi
     /// <summary>
     /// Maps Schema Registry REST API endpoints.
     /// </summary>
-    public static IEndpointRouteBuilder MapSurgewaveSchemaRegistry(this IEndpointRouteBuilder app)
+    /// <param name="app">The endpoint route builder.</param>
+    /// <param name="mapBowireWorkbench">
+    /// Whether to map the Bowire workbench at <c>/bowire</c>. Standalone
+    /// hosts (Schema.Registry.App) keep the default; hosts that already map
+    /// their own workbench on the same Kestrel (the broker does in
+    /// Program.cs) MUST pass <c>false</c> — a second MapBowire on the same
+    /// path throws AmbiguousMatchException on every /bowire request.
+    /// </param>
+    public static IEndpointRouteBuilder MapSurgewaveSchemaRegistry(this IEndpointRouteBuilder app, bool mapBowireWorkbench = true)
     {
         app.MapOpenApi();
-        app.MapBowire("/bowire", options =>
+        if (mapBowireWorkbench)
         {
-            options.Title = "Surgewave Schema Registry";
-            options.Description = "Interactive browser for the Confluent-compatible Schema Registry REST API";
-        });
+            app.MapBowire("/bowire", options =>
+            {
+                options.Title = "Surgewave Schema Registry";
+                options.Description = "Interactive browser for the Confluent-compatible Schema Registry REST API";
+            });
+        }
 
         var group = app.MapGroup("")
             .WithTags("Schema Registry");

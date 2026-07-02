@@ -263,8 +263,11 @@ public sealed class SurgewaveSchemaRegistryBrokerPlugin : IBrokerPlugin
             },
             getSchemaTypes: () => compatibilityChecker.GetSupportedTypes().ToList());
 
-        // Map REST + gRPC endpoints
-        app.MapSurgewaveSchemaRegistry();
+        // Map REST + gRPC endpoints. mapBowireWorkbench: false — der Broker
+        // mappt seine Workbench bereits in Program.cs; ein zweites
+        // MapBowire("/bowire") macht jede /bowire-Anfrage zum 500
+        // (AmbiguousMatchException).
+        app.MapSurgewaveSchemaRegistry(mapBowireWorkbench: false);
         app.MapGrpcService<SchemaRegistryServiceImpl>();
 
         // Schema Linking endpoints
