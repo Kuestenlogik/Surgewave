@@ -93,7 +93,8 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         PluginDiscovery? pluginDiscovery = null,
         DlqManager? dlqManager = null,
         Transactions.CrossTopicTransactionManager? crossTopicTxnManager = null,
-        KvBucketManager? kvBucketManager = null)
+        KvBucketManager? kvBucketManager = null,
+        Kuestenlogik.Surgewave.Core.Monitoring.ILagCalculator? lagCalculator = null)
     {
         _config = config;
         _logManager = logManager;
@@ -173,7 +174,8 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             dlqManager: dlqManager,
             crossTopicTxnManager: crossTopicTxnManager,
             kvBucketManager: kvBucketManager,
-            repositoryManager: _connectorRepositoryManager);
+            repositoryManager: _connectorRepositoryManager,
+            lagCalculator: lagCalculator);
 
         // Enterprise plugin: Kuestenlogik.Surgewave.Transport.SharedMemory
         // Shared memory handler requires the Kuestenlogik.Surgewave.Transport.SharedMemory package.

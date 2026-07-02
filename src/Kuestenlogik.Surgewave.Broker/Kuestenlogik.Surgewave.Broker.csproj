@@ -135,6 +135,7 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers\Kuestenlogik.Surgewave.Schema.Registry.Handlers.FlatBuffers.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Cdc.Hosting\Kuestenlogik.Surgewave.Cdc.Hosting.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect\Kuestenlogik.Surgewave.Connect.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect.Hosting\Kuestenlogik.Surgewave.Connect.Hosting.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Repository\Kuestenlogik.Surgewave.Plugins.Repository.csproj" />

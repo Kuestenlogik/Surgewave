@@ -809,6 +809,23 @@ public sealed class ConsumerGroupCoordinator(
         }
     }
 
+    /// <summary>
+    /// Snapshot of all Kafka-protocol consumer groups for lag reporting:
+    /// (GroupId, State, MemberCount). State follows the ListGroups semantics.
+    /// </summary>
+    public IReadOnlyList<(string GroupId, string State, int MemberCount)> GetGroupSummaries()
+    {
+        lock (_groupLock)
+        {
+            var result = new List<(string, string, int)>(_consumerGroups.Count);
+            foreach (var group in _consumerGroups.Values)
+            {
+                result.Add((group.GroupId, GetGroupState(group), group.Members.Count));
+            }
+            return result;
+        }
+    }
+
     public ListGroupsResponse HandleListGroups(ListGroupsRequest request)
     {
         lock (_groupLock)

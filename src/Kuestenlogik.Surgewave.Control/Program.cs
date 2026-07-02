@@ -128,6 +128,13 @@ AddBearerTokenHandler(builder.Services.AddHttpClient<IChatApiClient, ChatApiClie
 AddBearerTokenHandler(builder.Services.AddHttpClient<ITrustStoreApiClient, TrustStoreApiClient>(c => ConfigureHttpClient(c, 10)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<IRepositoryApiClient, RepositoryApiClient>(c => ConfigureHttpClient(c, 10)));
 
+// Named-Client "SurgewaveApi" + Roh-HttpClient (@inject HttpClient) — beide mit
+// Broker-BaseAddress, damit Seiten ohne typisierten SDK-Client (Operations,
+// CDC, Queue, IntentTopicCreator, SchemaEvolution, Wasm) relative /api/*-Pfade
+// gegen den Broker aufrufen können.
+AddBearerTokenHandler(builder.Services.AddHttpClient("SurgewaveApi", c => ConfigureHttpClient(c)));
+builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("SurgewaveApi"));
+
 // Register application state
 builder.Services.AddScoped<ClusterState>();
 builder.Services.AddScoped<NotificationState>();

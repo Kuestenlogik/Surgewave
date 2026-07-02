@@ -10,7 +10,9 @@ namespace Kuestenlogik.Surgewave.Broker.Native.Handlers;
 /// </summary>
 public sealed class NativeConsumerGroupHandler : NativeHandlerBase
 {
-    public NativeConsumerGroupHandler(NativeGroupCoordinator groupCoordinator)
+    public NativeConsumerGroupHandler(
+        NativeGroupCoordinator groupCoordinator,
+        Kuestenlogik.Surgewave.Core.Monitoring.ILagCalculator? lagCalculator = null)
     {
         Register<JoinGroupRequestPayload, ConsumerGroupOps.JoinGroupResult>(
             SurgewaveOpCode.JoinGroup, _ => new ConsumerGroupOps.JoinGroupOperation(groupCoordinator));
@@ -28,5 +30,16 @@ public sealed class NativeConsumerGroupHandler : NativeHandlerBase
             SurgewaveOpCode.DeleteGroup, _ => new ConsumerGroupOps.DeleteGroupOperation(groupCoordinator));
         Register<FindCoordinatorRequestPayload, ConsumerGroupOps.FindCoordinatorResult>(
             SurgewaveOpCode.FindCoordinator, ctx => new ConsumerGroupOps.FindCoordinatorOperation(groupCoordinator, ctx));
+
+        // Lag-Ops nur bei vorhandenem Calculator registrieren — Hosts ohne
+        // Lag-Infrastruktur (Tests, Embedded) antworten dann mit UnknownOpCode
+        // statt mit leeren Fake-Daten.
+        if (lagCalculator is not null)
+        {
+            Register<GetGroupLagRequestPayload, ConsumerGroupOps.GetGroupLagResult>(
+                SurgewaveOpCode.GetGroupLag, _ => new ConsumerGroupOps.GetGroupLagOperation(lagCalculator));
+            RegisterNoRequest<ConsumerGroupOps.GetLagSummaryResult>(
+                SurgewaveOpCode.GetLagSummary, _ => new ConsumerGroupOps.GetLagSummaryOperation(lagCalculator));
+        }
     }
 }

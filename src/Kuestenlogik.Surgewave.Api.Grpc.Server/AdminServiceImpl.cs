@@ -25,6 +25,33 @@ public delegate PartitionInfoDto? GetPartitionInfoDelegate(string topic, int par
 public delegate bool AlterBrokerConfigDelegate(Dictionary<string, string> configs);
 
 /// <summary>
+/// One broker config entry for DescribeBrokerConfig.
+/// </summary>
+public record BrokerConfigEntryDto(
+    string Key,
+    string Value,
+    bool IsDefault,
+    bool IsReadOnly,
+    bool IsSensitive);
+
+/// <summary>
+/// Delegate to enumerate the broker's effective config (static + dynamic overrides).
+/// </summary>
+public delegate List<BrokerConfigEntryDto> DescribeBrokerConfigDelegate();
+
+/// <summary>
+/// Delegate to set a single dynamic broker config entry.
+/// Returns null on success, otherwise a human-readable error.
+/// </summary>
+public delegate string? SetBrokerConfigDelegate(string key, string? value);
+
+/// <summary>
+/// Delegate to trigger a leader election for one partition.
+/// Returns true when a new leader was elected.
+/// </summary>
+public delegate Task<bool> ElectLeaderDelegate(string topic, int partition);
+
+/// <summary>
 /// gRPC AdminService implementation
 /// </summary>
 public class AdminServiceImpl : AdminService.AdminServiceBase
@@ -36,7 +63,9 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
     private readonly DateTime _startTime;
     private readonly GetPartitionInfoDelegate? _getPartitionInfo;
     private readonly AlterBrokerConfigDelegate? _alterBrokerConfig;
-    private readonly Dictionary<string, string> _dynamicConfig = new();
+    private readonly DescribeBrokerConfigDelegate? _describeBrokerConfig;
+    private readonly SetBrokerConfigDelegate? _setBrokerConfig;
+    private readonly ElectLeaderDelegate? _electLeader;
 
     public AdminServiceImpl(
         int brokerId,
@@ -44,7 +73,10 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
         int kafkaPort,
         int grpcPort,
         GetPartitionInfoDelegate? getPartitionInfo = null,
-        AlterBrokerConfigDelegate? alterBrokerConfig = null)
+        AlterBrokerConfigDelegate? alterBrokerConfig = null,
+        DescribeBrokerConfigDelegate? describeBrokerConfig = null,
+        SetBrokerConfigDelegate? setBrokerConfig = null,
+        ElectLeaderDelegate? electLeader = null)
     {
         _brokerId = brokerId;
         _host = host;
@@ -53,7 +85,17 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
         _startTime = DateTime.UtcNow;
         _getPartitionInfo = getPartitionInfo;
         _alterBrokerConfig = alterBrokerConfig;
+        _describeBrokerConfig = describeBrokerConfig;
+        _setBrokerConfig = setBrokerConfig;
+        _electLeader = electLeader;
     }
+
+    private static readonly string s_brokerVersion =
+        typeof(AdminServiceImpl).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            is [System.Reflection.AssemblyInformationalVersionAttribute attr, ..]
+            ? attr.InformationalVersion.Split('+')[0]
+            : typeof(AdminServiceImpl).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
     public override Task<GetBrokerInfoResponse> GetBrokerInfo(GetBrokerInfoRequest request, ServerCallContext context)
     {
@@ -63,7 +105,7 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
             Host = _host,
             KafkaPort = _kafkaPort,
             GrpcPort = _grpcPort,
-            Version = "1.0.0",
+            Version = s_brokerVersion,
             StartTime = new DateTimeOffset(_startTime).ToUnixTimeSeconds()
         });
     }
@@ -101,21 +143,49 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
         });
     }
 
-    public override Task<ElectLeaderResponse> ElectLeader(ElectLeaderRequest request, ServerCallContext context)
+    public override async Task<ElectLeaderResponse> ElectLeader(ElectLeaderRequest request, ServerCallContext context)
     {
         var response = new ElectLeaderResponse();
 
         foreach (var partition in request.Partitions)
         {
+            ResponseStatus status;
+            if (_electLeader is null)
+            {
+                status = new ResponseStatus
+                {
+                    ErrorCode = ErrorCode.Unknown,
+                    ErrorMessage = "Leader election is not available on this broker (no cluster controller wired)"
+                };
+            }
+            else
+            {
+                try
+                {
+                    var elected = await _electLeader(partition.Topic, partition.Partition);
+                    status = elected
+                        ? new ResponseStatus { ErrorCode = ErrorCode.None }
+                        : new ResponseStatus
+                        {
+                            ErrorCode = ErrorCode.Unknown,
+                            ErrorMessage = "Election failed (no eligible replica or not controller)"
+                        };
+                }
+                catch (Exception ex)
+                {
+                    status = new ResponseStatus { ErrorCode = ErrorCode.Unknown, ErrorMessage = ex.Message };
+                }
+            }
+
             response.Results.Add(new ElectionResult
             {
                 Topic = partition.Topic,
                 Partition = partition.Partition,
-                Status = new ResponseStatus { ErrorCode = ErrorCode.None }
+                Status = status
             });
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 
     public override Task<DescribeBrokerConfigResponse> DescribeBrokerConfig(DescribeBrokerConfigRequest request, ServerCallContext context)
@@ -125,7 +195,7 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
             Status = new ResponseStatus { ErrorCode = ErrorCode.None }
         };
 
-        // Static broker config
+        // Identity entries that only this layer knows.
         response.Configs.Add(new ConfigEntryDetail
         {
             Key = "broker.id",
@@ -153,17 +223,28 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
             IsSensitive = false
         });
 
-        // Dynamic config (can be changed at runtime)
-        foreach (var (key, value) in _dynamicConfig)
+        // Effective broker config (static values + dynamic overrides) from
+        // DynamicBrokerConfig — previously this returned an in-memory fake dict.
+        if (_describeBrokerConfig is not null)
         {
-            response.Configs.Add(new ConfigEntryDetail
+            var requestedKeys = request.ConfigKeys.Count > 0
+                ? new HashSet<string>(request.ConfigKeys, StringComparer.OrdinalIgnoreCase)
+                : null;
+
+            foreach (var entry in _describeBrokerConfig())
             {
-                Key = key,
-                Value = value,
-                IsDefault = false,
-                IsReadOnly = false,
-                IsSensitive = false
-            });
+                if (requestedKeys is not null && !requestedKeys.Contains(entry.Key))
+                    continue;
+
+                response.Configs.Add(new ConfigEntryDetail
+                {
+                    Key = entry.Key,
+                    Value = entry.Value,
+                    IsDefault = entry.IsDefault,
+                    IsReadOnly = entry.IsReadOnly,
+                    IsSensitive = entry.IsSensitive
+                });
+            }
         }
 
         return Task.FromResult(response);
@@ -171,16 +252,25 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
 
     public override Task<AlterBrokerConfigResponse> AlterBrokerConfig(AlterBrokerConfigRequest request, ServerCallContext context)
     {
-        // Update dynamic config entries
+        if (_setBrokerConfig is null)
+        {
+            return Task.FromResult(new AlterBrokerConfigResponse
+            {
+                Status = new ResponseStatus
+                {
+                    ErrorCode = ErrorCode.Unknown,
+                    ErrorMessage = "Dynamic broker config is not available on this broker"
+                }
+            });
+        }
+
+        var errors = new List<string>();
         foreach (var config in request.Configs)
         {
-            if (string.IsNullOrEmpty(config.Value))
+            var error = _setBrokerConfig(config.Key, string.IsNullOrEmpty(config.Value) ? null : config.Value);
+            if (error is not null)
             {
-                _dynamicConfig.Remove(config.Key);
-            }
-            else
-            {
-                _dynamicConfig[config.Key] = config.Value;
+                errors.Add($"{config.Key}: {error}");
             }
         }
 
@@ -193,7 +283,9 @@ public class AdminServiceImpl : AdminService.AdminServiceBase
 
         return Task.FromResult(new AlterBrokerConfigResponse
         {
-            Status = new ResponseStatus { ErrorCode = ErrorCode.None }
+            Status = errors.Count == 0
+                ? new ResponseStatus { ErrorCode = ErrorCode.None }
+                : new ResponseStatus { ErrorCode = ErrorCode.Unknown, ErrorMessage = string.Join("; ", errors) }
         });
     }
 }

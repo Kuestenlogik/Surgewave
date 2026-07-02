@@ -10,7 +10,7 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// </summary>
 public static class MessageBrowserRestApi
 {
-    public static IEndpointRouteBuilder MapMessageBrowser(this IEndpointRouteBuilder app, LogManager logManager)
+    public static IEndpointRouteBuilder MapMessageBrowser(this IEndpointRouteBuilder app, LogManager logManager, RecordBatchSerializer serializer)
     {
         var group = app.MapGroup("/admin/messages")
             .WithTags("Message Browser");
@@ -35,7 +35,171 @@ public static class MessageBrowserRestApi
             .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        group.MapPost("/{topic}", (string topic, ProduceMessageRequest request, CancellationToken ct) =>
+            ProduceMessage(logManager, serializer, topic, request, ct))
+            .WithName("ProduceMessage")
+            .WithSummary("Produce a single message to a topic")
+            .Produces<ProduceResultResponse>()
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapPost("/{topic}/batch", (string topic, List<ProduceMessageRequest> requests, CancellationToken ct) =>
+            ProduceBatch(logManager, serializer, topic, requests, ct))
+            .WithName("ProduceMessageBatch")
+            .WithSummary("Produce a batch of messages to a topic")
+            .Produces<List<ProduceResultResponse>>()
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapGet("/{topic}/{partition}/offset-for-timestamp", (string topic, int partition, long timestamp) =>
+            GetOffsetForTimestamp(logManager, topic, partition, timestamp))
+            .WithName("GetOffsetForTimestamp")
+            .WithSummary("Find the first offset at or after a unix-ms timestamp")
+            .Produces<OffsetForTimestampResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         return app;
+    }
+
+    private static async Task<IResult> ProduceMessage(
+        LogManager logManager,
+        RecordBatchSerializer serializer,
+        string topic,
+        ProduceMessageRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await ProduceSingleAsync(logManager, serializer, topic, request, ct);
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem($"Failed to produce message: {ex.Message}");
+        }
+    }
+
+    private static async Task<IResult> ProduceBatch(
+        LogManager logManager,
+        RecordBatchSerializer serializer,
+        string topic,
+        List<ProduceMessageRequest> requests,
+        CancellationToken ct)
+    {
+        try
+        {
+            var results = new List<ProduceResultResponse>(requests.Count);
+            foreach (var request in requests)
+            {
+                results.Add(await ProduceSingleAsync(logManager, serializer, topic, request, ct));
+            }
+            return Results.Ok(results);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem($"Failed to produce batch: {ex.Message}");
+        }
+    }
+
+    private static async Task<ProduceResultResponse> ProduceSingleAsync(
+        LogManager logManager,
+        RecordBatchSerializer serializer,
+        string topic,
+        ProduceMessageRequest request,
+        CancellationToken ct)
+    {
+        var metadata = logManager.GetTopicMetadata(topic);
+        var partitionCount = metadata?.PartitionCount ?? 1;
+        var partition = request.Partition is int explicitPartition && explicitPartition >= 0
+            ? explicitPartition
+            : PickPartition(request.Key, partitionCount);
+
+        var log = logManager.GetOrCreateLog(new TopicPartition { Topic = topic, Partition = partition });
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var message = new Message
+        {
+            Offset = 0,
+            Timestamp = timestamp,
+            Key = request.Key is null ? ReadOnlyMemory<byte>.Empty : Encoding.UTF8.GetBytes(request.Key),
+            Value = request.Value is null ? ReadOnlyMemory<byte>.Empty : Encoding.UTF8.GetBytes(request.Value),
+            Headers = SerializeHeaders(request.Headers)
+        };
+
+        var recordBatch = serializer.SerializeMessages([message]);
+        var baseOffset = await log.AppendBatchAsync(recordBatch, ct);
+
+        return new ProduceResultResponse(topic, partition, baseOffset, DateTimeOffset.FromUnixTimeMilliseconds(timestamp));
+    }
+
+    private static IResult GetOffsetForTimestamp(LogManager logManager, string topic, int partition, long timestamp)
+    {
+        var log = logManager.GetLog(new TopicPartition { Topic = topic, Partition = partition });
+        if (log is null)
+        {
+            return Results.NotFound(new { message = $"Partition {topic}-{partition} not found" });
+        }
+
+        // Timestamp nach der letzten Nachricht → NextOffset, damit die UI ans Log-Ende springt.
+        var offset = log.FindOffsetByTimestamp(timestamp) ?? log.NextOffset;
+        return Results.Ok(new OffsetForTimestampResponse(topic, partition, timestamp, offset));
+    }
+
+    /// <summary>
+    /// Deterministic keyed partitioning (FNV-1a over the UTF-8 key) so the same
+    /// key always lands on the same partition across broker restarts —
+    /// string.GetHashCode is randomized per process and unsuitable here.
+    /// Null keys spread randomly like Kafka's round-robin default.
+    /// </summary>
+    private static int PickPartition(string? key, int partitionCount)
+    {
+        if (partitionCount <= 1)
+            return 0;
+
+        if (string.IsNullOrEmpty(key))
+            return Random.Shared.Next(partitionCount);
+
+        var hash = 2166136261u;
+        foreach (var b in Encoding.UTF8.GetBytes(key))
+        {
+            hash ^= b;
+            hash *= 16777619;
+        }
+        return (int)(hash % (uint)partitionCount);
+    }
+
+    /// <summary>
+    /// Serializes string headers into the native-wire header block format
+    /// ([count:int32][keyLen:int32][key][valueLen:int32][value]..., BIG-endian)
+    /// that <see cref="RecordBatchSerializer"/> expects on <see cref="Message.Headers"/>
+    /// (see WriteHeadersFromNativeBlock).
+    /// </summary>
+    private static byte[] SerializeHeaders(Dictionary<string, string>? headers)
+    {
+        if (headers == null || headers.Count == 0)
+            return [];
+
+        var size = 4;
+        foreach (var (key, value) in headers)
+        {
+            size += 8 + Encoding.UTF8.GetByteCount(key) + Encoding.UTF8.GetByteCount(value);
+        }
+
+        var block = new byte[size];
+        var pos = 0;
+        BinaryPrimitives.WriteInt32BigEndian(block.AsSpan(pos), headers.Count);
+        pos += 4;
+
+        foreach (var (key, value) in headers)
+        {
+            var keyLen = Encoding.UTF8.GetBytes(key, block.AsSpan(pos + 4));
+            BinaryPrimitives.WriteInt32BigEndian(block.AsSpan(pos), keyLen);
+            pos += 4 + keyLen;
+
+            var valueLen = Encoding.UTF8.GetBytes(value, block.AsSpan(pos + 4));
+            BinaryPrimitives.WriteInt32BigEndian(block.AsSpan(pos), valueLen);
+            pos += 4 + valueLen;
+        }
+
+        return block;
     }
 
     private static async Task<IResult> GetMessages(
@@ -373,3 +537,31 @@ public sealed record MessageResponse(
     IReadOnlyDictionary<string, string> Headers,
     bool IsCompressed,
     int ValueSizeBytes);
+
+/// <summary>
+/// Request to produce a message. Partition null or -1 selects a partition
+/// automatically (keyed hash, otherwise random).
+/// </summary>
+public sealed record ProduceMessageRequest(
+    string? Key,
+    string? Value,
+    Dictionary<string, string>? Headers,
+    int? Partition);
+
+/// <summary>
+/// Result of producing a single message.
+/// </summary>
+public sealed record ProduceResultResponse(
+    string Topic,
+    int Partition,
+    long Offset,
+    DateTimeOffset Timestamp);
+
+/// <summary>
+/// Result of an offset-for-timestamp lookup.
+/// </summary>
+public sealed record OffsetForTimestampResponse(
+    string Topic,
+    int Partition,
+    long Timestamp,
+    long Offset);

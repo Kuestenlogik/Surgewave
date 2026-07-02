@@ -548,7 +548,10 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     {
         try
         {
-            var url = BuildUrl("/consumer-groups/lag", clusterId);
+            // Direkte Broker-REST-Route (ConsumerLagRestApi), nicht /v3-Transcoding —
+            // dort wuerde /consumer-groups/lag die DescribeGroup-Route mit
+            // group_id="lag" matchen und still eine leere Antwort liefern.
+            var url = "/api/consumer-groups/lag";
             var response = await _httpClient.GetFromJsonAsync<ConsumerLagListDto>(url, _jsonOptions, ct);
             return response?.Groups?.Select(MapConsumerGroupLag).ToList() ?? [];
         }
@@ -562,7 +565,7 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     {
         try
         {
-            var url = BuildUrl($"/consumer-groups/{Uri.EscapeDataString(groupId)}/lag", clusterId);
+            var url = $"/api/consumer-groups/{Uri.EscapeDataString(groupId)}/lag";
             var response = await _httpClient.GetFromJsonAsync<ConsumerGroupLagDto>(url, _jsonOptions, ct);
             return response != null ? MapConsumerGroupLag(response) : null;
         }
@@ -577,7 +580,7 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     {
         try
         {
-            var url = BuildUrl($"/consumer-groups/{Uri.EscapeDataString(groupId)}/offsets", clusterId);
+            var url = $"/api/consumer-groups/{Uri.EscapeDataString(groupId)}/offsets";
             var payload = new
             {
                 topic,
@@ -598,25 +601,28 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     {
         try
         {
+            // Transcodierte gRPC-Route (AdminService.DescribeBrokerConfig) —
+            // liefert die effektive Broker-Config aus DynamicBrokerConfig.
+            // Bei Fehlern ehrlich leer statt der frueheren Fake-Kafka-Defaults.
             var url = BuildUrl($"/brokers/{brokerId}/configs", clusterId);
-            var configs = await _httpClient.GetFromJsonAsync<List<BrokerConfigDto>>(url, _jsonOptions, ct);
-            if (configs == null) return GenerateDefaultBrokerConfigs(brokerId);
+            var response = await _httpClient.GetFromJsonAsync<DescribeBrokerConfigResponseDto>(url, _jsonOptions, ct);
+            if (response?.Configs == null) return [];
 
-            return configs.Select(c => new BrokerConfigEntry
+            return response.Configs.Select(c => new BrokerConfigEntry
             {
-                Key = c.Name ?? "",
+                Key = c.Key ?? "",
                 Value = c.Value ?? "",
-                DefaultValue = c.DefaultValue,
-                Source = Enum.TryParse<ConfigSource>(c.Source, true, out var src) ? src : ConfigSource.Default,
+                DefaultValue = null,
+                Source = c.IsDefault ? ConfigSource.StaticBroker : ConfigSource.DynamicBroker,
                 IsReadOnly = c.IsReadOnly,
                 IsSensitive = c.IsSensitive,
-                Documentation = c.Documentation,
-                Category = CategorizeConfig(c.Name ?? "")
+                Documentation = null,
+                Category = CategorizeConfig(c.Key ?? "")
             }).ToList();
         }
         catch
         {
-            return GenerateDefaultBrokerConfigs(brokerId);
+            return [];
         }
     }
 
@@ -625,7 +631,8 @@ public class SurgewaveApiClient : ISurgewaveApiClient
         try
         {
             var url = BuildUrl($"/brokers/{brokerId}/configs", clusterId);
-            var payload = new { key, value };
+            // AlterBrokerConfigRequest erwartet ein configs[]-Array (Proto-Transcoding).
+            var payload = new { configs = new[] { new { key, value } } };
             var response = await _httpClient.PutAsJsonAsync(url, payload, _jsonOptions, ct);
             return response.IsSuccessStatusCode;
         }
@@ -633,37 +640,6 @@ public class SurgewaveApiClient : ISurgewaveApiClient
         {
             return false;
         }
-    }
-
-    private static IReadOnlyList<BrokerConfigEntry> GenerateDefaultBrokerConfigs(int brokerId)
-    {
-        // Common Kafka broker configs with their typical defaults
-        return
-        [
-            new() { Key = "log.retention.hours", Value = "168", DefaultValue = "168", Category = "Log", Documentation = "Number of hours to keep a log file before deleting it" },
-            new() { Key = "log.retention.bytes", Value = "-1", DefaultValue = "-1", Category = "Log", Documentation = "Maximum size of the log before deleting it" },
-            new() { Key = "log.segment.bytes", Value = "1073741824", DefaultValue = "1073741824", Category = "Log", Documentation = "Size of a single log segment file in bytes" },
-            new() { Key = "log.roll.hours", Value = "168", DefaultValue = "168", Category = "Log", Documentation = "Maximum time before a new log segment is rolled out" },
-            new() { Key = "log.cleanup.policy", Value = "delete", DefaultValue = "delete", Category = "Log", Documentation = "Log cleanup policy (delete, compact, delete+compact)" },
-            new() { Key = "log.flush.interval.messages", Value = "9223372036854775807", DefaultValue = "9223372036854775807", Category = "Log", Documentation = "Number of messages accumulated before flushing to disk" },
-            new() { Key = "num.io.threads", Value = "8", DefaultValue = "8", Category = "Threading", Documentation = "Number of I/O threads for network requests" },
-            new() { Key = "num.network.threads", Value = "3", DefaultValue = "3", Category = "Threading", Documentation = "Number of network threads for handling requests" },
-            new() { Key = "num.partitions", Value = "1", DefaultValue = "1", Category = "Topic Defaults", Documentation = "Default number of partitions per topic" },
-            new() { Key = "default.replication.factor", Value = "1", DefaultValue = "1", Category = "Topic Defaults", Documentation = "Default replication factor for automatically created topics" },
-            new() { Key = "min.insync.replicas", Value = "1", DefaultValue = "1", Category = "Replication", Documentation = "Minimum number of ISR replicas needed to acknowledge a write" },
-            new() { Key = "replica.lag.time.max.ms", Value = "30000", DefaultValue = "30000", Category = "Replication", Documentation = "Maximum time a replica can be out of sync" },
-            new() { Key = "message.max.bytes", Value = "1048588", DefaultValue = "1048588", Category = "Messages", Documentation = "Maximum size of a message in bytes" },
-            new() { Key = "compression.type", Value = "producer", DefaultValue = "producer", Category = "Messages", Documentation = "Compression type for a given topic (none, gzip, snappy, lz4, zstd, producer)" },
-            new() { Key = "max.connections.per.ip", Value = "2147483647", DefaultValue = "2147483647", Category = "Network", Documentation = "Maximum number of connections allowed from each IP address" },
-            new() { Key = "socket.send.buffer.bytes", Value = "102400", DefaultValue = "102400", Category = "Network", Documentation = "SO_SNDBUF buffer size for socket connections" },
-            new() { Key = "socket.receive.buffer.bytes", Value = "102400", DefaultValue = "102400", Category = "Network", Documentation = "SO_RCVBUF buffer size for socket connections" },
-            new() { Key = "auto.create.topics.enable", Value = "true", DefaultValue = "true", Category = "Topic Defaults", Documentation = "Enable auto-creation of topics on the server" },
-            new() { Key = "delete.topic.enable", Value = "true", DefaultValue = "true", Category = "Topic Defaults", Documentation = "Enable topic deletion" },
-            new() { Key = "group.initial.rebalance.delay.ms", Value = "3000", DefaultValue = "3000", Category = "Consumer Groups", Documentation = "Delay for initial consumer group rebalance" },
-            new() { Key = "offsets.retention.minutes", Value = "10080", DefaultValue = "10080", Category = "Consumer Groups", Documentation = "Offset retention time in minutes" },
-            new() { Key = "transaction.state.log.replication.factor", Value = "1", DefaultValue = "1", Category = "Transactions", Documentation = "Replication factor for transaction state topic" },
-            new() { Key = "unclean.leader.election.enable", Value = "false", DefaultValue = "false", Category = "Replication", Documentation = "Allow unclean leader election as a last resort" },
-        ];
     }
 
     private static string CategorizeConfig(string key)
@@ -743,6 +719,8 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     }
 
     private record BrokerConfigDto(string? Name, string? Value, string? DefaultValue, string? Source, bool IsReadOnly, bool IsSensitive, string? Documentation);
+    private record DescribeBrokerConfigResponseDto(List<BrokerConfigDetailDto>? Configs);
+    private record BrokerConfigDetailDto(string? Key, string? Value, bool IsDefault, bool IsReadOnly, bool IsSensitive);
 
     private static ConsumerGroupLag MapConsumerGroupLag(ConsumerGroupLagDto dto) => new(
         dto.GroupId ?? "unknown",

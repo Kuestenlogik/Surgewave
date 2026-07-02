@@ -361,6 +361,9 @@ var activatedFeatures = new HashSet<string>(activatedPlugins.Select(p => p.Featu
 // plugins no longer need Program.cs locals passed in as constructor args.
 builder.Services.AddSingleton<BrokerMetrics>();
 builder.Services.AddSingleton<ClusterState>();
+// Singleton, weil er cluster.id auf Platte persistiert — zwei Instanzen
+// wären ein Race auf dieselbe Datei.
+builder.Services.AddSingleton<ClusterIdManager>();
 
 // Broker-side observability — a single channel-multiplexer that
 // lets in-process consumers (Bowire's surgewave://embedded tap is the
@@ -536,7 +539,8 @@ var logManager = app.Services.GetRequiredService<LogManager>();
 // Apply SIMD configuration from appsettings
 SimdBigEndian.MinBatchSize = config.SimdBatchThreshold;
 
-logger.LogInformation("Surgewave Broker v0.1.0 — Kafka wire-compatible streaming");
+logger.LogInformation("Surgewave Broker v{Version} — event streaming platform for .NET",
+    Kuestenlogik.Surgewave.Clustering.Upgrades.BrokerVersion.Current);
 
 
 
@@ -641,7 +645,39 @@ AdminServiceImplHolder.Instance = new AdminServiceImpl(
             [config.BrokerId],
             log.HighWatermark,
             log.LogStartOffset);
-    });
+    },
+    describeBrokerConfig: () =>
+    {
+        // Effektive Broker-Config aus DynamicBrokerConfig (statische Werte +
+        // persistierte dynamische Overrides) statt des frueheren In-Memory-Fakes.
+        var dyn = app.Services.GetRequiredService<DynamicBrokerConfig>();
+        var overrides = dyn.GetDynamicConfigs();
+        var entries = new List<BrokerConfigEntryDto>();
+        foreach (var key in DynamicBrokerConfig.DynamicConfigKeys
+                     .Concat(DynamicBrokerConfig.ReadOnlyConfigKeys)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            var value = dyn.GetConfig(key) ?? "";
+            var isSensitive = key.Contains("password", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("token", StringComparison.OrdinalIgnoreCase);
+            entries.Add(new BrokerConfigEntryDto(
+                key,
+                isSensitive && value.Length > 0 ? "********" : value,
+                IsDefault: !overrides.ContainsKey(key),
+                IsReadOnly: DynamicBrokerConfig.ReadOnlyConfigKeys.Contains(key),
+                IsSensitive: isSensitive));
+        }
+        return entries;
+    },
+    setBrokerConfig: (key, value) =>
+        app.Services.GetRequiredService<DynamicBrokerConfig>().SetConfig(key, value),
+    electLeader: (topic, partition) =>
+        clusterController.ElectLeaderAsync(
+            new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = partition },
+            preferredLeader: null,
+            CancellationToken.None));
 
 var shareGroupCoordinatorLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>();
 var queueViewManager = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Queue.IQueueViewManager>();
@@ -739,10 +775,25 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
         return new ClusterInfoDto(config.BrokerId, config.Host, config.Port, topics.Count, totalPartitions);
     },
     listBrokers: () =>
-    [
-        new BrokerInfoDto(config.BrokerId, config.Host, config.Port, true, true, null,
-            PeerTransport: clusteringConfig.InterBrokerTransport)
-    ],
+    {
+        // Echte Broker-Liste aus dem ClusterState statt hartkodiertem
+        // Single-Broker-Eintrag; im Single-Node-Betrieb registriert der
+        // ClusterController diesen Broker selbst.
+        var brokers = clusterState.Brokers.Values
+            .Select(b => new BrokerInfoDto(
+                b.BrokerId, b.Host, b.Port,
+                IsController: b.BrokerId == clusterState.ControllerId,
+                IsAlive: true,
+                b.Rack,
+                PeerTransport: clusteringConfig.InterBrokerTransport))
+            .OrderBy(b => b.BrokerId)
+            .ToList();
+
+        return brokers.Count > 0
+            ? brokers
+            : [new BrokerInfoDto(config.BrokerId, config.Host, config.Port, true, true, null,
+                PeerTransport: clusteringConfig.InterBrokerTransport)];
+    },
     getMetadata: (topicNames) =>
     {
         var allTopics = logManager.ListTopics().ToList();
@@ -759,8 +810,36 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
         )).ToList();
     },
     alterReassignments: (reassignments) =>
-        reassignments.Select(r => new ReassignmentResultDto(r.Topic, r.Partition, true, null)).ToList(),
-    listReassignments: () => [],
+    {
+        // Echte Ausführung über den PartitionReassignmentManager (gleicher
+        // Pfad wie der Kafka-Wire ClusterAdminHandler) statt Fake-Erfolg.
+        var manager = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>();
+        var plan = new Kuestenlogik.Surgewave.Clustering.Cluster.ReassignmentPlan
+        {
+            Version = 1,
+            Partitions = [.. reassignments.Select(r => new Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignment
+            {
+                Topic = r.Topic,
+                Partition = r.Partition,
+                Replicas = r.Replicas
+            })]
+        };
+        try
+        {
+            manager.ExecuteReassignmentAsync(plan, CancellationToken.None).GetAwaiter().GetResult();
+            return reassignments.Select(r => new ReassignmentResultDto(r.Topic, r.Partition, true, null)).ToList();
+        }
+        catch (Exception ex)
+        {
+            return reassignments.Select(r => new ReassignmentResultDto(r.Topic, r.Partition, false, ex.Message)).ToList();
+        }
+    },
+    listReassignments: () =>
+    {
+        var manager = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>();
+        return [.. manager.GetActiveReassignments().Select(s => new OngoingReassignmentDto(
+            s.Topic, s.Partition, s.TargetReplicas, s.AddingReplicas, s.RemovingReplicas))];
+    },
     triggerCompaction: async (partitions) =>
     {
         var result = await logManager.ApplyCompactionAsync(CancellationToken.None);
@@ -777,7 +856,14 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
         {
             for (int p = 0; p < topic.PartitionCount; p++)
             {
-                result.Add(new CompactionStatusDto(topic.Name, p, true, 0, 0.0));
+                var tp = new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic.Name, Partition = p };
+                var stats = logManager.GetCompactionStats(tp);
+                var dirtyRatio = logManager.GetDirtyRatio(tp) ?? 0.0;
+                result.Add(new CompactionStatusDto(
+                    topic.Name, p,
+                    CompactionEnabled: true,
+                    LastCompactionTime: stats?.LastCompaction.ToUnixTimeMilliseconds() ?? 0,
+                    CompactionRatio: dirtyRatio));
             }
         }
         return result;
@@ -1072,7 +1158,8 @@ SecurityServiceImplHolder.Instance = new SecurityServiceImpl(
     createAcls: (acls) =>
     {
         if (aclAuthorizer == null)
-            return acls.Select(_ => 0).ToList(); // Return success for all, but no-op
+            // Ehrlich statt Fake-Erfolg — gleiche Semantik wie SecurityApiHandler (SECURITY_DISABLED).
+            return acls.Select(_ => AclErrorCodes.SecurityDisabled).ToList();
 
         var errorCodes = new List<int>();
         foreach (var acl in acls)
@@ -1101,7 +1188,7 @@ SecurityServiceImplHolder.Instance = new SecurityServiceImpl(
     deleteAcls: (filters) =>
     {
         if (aclAuthorizer == null)
-            return filters.Select(_ => (new List<AclBindingDto>(), 0)).ToList();
+            return filters.Select(_ => (new List<AclBindingDto>(), AclErrorCodes.SecurityDisabled)).ToList();
 
         var results = new List<(List<AclBindingDto> MatchingAcls, int ErrorCode)>();
         foreach (var filter in filters)
@@ -1246,7 +1333,11 @@ IKafkaRequestHandler[] handlers =
         app.Services.GetRequiredService<ILogger<ClusterAdminHandler>>()),
     new QuotaApiHandler(quotaManager, quotaApiLogger),
     new DelegationTokenApiHandler(delegationTokenManager, delegationTokenApiLogger),
-    new TelemetryApiHandler(telemetryApiLogger, config.Telemetry, telemetryIngestor)
+    new TelemetryApiHandler(telemetryApiLogger, config.Telemetry, telemetryIngestor),
+    new ClusterMembershipHandler(
+        app.Services.GetRequiredService<ClusterIdManager>(),
+        clusterState,
+        app.Services.GetRequiredService<ILogger<ClusterMembershipHandler>>())
 ];
 var dispatcher = new RequestDispatcher(handlers);
 
@@ -1262,7 +1353,26 @@ var kvBucketManagerLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik
 var kvBucketManager = new Kuestenlogik.Surgewave.Broker.KeyValue.KvBucketManager(logManager, kvBucketManagerLogger);
 await kvBucketManager.RestoreFromTopicsAsync(app.Lifetime.ApplicationStopping);
 
-var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator, transactionCoordinator, quotaManager, protocolHandler, metrics, dispatcher, brokerLogger, consumerGroupV2Coordinator: consumerGroupV2Coordinator, streamsGroupCoordinator: streamsGroupCoordinator, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager);
+// Consumer-Lag-Berechnung: ein Calculator ueber dem gemeinsamen OffsetStore
+// (Kafka- UND Native-Consumer committen dorthin). Gruppen-Metadaten kommen aus
+// beiden Koordinatoren; Gruppen, die nur noch Offsets haben (keine aktiven
+// Member), erscheinen als "Empty".
+IEnumerable<(string GroupId, string State, int MemberCount)> GetGroupInfosForLag()
+{
+    var result = new Dictionary<string, (string GroupId, string State, int MemberCount)>(StringComparer.Ordinal);
+    foreach (var g in consumerGroupCoordinator.GetGroupSummaries())
+        result[g.GroupId] = g;
+    foreach (var g in nativeGroupCoordinator.ListGroups())
+        result.TryAdd(g.GroupId, (g.GroupId, g.State, 0));
+    foreach (var id in offsetStore.GetGroupIds())
+        result.TryAdd(id, (id, "Empty", 0));
+    return result.Values;
+}
+var lagCalculator = new Kuestenlogik.Surgewave.Core.Monitoring.DefaultLagCalculator(
+    new OffsetStoreProvider(offsetStore, GetGroupInfosForLag),
+    new LogManagerWatermarkProvider(logManager));
+
+var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator, transactionCoordinator, quotaManager, protocolHandler, metrics, dispatcher, brokerLogger, consumerGroupV2Coordinator: consumerGroupV2Coordinator, streamsGroupCoordinator: streamsGroupCoordinator, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator);
 
 // Publish the broker as the Surgewave stream handler so alternative transports
 // (QUIC, shared memory, ...) can pump connections into the shared pipeline.
@@ -1410,9 +1520,24 @@ app.MapSurgewaveBandwidthQuota(bandwidthQuotaManager);
 logger.LogInformation("  - Bandwidth Quota API: {Host}:{GrpcPort}/api/quotas/bandwidth{Suffix}",
     config.Host, config.GrpcPort, config.BandwidthQuota.Enabled ? "" : " (disabled)");
 
-// Map Message Browser REST API
-app.MapMessageBrowser(logManager);
+// Map Message Browser REST API (read + produce + offset-for-timestamp)
+app.MapMessageBrowser(logManager, recordBatchSerializer);
 logger.LogInformation("  - Message Browser:     {Host}:{GrpcPort}/admin/messages", config.Host, config.GrpcPort);
+
+// Map Queue Inspector REST API (QueueViewManager is always-on)
+app.MapSurgewaveQueue(app.Services.GetRequiredService<QueueViewManager>());
+logger.LogInformation("  - Queue API:           {Host}:{GrpcPort}/api/queue", config.Host, config.GrpcPort);
+
+// Map Consumer-Lag REST API (Lag-Dashboard + Offset-Reset in Control)
+int GetActiveMemberCount(string groupId)
+{
+    var kafkaMembers = consumerGroupCoordinator.GetGroupSummaries()
+        .FirstOrDefault(g => g.GroupId == groupId).MemberCount;
+    var nativeGroup = nativeGroupCoordinator.DescribeGroup(groupId);
+    return kafkaMembers + (nativeGroup?.Members.Count ?? 0);
+}
+app.MapConsumerLag(lagCalculator, offsetStore, logManager, GetActiveMemberCount);
+logger.LogInformation("  - Consumer Lag API:    {Host}:{GrpcPort}/api/consumer-groups/lag", config.Host, config.GrpcPort);
 
 // Map SQL Query REST API
 Kuestenlogik.Surgewave.Broker.Sql.SqlRestApi.MapSqlRestApi(app);

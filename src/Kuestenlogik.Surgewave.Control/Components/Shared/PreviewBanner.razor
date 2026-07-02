@@ -1,0 +1,19 @@
+@*
+    Preview banner — marks a page whose feature is not fully backed by the
+    broker yet (no backend, or browser-local state only). Honest signalling
+    instead of silently broken actions; the banner names what is missing.
+
+    Usage:
+
+        <PreviewBanner Text="Tenants are not persisted yet — the broker has no tenant API." />
+*@
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-4"
+          Icon="@Icons.Material.Filled.Science" data-testid="preview-banner">
+    <strong>Preview:</strong> @Text
+</MudAlert>
+
+@code {
+    /// <summary>Honest one-liner describing what is not wired up yet.</summary>
+    [Parameter, EditorRequired] public required string Text { get; set; }
+}

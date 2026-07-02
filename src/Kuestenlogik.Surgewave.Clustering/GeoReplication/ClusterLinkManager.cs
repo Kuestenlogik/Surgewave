@@ -192,10 +192,33 @@ public sealed partial class ClusterLinkManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Get all cluster links.
+    /// Get status of a specific link, or <c>null</c> if the link does not exist.
+    /// Non-throwing variant of <see cref="GetLinkStatus"/> for management APIs.
+    /// </summary>
+    public ClusterLinkStatus? GetLinkStatusOrNull(string linkId)
+    {
+        if (!_links.ContainsKey(linkId))
+            return null;
+
+        try
+        {
+            return GetLinkStatus(linkId);
+        }
+        catch (InvalidOperationException)
+        {
+            // Link was removed concurrently between the existence check and the status read.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get all cluster links. Links removed concurrently while enumerating are skipped.
     /// </summary>
     public List<ClusterLinkStatus> GetAllLinks() =>
-        _links.Keys.Select(GetLinkStatus).ToList();
+        _links.Keys
+            .Select(GetLinkStatusOrNull)
+            .OfType<ClusterLinkStatus>()
+            .ToList();
 
     /// <summary>
     /// Promote a mirror topic (planned migration).

@@ -5,11 +5,28 @@ option csharp_namespace = "Kuestenlogik.Surgewave.Api.Grpc";
 package klsurgewave;
 
 import "Protos/common.proto";
+import "google/api/annotations.proto";
 
 service AdminService {
   rpc ElectLeader(ElectLeaderRequest) returns (ElectLeaderResponse);
-  rpc DescribeBrokerConfig(DescribeBrokerConfigRequest) returns (DescribeBrokerConfigResponse);
-  rpc AlterBrokerConfig(AlterBrokerConfigRequest) returns (AlterBrokerConfigResponse);
+  rpc DescribeBrokerConfig(DescribeBrokerConfigRequest) returns (DescribeBrokerConfigResponse) {
+    option (google.api.http) = {
+      get: "/v3/clusters/{cluster_id}/brokers/{broker_id}/configs"
+      additional_bindings {
+        get: "/v3/brokers/{broker_id}/configs"
+      }
+    };
+  }
+  rpc AlterBrokerConfig(AlterBrokerConfigRequest) returns (AlterBrokerConfigResponse) {
+    option (google.api.http) = {
+      put: "/v3/clusters/{cluster_id}/brokers/{broker_id}/configs"
+      body: "*"
+      additional_bindings {
+        put: "/v3/brokers/{broker_id}/configs"
+        body: "*"
+      }
+    };
+  }
   rpc GetBrokerInfo(GetBrokerInfoRequest) returns (GetBrokerInfoResponse);
   rpc GetPartitionInfo(GetPartitionInfoRequest) returns (GetPartitionInfoResponse);
 }
@@ -38,6 +55,7 @@ message ElectionResult {
 message DescribeBrokerConfigRequest {
   int32 broker_id = 1;
   repeated string config_keys = 2;
+  string cluster_id = 3;
 }
 
 message DescribeBrokerConfigResponse {
@@ -48,6 +66,7 @@ message DescribeBrokerConfigResponse {
 message AlterBrokerConfigRequest {
   int32 broker_id = 1;
   repeated ConfigEntry configs = 2;
+  string cluster_id = 3;
 }
 
 message AlterBrokerConfigResponse {
