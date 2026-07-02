@@ -16,9 +16,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.3 — Runnable end-to-end
 
-- [#47](https://github.com/Kuestenlogik/Surgewave/issues/47) **v0.3: Message produce, offset-for-timestamp and consumer-lag APIs (REST + native)** 
-- [#48](https://github.com/Kuestenlogik/Surgewave/issues/48) **v0.3: Remove fake-success admin surfaces (broker config, reassignments, ElectLeader, ACL, compaction)** 
-- [#49](https://github.com/Kuestenlogik/Surgewave/issues/49) **v0.3: Cluster-links management API (/api/cluster-links)** 
 - [#50](https://github.com/Kuestenlogik/Surgewave/issues/50) **v0.3: Real CLI backends for link/mirror/cluster balance + admin REST URL fix** 
 - [#51](https://github.com/Kuestenlogik/Surgewave/issues/51) **v0.3: Real Streams/Client core paths (PollAsync, partition discovery, Confluent AdminClient)** 
 - [#52](https://github.com/Kuestenlogik/Surgewave/issues/52) **v0.3: Tag-driven versioning with post-release floor bump** 
