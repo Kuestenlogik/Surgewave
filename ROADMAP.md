@@ -14,12 +14,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Backlog
 
-### v0.3 — Runnable end-to-end
-
-- [#50](https://github.com/Kuestenlogik/Surgewave/issues/50) **v0.3: Real CLI backends for link/mirror/cluster balance + admin REST URL fix** 
-- [#51](https://github.com/Kuestenlogik/Surgewave/issues/51) **v0.3: Real Streams/Client core paths (PollAsync, partition discovery, Confluent AdminClient)** 
-- [#52](https://github.com/Kuestenlogik/Surgewave/issues/52) **v0.3: Tag-driven versioning with post-release floor bump** 
-
 ### v0.4 — Production hardening & trustworthy admin
 
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
