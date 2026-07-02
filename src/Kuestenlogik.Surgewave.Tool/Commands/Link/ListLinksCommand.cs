@@ -23,41 +23,64 @@ public class ListLinksCommand : CommandBase
 
         try
         {
-            await using var client = new Kuestenlogik.Surgewave.Client.Native.SurgewaveNativeClient(host, port);
-            await client.ConnectAsync(ct);
+            using var http = BrokerAdminHttp.Create(host);
+            var response = await http.GetAsync("/api/cluster-links", ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
 
-            // Placeholder - will be wired to actual API
-            var links = Array.Empty<object>();
+            if (!response.IsSuccessStatusCode)
+            {
+                WriteError($"Failed to list cluster links: {response.StatusCode} — {LinkApi.ExtractErrorMessage(json)}");
+                return 1;
+            }
 
             if (format == OutputFormat.Json)
             {
-                Console.WriteLine(JsonSerializer.Serialize(links, JsonOptions.Indented));
-            }
-            else if (format == OutputFormat.Plain)
-            {
-                // Placeholder: links is currently Array.Empty&lt;object&gt;.
-                // When wired to the real API, replace with one
-                // Console.WriteLine($"{link.Id}\t{link.Remote}\t..." per row.
-            }
-            else
-            {
-                var table = new Table();
-                table.AddColumn("Link ID");
-                table.AddColumn("Remote");
-                table.AddColumn("State");
-                table.AddColumn("Mirror Topics");
-                table.AddColumn("Total Lag");
-
-                if (links.Length == 0)
-                {
-                    AnsiConsole.MarkupLine("[dim]No cluster links configured.[/]");
-                }
-                else
-                {
-                    AnsiConsole.Write(table);
-                }
+                Console.WriteLine(json);
+                return 0;
             }
 
+            using var doc = JsonDocument.Parse(json);
+            var links = doc.RootElement.GetProperty("links");
+
+            if (format == OutputFormat.Plain)
+            {
+                foreach (var link in links.EnumerateArray())
+                {
+                    Console.WriteLine(
+                        $"{LinkApi.GetString(link, "linkId")}\t{LinkApi.GetString(link, "state")}\t" +
+                        $"{LinkApi.GetString(link, "remoteClusterId")}\t{LinkApi.GetInt64(link, "mirroredTopicCount")}\t" +
+                        $"{LinkApi.GetInt64(link, "totalLag")}\t{LinkApi.GetString(link, "lastFetch")}");
+                }
+                return 0;
+            }
+
+            if (links.GetArrayLength() == 0)
+            {
+                AnsiConsole.MarkupLine("[dim]No cluster links configured.[/]");
+                return 0;
+            }
+
+            var table = new Table();
+            table.AddColumn("Link ID");
+            table.AddColumn("State");
+            table.AddColumn("Remote Cluster");
+            table.AddColumn("Mirror Topics");
+            table.AddColumn("Total Lag");
+            table.AddColumn("Last Fetch");
+
+            foreach (var link in links.EnumerateArray())
+            {
+                var state = LinkApi.GetString(link, "state") ?? "unknown";
+                table.AddRow(
+                    Markup.Escape(LinkApi.GetString(link, "linkId") ?? ""),
+                    $"[{LinkApi.StateColor(state)}]{Markup.Escape(state)}[/]",
+                    Markup.Escape(LinkApi.GetString(link, "remoteClusterId") ?? "unknown"),
+                    LinkApi.GetInt64(link, "mirroredTopicCount").ToString(),
+                    LinkApi.GetInt64(link, "totalLag").ToString(),
+                    Markup.Escape(LinkApi.GetString(link, "lastFetch") ?? "never"));
+            }
+
+            AnsiConsole.Write(table);
             return 0;
         }
         catch (Exception ex)

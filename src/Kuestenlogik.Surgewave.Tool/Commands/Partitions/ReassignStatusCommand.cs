@@ -26,7 +26,7 @@ public class ReassignStatusCommand : CommandBase
 
         try
         {
-            using var http = new HttpClient { BaseAddress = new Uri($"http://{host}:{port}") };
+            using var http = BrokerAdminHttp.Create(host);
 
             if (!string.IsNullOrEmpty(planId))
             {

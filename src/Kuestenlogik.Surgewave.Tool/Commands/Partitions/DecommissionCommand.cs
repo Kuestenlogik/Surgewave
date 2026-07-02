@@ -36,7 +36,7 @@ public class DecommissionCommand : CommandBase
 
         try
         {
-            using var http = new HttpClient { BaseAddress = new Uri($"http://{host}:{port}") };
+            using var http = BrokerAdminHttp.Create(host);
             var response = await http.PostAsync($"/api/partitions/decommission/{brokerId}", null, ct);
             var json = await response.Content.ReadAsStringAsync(ct);
 

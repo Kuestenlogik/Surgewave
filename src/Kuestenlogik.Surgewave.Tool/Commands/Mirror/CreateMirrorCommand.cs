@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Json;
+using Kuestenlogik.Surgewave.Client.Native;
 using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Mirror;
@@ -10,6 +11,10 @@ namespace Kuestenlogik.Surgewave.Cli.Commands.Mirror;
 /// </summary>
 public class CreateMirrorCommand : CommandBase
 {
+    private const string SourceConnectorClass = "Kuestenlogik.Surgewave.Connector.Mirror.MirrorSourceConnector";
+    private const string CheckpointConnectorClass = "Kuestenlogik.Surgewave.Connector.Mirror.MirrorCheckpointConnector";
+    private const string HeartbeatConnectorClass = "Kuestenlogik.Surgewave.Connector.Mirror.MirrorHeartbeatConnector";
+
     private readonly Option<string> _nameOption = new("--name", "-n") { Description = "Name for this replication flow", Required = true };
 
     private readonly Option<string> _sourceAliasOption = new("--source-alias") { Description = "Alias for the source cluster", Required = true };
@@ -28,9 +33,9 @@ public class CreateMirrorCommand : CommandBase
 
     private readonly Option<int> _tasksOption = new("--tasks") { Description = "Number of parallel replication tasks", DefaultValueFactory = _ => 4 };
 
-    private readonly Option<bool> _syncOffsetsOption = new("--sync-offsets") { Description = "Sync consumer group offsets for failover", DefaultValueFactory = _ => true };
+    private readonly Option<bool> _syncOffsetsOption = new("--sync-offsets") { Description = "Sync consumer group offsets for failover (deploys checkpoint connector)", DefaultValueFactory = _ => true };
 
-    private readonly Option<bool> _emitHeartbeatsOption = new("--emit-heartbeats") { Description = "Emit heartbeat records for health monitoring", DefaultValueFactory = _ => true };
+    private readonly Option<bool> _emitHeartbeatsOption = new("--emit-heartbeats") { Description = "Emit heartbeat records for health monitoring (deploys heartbeat connector)", DefaultValueFactory = _ => true };
 
     public CreateMirrorCommand() : base("create", "Create a new replication flow")
     {
@@ -63,72 +68,121 @@ public class CreateMirrorCommand : CommandBase
         var syncOffsets = parseResult.GetValue(_syncOffsetsOption);
         var emitHeartbeats = parseResult.GetValue(_emitHeartbeatsOption);
 
+        var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
 
         WriteVerbose(parseResult, $"Creating replication flow '{name}'...");
         WriteVerbose(parseResult, $"  Source: {sourceAlias} ({sourceServers})");
         WriteVerbose(parseResult, $"  Target: {targetAlias} ({targetServers})");
 
-        try
+        // Source connector config
+        var sourceConfig = new Dictionary<string, string>
         {
-            // Build connector configuration
-            var config = new Dictionary<string, object>
+            ["connector.class"] = SourceConnectorClass,
+            ["source.cluster.alias"] = sourceAlias,
+            ["source.bootstrap.servers"] = sourceServers,
+            ["target.cluster.alias"] = targetAlias,
+            ["target.bootstrap.servers"] = targetServers,
+            ["topics"] = topics ?? ".*",
+            ["tasks.max"] = tasks.ToString()
+        };
+
+        if (!string.IsNullOrEmpty(topicsWhitelist))
+            sourceConfig["topics.whitelist"] = topicsWhitelist;
+        if (!string.IsNullOrEmpty(topicsBlacklist))
+            sourceConfig["topics.blacklist"] = topicsBlacklist;
+
+        // Companion connectors are only deployed when requested
+        var deployments = new List<(string ConnectorName, Dictionary<string, string> Config)>
+        {
+            ($"{name}-source", sourceConfig)
+        };
+
+        if (syncOffsets)
+        {
+            deployments.Add(($"{name}-checkpoint", new Dictionary<string, string>
             {
-                ["name"] = name,
-                ["connector.class"] = "Kuestenlogik.Surgewave.Connect.Mirror.MirrorSourceConnector",
+                ["connector.class"] = CheckpointConnectorClass,
                 ["source.cluster.alias"] = sourceAlias,
                 ["source.bootstrap.servers"] = sourceServers,
                 ["target.cluster.alias"] = targetAlias,
                 ["target.bootstrap.servers"] = targetServers,
-                ["topics"] = topics ?? ".*",
-                ["tasks.max"] = tasks,
-                ["sync.group.offsets.enabled"] = syncOffsets,
-                ["emit.heartbeats.enabled"] = emitHeartbeats
-            };
+                ["sync.group.offsets.enabled"] = "true"
+            }));
+        }
 
-            if (!string.IsNullOrEmpty(topicsWhitelist))
-                config["topics.whitelist"] = topicsWhitelist;
-            if (!string.IsNullOrEmpty(topicsBlacklist))
-                config["topics.blacklist"] = topicsBlacklist;
+        if (emitHeartbeats)
+        {
+            deployments.Add(($"{name}-heartbeat", new Dictionary<string, string>
+            {
+                ["connector.class"] = HeartbeatConnectorClass,
+                ["source.cluster.alias"] = sourceAlias,
+                ["target.cluster.alias"] = targetAlias
+            }));
+        }
 
-            // In a real implementation, this would create connectors via Connect REST API
-            // For now, we output the configuration
+        var created = new List<(string ConnectorName, int TaskCount)>();
+
+        try
+        {
+            await using var client = new SurgewaveNativeClient(host, port);
+            await client.ConnectAsync(ct);
+
+            foreach (var (connectorName, config) in deployments)
+            {
+                WriteVerbose(parseResult, $"  Deploying connector '{connectorName}' ({config["connector.class"]})...");
+                var result = await client.Connect.CreateConnectorAsync(connectorName, config, ct);
+                created.Add((result.Name, result.TaskCount));
+            }
+
             if (format == OutputFormat.Json)
             {
-                Console.WriteLine(JsonSerializer.Serialize(config, JsonOptions.Indented));
+                var output = new
+                {
+                    Name = name,
+                    Connectors = created.Select(c => new { Name = c.ConnectorName, c.TaskCount }).ToList()
+                };
+                Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions.Indented));
             }
             else if (format == OutputFormat.Plain)
             {
-                foreach (var (key, value) in config)
+                foreach (var (connectorName, taskCount) in created)
                 {
-                    Console.WriteLine($"{key}={value}");
+                    Console.WriteLine($"created {connectorName} tasks={taskCount}");
                 }
             }
             else
             {
                 var table = new Table();
-                table.AddColumn("Property");
-                table.AddColumn("Value");
+                table.AddColumn("Connector");
+                table.AddColumn("Tasks");
                 table.Title = new TableTitle($"[bold]Mirror: {name}[/]");
 
-                foreach (var (key, value) in config)
+                foreach (var (connectorName, taskCount) in created)
                 {
-                    table.AddRow(key, value.ToString() ?? "");
+                    table.AddRow(connectorName, taskCount.ToString());
                 }
 
                 AnsiConsole.Write(table);
-                AnsiConsole.MarkupLine($"\n[green]Replication flow '{name}' configuration generated.[/]");
-                AnsiConsole.MarkupLine("[dim]Use 'surgewave connect create' to deploy this configuration.[/]");
+                WriteSuccess($"Replication flow '{name}' created ({created.Count} connector(s) deployed).");
+                AnsiConsole.MarkupLine("[dim]Use 'surgewave mirror status' to monitor replication.[/]");
             }
 
-            await Task.CompletedTask;
+            return 0;
         }
         catch (Exception ex)
         {
-            WriteError(ex);
+            if (created.Count > 0)
+            {
+                WriteError($"Failed to create replication flow '{name}': {ex.Message} " +
+                    $"(already deployed: {string.Join(", ", created.Select(c => c.ConnectorName))} — " +
+                    $"use 'surgewave mirror delete {name}' to clean up)");
+            }
+            else
+            {
+                WriteError($"Failed to create replication flow '{name}': {ex.Message}");
+            }
             return 1;
         }
-
-        return 0;
     }
 }

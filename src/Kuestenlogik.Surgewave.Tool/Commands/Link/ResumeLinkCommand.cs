@@ -23,10 +23,16 @@ public class ResumeLinkCommand : CommandBase
 
         try
         {
-            await using var client = new Kuestenlogik.Surgewave.Client.Native.SurgewaveNativeClient(host, port);
-            await client.ConnectAsync(ct);
+            using var http = BrokerAdminHttp.Create(host);
+            var response = await http.PostAsync($"/api/cluster-links/{Uri.EscapeDataString(linkId)}/resume", null, ct);
 
-            // Placeholder - will be wired to actual API
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                WriteError($"Failed to resume cluster link '{linkId}': {response.StatusCode} — {LinkApi.ExtractErrorMessage(body)}");
+                return 1;
+            }
+
             WriteSuccess($"Cluster link '{linkId}' resumed.");
             return 0;
         }

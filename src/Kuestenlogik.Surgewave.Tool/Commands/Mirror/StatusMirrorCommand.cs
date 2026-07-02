@@ -1,12 +1,14 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Json;
+using Kuestenlogik.Surgewave.Client.Native;
+using Kuestenlogik.Surgewave.Client.Native.Operations.Connect;
 using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Mirror;
 
 /// <summary>
-/// Show status and lag for a replication flow (surgewave mirror status)
+/// Show status for a replication flow (surgewave mirror status)
 /// </summary>
 public class StatusMirrorCommand : CommandBase
 {
@@ -14,7 +16,7 @@ public class StatusMirrorCommand : CommandBase
 
     private readonly Option<bool> _watchOption = new("--watch", "-w") { Description = "Continuously watch status updates" };
 
-    public StatusMirrorCommand() : base("status", "Show status and lag for a replication flow")
+    public StatusMirrorCommand() : base("status", "Show status for a replication flow")
     {
         Arguments.Add(_nameArgument);
         Options.Add(_watchOption);
@@ -26,37 +28,55 @@ public class StatusMirrorCommand : CommandBase
         var name = parseResult.GetValue(_nameArgument);
         var watch = parseResult.GetValue(_watchOption);
         var format = GetFormat(parseResult);
+        var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
 
         try
         {
+            await using var client = new SurgewaveNativeClient(host, port);
+            await client.ConnectAsync(ct);
+
             do
             {
-                // In a real implementation, this would query actual status
-                var status = new
+                var sourceStatus = await client.Connect.GetConnectorStatusAsync($"{name}-source", ct);
+                if (sourceStatus == null)
                 {
-                    Name = name,
-                    State = "RUNNING",
-                    Tasks = new[]
-                    {
-                        new { Id = 0, State = "RUNNING", Topic = "orders", Partition = 0, Lag = 10L },
-                        new { Id = 0, State = "RUNNING", Topic = "orders", Partition = 1, Lag = 5L },
-                        new { Id = 1, State = "RUNNING", Topic = "payments", Partition = 0, Lag = 0L },
-                        new { Id = 1, State = "RUNNING", Topic = "payments", Partition = 1, Lag = 2L },
-                    },
-                    TotalLag = 17L,
-                    RecordsPerSecond = 1250.5,
-                    BytesPerSecond = 524288L,
-                    HealthStatus = "HEALTHY",
-                    LastHeartbeat = DateTimeOffset.UtcNow.AddSeconds(-2)
-                };
+                    WriteError($"Replication flow '{name}' not found (no connector '{name}-source')");
+                    return 1;
+                }
+
+                var checkpointStatus = await client.Connect.GetConnectorStatusAsync($"{name}-checkpoint", ct);
+                var heartbeatStatus = await client.Connect.GetConnectorStatusAsync($"{name}-heartbeat", ct);
+
+                var connectors = new List<ConnectorStatus> { sourceStatus };
+                if (checkpointStatus != null) connectors.Add(checkpointStatus);
+                if (heartbeatStatus != null) connectors.Add(heartbeatStatus);
 
                 if (format == OutputFormat.Json)
                 {
-                    Console.WriteLine(JsonSerializer.Serialize(status, JsonOptions.Indented));
+                    var output = new
+                    {
+                        Name = name,
+                        State = sourceStatus.State.ToUpperInvariant(),
+                        Connectors = connectors.Select(c => new
+                        {
+                            c.Name,
+                            State = c.State.ToUpperInvariant(),
+                            c.WorkerId,
+                            Tasks = c.Tasks.Select(t => new { t.Id, State = t.State.ToUpperInvariant(), t.WorkerId, t.Trace }).ToList()
+                        }).ToList()
+                    };
+                    Console.WriteLine(JsonSerializer.Serialize(output, JsonOptions.Indented));
                 }
                 else if (format == OutputFormat.Plain)
                 {
-                    Console.WriteLine($"{status.Name}\t{status.State}\tlag={status.TotalLag}\t{status.RecordsPerSecond:F0} rec/s");
+                    foreach (var connector in connectors)
+                    {
+                        Console.WriteLine($"{connector.Name}\t{connector.State.ToUpperInvariant()}\ttasks={connector.Tasks.Count}");
+                        foreach (var task in connector.Tasks.OrderBy(t => t.Id))
+                        {
+                            Console.WriteLine($"  {task.Id}\t{task.State.ToUpperInvariant()}\t{task.WorkerId}");
+                        }
+                    }
                 }
                 else
                 {
@@ -65,51 +85,58 @@ public class StatusMirrorCommand : CommandBase
                         Console.Clear();
                     }
 
-                    var healthColor = GetStatusColor(status.HealthStatus);
-                    var stateColor = GetStatusColor(status.State);
-
+                    var stateColor = GetStatusColor(sourceStatus.State.ToUpperInvariant());
                     AnsiConsole.MarkupLine($"[bold]Mirror: {name}[/]");
-                    AnsiConsole.MarkupLine($"State: [{stateColor}]{status.State}[/]  Health: [{healthColor}]{status.HealthStatus}[/]");
-                    AnsiConsole.MarkupLine($"Last Heartbeat: {status.LastHeartbeat:HH:mm:ss}");
+                    AnsiConsole.MarkupLine($"State: [{stateColor}]{sourceStatus.State.ToUpperInvariant()}[/]");
                     AnsiConsole.MarkupLine("");
 
-                    // Summary metrics
-                    var panel = new Panel(new Markup(
-                        $"[bold]Total Lag:[/] {status.TotalLag} records\n" +
-                        $"[bold]Throughput:[/] {status.RecordsPerSecond:F0} rec/s ({FormatBytes(status.BytesPerSecond)}/s)"))
-                    {
-                        Border = BoxBorder.Rounded,
-                        Header = new PanelHeader("Metrics")
-                    };
-                    AnsiConsole.Write(panel);
-                    AnsiConsole.MarkupLine("");
-
-                    // Task status
                     var table = new Table();
+                    table.AddColumn("Connector");
                     table.AddColumn("Task");
-                    table.AddColumn("Topic");
-                    table.AddColumn("Partition");
-                    table.AddColumn("Lag");
                     table.AddColumn("State");
+                    table.AddColumn("Worker");
 
-                    foreach (var task in status.Tasks)
+                    foreach (var connector in connectors)
                     {
-                        var lagColor = task.Lag == 0 ? "green" : task.Lag < 100 ? "yellow" : "red";
-                        var taskStateColor = task.State == "RUNNING" ? "green" : "red";
-                        table.AddRow(
-                            task.Id.ToString(),
-                            task.Topic,
-                            task.Partition.ToString(),
-                            $"[{lagColor}]{task.Lag}[/]",
-                            $"[{taskStateColor}]{task.State}[/]"
-                        );
+                        if (connector.Tasks.Count == 0)
+                        {
+                            var connectorColor = GetStatusColor(connector.State.ToUpperInvariant());
+                            table.AddRow(connector.Name, "—", $"[{connectorColor}]{connector.State.ToUpperInvariant()}[/]", connector.WorkerId);
+                            continue;
+                        }
+
+                        foreach (var task in connector.Tasks.OrderBy(t => t.Id))
+                        {
+                            var taskColor = GetStatusColor(task.State.ToUpperInvariant());
+                            table.AddRow(
+                                connector.Name,
+                                task.Id.ToString(),
+                                $"[{taskColor}]{task.State.ToUpperInvariant()}[/]",
+                                task.WorkerId
+                            );
+                        }
                     }
 
                     AnsiConsole.Write(table);
+
+                    var failedTasks = connectors.SelectMany(c => c.Tasks)
+                        .Where(t => t.State.Equals("failed", StringComparison.OrdinalIgnoreCase) && t.Trace != null)
+                        .ToList();
+
+                    if (failedTasks.Count > 0)
+                    {
+                        AnsiConsole.MarkupLine("");
+                        AnsiConsole.MarkupLine("[red]Failed task traces:[/]");
+                        foreach (var task in failedTasks)
+                        {
+                            AnsiConsole.MarkupLine($"  [red]{task.Id}: {Markup.Escape(task.Trace!)}[/]");
+                        }
+                    }
                 }
 
                 if (watch)
                 {
+                    // Poll interval for --watch mode
                     await Task.Delay(1000, ct);
                 }
 
@@ -128,26 +155,11 @@ public class StatusMirrorCommand : CommandBase
         return 0;
     }
 
-    private static string FormatBytes(long bytes)
-    {
-        string[] suffixes = ["B", "KB", "MB", "GB"];
-        int index = 0;
-        double size = bytes;
-
-        while (size >= 1024 && index < suffixes.Length - 1)
-        {
-            size /= 1024;
-            index++;
-        }
-
-        return $"{size:F1} {suffixes[index]}";
-    }
-
     private static string GetStatusColor(string status) => status switch
     {
-        "RUNNING" or "HEALTHY" => "green",
-        "PAUSED" or "WARNING" => "yellow",
-        "FAILED" or "UNHEALTHY" => "red",
+        "RUNNING" => "green",
+        "PAUSED" => "yellow",
+        "FAILED" => "red",
         _ => "dim"
     };
 }

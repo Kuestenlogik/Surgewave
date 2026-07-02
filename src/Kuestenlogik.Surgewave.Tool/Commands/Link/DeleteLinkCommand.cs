@@ -1,6 +1,5 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using Spectre.Console;
 
 namespace Kuestenlogik.Surgewave.Cli.Commands.Link;
 
@@ -33,10 +32,16 @@ public class DeleteLinkCommand : CommandBase
 
         try
         {
-            await using var client = new Kuestenlogik.Surgewave.Client.Native.SurgewaveNativeClient(host, port);
-            await client.ConnectAsync(ct);
+            using var http = BrokerAdminHttp.Create(host);
+            var response = await http.DeleteAsync($"/api/cluster-links/{Uri.EscapeDataString(linkId)}", ct);
 
-            // Placeholder - will be wired to actual API
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                WriteError($"Failed to delete cluster link '{linkId}': {response.StatusCode} — {LinkApi.ExtractErrorMessage(body)}");
+                return 1;
+            }
+
             WriteSuccess($"Cluster link '{linkId}' deleted.");
             return 0;
         }
