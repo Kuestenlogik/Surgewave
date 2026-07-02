@@ -9,6 +9,17 @@
          passendes `<PackageId>.props` — irrelevant fuer Consumer, weil keiner das Broker-NuGet konsumiert,
          um build-targets zu importieren (es ist ein self-contained Service-Artefakt). -->
     <NoWarn>$(NoWarn);NU5104;NU5119;NU5129</NoWarn>
+    <!-- Das Broker-NuGet ist ein Service-Artefakt, keine Static-Asset-Quelle.
+         Ohne diese Schalter emittiert das StaticWebAssets-SDK beim Pack
+         build/*.props-Manifeste, die die eigene wwwroot (.gitkeep-Platzhalter +
+         bowire.js aus Bowires contentFiles) als Paket-Assets deklarieren, ohne
+         die Dateien mitzupacken — Web-Projekte, die das Broker-Paket
+         referenzieren, scheitern dann an Phantom-Assets (Issue #55). -->
+    <DisableStaticWebAssetsBuildPropsFileGeneration>true</DisableStaticWebAssetsBuildPropsFileGeneration>
+    <DisableStaticWebAssetEndpointsBuildPropsFileGeneration>true</DisableStaticWebAssetEndpointsBuildPropsFileGeneration>
+    <StaticWebAssetsDisableProjectBuildPropsFileGeneration>true</StaticWebAssetsDisableProjectBuildPropsFileGeneration>
+    <StaticWebAssetsDisableProjectBuildMultiTargetingPropsFileGeneration>true</StaticWebAssetsDisableProjectBuildMultiTargetingPropsFileGeneration>
+    <StaticWebAssetsDisableProjectBuildTransitivePropsFileGeneration>true</StaticWebAssetsDisableProjectBuildTransitivePropsFileGeneration>
     <AssemblyName>surgewave-broker</AssemblyName>
     <!--
       Bowire-Pattern: AssemblyName bleibt kebab-case (linux-binary +
@@ -105,7 +116,11 @@
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
     <PackageReference Include="Microsoft.AspNetCore.Grpc.JsonTranscoding" />
-    <PackageReference Include="Kuestenlogik.Bowire" />
+    <!-- ExcludeAssets=contentFiles: Bowire liefert bowire.js zusaetzlich als
+         contentFile in die wwwroot des Konsumenten — der Broker braucht das
+         nicht (Bowire serviert die Tap-UI zur Laufzeit aus EmbeddedResources)
+         und wuerde die Datei sonst als Static-Web-Asset mitverpacken. -->
+    <PackageReference Include="Kuestenlogik.Bowire" ExcludeAssets="contentFiles" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <PackageReference Include="OpenTelemetry" />
