@@ -22,7 +22,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#39](https://github.com/Kuestenlogik/Surgewave/issues/39) **Control UI for KV Store (/api/kv) ** 
 - [#40](https://github.com/Kuestenlogik/Surgewave/issues/40) **Control UI for transactions (/v3/transactions, cross-topic)** 
 - [#54](https://github.com/Kuestenlogik/Surgewave/issues/54) **Vulnerable transitives shipped by 0.3.0 packages: Microsoft.OpenApi 2.0.0 (fix available) + SQLitePCLRaw.lib.e_sqlite3 2.1.11 (no upstream fix yet)** 
-- [#55](https://github.com/Kuestenlogik/Surgewave/issues/55) **Broker NuGet 0.3.0: static-web-assets manifest references bowire.js but the package ships no staticwebassets folder** 
 
 ### v0.5 — AI-friendly broker
 
