@@ -43,6 +43,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
 - [#41](https://github.com/Kuestenlogik/Surgewave/issues/41) **Decouple Kafka protocol behind the IProtocolPlugin boundary (broker must run without Protocol.Kafka assembly)** 
+- [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
 
 ---
 
