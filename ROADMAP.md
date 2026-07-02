@@ -44,6 +44,9 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
 - [#41](https://github.com/Kuestenlogik/Surgewave/issues/41) **Decouple Kafka protocol behind the IProtocolPlugin boundary (broker must run without Protocol.Kafka assembly)** 
 - [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
+- [#43](https://github.com/Kuestenlogik/Surgewave/issues/43) **Native client: multi-broker bootstrap & failover** 
+- [#44](https://github.com/Kuestenlogik/Surgewave/issues/44) **StreamsProducer: transactional changelog writes** 
+- [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
 
 ---
 
