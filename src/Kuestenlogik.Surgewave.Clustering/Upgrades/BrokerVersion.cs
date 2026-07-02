@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 
 namespace Kuestenlogik.Surgewave.Clustering.Upgrades;
 
@@ -31,7 +32,35 @@ public sealed record BrokerVersion
     /// <summary>
     /// The current broker version, derived from the assembly version.
     /// </summary>
-    public static BrokerVersion Current { get; } = new() { Major = 0, Minor = 1, Patch = 0 };
+    public static BrokerVersion Current { get; } = FromAssembly(typeof(BrokerVersion).Assembly);
+
+    /// <summary>
+    /// Reads the version from the assembly's informational version (SemVer
+    /// including prerelease, build metadata after '+' stripped), falling back
+    /// to the plain assembly version when the attribute is missing or invalid.
+    /// </summary>
+    internal static BrokerVersion FromAssembly(Assembly assembly)
+    {
+        var informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (informational is not null)
+        {
+            var metadataIndex = informational.IndexOf('+');
+            if (metadataIndex >= 0)
+                informational = informational[..metadataIndex];
+
+            if (TryParse(informational, out var parsed) && parsed is not null)
+                return parsed;
+        }
+
+        var fallback = assembly.GetName().Version;
+        return new BrokerVersion
+        {
+            Major = fallback?.Major ?? 0,
+            Minor = fallback?.Minor ?? 0,
+            Patch = fallback?.Build ?? 0
+        };
+    }
 
     /// <summary>
     /// Parses a version string in the format "major.minor.patch[-prerelease]".

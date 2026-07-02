@@ -50,7 +50,7 @@
   <!-- Usage: dotnet publish src/Kuestenlogik.Surgewave.Cli -c Release /t:PublishContainer -->
   <PropertyGroup>
     <ContainerRepository>surgewave/surgewave-cli</ContainerRepository>
-    <ContainerImageTag>0.1.0</ContainerImageTag>
+    <ContainerImageTag>$(Version)</ContainerImageTag>
     <ContainerBaseImage>mcr.microsoft.com/dotnet/runtime:10.0</ContainerBaseImage>
     <ContainerFamily>jammy</ContainerFamily>
   </PropertyGroup>

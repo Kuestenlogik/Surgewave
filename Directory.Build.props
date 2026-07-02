@@ -61,9 +61,14 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!-- Version information -->
-  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
-    <Version>0.1.0</Version>
+  <!-- Version information. <Version> ist der Floor für Builds ohne Tag (lokal +
+       CI ohne Tag); die Release-Pipeline überschreibt per -p:Version=$V aus dem
+       Git-Tag. Floor = zuletzt released + "-dev", wird nach jedem Release durch
+       .github/workflows/post-release-floor-bump.yml angehoben. Gilt bewusst für
+       ALLE Projekte (auch IsPackable=false), damit Exe-Banner und
+       Rolling-Upgrade-Checks dieselbe Version tragen. -->
+  <PropertyGroup>
+    <Version>0.2.0-dev</Version>
     <!-- AssemblyVersion + FileVersion folgen $(Version), damit der
          Release-Workflow per -p:Version=$V alle drei synchron bumpt.
          Padding auf vier Stellen erledigt MSBuild (0.1.6 -> 0.1.6.0).
