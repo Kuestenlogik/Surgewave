@@ -33,18 +33,146 @@ public sealed class KafkaConsumer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Subscribe to topics
+    /// The topic-partitions this consumer is currently subscribed or assigned to.
+    /// </summary>
+    public IReadOnlyCollection<TopicPartition> Assignment => _subscriptions.Keys;
+
+    /// <summary>
+    /// Subscribe to topics. Fetches topic metadata from the broker and subscribes
+    /// to every partition of each topic (single-consumer semantics — no group
+    /// assignment is performed; this consumer reads all partitions itself).
     /// </summary>
     public void Subscribe(params string[] topics)
+        => SubscribeAsync(topics).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Subscribe to topics asynchronously. Fetches topic metadata from the broker
+    /// and subscribes to every partition of each topic. Failures during metadata
+    /// discovery are propagated as <see cref="BrokerResponseException"/>.
+    /// </summary>
+    public async Task SubscribeAsync(string[] topics, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // For now, assume partition 0 for each topic
-        // In production, would fetch metadata first
+        if (topics.Length == 0)
+        {
+            return;
+        }
+
+        var metadata = await FetchMetadataAsync(topics, cancellationToken);
+        var initialOffset = _config.AutoOffsetReset == "earliest" ? 0L : -1L;
+
         foreach (var topic in topics)
         {
-            var tp = new TopicPartition { Topic = topic, Partition = 0 };
-            _subscriptions[tp] = _config.AutoOffsetReset == "earliest" ? 0 : -1;
+            var topicMetadata = metadata.Topics.FirstOrDefault(
+                    t => string.Equals(t.Name, topic, StringComparison.Ordinal))
+                ?? throw new BrokerResponseException(
+                    $"Metadata response did not contain topic '{topic}'", nameof(ApiKey.Metadata));
+
+            if (topicMetadata.ErrorCode != ErrorCode.None)
+            {
+                throw new BrokerResponseException(
+                    $"Metadata request for topic '{topic}' failed: {topicMetadata.ErrorCode}",
+                    nameof(ApiKey.Metadata));
+            }
+
+            if (topicMetadata.Partitions.Count == 0)
+            {
+                throw new BrokerResponseException(
+                    $"Metadata for topic '{topic}' contains no partitions",
+                    nameof(ApiKey.Metadata));
+            }
+
+            foreach (var partition in topicMetadata.Partitions)
+            {
+                if (partition.ErrorCode != ErrorCode.None)
+                {
+                    throw new BrokerResponseException(
+                        $"Metadata for '{topic}' partition {partition.PartitionIndex} failed: {partition.ErrorCode}",
+                        nameof(ApiKey.Metadata));
+                }
+
+                var tp = new TopicPartition { Topic = topic, Partition = partition.PartitionIndex };
+                _subscriptions[tp] = initialOffset;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fetch topic metadata from the broker over the existing connection.
+    /// Uses Metadata v4 (non-flexible wire format, supports AllowAutoTopicCreation).
+    /// </summary>
+    private async Task<MetadataResponse> FetchMetadataAsync(string[] topics, CancellationToken cancellationToken)
+    {
+        const short metadataVersion = 4;
+
+        var request = new MetadataRequest
+        {
+            ApiKey = ApiKey.Metadata,
+            ApiVersion = metadataVersion,
+            CorrelationId = Interlocked.Increment(ref _correlationId),
+            ClientId = _clientId,
+            Topics = topics
+                .Select(t => new MetadataRequest.MetadataRequestTopic { Name = t })
+                .ToList()
+        };
+
+        // Send request - combine size prefix + payload into single write
+        using var writer = new KafkaProtocolWriter();
+        request.WriteTo(writer);
+
+        var requestSpan = writer.WrittenSpan;
+        var totalWriteLength = 4 + requestSpan.Length;
+        var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalWriteLength);
+        try
+        {
+            BinaryPrimitives.WriteInt32BigEndian(combinedBuffer, requestSpan.Length);
+            requestSpan.CopyTo(combinedBuffer.AsSpan(4));
+            await _stream.WriteAsync(combinedBuffer.AsMemory(0, totalWriteLength), cancellationToken);
+            await _stream.FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(combinedBuffer);
+        }
+
+        // Read response - use pooled buffer
+        var responseSizeBuffer = ArrayPool<byte>.Shared.Rent(4);
+        int responseSize;
+        try
+        {
+            await _stream.ReadExactlyAsync(responseSizeBuffer.AsMemory(0, 4), cancellationToken);
+            responseSize = BinaryPrimitives.ReadInt32BigEndian(responseSizeBuffer.AsSpan(0, 4));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(responseSizeBuffer);
+        }
+
+        if (responseSize < 4)
+        {
+            throw new BrokerResponseException(
+                $"Metadata response too short ({responseSize} bytes)", nameof(ApiKey.Metadata));
+        }
+
+        var responseBytes = ArrayPool<byte>.Shared.Rent(responseSize);
+        try
+        {
+            await _stream.ReadExactlyAsync(responseBytes.AsMemory(0, responseSize), cancellationToken);
+
+            // Response header: 4-byte correlation id, then the body.
+            var correlationId = BinaryPrimitives.ReadInt32BigEndian(responseBytes.AsSpan(0, 4));
+            return MetadataResponse.ReadFrom(
+                responseBytes.AsSpan(4, responseSize - 4), metadataVersion, correlationId);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new BrokerResponseException(
+                "Malformed Metadata response from broker", ex);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(responseBytes);
         }
     }
 
