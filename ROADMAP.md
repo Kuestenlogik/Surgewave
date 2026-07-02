@@ -49,6 +49,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#43](https://github.com/Kuestenlogik/Surgewave/issues/43) **Native client: multi-broker bootstrap & failover** 
 - [#44](https://github.com/Kuestenlogik/Surgewave/issues/44) **StreamsProducer: transactional changelog writes** 
 - [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
+- [#58](https://github.com/Kuestenlogik/Surgewave/issues/58) **Kafka decoupling stage 1: SurgewaveKafkaProtocolPlugin with Surgewave:Kafka:Enabled config gate** 
 
 ---
 
