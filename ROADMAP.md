@@ -8,17 +8,20 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Next up
 
-### v0.2 — Production hardening
+### v0.4 — Production hardening & trustworthy admin
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `kind:feature` `area:broker` `track:performance` `P1`
 
 ## Backlog
 
-### v0.2 — Production hardening
+### v0.4 — Production hardening & trustworthy admin
 
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `kind:debt` `area:multi` `P2`
+- [#37](https://github.com/Kuestenlogik/Surgewave/issues/37) **Server-side role enforcement — RoleManagement page is Preview** 
+- [#38](https://github.com/Kuestenlogik/Surgewave/issues/38) **Server-side alert rule evaluation — alert rules only evaluate while UI is open** 
+- [#39](https://github.com/Kuestenlogik/Surgewave/issues/39) **Control UI for KV Store (/api/kv) ** 
 
-### v0.3 — AI-friendly broker
+### v0.5 — AI-friendly broker
 
 - [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `kind:feature` `area:schema` `P2`
 - [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `kind:feature` `area:schema` `track:ai-pipelines` `P1`
@@ -38,9 +41,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `kind:docs` `area:docs` `P2`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
-- [#37](https://github.com/Kuestenlogik/Surgewave/issues/37) **Server-side role enforcement — RoleManagement page is Preview** 
-- [#38](https://github.com/Kuestenlogik/Surgewave/issues/38) **Server-side alert rule evaluation — alert rules only evaluate while UI is open** 
-- [#39](https://github.com/Kuestenlogik/Surgewave/issues/39) **Control UI for KV Store (/api/kv) ** 
 - [#40](https://github.com/Kuestenlogik/Surgewave/issues/40) **Control UI for transactions (/v3/transactions, cross-topic)** 
 - [#41](https://github.com/Kuestenlogik/Surgewave/issues/41) **Decouple Kafka protocol behind the IProtocolPlugin boundary (broker must run without Protocol.Kafka assembly)** 
 
