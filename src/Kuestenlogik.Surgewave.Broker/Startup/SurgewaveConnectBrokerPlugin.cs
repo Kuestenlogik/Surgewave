@@ -3,6 +3,7 @@ using Kuestenlogik.Surgewave.Api.Grpc.Server;
 using Kuestenlogik.Surgewave.Client;
 using Kuestenlogik.Surgewave.Connect;
 using Kuestenlogik.Surgewave.Connect.Pipelines;
+using Kuestenlogik.Surgewave.Connect.Pipelines.Chat;
 using Kuestenlogik.Surgewave.Plugins;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -152,10 +153,17 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
                     .ToList();
             });
 
+        // Pipeline chat (agent pipelines): manager + REST API at /api/pipelines/{id}/chat.
+        // Without the holder assignment every chat endpoint answers 503; without the
+        // mapping the Control PipelineEditor chat panel gets 404s.
+        var chatManager = new PipelineChatManager(connectConfig, loggerFactory.CreateLogger<PipelineChatManager>());
+        PipelineChatManagerHolder.Instance = chatManager;
+
         // REST + gRPC
         app.MapGrpcService<ConnectServiceImpl>();
         app.MapSurgewavePipelines();
-        app.Logger.LogInformation("Pipeline REST API mapped at /api/pipelines");
+        app.MapSurgewavePipelineChat();
+        app.Logger.LogInformation("Pipeline REST API mapped at /api/pipelines (+ /chat)");
 
         programLogger.LogInformation("  - Connect API:         {Host}:{GrpcPort}/connectors (gRPC + REST + Pipelines)",
             config.Host, config.GrpcPort);

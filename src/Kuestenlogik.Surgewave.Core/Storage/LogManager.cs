@@ -38,6 +38,7 @@ public sealed class LogManager : IDisposable
     private readonly TimeSpan _retentionCheckInterval;
 
     // Compaction
+    private readonly ConcurrentDictionary<TopicPartition, PartitionCompactionStats> _compactionStats = new();
     private readonly CompactionConfig _compactionConfig;
     private readonly LogCompactor _compactor;
     private readonly Task? _compactionTask;
@@ -398,6 +399,25 @@ public sealed class LogManager : IDisposable
     }
 
     /// <summary>
+    /// Returns the partitions of a topic — from the topic metadata when present,
+    /// otherwise from the materialized partition logs (topics auto-created via
+    /// <see cref="GetOrCreateLog"/> have logs but no metadata entry). Empty when
+    /// the topic is unknown.
+    /// </summary>
+    public IReadOnlyList<int> GetTopicPartitions(string topicName)
+    {
+        if (_topics.TryGetValue(topicName, out var metadata))
+        {
+            return [.. Enumerable.Range(0, metadata.PartitionCount)];
+        }
+
+        return [.. _logs.Keys
+            .Where(tp => tp.Topic == topicName)
+            .Select(tp => tp.Partition)
+            .OrderBy(p => p)];
+    }
+
+    /// <summary>
     /// Update topic configuration.
     /// Supports both Kafka-compatible keys (segment.bytes) and human-readable keys (segment).
     /// </summary>
@@ -724,6 +744,9 @@ public sealed class LogManager : IDisposable
                     _logger?.LogDebug("Compacted partition {TopicPartition}: removed {Records} records, {Bytes} bytes",
                         topicPartition, result.RecordsRemoved, result.BytesRemoved);
                 }
+
+                _compactionStats[topicPartition] = new PartitionCompactionStats(
+                    DateTimeOffset.UtcNow, result.RecordsRemoved, result.BytesRemoved);
             }
             catch (Exception ex)
             {
@@ -749,6 +772,20 @@ public sealed class LogManager : IDisposable
             Duration = stopwatch.Elapsed
         };
     }
+
+    /// <summary>
+    /// Last compaction stats for a partition, or null when it has not been
+    /// compacted during this broker's lifetime. (Stats are in-memory only.)
+    /// </summary>
+    public PartitionCompactionStats? GetCompactionStats(TopicPartition topicPartition)
+        => _compactionStats.TryGetValue(topicPartition, out var stats) ? stats : null;
+
+    /// <summary>
+    /// Current dirty ratio of a partition (uncompacted fraction), or null when
+    /// the partition does not exist or is not a persistent log.
+    /// </summary>
+    public double? GetDirtyRatio(TopicPartition topicPartition)
+        => (GetLog(topicPartition) as PartitionLog)?.DirtyRatio;
 
     // ───────────────────────────────────────────────────────────────────
     // Topic lifecycle hooks (KIP-1010)

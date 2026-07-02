@@ -112,6 +112,17 @@ public sealed class OffsetStore : IDisposable
     }
 
     /// <summary>
+    /// Returns the IDs of all groups that have committed offsets.
+    /// </summary>
+    public IReadOnlyList<string> GetGroupIds()
+    {
+        lock (_lock)
+        {
+            return [.. _groupOffsets.Keys];
+        }
+    }
+
+    /// <summary>
     /// Deletes a single committed offset for a consumer group.
     /// </summary>
     public void DeleteOffset(string groupId, string topic, int partition)

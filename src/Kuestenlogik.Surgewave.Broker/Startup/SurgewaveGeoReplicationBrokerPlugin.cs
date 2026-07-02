@@ -10,8 +10,11 @@ namespace Kuestenlogik.Surgewave.Broker.Startup;
 
 /// <summary>
 /// <see cref="IBrokerPlugin"/> that activates built-in geo-replication via
-/// <see cref="ClusterLinkManager"/>. Opt-in via <c>Surgewave:GeoReplicationEnabled=true</c>
-/// plus at least one <c>Surgewave:ClusterLinks</c> entry.
+/// <see cref="ClusterLinkManager"/>. Opt-in via <c>Surgewave:GeoReplicationEnabled=true</c>.
+/// Statically configured <c>Surgewave:ClusterLinks</c> entries are connected at startup;
+/// additional links can be created at runtime through the management REST API
+/// (<c>/api/cluster-links</c>, see <see cref="ClusterLinkRestApi"/>), so an empty
+/// link list is valid.
 /// </summary>
 public sealed class SurgewaveGeoReplicationBrokerPlugin : IBrokerPlugin
 {
@@ -31,8 +34,8 @@ public sealed class SurgewaveGeoReplicationBrokerPlugin : IBrokerPlugin
     /// <inheritdoc />
     public async Task ConfigureAsync(object host, IServiceProvider services)
     {
+        var app = (WebApplication)host;
         var config = services.GetRequiredService<BrokerConfig>();
-        if (config.ClusterLinks is not { Length: > 0 }) return;
 
         var logManager = services.GetRequiredService<LogManager>();
         var metrics = services.GetRequiredService<BrokerMetrics>();
@@ -44,7 +47,16 @@ public sealed class SurgewaveGeoReplicationBrokerPlugin : IBrokerPlugin
 #pragma warning disable CA2000 // Lifecycle managed by the application
         var clusterLinkManager = new ClusterLinkManager(logManager, peerTransport, metrics, clusterLinkLogger);
 #pragma warning restore CA2000
-        await clusterLinkManager.StartAsync(config.ClusterLinks, CancellationToken.None);
-        programLogger.LogInformation("Geo-replication started with {LinkCount} cluster links", config.ClusterLinks.Length);
+
+        // No ">= 1 ClusterLinks" gate anymore: links can be created at runtime via the
+        // REST API, so the flag alone activates the engine — an empty list is fine
+        // (StartAsync just spins up the metadata sync loop without connecting anywhere).
+        var initialLinks = config.ClusterLinks ?? [];
+        await clusterLinkManager.StartAsync(initialLinks, CancellationToken.None);
+        programLogger.LogInformation("Geo-replication started with {LinkCount} cluster links", initialLinks.Length);
+
+        app.MapSurgewaveClusterLinks(clusterLinkManager);
+        programLogger.LogInformation("  - Cluster Links API:   {Host}:{GrpcPort}/api/cluster-links",
+            config.Host, config.GrpcPort);
     }
 }

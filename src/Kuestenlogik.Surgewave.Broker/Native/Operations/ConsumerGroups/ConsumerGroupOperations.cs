@@ -412,3 +412,149 @@ public sealed class FindCoordinatorOperation : IOperationHandler<FindCoordinator
     public void WriteResponse(IPayloadWriter writer, in FindCoordinatorResult response)
         => response.Response.WriteTo(writer);
 }
+
+/// <summary>
+/// Result for get group lag operation.
+/// </summary>
+public readonly record struct GetGroupLagResult : IOperationResult
+{
+    public required GetGroupLagResponsePayload Response { get; init; }
+    public required SurgewaveErrorCode ErrorCode { get; init; }
+}
+
+/// <summary>
+/// Operation to get the lag of a single consumer group.
+/// </summary>
+public sealed class GetGroupLagOperation : IOperationHandler<GetGroupLagRequestPayload, GetGroupLagResult>
+{
+    private readonly Core.Monitoring.ILagCalculator _lagCalculator;
+
+    public GetGroupLagOperation(Core.Monitoring.ILagCalculator lagCalculator) => _lagCalculator = lagCalculator;
+
+    public SurgewaveOpCode OpCode => SurgewaveOpCode.GetGroupLag;
+
+    public GetGroupLagRequestPayload ParseRequest(ref SurgewavePayloadReader reader)
+        => GetGroupLagRequestPayload.Read(ref reader);
+
+    public void ValidateRequest(in GetGroupLagRequestPayload request) { }
+
+    public Task<GetGroupLagResult> ExecuteAsync(GetGroupLagRequestPayload request, CancellationToken cancellationToken)
+    {
+        var info = _lagCalculator.GetGroupLag(request.GroupId);
+        if (info is null)
+        {
+            return Task.FromResult(new GetGroupLagResult
+            {
+                Response = new GetGroupLagResponsePayload
+                {
+                    ErrorCode = (ushort)SurgewaveErrorCode.GroupNotFound,
+                    GroupId = request.GroupId,
+                    State = "",
+                    Topics = []
+                },
+                ErrorCode = SurgewaveErrorCode.GroupNotFound
+            });
+        }
+
+        var topics = new TopicLagPayload[info.Topics.Count];
+        for (int i = 0; i < info.Topics.Count; i++)
+        {
+            var topic = info.Topics[i];
+            var partitions = new PartitionLagPayload[topic.Partitions.Count];
+            for (int j = 0; j < topic.Partitions.Count; j++)
+            {
+                var p = topic.Partitions[j];
+                partitions[j] = new PartitionLagPayload
+                {
+                    Partition = p.Partition,
+                    CommittedOffset = p.CommittedOffset,
+                    HighWatermark = p.HighWatermark,
+                    Lag = p.Lag,
+                    LogStartOffset = p.LogStartOffset
+                };
+            }
+
+            topics[i] = new TopicLagPayload
+            {
+                Topic = topic.Topic,
+                TotalLag = topic.TotalLag,
+                Partitions = partitions
+            };
+        }
+
+        var response = new GetGroupLagResponsePayload
+        {
+            ErrorCode = 0,
+            GroupId = info.GroupId,
+            State = info.State,
+            TotalLag = info.TotalLag,
+            PartitionCount = info.PartitionCount,
+            MemberCount = info.MemberCount,
+            Topics = topics
+        };
+
+        return Task.FromResult(new GetGroupLagResult
+        {
+            Response = response,
+            ErrorCode = SurgewaveErrorCode.None
+        });
+    }
+
+    public void WriteResponse(IPayloadWriter writer, in GetGroupLagResult response)
+        => response.Response.WriteTo(writer);
+}
+
+/// <summary>
+/// Result for get lag summary operation.
+/// </summary>
+public readonly record struct GetLagSummaryResult
+{
+    public required GetLagSummaryResponsePayload Response { get; init; }
+}
+
+/// <summary>
+/// Operation to get the lag summary across all consumer groups.
+/// </summary>
+public sealed class GetLagSummaryOperation : INoRequestOperationHandler<GetLagSummaryResult>
+{
+    private readonly Core.Monitoring.ILagCalculator _lagCalculator;
+
+    public GetLagSummaryOperation(Core.Monitoring.ILagCalculator lagCalculator) => _lagCalculator = lagCalculator;
+
+    public SurgewaveOpCode OpCode => SurgewaveOpCode.GetLagSummary;
+
+    public Task<GetLagSummaryResult> ExecuteAsync(CancellationToken cancellationToken)
+    {
+        var summary = _lagCalculator.GetLagSummary();
+
+        var groups = new LagSummaryGroupPayload[summary.Groups.Count];
+        for (int i = 0; i < summary.Groups.Count; i++)
+        {
+            var g = summary.Groups[i];
+            groups[i] = new LagSummaryGroupPayload
+            {
+                GroupId = g.GroupId,
+                State = g.State,
+                TotalLag = g.TotalLag,
+                PartitionCount = g.PartitionCount,
+                MemberCount = g.MemberCount
+            };
+        }
+
+        var response = new GetLagSummaryResponsePayload
+        {
+            ErrorCode = 0,
+            GroupCount = summary.GroupCount,
+            GroupsWithHighLag = summary.GroupsWithHighLag,
+            TotalLag = summary.TotalLag,
+            MaxLag = summary.MaxLag,
+            MaxLagGroup = summary.MaxLagGroup,
+            Groups = groups
+        };
+
+        return Task.FromResult(new GetLagSummaryResult { Response = response });
+    }
+
+    public void WriteResponse(IPayloadWriter writer, in GetLagSummaryResult response)
+        => response.Response.WriteTo(writer);
+}

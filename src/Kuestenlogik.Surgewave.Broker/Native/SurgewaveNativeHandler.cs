@@ -54,7 +54,8 @@ public sealed class SurgewaveNativeHandler
         ConnectorRepositoryManager? repositoryManager = null,
         DlqManager? dlqManager = null,
         CrossTopicTransactionManager? crossTopicTxnManager = null,
-        KvBucketManager? kvBucketManager = null)
+        KvBucketManager? kvBucketManager = null,
+        Kuestenlogik.Surgewave.Core.Monitoring.ILagCalculator? lagCalculator = null)
     {
         _config = config;
         _logger = logger;
@@ -69,7 +70,7 @@ public sealed class SurgewaveNativeHandler
                 dlqManager: dlqManager),
             new NativeMetadataHandler(logManager),
             new NativeTopicHandler(logManager),
-            new NativeConsumerGroupHandler(groupCoordinator),
+            new NativeConsumerGroupHandler(groupCoordinator, lagCalculator),
             new NativeClusterHandler(logManager, reassignmentManager),
             new NativeTransactionHandler(transactionCoordinator),
             new NativeQuotaHandler(quotaManager),
