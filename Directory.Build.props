@@ -68,7 +68,7 @@
        ALLE Projekte (auch IsPackable=false), damit Exe-Banner und
        Rolling-Upgrade-Checks dieselbe Version tragen. -->
   <PropertyGroup>
-    <Version>0.2.0-dev</Version>
+    <Version>0.3.1-dev</Version>
     <!-- AssemblyVersion + FileVersion folgen $(Version), damit der
          Release-Workflow per -p:Version=$V alle drei synchron bumpt.
          Padding auf vier Stellen erledigt MSBuild (0.1.6 -> 0.1.6.0).
