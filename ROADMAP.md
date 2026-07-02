@@ -40,6 +40,9 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
 - [#37](https://github.com/Kuestenlogik/Surgewave/issues/37) **Server-side role enforcement — RoleManagement page is Preview** 
 - [#38](https://github.com/Kuestenlogik/Surgewave/issues/38) **Server-side alert rule evaluation — alert rules only evaluate while UI is open** 
+- [#39](https://github.com/Kuestenlogik/Surgewave/issues/39) **Control UI for KV Store (/api/kv) ** 
+- [#40](https://github.com/Kuestenlogik/Surgewave/issues/40) **Control UI for transactions (/v3/transactions, cross-topic)** 
+- [#41](https://github.com/Kuestenlogik/Surgewave/issues/41) **Decouple Kafka protocol behind the IProtocolPlugin boundary (broker must run without Protocol.Kafka assembly)** 
 
 ---
 
