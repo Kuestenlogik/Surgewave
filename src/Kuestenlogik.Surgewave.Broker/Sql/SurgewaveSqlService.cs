@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
@@ -254,120 +253,24 @@ public sealed class SurgewaveSqlService : IHostedService, IDisposable
     private static List<RawTopicMessage> ParseRecordBatch(byte[] batchBytes, string topic, int partition)
     {
         var messages = new List<RawTopicMessage>();
-
-        try
+        var parsed = RecordBatchBrowser.Parse(batchBytes);
+        if (parsed.DecompressionFailed)
         {
-            var span = batchBytes.AsSpan();
-            if (span.Length < 61) return messages;
-
-            var baseOffset = BinaryPrimitives.ReadInt64BigEndian(span);
-            var attributes = BinaryPrimitives.ReadInt16BigEndian(span.Slice(21));
-            var firstTimestamp = BinaryPrimitives.ReadInt64BigEndian(span.Slice(27));
-            var recordCount = BinaryPrimitives.ReadInt32BigEndian(span.Slice(57));
-
-            var compression = attributes & 0x07;
-            if (compression != 0) return messages; // Skip compressed batches
-
-            var pos = 61;
-            for (var i = 0; i < recordCount && pos < span.Length; i++)
-            {
-                try
-                {
-                    var recordLength = ReadVarInt(span, ref pos);
-                    if (recordLength <= 0 || pos + recordLength > span.Length) break;
-
-                    ReadVarInt(span, ref pos); // attributes
-                    var timestampDelta = ReadVarLong(span, ref pos);
-                    var offsetDelta = ReadVarInt(span, ref pos);
-
-                    var keyLength = ReadVarInt(span, ref pos);
-                    string? key = null;
-                    if (keyLength > 0 && pos + keyLength <= span.Length)
-                    {
-                        key = Encoding.UTF8.GetString(span.Slice(pos, keyLength));
-                        pos += keyLength;
-                    }
-                    else if (keyLength > 0) break;
-
-                    var valueLength = ReadVarInt(span, ref pos);
-                    string? value = null;
-                    if (valueLength > 0 && pos + valueLength <= span.Length)
-                    {
-                        value = Encoding.UTF8.GetString(span.Slice(pos, valueLength));
-                        pos += valueLength;
-                    }
-                    else if (valueLength > 0) break;
-
-                    var headerCount = ReadVarInt(span, ref pos);
-                    var headers = new Dictionary<string, string>();
-                    for (var h = 0; h < headerCount && pos < span.Length; h++)
-                    {
-                        var hkLen = ReadVarInt(span, ref pos);
-                        if (hkLen > 0 && pos + hkLen <= span.Length)
-                        {
-                            var hk = Encoding.UTF8.GetString(span.Slice(pos, hkLen));
-                            pos += hkLen;
-                            var hvLen = ReadVarInt(span, ref pos);
-                            if (hvLen > 0 && pos + hvLen <= span.Length)
-                            {
-                                headers[hk] = Encoding.UTF8.GetString(span.Slice(pos, hvLen));
-                                pos += hvLen;
-                            }
-                        }
-                    }
-
-                    messages.Add(new RawTopicMessage(
-                        Offset: baseOffset + offsetDelta,
-                        Partition: partition,
-                        Timestamp: DateTimeOffset.FromUnixTimeMilliseconds(firstTimestamp + timestampDelta),
-                        Key: key,
-                        Value: value,
-                        Headers: headers.Count > 0 ? headers : null));
-                }
-                catch
-                {
-                    break;
-                }
-            }
+            return messages; // Undecodable batch — nothing the SQL engine can project.
         }
-        catch
+
+        foreach (var record in parsed.Records)
         {
-            // Failed to parse batch
+            messages.Add(new RawTopicMessage(
+                Offset: record.Offset,
+                Partition: partition,
+                Timestamp: DateTimeOffset.FromUnixTimeMilliseconds(record.TimestampMs),
+                Key: record.Key is { Length: > 0 } ? Encoding.UTF8.GetString(record.Key) : null,
+                Value: record.Value is { Length: > 0 } ? Encoding.UTF8.GetString(record.Value) : null,
+                Headers: record.Headers.Count > 0 ? record.Headers : null));
         }
 
         return messages;
-    }
-
-    private static int ReadVarInt(ReadOnlySpan<byte> span, ref int pos)
-    {
-        var result = 0;
-        var shift = 0;
-        while (pos < span.Length)
-        {
-            var b = span[pos++];
-            result |= (b & 0x7F) << shift;
-            if ((b & 0x80) == 0)
-                return (result >> 1) ^ -(result & 1);
-            shift += 7;
-            if (shift > 28) break;
-        }
-        return result;
-    }
-
-    private static long ReadVarLong(ReadOnlySpan<byte> span, ref int pos)
-    {
-        long result = 0;
-        var shift = 0;
-        while (pos < span.Length)
-        {
-            var b = span[pos++];
-            result |= (long)(b & 0x7F) << shift;
-            if ((b & 0x80) == 0)
-                return (result >> 1) ^ -(result & 1);
-            shift += 7;
-            if (shift > 63) break;
-        }
-        return result;
     }
 
     private Task WriteResultsToTopic(string topicName, List<Dictionary<string, object?>> rows, CancellationToken ct)
