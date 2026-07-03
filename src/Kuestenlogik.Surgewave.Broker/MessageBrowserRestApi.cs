@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 
 namespace Kuestenlogik.Surgewave.Broker;
 
@@ -314,185 +315,54 @@ public static class MessageBrowserRestApi
     private static List<MessageResponse> ParseRecordBatch(byte[] batchBytes, string topic, int partition)
     {
         var messages = new List<MessageResponse>();
+        var parsed = RecordBatchBrowser.Parse(batchBytes);
 
-        try
+        if (parsed.DecompressionFailed)
         {
-            // Parse Kafka RecordBatch format
-            var span = batchBytes.AsSpan();
-            if (span.Length < 61) // Minimum RecordBatch size
-                return messages;
-
-            // RecordBatch header
-            var baseOffset = BinaryPrimitives.ReadInt64BigEndian(span);
-            // var batchLength = BinaryPrimitives.ReadInt32BigEndian(span.Slice(8));
-            // var partitionLeaderEpoch = BinaryPrimitives.ReadInt32BigEndian(span.Slice(12));
-            // var magic = span[16];
-            // var crc = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(17));
-            var attributes = BinaryPrimitives.ReadInt16BigEndian(span.Slice(21));
-            // var lastOffsetDelta = BinaryPrimitives.ReadInt32BigEndian(span.Slice(23));
-            var firstTimestamp = BinaryPrimitives.ReadInt64BigEndian(span.Slice(27));
-            // var maxTimestamp = BinaryPrimitives.ReadInt64BigEndian(span.Slice(35));
-            // var producerId = BinaryPrimitives.ReadInt64BigEndian(span.Slice(43));
-            // var producerEpoch = BinaryPrimitives.ReadInt16BigEndian(span.Slice(51));
-            // var baseSequence = BinaryPrimitives.ReadInt32BigEndian(span.Slice(53));
-            var recordCount = BinaryPrimitives.ReadInt32BigEndian(span.Slice(57));
-
-            var compression = (attributes & 0x07);
-            if (compression != 0)
-            {
-                // Compressed batch - return placeholder
-                messages.Add(new MessageResponse(
-                    Offset: baseOffset,
-                    Timestamp: DateTimeOffset.FromUnixTimeMilliseconds(firstTimestamp),
-                    Key: null,
-                    Value: $"[Compressed batch with {recordCount} records]",
-                    ValueBase64: null,
-                    Headers: new Dictionary<string, string>(),
-                    IsCompressed: true,
-                    ValueSizeBytes: batchBytes.Length));
-                return messages;
-            }
-
-            // Parse uncompressed records
-            var pos = 61;
-            for (var i = 0; i < recordCount && pos < span.Length; i++)
-            {
-                try
-                {
-                    var recordStart = pos;
-
-                    // Record length (varint)
-                    var recordLength = ReadVarInt(span, ref pos);
-                    if (recordLength <= 0 || pos + recordLength > span.Length)
-                        break;
-
-                    // Attributes (varint, typically 0)
-                    ReadVarInt(span, ref pos);
-
-                    // Timestamp delta (varint)
-                    var timestampDelta = ReadVarLong(span, ref pos);
-
-                    // Offset delta (varint)
-                    var offsetDelta = ReadVarInt(span, ref pos);
-
-                    // Key length (varint, -1 = null)
-                    var keyLength = ReadVarInt(span, ref pos);
-                    string? key = null;
-                    if (keyLength > 0 && pos + keyLength <= span.Length)
-                    {
-                        key = Encoding.UTF8.GetString(span.Slice(pos, keyLength));
-                        pos += keyLength;
-                    }
-                    else if (keyLength > 0)
-                    {
-                        break;
-                    }
-
-                    // Value length (varint, -1 = null)
-                    var valueLength = ReadVarInt(span, ref pos);
-                    string? value = null;
-                    string? valueBase64 = null;
-                    if (valueLength > 0 && pos + valueLength <= span.Length)
-                    {
-                        var valueBytes = span.Slice(pos, valueLength).ToArray();
-                        // Try to decode as UTF-8, fallback to Base64
-                        if (IsValidUtf8(valueBytes))
-                        {
-                            value = Encoding.UTF8.GetString(valueBytes);
-                        }
-                        else
-                        {
-                            valueBase64 = Convert.ToBase64String(valueBytes);
-                            value = $"[Binary data: {valueLength} bytes]";
-                        }
-                        pos += valueLength;
-                    }
-                    else if (valueLength > 0)
-                    {
-                        break;
-                    }
-
-                    // Headers count (varint)
-                    var headerCount = ReadVarInt(span, ref pos);
-                    var headers = new Dictionary<string, string>();
-                    for (var h = 0; h < headerCount && pos < span.Length; h++)
-                    {
-                        var headerKeyLen = ReadVarInt(span, ref pos);
-                        if (headerKeyLen > 0 && pos + headerKeyLen <= span.Length)
-                        {
-                            var headerKey = Encoding.UTF8.GetString(span.Slice(pos, headerKeyLen));
-                            pos += headerKeyLen;
-
-                            var headerValueLen = ReadVarInt(span, ref pos);
-                            if (headerValueLen > 0 && pos + headerValueLen <= span.Length)
-                            {
-                                var headerValue = Encoding.UTF8.GetString(span.Slice(pos, headerValueLen));
-                                pos += headerValueLen;
-                                headers[headerKey] = headerValue;
-                            }
-                        }
-                    }
-
-                    messages.Add(new MessageResponse(
-                        Offset: baseOffset + offsetDelta,
-                        Timestamp: DateTimeOffset.FromUnixTimeMilliseconds(firstTimestamp + timestampDelta),
-                        Key: key,
-                        Value: value,
-                        ValueBase64: valueBase64,
-                        Headers: headers,
-                        IsCompressed: false,
-                        ValueSizeBytes: valueLength > 0 ? valueLength : 0));
-                }
-                catch
-                {
-                    break;
-                }
-            }
+            // Honest placeholder: the batch exists but its payload cannot be decoded.
+            messages.Add(new MessageResponse(
+                Offset: parsed.BaseOffset,
+                Timestamp: DateTimeOffset.FromUnixTimeMilliseconds(parsed.FirstTimestampMs),
+                Key: null,
+                Value: $"[Compressed batch ({CompressionCodec.GetCompressionName(parsed.CompressionType)}) " +
+                       $"with {parsed.HeaderRecordCount} records — decompression failed]",
+                ValueBase64: null,
+                Headers: new Dictionary<string, string>(),
+                IsCompressed: true,
+                ValueSizeBytes: batchBytes.Length));
+            return messages;
         }
-        catch
+
+        foreach (var record in parsed.Records)
         {
-            // Failed to parse batch
+            string? value = null;
+            string? valueBase64 = null;
+            if (record.Value is { Length: > 0 })
+            {
+                // Try to decode as UTF-8, fallback to Base64
+                if (IsValidUtf8(record.Value))
+                {
+                    value = Encoding.UTF8.GetString(record.Value);
+                }
+                else
+                {
+                    valueBase64 = Convert.ToBase64String(record.Value);
+                    value = $"[Binary data: {record.Value.Length} bytes]";
+                }
+            }
+
+            messages.Add(new MessageResponse(
+                Offset: record.Offset,
+                Timestamp: DateTimeOffset.FromUnixTimeMilliseconds(record.TimestampMs),
+                Key: record.Key is { Length: > 0 } ? Encoding.UTF8.GetString(record.Key) : null,
+                Value: value,
+                ValueBase64: valueBase64,
+                Headers: record.Headers,
+                IsCompressed: parsed.IsCompressed,
+                ValueSizeBytes: record.Value?.Length ?? 0));
         }
 
         return messages;
-    }
-
-    private static int ReadVarInt(ReadOnlySpan<byte> span, ref int pos)
-    {
-        var result = 0;
-        var shift = 0;
-        while (pos < span.Length)
-        {
-            var b = span[pos++];
-            result |= (b & 0x7F) << shift;
-            if ((b & 0x80) == 0)
-            {
-                // ZigZag decode
-                return (result >> 1) ^ -(result & 1);
-            }
-            shift += 7;
-            if (shift > 28) break;
-        }
-        return result;
-    }
-
-    private static long ReadVarLong(ReadOnlySpan<byte> span, ref int pos)
-    {
-        long result = 0;
-        var shift = 0;
-        while (pos < span.Length)
-        {
-            var b = span[pos++];
-            result |= (long)(b & 0x7F) << shift;
-            if ((b & 0x80) == 0)
-            {
-                // ZigZag decode
-                return (result >> 1) ^ -(result & 1);
-            }
-            shift += 7;
-            if (shift > 63) break;
-        }
-        return result;
     }
 
     private static bool IsValidUtf8(byte[] bytes)
