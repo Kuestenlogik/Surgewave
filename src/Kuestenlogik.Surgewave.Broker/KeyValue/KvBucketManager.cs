@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
@@ -91,7 +92,7 @@ public sealed class KvBucketManager : IDisposable
             if (_buckets.ContainsKey(bucketName))
                 continue;
 
-            var config = new KvBucketConfig();
+            var config = ReadPersistedConfig(topic.Config) ?? new KvBucketConfig();
             var bucket = new KvBucket(bucketName, config, _logManager,
                 _logger as ILogger);
 
@@ -104,6 +105,22 @@ public sealed class KvBucketManager : IDisposable
             {
                 bucket.Dispose();
             }
+        }
+    }
+
+    private KvBucketConfig? ReadPersistedConfig(Dictionary<string, string> topicConfig)
+    {
+        if (!topicConfig.TryGetValue(KvBucket.ConfigTopicKey, out var json))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<KvBucketConfig>(json);
+        }
+        catch (JsonException ex)
+        {
+            _logger?.LogWarning(ex, "Ignoring unreadable persisted KV bucket config");
+            return null;
         }
     }
 

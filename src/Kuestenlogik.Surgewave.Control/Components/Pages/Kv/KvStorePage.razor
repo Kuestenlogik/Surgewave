@@ -1,0 +1,469 @@
+@page "/kv"
+@using System.Text
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@inject IKvApiClient KvApiClient
+@inject NotificationState Notification
+@inject IDialogService DialogService
+
+<PageTitle>KV Store - Surgewave Control</PageTitle>
+
+<PageHead Title="KV Store"
+          Subtitle="Browse and edit the broker-native key-value buckets." />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+<SummaryStrip>
+    <Stat Label="Buckets" Value="@_buckets.Count.ToString()" />
+    <Stat Label="Keys" Value="@_buckets.Sum(b => b.KeyCount).ToString("N0")" Mono="true" />
+    <Stat Label="Total size" Value="@FormatBytes(_buckets.Sum(b => b.TotalValueBytes))" Mono="true" />
+</SummaryStrip>
+
+<MudGrid>
+    <MudItem xs="12" lg="5">
+        <MudPaper Elevation="2" Class="pa-4">
+            <div class="d-flex align-center justify-space-between mb-4">
+                <MudText Typo="Typo.h6">
+                    <MudIcon Icon="@Icons.Material.Filled.Key" Class="mr-2" />
+                    Buckets
+                </MudText>
+                <div class="d-flex gap-2">
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="LoadBucketsAsync"
+                               StartIcon="@Icons.Material.Filled.Refresh">
+                        Refresh
+                    </MudButton>
+                    <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => _showCreate = !_showCreate)">
+                            New Bucket
+                        </MudButton>
+                    </AuthorizeView>
+                </div>
+            </div>
+
+            @if (_showCreate)
+            {
+                <MudPaper Outlined="true" Class="pa-3 mb-4">
+                    <MudTextField @bind-Value="_newBucketName" Label="Bucket name" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Immediate="true" />
+                    <MudGrid Class="mt-1">
+                        <MudItem xs="6">
+                            <MudNumericField @bind-Value="_newBucketHistory" Label="History per key"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" />
+                        </MudItem>
+                        <MudItem xs="6">
+                            <MudNumericField T="double?" @bind-Value="_newBucketTtlSeconds" Label="TTL (seconds)"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense"
+                                             HelperText="empty = no expiry" />
+                        </MudItem>
+                    </MudGrid>
+                    <MudTextField @bind-Value="_newBucketDescription" Label="Description" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Class="mt-1" />
+                    <div class="d-flex justify-end mt-2 gap-2">
+                        <MudButton Size="Size.Small" OnClick="@(() => _showCreate = false)">Cancel</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   Disabled="@(string.IsNullOrWhiteSpace(_newBucketName) || _creating)"
+                                   OnClick="CreateBucketAsync">
+                            Create
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            }
+
+            @if (_buckets.Count == 0 && !_loading)
+            {
+                <MudAlert Severity="Severity.Info">
+                    No KV buckets yet. Create one to store configuration, state or feature flags next to your streams.
+                </MudAlert>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th style="text-align:right">Keys</th>
+                            <th style="text-align:right">Size</th>
+                            <th style="text-align:right">Revision</th>
+                            <th>TTL</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var bucket in _buckets)
+                        {
+                            <tr style="cursor:pointer"
+                                class="@(bucket.Name == _selectedBucket ? "mud-theme-primary-hover selected" : null)"
+                                @onclick="@(() => SelectBucketAsync(bucket.Name))">
+                                <td><code>@bucket.Name</code></td>
+                                <td style="text-align:right">@bucket.KeyCount.ToString("N0")</td>
+                                <td style="text-align:right">@FormatBytes(bucket.TotalValueBytes)</td>
+                                <td style="text-align:right">@bucket.LatestRevision</td>
+                                <td>@(bucket.Config?.Ttl?.ToString() ?? "—")</td>
+                                <td style="text-align:right">
+                                    <AuthorizeView Policy="@SurgewavePolicies.TopicsManage" Context="auth">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                       Color="Color.Error"
+                                                       OnClick="@(() => DeleteBucketAsync(bucket.Name))" />
+                                    </AuthorizeView>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" lg="7">
+        <MudPaper Elevation="2" Class="pa-4">
+            @if (_selectedBucket is null)
+            {
+                <MudText Typo="Typo.h6" Class="mb-2">
+                    <MudIcon Icon="@Icons.Material.Filled.DataObject" Class="mr-2" />
+                    Keys
+                </MudText>
+                <MudAlert Severity="Severity.Info">Select a bucket to browse its keys.</MudAlert>
+            }
+            else
+            {
+                <div class="d-flex align-center justify-space-between mb-4">
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.DataObject" Class="mr-2" />
+                        Keys in <code>@_selectedBucket</code>
+                    </MudText>
+                    <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => StartNewKey())">
+                            New Key
+                        </MudButton>
+                    </AuthorizeView>
+                </div>
+
+                <MudGrid>
+                    <MudItem xs="12" md="4">
+                        <MudTextField @bind-Value="_keyFilter" Placeholder="Filter keys..." Immediate="true"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                                      Margin="Margin.Dense" Variant="Variant.Outlined" Class="mb-2" />
+                        <MudList T="string" Dense="true" SelectedValue="_selectedKey"
+                                 SelectedValueChanged="@(async (string? key) => await SelectKeyAsync(key))"
+                                 Style="max-height: 480px; overflow-y: auto;">
+                            @foreach (var key in FilteredKeys)
+                            {
+                                <MudListItem T="string" Value="@key">
+                                    <code>@key</code>
+                                </MudListItem>
+                            }
+                        </MudList>
+                        @if (_keys.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true">Bucket is empty.</MudAlert>
+                        }
+                    </MudItem>
+
+                    <MudItem xs="12" md="8">
+                        @if (_editingNewKey || _selectedEntry is not null)
+                        {
+                            @if (_editingNewKey)
+                            {
+                                <MudTextField @bind-Value="_editKeyName" Label="Key" Variant="Variant.Outlined"
+                                              Margin="Margin.Dense" Class="mb-2" />
+                            }
+                            else
+                            {
+                                <div class="d-flex align-center gap-4 mb-2">
+                                    <MudText Typo="Typo.subtitle1"><code>@_selectedEntry!.Key</code></MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info">rev @_selectedEntry!.Revision</MudChip>
+                                    <MudChip T="string" Size="Size.Small">@_selectedEntry!.Operation</MudChip>
+                                    <MudText Typo="Typo.caption">@_selectedEntry!.Created.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</MudText>
+                                </div>
+                            }
+
+                            @if (_valueIsBinary)
+                            {
+                                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                                    Value is binary (@_editValue.Length base64 chars) — shown as Base64, editing disabled.
+                                </MudAlert>
+                                <MudTextField Value="@_editValue" Lines="8" ReadOnly="true"
+                                              Variant="Variant.Outlined" Class="mb-2" Style="font-family:monospace" />
+                            }
+                            else
+                            {
+                                <MudTextField @bind-Value="_editValue" Label="Value (UTF-8)" Lines="8"
+                                              Variant="Variant.Outlined" Class="mb-2" Style="font-family:monospace" />
+                            }
+
+                            <AuthorizeView Policy="@SurgewavePolicies.TopicsManage">
+                                <div class="d-flex gap-2 mb-4">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                               Disabled="@(_valueIsBinary || _saving || (_editingNewKey && string.IsNullOrWhiteSpace(_editKeyName)))"
+                                               OnClick="SaveEntryAsync">
+                                        Save
+                                    </MudButton>
+                                    @if (!_editingNewKey)
+                                    {
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                                                   Disabled="@_saving" OnClick="DeleteEntryAsync">
+                                            Delete Key
+                                        </MudButton>
+                                    }
+                                </div>
+                            </AuthorizeView>
+
+                            @if (!_editingNewKey && _history.Count > 1)
+                            {
+                                <MudText Typo="Typo.subtitle2" Class="mb-1">History</MudText>
+                                <MudSimpleTable Dense="true" Style="max-height: 220px; overflow-y: auto;">
+                                    <thead>
+                                        <tr><th>Revision</th><th>Operation</th><th>Created</th><th style="text-align:right">Size</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var entry in _history.OrderByDescending(h => h.Revision))
+                                        {
+                                            <tr>
+                                                <td>@entry.Revision</td>
+                                                <td>@entry.Operation</td>
+                                                <td>@entry.Created.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                                <td style="text-align:right">@FormatBytes(Convert.FromBase64String(entry.ValueBase64).LongLength)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                            }
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info">Select a key to inspect and edit its value.</MudAlert>
+                        }
+                    </MudItem>
+                </MudGrid>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _loading = true;
+    private bool _creating;
+    private bool _saving;
+    private bool _showCreate;
+
+    private List<KvBucketModel> _buckets = [];
+    private string? _selectedBucket;
+    private List<string> _keys = [];
+    private string _keyFilter = "";
+    private string? _selectedKey;
+    private KvEntryModel? _selectedEntry;
+    private List<KvEntryModel> _history = [];
+
+    private bool _editingNewKey;
+    private string _editKeyName = "";
+    private string _editValue = "";
+    private bool _valueIsBinary;
+
+    private string _newBucketName = "";
+    private int _newBucketHistory = 1;
+    private double? _newBucketTtlSeconds;
+    private string? _newBucketDescription;
+
+    private IEnumerable<string> FilteredKeys =>
+        string.IsNullOrWhiteSpace(_keyFilter)
+            ? _keys
+            : _keys.Where(k => k.Contains(_keyFilter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+        => await LoadBucketsAsync();
+
+    private async Task LoadBucketsAsync()
+    {
+        _loading = true;
+        _buckets = [.. await KvApiClient.ListBucketsAsync()];
+        _loading = false;
+    }
+
+    private async Task CreateBucketAsync()
+    {
+        _creating = true;
+        var created = await KvApiClient.CreateBucketAsync(new CreateKvBucketRequest
+        {
+            Name = _newBucketName.Trim(),
+            MaxHistoryPerKey = _newBucketHistory,
+            TtlSeconds = _newBucketTtlSeconds,
+            Description = string.IsNullOrWhiteSpace(_newBucketDescription) ? null : _newBucketDescription,
+        });
+        _creating = false;
+
+        if (created is null)
+        {
+            Notification.ShowError($"Failed to create bucket '{_newBucketName}' (already exists?)");
+            return;
+        }
+
+        Notification.ShowSuccess($"Bucket '{created.Name}' created");
+        _showCreate = false;
+        _newBucketName = "";
+        _newBucketDescription = null;
+        await LoadBucketsAsync();
+        await SelectBucketAsync(created.Name);
+    }
+
+    private async Task DeleteBucketAsync(string bucket)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete bucket",
+            $"Delete bucket '{bucket}' and all of its keys? This cannot be undone.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        if (await KvApiClient.DeleteBucketAsync(bucket))
+        {
+            Notification.ShowSuccess($"Bucket '{bucket}' deleted");
+            if (_selectedBucket == bucket)
+            {
+                _selectedBucket = null;
+                ResetKeyState();
+            }
+            await LoadBucketsAsync();
+        }
+        else
+        {
+            Notification.ShowError($"Failed to delete bucket '{bucket}'");
+        }
+    }
+
+    private async Task SelectBucketAsync(string bucket)
+    {
+        _selectedBucket = bucket;
+        ResetKeyState();
+        _keys = [.. await KvApiClient.ListKeysAsync(bucket)];
+        _keys.Sort(StringComparer.Ordinal);
+    }
+
+    private async Task SelectKeyAsync(string? key)
+    {
+        if (key is null || _selectedBucket is null)
+            return;
+
+        _editingNewKey = false;
+        _selectedKey = key;
+        _selectedEntry = await KvApiClient.GetEntryAsync(_selectedBucket, key);
+        _history = _selectedEntry is null
+            ? []
+            : [.. await KvApiClient.GetHistoryAsync(_selectedBucket, key)];
+
+        if (_selectedEntry is not null)
+        {
+            var bytes = Convert.FromBase64String(_selectedEntry.ValueBase64);
+            _valueIsBinary = !IsProbablyUtf8Text(bytes);
+            _editValue = _valueIsBinary ? _selectedEntry.ValueBase64 : Encoding.UTF8.GetString(bytes);
+        }
+    }
+
+    private void StartNewKey()
+    {
+        _editingNewKey = true;
+        _selectedKey = null;
+        _selectedEntry = null;
+        _history = [];
+        _editKeyName = "";
+        _editValue = "";
+        _valueIsBinary = false;
+    }
+
+    private async Task SaveEntryAsync()
+    {
+        if (_selectedBucket is null)
+            return;
+
+        var key = _editingNewKey ? _editKeyName.Trim() : _selectedEntry!.Key;
+        _saving = true;
+        var entry = await KvApiClient.PutEntryAsync(_selectedBucket, key, Encoding.UTF8.GetBytes(_editValue));
+        _saving = false;
+
+        if (entry is null)
+        {
+            Notification.ShowError($"Failed to save key '{key}'");
+            return;
+        }
+
+        Notification.ShowSuccess($"Key '{key}' saved (revision {entry.Revision})");
+        await SelectBucketAsync(_selectedBucket);
+        await SelectKeyAsync(key);
+        await LoadBucketsAsync();
+    }
+
+    private async Task DeleteEntryAsync()
+    {
+        if (_selectedBucket is null || _selectedEntry is null)
+            return;
+
+        var key = _selectedEntry.Key;
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete key",
+            $"Delete key '{key}' from bucket '{_selectedBucket}'?",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        _saving = true;
+        var entry = await KvApiClient.DeleteEntryAsync(_selectedBucket, key);
+        _saving = false;
+
+        if (entry is null)
+        {
+            Notification.ShowError($"Failed to delete key '{key}'");
+            return;
+        }
+
+        Notification.ShowSuccess($"Key '{key}' deleted");
+        ResetKeyState();
+        await SelectBucketAsync(_selectedBucket);
+        await LoadBucketsAsync();
+    }
+
+    private void ResetKeyState()
+    {
+        _keys = [];
+        _keyFilter = "";
+        _selectedKey = null;
+        _selectedEntry = null;
+        _history = [];
+        _editingNewKey = false;
+        _editValue = "";
+        _valueIsBinary = false;
+    }
+
+    private static bool IsProbablyUtf8Text(byte[] bytes)
+    {
+        if (bytes.Length == 0)
+            return true;
+
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+            return false;
+
+        try
+        {
+            _ = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+                .GetString(bytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+}
