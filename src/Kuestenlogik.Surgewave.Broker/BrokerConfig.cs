@@ -898,6 +898,57 @@ public sealed class SecurityConfig
     /// tokens on the Kafka wire.
     /// </summary>
     public OAuthBearerConfig OAuthBearer { get; set; } = new();
+
+    /// <summary>
+    /// JWT authentication + authorization for the broker's HTTP admin/REST
+    /// surface. Bound from <c>Surgewave:Security:RestApiAuth</c>. Disabled by
+    /// default so existing deployments keep working; enable it to require a
+    /// valid bearer token on management endpoints instead of leaving them open.
+    /// </summary>
+    public RestApiAuthConfig RestApiAuth { get; set; } = new();
+}
+
+/// <summary>
+/// JWT auth for the broker's HTTP REST surface. When <see cref="Enabled"/> is
+/// true, the surface is default-deny: every request except the anonymous
+/// allowlist (<see cref="AnonymousPathPrefixes"/>) requires a valid bearer
+/// token. This covers REST (/admin, /api), gRPC-JSON transcoding (/v3), raw
+/// gRPC, Schema Registry (/subjects, …) and /bowire alike. Mutating REST
+/// requests (POST/PUT/DELETE/PATCH) additionally require <see cref="RequiredRole"/>;
+/// gRPC calls require authentication only (the method cannot distinguish
+/// read from write — fine-grained gRPC authz is a follow-up).
+/// </summary>
+public sealed class RestApiAuthConfig
+{
+    /// <summary>Enable JWT auth on the HTTP REST surface. Default: false.</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>OIDC issuer / authority. Falls back to <see cref="OAuth2Config.Issuer"/> when unset.</summary>
+    public string? Issuer { get; set; }
+
+    /// <summary>Expected audience. Falls back to <see cref="OAuth2Config.Audience"/> when unset.</summary>
+    public string? Audience { get; set; }
+
+    /// <summary>JWKS endpoint. Falls back to <see cref="OAuth2Config.JwksUri"/>, then issuer discovery.</summary>
+    public string? JwksUri { get; set; }
+
+    /// <summary>Claim carrying role/group names. Default: "roles".</summary>
+    public string RolesClaim { get; set; } = "roles";
+
+    /// <summary>Role required for mutating (POST/PUT/DELETE/PATCH) management calls. Default: "surgewave-admin".</summary>
+    public string RequiredRole { get; set; } = "surgewave-admin";
+
+    /// <summary>
+    /// Path prefixes that stay anonymous (everything else requires auth). Kept
+    /// minimal on purpose: liveness/readiness probes and metrics scraping only.
+    /// </summary>
+    public string[] AnonymousPathPrefixes { get; set; } = ["/health", "/metrics", "/sd-targets"];
+
+    /// <summary>Require HTTPS for OIDC metadata retrieval. Default: true.</summary>
+    public bool RequireHttpsMetadata { get; set; } = true;
+
+    /// <summary>Clock skew tolerance in minutes. Default: 5.</summary>
+    public int ClockSkewMinutes { get; set; } = 5;
 }
 
 /// <summary>

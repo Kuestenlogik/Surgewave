@@ -126,6 +126,7 @@
          Surgewave.Client-Abhaengigkeit des Pakets wird durch die lokale
          ProjectReference ersetzt. -->
     <PackageReference Include="Kuestenlogik.Bowire.Protocol.Surgewave" ExcludeAssets="contentFiles" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <PackageReference Include="OpenTelemetry" />

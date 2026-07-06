@@ -1,18 +1,24 @@
 @page "/roles"
 @using Kuestenlogik.Surgewave.Control.Models
 @using Kuestenlogik.Surgewave.Control.Services
+@using Kuestenlogik.Surgewave.Control.Services.Security
 @using Blazored.LocalStorage
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Authorize(Policy = SurgewavePolicies.RoleManage)]
+@implements IDisposable
 @inject ILocalStorageService LocalStorage
-@inject IAclApiClient AclClient
+@inject IRoleService RoleService
+@inject IAuthorizationService AuthorizationService
 @inject IDialogService DialogService
 @inject NotificationState Notification
 
 <PageTitle>Role Management - Surgewave Control</PageTitle>
 
 <PageHead Title="Role Management"
-          Subtitle="Manage roles, permissions, and user assignments.">
+          Subtitle="Manage roles, permissions, and user assignments — stored server-side and enforced via the authorization policies.">
     <Actions>
-        <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+        <AuthorizeView Policy="@SurgewavePolicies.RoleManage">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.Add" OnClick="CreateRoleAsync">
                 Create role
@@ -21,7 +27,11 @@
     </Actions>
 </PageHead>
 
-<PreviewBanner Text="Roles are stored in this browser only and are not enforced by the broker yet." />
+<MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+    Roles are stored on the Control host and become effective role claims for assigned users when
+    authentication is enabled. Permissions marked <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">enforced</MudChip>
+    map to an authorization policy; the rest are informational until a matching policy exists.
+</MudAlert>
 
 @if (_loading)
 {
@@ -68,7 +78,7 @@
                             }
                             else
                             {
-                                <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+                                <AuthorizeView Policy="@SurgewavePolicies.RoleManage">
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
                                                    OnClick="@(() => EditRoleAsync(role))" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
@@ -123,7 +133,7 @@ else if (_activeTab == 1)
     @* ===== USER ASSIGNMENTS TAB ===== *@
     <MudPaper Elevation="2" Class="pa-4 mb-4">
         <div class="d-flex gap-2 align-center mb-4">
-            <MudTextField T="string" @bind-Value="_newUser" Label="Username (e.g. User:alice)"
+            <MudTextField T="string" @bind-Value="_newUser" Label="Username (e.g. alice or alice@example.com)"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
             <MudSelect T="string" @bind-Value="_newUserRole" Label="Role" Variant="Variant.Outlined"
                        Margin="Margin.Dense" Style="min-width: 200px;">
@@ -132,7 +142,7 @@ else if (_activeTab == 1)
                     <MudSelectItem Value="@role.Name">@role.Name</MudSelectItem>
                 }
             </MudSelect>
-            <AuthorizeView Policy="@SurgewavePolicies.AclManage">
+            <AuthorizeView Policy="@SurgewavePolicies.RoleManage">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AssignRoleAsync"
                            Disabled="@(string.IsNullOrWhiteSpace(_newUser) || string.IsNullOrWhiteSpace(_newUserRole))">
                     Assign
@@ -197,7 +207,7 @@ else
     <MudPaper Elevation="2" Class="pa-4 mb-4">
         <MudGrid>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" @bind-Value="_viewerUser" Label="Username (e.g. User:alice)"
+                <MudTextField T="string" @bind-Value="_viewerUser" Label="Username (e.g. alice or alice@example.com)"
                               Variant="Variant.Outlined" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
@@ -305,7 +315,7 @@ else
             {
                 <MudCheckBox T="bool" Value="@(_editingRole.Permissions.Contains(perm.Key))"
                              ValueChanged="@(v => TogglePermission(perm.Key, v))"
-                             Label="@($"{perm.Key} — {perm.Value}")" Dense="true"
+                             Label="@($"{perm.Key} — {perm.Value}{(IsEnforced(perm.Key) ? " (enforced)" : "")}")" Dense="true"
                              Color="@GetPermissionColor(perm.Key)" />
             }
         }
@@ -318,6 +328,9 @@ else
 </MudDialog>
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
     private bool _loading = true;
     private int _activeTab;
     private RoleManagementState _state = new();
@@ -337,21 +350,10 @@ else
 
     private static readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
 
-    private static readonly Dictionary<string, string> _allPermissions = new()
-    {
-        ["topics.manage"] = "Create, delete, and configure topics",
-        ["topics.produce"] = "Produce messages to topics",
-        ["topics.consume"] = "Consume/browse messages from topics",
-        ["connectors.manage"] = "Create, delete, and configure connectors",
-        ["pipelines.manage"] = "Create, delete, and run pipelines",
-        ["schemas.manage"] = "Register and delete schemas",
-        ["acls.manage"] = "Create and delete ACL entries",
-        ["quotas.manage"] = "Configure client quotas",
-        ["plugins.manage"] = "Upload and manage plugins",
-        ["cluster.admin"] = "Full cluster administration",
-        ["catalog.edit"] = "Edit data catalog entries",
-        ["alerts.manage"] = "Create and manage alert rules"
-    };
+    private const string LegacyStorageKey = "surgewave-role-management";
+
+    private static readonly Dictionary<string, string> _allPermissions =
+        RolePermissions.Catalogue.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
     private sealed record UserAssignment(string User, List<string> Roles);
 
@@ -360,55 +362,74 @@ else
             .Select(kvp => new UserAssignment(kvp.Key, kvp.Value))
             .OrderBy(u => u.User);
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        var stored = await LocalStorage.GetItemAsync<RoleManagementState>("surgewave-role-management");
-        if (stored != null)
-            _state = stored;
-
-        // Ensure built-in roles exist
-        EnsureBuiltInRoles();
+        RoleService.Changed += OnRolesChanged;
+        Reload();
         _loading = false;
     }
 
-    private void EnsureBuiltInRoles()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var builtIns = new List<RoleDefinition>
-        {
-            new()
-            {
-                Name = "Admin",
-                Description = "Full access to all features",
-                Permissions = [.._allPermissions.Keys],
-                IsBuiltIn = true
-            },
-            new()
-            {
-                Name = "Operator",
-                Description = "Manage topics, connectors, and monitor cluster",
-                Permissions = ["topics.manage", "topics.produce", "topics.consume", "connectors.manage", "catalog.edit", "alerts.manage"],
-                IsBuiltIn = true
-            },
-            new()
-            {
-                Name = "Developer",
-                Description = "Read topics, produce messages, manage schemas",
-                Permissions = ["topics.produce", "topics.consume", "schemas.manage", "catalog.edit"],
-                IsBuiltIn = true
-            },
-            new()
-            {
-                Name = "Viewer",
-                Description = "Read-only access to all resources",
-                Permissions = ["topics.consume"],
-                IsBuiltIn = true
-            }
-        };
+        if (firstRender)
+            await MigrateLegacyAsync();
+    }
 
-        foreach (var builtIn in builtIns)
+    private void Reload()
+    {
+        _state = new RoleManagementState
         {
-            if (!_state.Roles.Any(r => r.Name == builtIn.Name))
-                _state.Roles.Add(builtIn);
+            Roles = [.. RoleService.GetRoles()],
+            UserRoles = RoleService.GetUserRoles()
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToList(), StringComparer.OrdinalIgnoreCase),
+        };
+    }
+
+    private void OnRolesChanged() => _ = InvokeAsync(() =>
+    {
+        Reload();
+        StateHasChanged();
+    });
+
+    private async Task MigrateLegacyAsync()
+    {
+        try
+        {
+            // LocalStorage is attacker-controllable, so only an authenticated
+            // admin may seed server-side RBAC from it — never an anonymous or
+            // feature-scoped visitor.
+            if (AuthState is null)
+                return;
+            var user = (await AuthState).User;
+            var authorized = await AuthorizationService.AuthorizeAsync(user, SurgewavePolicies.RoleManage);
+            if (!authorized.Succeeded)
+                return;
+
+            // Only migrate if the server store still holds nothing custom, so we
+            // never clobber server-side edits with a stale browser blob.
+            if (_state.Roles.Any(r => !r.IsBuiltIn) || _state.UserRoles.Count > 0)
+                return;
+
+            var legacy = await LocalStorage.GetItemAsync<RoleManagementState>(LegacyStorageKey);
+            if (legacy is null || (legacy.Roles.Count == 0 && legacy.UserRoles.Count == 0))
+                return;
+
+            // Only drop the browser copy once the server persist actually
+            // succeeded — otherwise a failed write would silently lose the roles.
+            if (!RoleService.ReplaceAll(legacy))
+            {
+                Notification.ShowError("Could not persist migrated roles — the browser copy was kept. Check the server logs.");
+                return;
+            }
+
+            await LocalStorage.RemoveItemAsync(LegacyStorageKey);
+            Reload();
+            Notification.ShowSuccess("Migrated browser-stored roles to server-side storage");
+            StateHasChanged();
+        }
+        catch
+        {
+            // LocalStorage unavailable during prerender — nothing to migrate.
         }
     }
 
@@ -441,32 +462,27 @@ else
 
         if (confirmed == true)
         {
-            _state.Roles.RemoveAll(r => r.Name == role.Name);
-            foreach (var kvp in _state.UserRoles)
-                kvp.Value.Remove(role.Name);
-            await SaveStateAsync();
-            Notification.ShowSuccess($"Role '{role.Name}' deleted");
+            if (RoleService.DeleteRole(role.Name))
+                Notification.ShowSuccess($"Role '{role.Name}' deleted");
+            else
+                Notification.ShowError($"Role '{role.Name}' could not be deleted (built-in roles are protected, or the write failed).");
         }
     }
 
-    private async Task SaveRoleAsync()
+    private void SaveRoleAsync()
     {
         if (_editingRole == null || string.IsNullOrWhiteSpace(_editingRole.Name)) return;
 
-        var existing = _state.Roles.FindIndex(r => r.Name == _editingRole.Name);
-        if (existing >= 0)
+        var name = _editingRole.Name;
+        if (RoleService.SaveRole(_editingRole))
         {
-            _state.Roles[existing].Description = _editingRole.Description;
-            _state.Roles[existing].Permissions = [.._editingRole.Permissions];
+            _roleDialogVisible = false;
+            Notification.ShowSuccess($"Role '{name}' saved");
         }
         else
         {
-            _state.Roles.Add(_editingRole);
+            Notification.ShowError($"Role '{name}' could not be persisted — check the server logs.");
         }
-
-        await SaveStateAsync();
-        _roleDialogVisible = false;
-        Notification.ShowSuccess($"Role '{_editingRole.Name}' saved");
     }
 
     private void TogglePermission(string permission, bool enabled)
@@ -478,45 +494,30 @@ else
             _editingRole.Permissions.Remove(permission);
     }
 
-    private async Task AssignRoleAsync()
+    private void AssignRoleAsync()
     {
         if (string.IsNullOrWhiteSpace(_newUser) || string.IsNullOrWhiteSpace(_newUserRole)) return;
 
-        if (!_state.UserRoles.TryGetValue(_newUser, out var roles))
+        var user = _newUser;
+        var roleName = _newUserRole;
+        if (RoleService.AssignRole(user, roleName))
         {
-            roles = [];
-            _state.UserRoles[_newUser] = roles;
+            Notification.ShowSuccess($"Role '{roleName}' assigned to '{user}'");
+            _newUser = "";
+            _newUserRole = null;
         }
-
-        if (!roles.Contains(_newUserRole))
+        else
         {
-            roles.Add(_newUserRole);
-            // Also add to the role's member list
-            var role = _state.Roles.FirstOrDefault(r => r.Name == _newUserRole);
-            if (role != null && !role.Members.Contains(_newUser))
-                role.Members.Add(_newUser);
+            Notification.ShowError($"Could not assign '{roleName}' to '{user}' — check the server logs.");
         }
-
-        await SaveStateAsync();
-        Notification.ShowSuccess($"Role '{_newUserRole}' assigned to '{_newUser}'");
-        _newUser = "";
-        _newUserRole = null;
     }
 
-    private async void RemoveUserRole(string user, string roleName)
+    private void RemoveUserRole(string user, string roleName)
     {
-        if (_state.UserRoles.TryGetValue(user, out var roles))
-        {
-            roles.Remove(roleName);
-            if (roles.Count == 0) _state.UserRoles.Remove(user);
-        }
-
-        var role = _state.Roles.FirstOrDefault(r => r.Name == roleName);
-        role?.Members.Remove(user);
-
-        await SaveStateAsync();
-        Notification.ShowInfo($"Removed '{roleName}' from '{user}'");
-        StateHasChanged();
+        if (RoleService.RemoveRole(user, roleName))
+            Notification.ShowInfo($"Removed '{roleName}' from '{user}'");
+        else
+            Notification.ShowError($"Could not remove '{roleName}' from '{user}' — check the server logs.");
     }
 
     private List<string> GetUserRoles(string user)
@@ -544,10 +545,8 @@ else
         StateHasChanged();
     }
 
-    private async Task SaveStateAsync()
-    {
-        await LocalStorage.SetItemAsync("surgewave-role-management", _state);
-    }
+    private static bool IsEnforced(string permission) =>
+        RolePermissionMapping.EnforcedPermissions.Contains(permission);
 
     private static Color GetPermissionColor(string permission) => permission switch
     {
@@ -558,4 +557,6 @@ else
         var p when p.Contains("edit") => Color.Success,
         _ => Color.Default
     };
+
+    public void Dispose() => RoleService.Changed -= OnRolesChanged;
 }
