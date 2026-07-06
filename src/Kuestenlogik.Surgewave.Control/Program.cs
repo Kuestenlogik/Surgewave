@@ -4,6 +4,7 @@ using Kuestenlogik.Surgewave.Control.Models.Assistant;
 using Kuestenlogik.Surgewave.Control.Security;
 using Kuestenlogik.Surgewave.Control.Services;
 using Kuestenlogik.Surgewave.Control.Models.Marketplace;
+using Kuestenlogik.Surgewave.Control.Services.Alerting;
 using Kuestenlogik.Surgewave.Control.Services.Assistant;
 using Kuestenlogik.Surgewave.Control.Services.Collaboration;
 using Kuestenlogik.Surgewave.Control.Services.Timeline;
@@ -180,6 +181,23 @@ builder.Services.AddScoped<ITimelineService, TimelineService>();
 // Register Collaboration services (SignalR for multi-user pipeline editing)
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<CollaborationStateService>();
+
+// Server-side alerting: rules/channels/history persist on the Control host and
+// evaluate in the background, so alerts fire without an open browser (#38).
+var alertingStorePath = builder.Configuration["Surgewave:Alerting:StorePath"] ?? Path.Combine("data", "alerts.json");
+if (!Path.IsPathRooted(alertingStorePath))
+    alertingStorePath = Path.Combine(builder.Environment.ContentRootPath, alertingStorePath);
+builder.Services.AddHttpClient(AlertNotificationDispatcher.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(sp => new AlertingStore(alertingStorePath, sp.GetRequiredService<ILogger<AlertingStore>>()));
+builder.Services.AddSingleton<AlertNotificationDispatcher>();
+builder.Services.AddSingleton<IAlertingService, AlertingService>();
+var alertingIntervalSeconds = Math.Max(5, builder.Configuration.GetValue("Surgewave:Alerting:EvaluationIntervalSeconds", 30));
+builder.Services.AddHostedService(sp => new AlertEvaluationWorker(
+    sp.GetRequiredService<IAlertingService>(),
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    TimeSpan.FromSeconds(alertingIntervalSeconds),
+    sp.GetRequiredService<ILogger<AlertEvaluationWorker>>()));
 
 // Control UI plugin discovery (Fleet, Schema Registry, etc.)
 var controlPluginRegistry = new ControlPluginRegistry();
