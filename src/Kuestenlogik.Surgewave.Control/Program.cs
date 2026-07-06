@@ -127,6 +127,8 @@ AddBearerTokenHandler(builder.Services.AddHttpClient<IMetricsClient, MetricsClie
 AddBearerTokenHandler(builder.Services.AddHttpClient<IChatApiClient, ChatApiClient>(c => ConfigureHttpClient(c, 120)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<ITrustStoreApiClient, TrustStoreApiClient>(c => ConfigureHttpClient(c, 10)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<IRepositoryApiClient, RepositoryApiClient>(c => ConfigureHttpClient(c, 10)));
+AddBearerTokenHandler(builder.Services.AddHttpClient<IKvApiClient, KvApiClient>(c => ConfigureHttpClient(c)));
+AddBearerTokenHandler(builder.Services.AddHttpClient<ITransactionsApiClient, TransactionsApiClient>(c => ConfigureHttpClient(c)));
 
 // Named-Client "SurgewaveApi" + Roh-HttpClient (@inject HttpClient) — beide mit
 // Broker-BaseAddress, damit Seiten ohne typisierten SDK-Client (Operations,

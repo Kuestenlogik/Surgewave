@@ -1,0 +1,254 @@
+@page "/transactions"
+@using Kuestenlogik.Surgewave.Control.Models
+@using Kuestenlogik.Surgewave.Control.Services
+@implements IDisposable
+@inject ITransactionsApiClient TransactionsApiClient
+
+<PageTitle>Transactions - Surgewave Control</PageTitle>
+
+<PageHead Title="Transactions"
+          Subtitle="Kafka transactional producers and Surgewave cross-topic transactions." />
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+
+<SummaryStrip>
+    <Stat Label="Kafka transactions" Value="@_kafkaTransactions.Count.ToString()" />
+    <Stat Label="Ongoing" Value="@_kafkaTransactions.Count(t => t.State is "Ongoing" or "ONGOING").ToString()" />
+    <Stat Label="Cross-topic active" Value="@_crossTopicTransactions.Count.ToString()" />
+</SummaryStrip>
+
+<div class="d-flex justify-end mb-2">
+    <MudSwitch T="bool" Value="_autoRefresh" ValueChanged="ToggleAutoRefresh"
+               Label="Auto-refresh (5s)" Color="Color.Primary" Class="mr-4" />
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="RefreshAsync"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Refresh
+    </MudButton>
+</div>
+
+<MudGrid>
+    <MudItem xs="12">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.ReceiptLong" Class="mr-2" />
+                Kafka Transactions
+            </MudText>
+
+            @if (_kafkaTransactions.Count == 0 && !_loading)
+            {
+                <MudAlert Severity="Severity.Info">
+                    No transactional producers known to this broker. Transactions appear here once a
+                    producer calls InitProducerId with a transactional id.
+                </MudAlert>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Transactional ID</th>
+                            <th style="text-align:right">Producer ID</th>
+                            <th>State</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var txn in _kafkaTransactions)
+                        {
+                            <tr style="cursor:pointer" @onclick="@(() => ToggleDetailsAsync(txn.TransactionalId))">
+                                <td style="width:32px">
+                                    <MudIcon Size="Size.Small"
+                                             Icon="@(_expandedId == txn.TransactionalId ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" />
+                                </td>
+                                <td><code>@txn.TransactionalId</code></td>
+                                <td style="text-align:right"><code>@txn.ProducerId</code></td>
+                                <td>@StateChip(txn.State)</td>
+                            </tr>
+                            @if (_expandedId == txn.TransactionalId)
+                            {
+                                <tr>
+                                    <td colspan="4" class="pa-4" style="background: var(--mud-palette-background-gray)">
+                                        @if (_expandedDetail is null)
+                                        {
+                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                                        }
+                                        else
+                                        {
+                                            <MudGrid>
+                                                <MudItem xs="6" md="3">
+                                                    <MudText Typo="Typo.caption">Producer epoch</MudText>
+                                                    <MudText Typo="Typo.body2"><code>@_expandedDetail.ProducerEpoch</code></MudText>
+                                                </MudItem>
+                                                <MudItem xs="6" md="3">
+                                                    <MudText Typo="Typo.caption">Timeout</MudText>
+                                                    <MudText Typo="Typo.body2">@(_expandedDetail.TransactionTimeoutMs) ms</MudText>
+                                                </MudItem>
+                                                <MudItem xs="6" md="3">
+                                                    <MudText Typo="Typo.caption">Started</MudText>
+                                                    <MudText Typo="Typo.body2">
+                                                        @(_expandedDetail.TransactionStartTimeMs > 0
+                                                            ? DateTimeOffset.FromUnixTimeMilliseconds(_expandedDetail.TransactionStartTimeMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                                                            : "—")
+                                                    </MudText>
+                                                </MudItem>
+                                                <MudItem xs="6" md="3">
+                                                    <MudText Typo="Typo.caption">Partitions</MudText>
+                                                    <MudText Typo="Typo.body2">
+                                                        @if (_expandedDetail.Partitions is { Count: > 0 })
+                                                        {
+                                                            @foreach (var partition in _expandedDetail.Partitions)
+                                                            {
+                                                                <MudChip T="string" Size="Size.Small">@partition.Topic-@partition.Partition</MudChip>
+                                                            }
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>none</span>
+                                                        }
+                                                    </MudText>
+                                                </MudItem>
+                                            </MudGrid>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.CallSplit" Class="mr-2" />
+                Cross-Topic Transactions
+                <MudTooltip Text="Surgewave-native atomic multi-topic writes via /api/transactions — no Kafka producer required.">
+                    <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" Class="ml-1" />
+                </MudTooltip>
+            </MudText>
+
+            @if (_crossTopicTransactions.Count == 0 && !_loading)
+            {
+                <MudAlert Severity="Severity.Info">No active cross-topic transactions.</MudAlert>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th>Transaction ID</th>
+                            <th>State</th>
+                            <th>Started</th>
+                            <th style="text-align:right">Timeout</th>
+                            <th style="text-align:right">Pending writes</th>
+                            <th style="text-align:right">Producer ID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var txn in _crossTopicTransactions)
+                        {
+                            <tr>
+                                <td><code>@txn.TransactionId</code></td>
+                                <td>@StateChip(txn.State)</td>
+                                <td>@txn.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td style="text-align:right">@txn.TimeoutSeconds.ToString("N0") s</td>
+                                <td style="text-align:right">@txn.PendingWrites</td>
+                                <td style="text-align:right"><code>@(txn.ProducerId?.ToString() ?? "—")</code></td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _loading = true;
+    private bool _autoRefresh;
+    private Timer? _refreshTimer;
+
+    private List<TxnListingModel> _kafkaTransactions = [];
+    private List<CrossTopicTransactionModel> _crossTopicTransactions = [];
+
+    private string? _expandedId;
+    private TxnDescriptionModel? _expandedDetail;
+
+    protected override async Task OnInitializedAsync()
+        => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        var kafkaTask = TransactionsApiClient.ListKafkaTransactionsAsync();
+        var crossTask = TransactionsApiClient.ListCrossTopicTransactionsAsync();
+        _kafkaTransactions = [.. await kafkaTask];
+        _crossTopicTransactions = [.. await crossTask];
+        _kafkaTransactions.Sort((a, b) => string.CompareOrdinal(a.TransactionalId, b.TransactionalId));
+        _loading = false;
+
+        if (_expandedId is not null && _kafkaTransactions.All(t => t.TransactionalId != _expandedId))
+        {
+            _expandedId = null;
+            _expandedDetail = null;
+        }
+    }
+
+    private async Task ToggleDetailsAsync(string transactionalId)
+    {
+        if (_expandedId == transactionalId)
+        {
+            _expandedId = null;
+            _expandedDetail = null;
+            return;
+        }
+
+        _expandedId = transactionalId;
+        _expandedDetail = null;
+        var details = await TransactionsApiClient.DescribeKafkaTransactionsAsync([transactionalId]);
+        _expandedDetail = details.FirstOrDefault();
+    }
+
+    private void ToggleAutoRefresh(bool enabled)
+    {
+        _autoRefresh = enabled;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+
+        if (enabled)
+        {
+            _refreshTimer = new Timer(_ => _ = InvokeAsync(async () =>
+            {
+                await RefreshAsync();
+                StateHasChanged();
+            }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        }
+    }
+
+    private static RenderFragment StateChip(string state) => builder =>
+    {
+        var color = state.ToUpperInvariant() switch
+        {
+            "ONGOING" => Color.Info,
+            "ACTIVE" => Color.Info,
+            "PREPARECOMMIT" or "COMMITTING" => Color.Warning,
+            "COMPLETECOMMIT" or "COMMITTED" => Color.Success,
+            "PREPAREABORT" or "COMPLETEABORT" or "ABORTED" or "ABORTING" => Color.Error,
+            "EMPTY" => Color.Default,
+            _ => Color.Default,
+        };
+
+        builder.OpenComponent<MudChip<string>>(0);
+        builder.AddComponentParameter(1, "Size", Size.Small);
+        builder.AddComponentParameter(2, "Color", color);
+        builder.AddAttribute(3, "ChildContent", (RenderFragment)(b => b.AddContent(0, state)));
+        builder.CloseComponent();
+    };
+
+    public void Dispose() => _refreshTimer?.Dispose();
+}

@@ -7,6 +7,7 @@ using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Kuestenlogik.Surgewave.Broker.KeyValue;
 
@@ -16,6 +17,11 @@ namespace Kuestenlogik.Surgewave.Broker.KeyValue;
 /// </summary>
 public sealed class KvBucket : IDisposable
 {
+    // The backing topic stores real Kafka record batches (record key = KV key so
+    // compaction retains the latest value; record value = serialized KvEntry).
+    private static readonly RecordBatchSerializer BatchSerializer =
+        new(NullLogger<RecordBatchSerializer>.Instance);
+
     private readonly string _name;
     private readonly KvBucketConfig _config;
     private readonly LogManager _logManager;
@@ -36,6 +42,9 @@ public sealed class KvBucket : IDisposable
     private readonly Task? _ttlTask;
 
     private bool _disposed;
+
+    /// <summary>Topic-config key under which the bucket configuration is persisted as JSON.</summary>
+    public const string ConfigTopicKey = "surgewave.kv.config";
 
     public string Name => _name;
     public KvBucketConfig Config => _config;
@@ -72,6 +81,9 @@ public sealed class KvBucket : IDisposable
         var topicConfig = new Dictionary<string, string>
         {
             ["cleanup.policy"] = "compact",
+            // Persist the bucket configuration so a broker restart restores
+            // MaxHistoryPerKey/TTL/limits instead of falling back to defaults.
+            [ConfigTopicKey] = JsonSerializer.Serialize(_config),
         };
 
         await _logManager.CreateTopicAsync(_backingTopic, partitionCount: 1, config: topicConfig, cancellationToken: cancellationToken);
@@ -95,15 +107,26 @@ public sealed class KvBucket : IDisposable
             if (batches.Count == 0)
                 break;
 
+            var advanced = false;
             foreach (var batch in batches)
             {
-                var entry = DeserializeEntry(batch);
-                if (entry is null)
-                    continue;
+                foreach (var record in RecordBatchBrowser.Parse(batch).Records)
+                {
+                    if (record.Value is not null && DeserializeEntry(record.Value) is { } entry)
+                    {
+                        ApplyEntry(entry);
+                    }
 
-                ApplyEntry(entry);
-                offset++;
+                    if (record.Offset >= offset)
+                    {
+                        offset = record.Offset + 1;
+                        advanced = true;
+                    }
+                }
             }
+
+            if (!advanced)
+                break; // Undecodable tail — stop instead of spinning on the same offset.
         }
 
         _logger?.LogInformation("Restored KV bucket {Bucket}: {Keys} keys, revision {Revision}", _name, _store.Count, _revision);
@@ -138,9 +161,7 @@ public sealed class KvBucket : IDisposable
         var entry = new KvEntry(_name, key, value, revision, DateTimeOffset.UtcNow, KvOperation.Put);
 
         // Persist to backing topic
-        var serialized = SerializeEntry(entry);
-        var topicPartition = new TopicPartition { Topic = _backingTopic, Partition = 0 };
-        await _logManager.AppendBatchAsync(topicPartition, serialized, cancellationToken);
+        await AppendEntryAsync(entry, cancellationToken);
 
         // Apply to in-memory store
         ApplyEntry(entry);
@@ -165,9 +186,7 @@ public sealed class KvBucket : IDisposable
         var entry = new KvEntry(_name, key, [], revision, DateTimeOffset.UtcNow, KvOperation.Delete);
 
         // Persist tombstone to backing topic
-        var serialized = SerializeEntry(entry);
-        var topicPartition = new TopicPartition { Topic = _backingTopic, Partition = 0 };
-        await _logManager.AppendBatchAsync(topicPartition, serialized, cancellationToken);
+        await AppendEntryAsync(entry, cancellationToken);
 
         // Apply to in-memory store
         ApplyEntry(entry);
@@ -251,9 +270,7 @@ public sealed class KvBucket : IDisposable
         var entry = new KvEntry(_name, key, [], revision, DateTimeOffset.UtcNow, KvOperation.Purge);
 
         // Persist purge marker
-        var serialized = SerializeEntry(entry);
-        var topicPartition = new TopicPartition { Topic = _backingTopic, Partition = 0 };
-        await _logManager.AppendBatchAsync(topicPartition, serialized, cancellationToken);
+        await AppendEntryAsync(entry, cancellationToken);
 
         // Remove from in-memory store
         _store.TryRemove(key, out _);
@@ -284,6 +301,27 @@ public sealed class KvBucket : IDisposable
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Wraps the entry in a single-record Kafka batch and appends it to the
+    /// backing topic. The record key is the KV key so log compaction keeps
+    /// the latest revision per key.
+    /// </summary>
+    private async Task AppendEntryAsync(KvEntry entry, CancellationToken cancellationToken)
+    {
+        var message = new Message
+        {
+            Offset = 0,
+            Timestamp = entry.Created.ToUnixTimeMilliseconds(),
+            Key = Encoding.UTF8.GetBytes(entry.Key),
+            Value = SerializeEntry(entry),
+            Headers = ReadOnlyMemory<byte>.Empty,
+        };
+
+        var recordBatch = BatchSerializer.SerializeMessages([message]);
+        var topicPartition = new TopicPartition { Topic = _backingTopic, Partition = 0 };
+        await _logManager.AppendBatchAsync(topicPartition, recordBatch, cancellationToken);
+    }
 
     private void ApplyEntry(KvEntry entry)
     {
