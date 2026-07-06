@@ -1,18 +1,14 @@
 @page "/alerts"
+@using Kuestenlogik.Surgewave.Control.Services.Alerting
 @inject ILocalStorageService LocalStorage
-@inject IMetricsClient MetricsClient
-@inject ISurgewaveApiClient ApiClient
-@inject ClusterState ClusterState
+@inject IAlertingService Alerting
 @inject NotificationState Notification
-@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>Alerts - Surgewave Control</PageTitle>
 
 <PageHead Title="Alert Management"
-          Subtitle="Active alerts, rules, and notification channels." />
-
-<PreviewBanner Text="Alert rules are stored in this browser and evaluated only while the UI is open — server-side evaluation is on the roadmap." />
+          Subtitle="Active alerts, rules, and notification channels — evaluated server-side, alerts fire without an open browser." />
 
 <SummaryStrip>
     <Stat Label="Active">
@@ -43,6 +39,8 @@
         </span>
     </Stat>
     <Stat Label="Rules" Value="@_rules.Count.ToString()" />
+    <Stat Label="Last evaluation"
+          Value="@(Alerting.LastEvaluatedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "—")" />
 </SummaryStrip>
 
 <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" PanelClass="pt-4" Class="mb-4">
@@ -71,7 +69,7 @@
                 </MudChip>
                 <MudSpacer />
                 <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary"
-                           OnClick="AcknowledgeAllAsync">
+                           OnClick="AcknowledgeAll">
                     Acknowledge All
                 </MudButton>
             </div>
@@ -104,12 +102,12 @@
                             @if (alert.AcknowledgedAt == null)
                             {
                                 <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary"
-                                           OnClick="@(() => AcknowledgeAlertAsync(alert))">
+                                           OnClick="@(() => AcknowledgeAlert(alert))">
                                     ACK
                                 </MudButton>
                             }
                             <MudIconButton Icon="@Icons.Material.Filled.Done" Size="Size.Small" Color="Color.Success"
-                                           OnClick="@(() => ResolveAlertAsync(alert))" />
+                                           OnClick="@(() => ResolveAlert(alert))" />
                         </div>
                     </MudCardContent>
                 </MudCard>
@@ -133,9 +131,6 @@
                 </MudMenuItem>
                 <MudMenuItem OnClick="@(() => AddTemplateRule("High Latency (P99)", AlertRuleType.HighLatency, 100))">
                     High P99 Latency (&gt; 100ms)
-                </MudMenuItem>
-                <MudMenuItem OnClick="@(() => AddTemplateRule("Under-Replicated Partitions", AlertRuleType.UnderReplicatedPartitions, 1, AlertSeverity.Critical))">
-                    Under-Replicated Partitions
                 </MudMenuItem>
                 <MudMenuItem OnClick="@(() => AddTemplateRule("Low Throughput", AlertRuleType.LowThroughput, 0))">
                     Low Throughput (0 msg/s)
@@ -319,7 +314,7 @@
             </MudTable>
 
             <MudButton Variant="Variant.Text" Color="Color.Secondary" Class="mt-3"
-                       OnClick="ClearHistoryAsync" StartIcon="@Icons.Material.Filled.DeleteSweep">
+                       OnClick="ClearHistory" StartIcon="@Icons.Material.Filled.DeleteSweep">
                 Clear History
             </MudButton>
         }
@@ -328,131 +323,85 @@
 
 @code {
     private int _activeTab;
-    private Timer? _evaluationTimer;
 
     private List<AlertRule> _rules = [];
     private List<AlertEvent> _activeAlerts = [];
     private List<AlertEvent> _alertHistory = [];
     private List<NotificationChannel> _channels = [];
 
+    // Legacy browser-storage keys — read once to migrate pre-#38 configs to the server.
     private const string RulesStorageKey = "surgewave-alert-rules";
     private const string AlertsStorageKey = "surgewave-alert-events";
     private const string ChannelsStorageKey = "surgewave-alert-channels";
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        await LoadConfigAsync();
-        StartEvaluationTimer();
+        Alerting.Changed += OnAlertingChanged;
+        ReloadConfig();
+        ReloadAlerts();
     }
 
-    private async Task LoadConfigAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await MigrateLocalStorageAsync();
+    }
+
+    // Rules and channels are editing buffers: the Rules/Channels tabs mutate
+    // them in place and only persist on the explicit Save buttons. Reload them
+    // solely on our own load/save — never from a background Changed event, which
+    // would silently discard the user's unsaved edits.
+    private void ReloadConfig()
+    {
+        _rules = [.. Alerting.GetRules()];
+        _channels = [.. Alerting.GetChannels()];
+    }
+
+    private void ReloadAlerts()
+    {
+        _alertHistory = [.. Alerting.GetEvents()];
+        _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
+    }
+
+    private void OnAlertingChanged() => _ = InvokeAsync(() =>
+    {
+        // Background evaluation ticks and cross-tab acks land here; refresh only
+        // the read-only alert lists (and the LastEvaluatedAt stat), leaving the
+        // rule/channel editing buffers untouched.
+        ReloadAlerts();
+        StateHasChanged();
+    });
+
+    private async Task MigrateLocalStorageAsync()
     {
         try
         {
-            _rules = await LocalStorage.GetItemAsync<List<AlertRule>>(RulesStorageKey) ?? [];
-            _alertHistory = await LocalStorage.GetItemAsync<List<AlertEvent>>(AlertsStorageKey) ?? [];
-            _channels = await LocalStorage.GetItemAsync<List<NotificationChannel>>(ChannelsStorageKey) ?? [];
-            _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
+            if (_rules.Count > 0 || _channels.Count > 0)
+                return;
+
+            var legacyRules = await LocalStorage.GetItemAsync<List<AlertRule>>(RulesStorageKey) ?? [];
+            var legacyChannels = await LocalStorage.GetItemAsync<List<NotificationChannel>>(ChannelsStorageKey) ?? [];
+            if (legacyRules.Count == 0 && legacyChannels.Count == 0)
+                return;
+
+            if (legacyRules.Count > 0)
+                Alerting.SaveRules(legacyRules);
+            if (legacyChannels.Count > 0)
+                Alerting.SaveChannels(legacyChannels);
+
+            await LocalStorage.RemoveItemAsync(RulesStorageKey);
+            await LocalStorage.RemoveItemAsync(ChannelsStorageKey);
+            await LocalStorage.RemoveItemAsync(AlertsStorageKey);
+
+            ReloadConfig();
+            ReloadAlerts();
+            Notification.ShowSuccess("Migrated browser-stored alert rules to server-side storage");
+            StateHasChanged();
         }
         catch
         {
-            _rules = [];
-            _alertHistory = [];
-            _channels = [];
-            _activeAlerts = [];
+            // LocalStorage unavailable (e.g. during prerender) — nothing to migrate.
         }
-    }
-
-    private void StartEvaluationTimer()
-    {
-        _evaluationTimer?.Dispose();
-        _evaluationTimer = new Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                await EvaluateRulesAsync();
-                StateHasChanged();
-            });
-        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
-    }
-
-    private async Task EvaluateRulesAsync()
-    {
-        try
-        {
-            var metrics = await MetricsClient.GetMetricsAsync();
-            var lags = await ApiClient.GetAllConsumerLagsAsync(ClusterState.SelectedClusterId);
-
-            foreach (var rule in _rules.Where(r => r.Enabled))
-            {
-                var (triggered, currentValue, message) = EvaluateRule(rule, metrics, lags);
-                if (!triggered) continue;
-
-                // Check cooldown
-                var lastFired = _alertHistory
-                    .Where(a => a.RuleId == rule.Id)
-                    .OrderByDescending(a => a.FiredAt)
-                    .FirstOrDefault();
-
-                if (lastFired != null && (DateTime.UtcNow - lastFired.FiredAt).TotalMinutes < rule.CooldownMinutes)
-                    continue;
-
-                var alertEvent = new AlertEvent
-                {
-                    RuleId = rule.Id,
-                    RuleName = rule.Name,
-                    Type = rule.Type,
-                    Severity = rule.Severity,
-                    Message = message,
-                    CurrentValue = currentValue,
-                    Threshold = rule.Threshold,
-                    FiredAt = DateTime.UtcNow
-                };
-
-                _alertHistory.Add(alertEvent);
-                _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
-                await SaveAlertsAsync();
-            }
-        }
-        catch
-        {
-            // Silently skip evaluation failures
-        }
-    }
-
-    private static (bool Triggered, double CurrentValue, string Message) EvaluateRule(
-        AlertRule rule, MetricsSnapshot metrics, IReadOnlyList<ConsumerGroupLag> lags)
-    {
-        return rule.Type switch
-        {
-            AlertRuleType.ConsumerLag => EvaluateConsumerLag(rule, lags),
-            AlertRuleType.ErrorRate => (metrics.ErrorsTotal + metrics.ProduceErrorsTotal > rule.Threshold,
-                metrics.ErrorsTotal + metrics.ProduceErrorsTotal,
-                $"Error count {metrics.ErrorsTotal + metrics.ProduceErrorsTotal} exceeds threshold {rule.Threshold}"),
-            AlertRuleType.HighLatency => (metrics.ProduceLatencyP99 > rule.Threshold,
-                metrics.ProduceLatencyP99,
-                $"P99 produce latency {metrics.ProduceLatencyP99:N1}ms exceeds threshold {rule.Threshold}ms"),
-            AlertRuleType.LowThroughput => (metrics.MessagesProducedTotal <= rule.Threshold,
-                metrics.MessagesProducedTotal,
-                $"Throughput is at {metrics.MessagesProducedTotal:N0} messages (threshold: {rule.Threshold})"),
-            _ => (false, 0, "")
-        };
-    }
-
-    private static (bool Triggered, double CurrentValue, string Message) EvaluateConsumerLag(
-        AlertRule rule, IReadOnlyList<ConsumerGroupLag> lags)
-    {
-        if (string.IsNullOrWhiteSpace(rule.Target))
-        {
-            var maxLag = lags.Count > 0 ? lags.Max(g => g.TotalLag) : 0;
-            return (maxLag > rule.Threshold, maxLag,
-                $"Max consumer lag {maxLag:N0} exceeds threshold {rule.Threshold:N0}");
-        }
-
-        var targetGroup = lags.FirstOrDefault(g => g.GroupId == rule.Target);
-        if (targetGroup == null) return (false, 0, "");
-        return (targetGroup.TotalLag > rule.Threshold, targetGroup.TotalLag,
-            $"Consumer group '{rule.Target}' lag {targetGroup.TotalLag:N0} exceeds threshold {rule.Threshold:N0}");
     }
 
     private void AddNewRule()
@@ -482,47 +431,25 @@
 
     private void DeleteRule(AlertRule rule) => _rules.Remove(rule);
 
-    private async Task SaveRulesAsync()
+    private Task SaveRulesAsync()
     {
-        await LocalStorage.SetItemAsync(RulesStorageKey, _rules);
+        Alerting.SaveRules(_rules);
         Notification.ShowSuccess("Alert rules saved");
+        return Task.CompletedTask;
     }
 
-    private async Task AcknowledgeAlertAsync(AlertEvent alert)
-    {
-        alert.AcknowledgedAt = DateTime.UtcNow;
-        alert.AcknowledgedBy = "admin";
-        await SaveAlertsAsync();
-    }
+    private void AcknowledgeAlert(AlertEvent alert)
+        => Alerting.Acknowledge(alert.Id, "admin");
 
-    private async Task AcknowledgeAllAsync()
-    {
-        foreach (var alert in _activeAlerts.Where(a => a.AcknowledgedAt == null))
-        {
-            alert.AcknowledgedAt = DateTime.UtcNow;
-            alert.AcknowledgedBy = "admin";
-        }
-        await SaveAlertsAsync();
-    }
+    private void AcknowledgeAll()
+        => Alerting.AcknowledgeAll("admin");
 
-    private async Task ResolveAlertAsync(AlertEvent alert)
-    {
-        alert.IsResolved = true;
-        alert.ResolvedAt = DateTime.UtcNow;
-        _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
-        await SaveAlertsAsync();
-    }
+    private void ResolveAlert(AlertEvent alert)
+        => Alerting.Resolve(alert.Id);
 
-    private async Task SaveAlertsAsync()
+    private void ClearHistory()
     {
-        await LocalStorage.SetItemAsync(AlertsStorageKey, _alertHistory);
-    }
-
-    private async Task ClearHistoryAsync()
-    {
-        _alertHistory = _alertHistory.Where(a => !a.IsResolved).ToList();
-        _activeAlerts = _alertHistory.Where(a => !a.IsResolved).ToList();
-        await SaveAlertsAsync();
+        Alerting.ClearResolvedHistory();
         Notification.ShowSuccess("Alert history cleared");
     }
 
@@ -540,15 +467,19 @@
 
     private void DeleteChannel(NotificationChannel channel) => _channels.Remove(channel);
 
-    private async Task SaveChannelsAsync()
+    private Task SaveChannelsAsync()
     {
-        await LocalStorage.SetItemAsync(ChannelsStorageKey, _channels);
+        Alerting.SaveChannels(_channels);
         Notification.ShowSuccess("Notification channels saved");
+        return Task.CompletedTask;
     }
 
-    private void TestChannel(NotificationChannel channel)
+    private async Task TestChannel(NotificationChannel channel)
     {
-        Notification.ShowInfo($"Test notification sent to '{channel.Name}' ({channel.Type})");
+        if (await Alerting.SendTestAsync(channel))
+            Notification.ShowSuccess($"Test notification sent to '{channel.Name}' ({channel.Type})");
+        else
+            Notification.ShowError($"Test notification to '{channel.Name}' failed — check the channel configuration");
     }
 
     private static string GetChannelUrl(NotificationChannel channel) =>
@@ -616,5 +547,5 @@
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength] + "...";
 
-    public void Dispose() => _evaluationTimer?.Dispose();
+    public void Dispose() => Alerting.Changed -= OnAlertingChanged;
 }
