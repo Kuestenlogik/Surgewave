@@ -17,7 +17,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 ### v0.4 — Production hardening & trustworthy admin
 
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
-- [#37](https://github.com/Kuestenlogik/Surgewave/issues/37) **Server-side role enforcement — RoleManagement page is Preview** 
 - [#54](https://github.com/Kuestenlogik/Surgewave/issues/54) **Vulnerable transitives shipped by 0.3.0 packages: Microsoft.OpenApi 2.0.0 (fix available) + SQLitePCLRaw.lib.e_sqlite3 2.1.11 (no upstream fix yet)** 
 - [#56](https://github.com/Kuestenlogik/Surgewave/issues/56) **Flaky: ReplicationTests.Cluster_IsrManagement_FollowersCatchUp fails intermittently in Release CI** 
 
