@@ -226,6 +226,15 @@ builder.Services.AddSingleton(_ => ConnectServiceImplHolder.Instance
 // Add health checks
 builder.Services.AddHealthChecks();
 
+// JWT auth for the HTTP REST surface (#37). Config-gated (default off) so
+// existing deployments keep their open admin API; when enabled, management
+// endpoints require a valid bearer token. Reuses the OAuth2 issuer/audience.
+var restApiAuthConfig = builder.Configuration
+    .GetSection($"{BrokerConfig.SectionName}:Security:RestApiAuth").Get<RestApiAuthConfig>() ?? new RestApiAuthConfig();
+var restApiOAuth2Config = builder.Configuration
+    .GetSection($"{BrokerConfig.SectionName}:Security:OAuth2").Get<OAuth2Config>() ?? new OAuth2Config();
+builder.Services.AddSurgewaveRestApiAuth(restApiAuthConfig, restApiOAuth2Config);
+
 // SQL Query Service
 builder.Services.Configure<Kuestenlogik.Surgewave.Broker.Sql.SqlServiceConfig>(
     builder.Configuration.GetSection(Kuestenlogik.Surgewave.Broker.Sql.SqlServiceConfig.SectionName));
@@ -535,6 +544,9 @@ var app = builder.Build();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var config = app.Services.GetRequiredService<BrokerConfig>();
 var logManager = app.Services.GetRequiredService<LogManager>();
+
+// REST auth gate must sit ahead of the endpoint mappings below (#37).
+app.UseSurgewaveRestApiAuth(config.Security.RestApiAuth, config.Security.OAuth2, logger);
 
 // Apply SIMD configuration from appsettings
 SimdBigEndian.MinBatchSize = config.SimdBatchThreshold;

@@ -7,6 +7,7 @@ using Kuestenlogik.Surgewave.Control.Models.Marketplace;
 using Kuestenlogik.Surgewave.Control.Services.Alerting;
 using Kuestenlogik.Surgewave.Control.Services.Assistant;
 using Kuestenlogik.Surgewave.Control.Services.Collaboration;
+using Kuestenlogik.Surgewave.Control.Services.Security;
 using Kuestenlogik.Surgewave.Control.Services.Timeline;
 using Kuestenlogik.Surgewave.Control.State;
 using Microsoft.AspNetCore.Authentication;
@@ -64,7 +65,12 @@ if (authConfig.Enabled && authConfig.Providers.Length > 0)
     builder.Services.AddTransient<OktaClaimsTransformation>();
     builder.Services.AddTransient<GoogleClaimsTransformation>();
     builder.Services.AddTransient<LdapClaimsTransformation>();
-    builder.Services.AddTransient<IClaimsTransformation, CompositeClaimsTransformation>();
+    // The composite (provider routing) runs first; the store transformation
+    // wraps it and adds server-side role claims. The wrapper is the single
+    // registered IClaimsTransformation so both run on every authentication.
+    builder.Services.AddTransient<CompositeClaimsTransformation>();
+    builder.Services.AddSingleton(sp => new RoleClaimAugmenter(sp.GetRequiredService<IRoleService>(), authConfig.AdminRole));
+    builder.Services.AddTransient<IClaimsTransformation, StoreRoleClaimsTransformation>();
 
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddTransient<BearerTokenDelegatingHandler>();
@@ -79,6 +85,16 @@ if (authConfig.Enabled && authConfig.Providers.Length > 0)
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthorizationBuilder()
     .AddSurgewavePolicies(authConfig);
+
+// Server-side RBAC store (#37): roles + user assignments persist on the Control
+// host and are enforced via StoreRoleClaimsTransformation, replacing the old
+// browser-only RoleManagement preview. Registered always so the page can manage
+// roles even with auth off (enforcement only kicks in once auth is enabled).
+var roleStorePath = builder.Configuration["Surgewave:Roles:StorePath"] ?? Path.Combine("data", "roles.json");
+if (!Path.IsPathRooted(roleStorePath))
+    roleStorePath = Path.Combine(builder.Environment.ContentRootPath, roleStorePath);
+builder.Services.AddSingleton(sp => new RoleStore(roleStorePath, sp.GetRequiredService<ILogger<RoleStore>>()));
+builder.Services.AddSingleton<IRoleService, RoleService>();
 
 // Add MudBlazor services
 builder.Services.AddMudServices(config =>
