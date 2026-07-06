@@ -2,8 +2,13 @@
   <!-- Central Package Version Management -->
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Noetig, damit die Microsoft.OpenApi/SQLite-Pins auch transitive Abhaengigkeiten greifen. -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Transitive Pins: Microsoft.OpenApi 2.0.0 (via Microsoft.AspNetCore.OpenApi) hat
+         GHSA-v5pm-xwqc-g5wc; 2.9.0 ist die gepatchte 2.x-Linie. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
     <!-- Extracted Surgewave modules (external repos) -->
     <!-- WiX (MSI installer) -->
     <PackageVersion Include="WixToolset.UI.wixext" Version="5.0.1" />
@@ -242,5 +247,11 @@
     <!-- MSBuild task authoring -->
     <PackageVersion Include="Microsoft.Build.Framework" Version="18.6.3" />
     <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="18.6.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- SQLitePCLRaw.lib.e_sqlite3 2.1.11 (via Microsoft.Data.Sqlite): Advisory ohne gepatchte
+         Version (2.1.11 ist latest 2.x; 3.x ist eine andere Major-Linie). Unterdrueckt bis
+         Upstream-Fix — Tracking siehe #54. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
   </ItemGroup>
 </Project>
