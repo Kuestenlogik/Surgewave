@@ -50,7 +50,8 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         LogManager logManager,
         ClusteringConfig config,
         Kuestenlogik.Surgewave.Transport.IPeerTransport peerTransport,
-        IClusteringMetrics? metrics = null)
+        IClusteringMetrics? metrics = null,
+        IIsrChangeNotifier? isrChangeNotifier = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -58,15 +59,14 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         _config = config;
         _peerTransport = peerTransport;
         _metrics = metrics;
-    }
+        _isrChangeNotifier = isrChangeNotifier;
 
-    private readonly Kuestenlogik.Surgewave.Transport.IPeerTransport _peerTransport;
-
-    public async Task StartAsync(CancellationToken cancellationToken)
-    {
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        // Start replica fetcher for follower partitions
+        // Create the fetcher eagerly (its loop only starts in StartAsync). The
+        // cluster components start on a background task, but the controller can
+        // push LeaderAndIsr -> BecomeFollowerAsync before ReplicaManager.StartAsync
+        // has run; if the fetcher were still null then, StartFetching would be
+        // silently dropped (via `?.`) and that follower would never fetch — the
+        // race that made ISR formation flaky (#69).
         _replicaFetcher = new ReplicaFetcher(
             _logger,
             _clusterState,
@@ -74,7 +74,23 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             this,
             _config,
             _peerTransport);
-        await _replicaFetcher.StartAsync(_cts.Token);
+    }
+
+    private readonly Kuestenlogik.Surgewave.Transport.IPeerTransport _peerTransport;
+    // Optional leader-side hook: fired when THIS broker (as partition leader)
+    // actually changes a partition's ISR, so the change can be propagated back
+    // to the controller (reverse ISR propagation, #69). Null in single-broker
+    // setups and in tests that don't exercise clustering.
+    private readonly IIsrChangeNotifier? _isrChangeNotifier;
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // Start the replica fetcher loop (the fetcher itself was created in the
+        // constructor so BecomeFollowerAsync can register partitions even before
+        // StartAsync runs; the loop picks up whatever is already registered).
+        await _replicaFetcher!.StartAsync(_cts.Token);
 
         // Start ISR check background task
         _isrCheckTask = Task.Run(() => IsrCheckLoopAsync(_cts.Token), _cts.Token);
@@ -202,19 +218,26 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
     /// <summary>
     /// Append data to the local log (for both leader and follower).
-    /// Returns the base offset of the appended batch.
+    /// Returns the log-end offset after the append (the next offset to fetch),
+    /// which is <c>baseOffset + recordCount</c>. Returning the base offset here
+    /// would understate the LEO for multi-record batches and make the follower
+    /// re-fetch a single record at a time, so the ISR would never converge (#69).
     /// </summary>
     public async Task<long> AppendAsync(TopicPartition tp, byte[] recordBatch, CancellationToken ct)
     {
-        var offset = await _logManager.AppendBatchAsync(tp, recordBatch, ct);
+        await _logManager.AppendBatchAsync(tp, recordBatch, ct);
+
+        // AppendBatchAsync returns the batch's base offset; the log's NextOffset
+        // is the true LEO after the whole batch (covers multi-record batches).
+        var nextOffset = _logManager.GetLog(tp)?.NextOffset ?? 0;
 
         // Update local replica state
         if (_localReplicas.TryGetValue(tp, out var replica))
         {
-            replica.LogEndOffset = offset + 1; // LEO is next offset to write
+            replica.LogEndOffset = nextOffset; // LEO is next offset to write
         }
 
-        return offset;
+        return nextOffset;
     }
 
     /// <summary>
@@ -234,44 +257,88 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         if (replica == null)
             return;
 
-        // Track follower LEO for high watermark calculation
+        // Track follower LEO for high watermark calculation. Read the PRIOR
+        // entry before overwriting it: the "last time this follower was caught
+        // up" timestamp must survive successive lagging reports, otherwise the
+        // grace-period check below always measures ~0 elapsed and the ISR shrink
+        // never fires (#69).
         var followerLeos = _followerLeos.GetOrAdd(tp, _ => new ConcurrentDictionary<int, (long, DateTimeOffset)>());
         var now = DateTimeOffset.UtcNow;
-        followerLeos[followerId] = (fetchOffset, now);
+        var hadPrev = followerLeos.TryGetValue(followerId, out var prev);
 
         // Check if follower is caught up
         var leaderLeo = replica.LogEndOffset;
         var lag = leaderLeo - fetchOffset;
 
+        bool isrChanged = false;
+
         // Update ISR based on lag with grace period
         if (lag <= ReplicaLagMaxMessages)
         {
-            // Follower is caught up, add to ISR immediately
+            // Follower is caught up — reset its caught-up clock and add to ISR.
+            followerLeos[followerId] = (fetchOffset, now);
             if (_clusterState.AddToIsr(tp, followerId))
             {
                 _metrics?.RecordReplicaJoinedIsr(tp.Topic, tp.Partition);
+                isrChanged = true;
             }
         }
-        else if (lag > ReplicaLagMaxMessages)
+        else
         {
-            // Check grace period before removing from ISR
-            // Only remove if consistently lagging beyond the grace period
-            if (followerLeos.TryGetValue(followerId, out var state))
+            // Lagging — advance the LEO but PRESERVE the last-caught-up time so
+            // lag accumulates across reports; only then is the grace period a
+            // real elapsed measurement.
+            var lastCaughtUp = hadPrev ? prev.LastUpdate : now;
+            followerLeos[followerId] = (fetchOffset, lastCaughtUp);
+
+            var timeSinceLastCaughtUp = now - lastCaughtUp;
+            if (timeSinceLastCaughtUp > IsrShrinkGracePeriod && partitionState.Isr.Contains(followerId))
             {
-                var timeSinceLastCaughtUp = now - state.LastUpdate;
-                if (timeSinceLastCaughtUp > IsrShrinkGracePeriod && partitionState.Isr.Contains(followerId))
+                if (_clusterState.RemoveFromIsr(tp, followerId))
                 {
-                    if (_clusterState.RemoveFromIsr(tp, followerId))
-                    {
-                        _metrics?.RecordReplicaLeftIsr(tp.Topic, tp.Partition);
-                    }
-                    LogFollowerRemovedFromIsr(tp.Topic, tp.Partition, followerId, lag);
+                    _metrics?.RecordReplicaLeftIsr(tp.Topic, tp.Partition);
+                    isrChanged = true;
                 }
+                LogFollowerRemovedFromIsr(tp.Topic, tp.Partition, followerId, lag);
             }
+        }
+
+        // Reverse ISR propagation: if the ISR actually changed, report the new
+        // set to the controller (fire-and-forget so the fetch hot path never
+        // blocks on a network round-trip).
+        if (isrChanged)
+        {
+            NotifyIsrChanged(tp, partitionState.LeaderEpoch);
         }
 
         // Update high watermark using ISR minimum LEO
         UpdateHighWatermark(tp);
+    }
+
+    /// <summary>
+    /// Fire the optional leader-side ISR-change notifier without blocking the
+    /// caller. A slow or unreachable controller must never stall the fetch hot
+    /// path, so the send runs on a background task and swallows+logs failures;
+    /// the ISR reconciles on the next fetch report anyway.
+    /// </summary>
+    private void NotifyIsrChanged(TopicPartition tp, int leaderEpoch)
+    {
+        var notifier = _isrChangeNotifier;
+        if (notifier is null)
+            return;
+
+        var isrSnapshot = _clusterState.GetIsrSnapshot(tp);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await notifier.NotifyIsrChangedAsync(tp, _config.BrokerId, leaderEpoch, isrSnapshot).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                LogIsrNotifyFailed(tp.Topic, tp.Partition, ex);
+            }
+        });
     }
 
     /// <summary>
@@ -420,6 +487,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Follower {FollowerId} removed from ISR for {Topic}-{Partition} (lag={Lag})")]
     private partial void LogFollowerRemovedFromIsr(string topic, int partition, int followerId, long lag);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to notify controller of ISR change for {Topic}-{Partition}")]
+    private partial void LogIsrNotifyFailed(string topic, int partition, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error in ISR check loop")]
     private partial void LogIsrCheckError(Exception ex);

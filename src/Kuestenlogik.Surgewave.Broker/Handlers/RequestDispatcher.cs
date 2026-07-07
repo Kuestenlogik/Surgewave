@@ -63,4 +63,16 @@ public sealed class RequestDispatcher
     /// Check if a handler is registered for the given API key.
     /// </summary>
     public bool HasHandler(ApiKey apiKey) => _handlers.ContainsKey(apiKey);
+
+    /// <summary>
+    /// Return a NEW dispatcher containing this dispatcher's handlers plus the
+    /// given one (its ApiKeys win on overlap). Used at startup to add the
+    /// inter-broker handler once the cluster components exist, since the frozen
+    /// map cannot be mutated in place (#69).
+    /// </summary>
+    public RequestDispatcher WithAdditionalHandler(IKafkaRequestHandler handler)
+    {
+        var handlers = _handlers.Values.Distinct().Append(handler);
+        return new RequestDispatcher(handlers, _logger);
+    }
 }

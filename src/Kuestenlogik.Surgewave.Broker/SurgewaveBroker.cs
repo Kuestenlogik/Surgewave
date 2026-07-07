@@ -37,8 +37,12 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     private readonly List<Task> _clientTasks = [];
     private bool _disposed;
 
-    // Request dispatcher (O(1) frozen dictionary lookup)
-    private readonly RequestDispatcher _dispatcher;
+    // Request dispatcher (O(1) frozen dictionary lookup). Volatile because
+    // cluster startup swaps in a new dispatcher via AddHandler once the
+    // inter-broker components exist (#69), after the accept loop is already
+    // serving; the frozen map can't be mutated in place, so we publish a
+    // fresh instance and let readers pick it up on their next dispatch.
+    private volatile RequestDispatcher _dispatcher;
 
     // Consumer group coordination (delegated handlers use these directly)
     private readonly ConsumerGroupCoordinator _consumerGroupCoordinator;
@@ -586,6 +590,20 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         };
 
         return await _dispatcher.DispatchAsync(request, context, cancellationToken);
+    }
+
+    /// <summary>
+    /// Register an additional request handler after the broker is already
+    /// serving. Used by cluster startup to add the inter-broker handler
+    /// (LeaderAndIsr / StopReplica / UpdateMetadata) once the cluster
+    /// components have been created — those depend on the broker being up
+    /// first, so the handler can't be part of the initial frozen dispatcher.
+    /// Publishes a fresh dispatcher; in-flight dispatches keep using the old
+    /// one and the next request picks up the new map (#69).
+    /// </summary>
+    public void AddHandler(IKafkaRequestHandler handler)
+    {
+        _dispatcher = _dispatcher.WithAdditionalHandler(handler);
     }
 
     public async ValueTask DisposeAsync()

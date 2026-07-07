@@ -34,6 +34,12 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Warning, Message = "Partition {Topic}-{Partition} not found")]
     private partial void LogPartitionNotFound(string topic, int partition);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "Applied ISR update for {Topic}-{Partition} from leader {LeaderId}: ISR=[{Isr}]")]
+    private partial void LogIsrUpdateApplied(string topic, int partition, int leaderId, string isr);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting stale ISR update for {Topic}-{Partition}: leaderEpoch {RequestEpoch} < current {CurrentEpoch}")]
+    private partial void LogStaleIsrUpdate(string topic, int partition, int requestEpoch, int currentEpoch);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Unclean leader election for {Topic}-{Partition}: new leader {NewLeader}")]
     private partial void LogUncleanLeaderElection(string topic, int partition, int newLeader);
 

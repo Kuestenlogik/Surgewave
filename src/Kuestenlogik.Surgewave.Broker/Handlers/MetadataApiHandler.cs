@@ -236,15 +236,19 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
 
                 if (partitionState != null)
                 {
-                    // Use cluster state for accurate replica info
+                    // Use cluster state for accurate replica info. Snapshot the
+                    // ISR under the state lock and copy the replica list: reverse
+                    // ISR propagation (#69) mutates Isr from the fetch path while
+                    // we serialize the response, so aliasing the live lists risks
+                    // a torn read / InvalidOperationException.
                     partitions.Add(new MetadataResponse.MetadataResponsePartition
                     {
                         ErrorCode = ErrorCode.None,
                         PartitionIndex = i,
                         LeaderId = partitionState.LeaderBrokerId,
                         LeaderEpoch = partitionState.LeaderEpoch,
-                        ReplicaNodes = partitionState.Replicas,
-                        IsrNodes = partitionState.Isr,
+                        ReplicaNodes = [.. partitionState.Replicas],
+                        IsrNodes = _clusterState!.GetIsrSnapshot(tp),
                         OfflineReplicas = []
                     });
                 }

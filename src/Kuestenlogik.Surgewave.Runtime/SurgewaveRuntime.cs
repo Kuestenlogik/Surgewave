@@ -62,6 +62,13 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     // Handler references for cluster wiring
     private TopicAdminHandler? _topicAdminHandler;
     private MetadataApiHandler? _metadataApiHandler;
+    // Kept so the inter-broker handler (registered after the broker is up)
+    // can share the same coordinator instance for WriteTxnMarkers (#69).
+    // Owned and disposed by SurgewaveBroker (see the CA2000 note above), so
+    // the runtime only holds a reference for wiring — not for disposal.
+#pragma warning disable CA2213
+    private TransactionCoordinator? _transactionCoordinator;
+#pragma warning restore CA2213
 
     // Cluster components (only initialized when EnableCluster = true)
     private ClusterState? _clusterState;
@@ -69,6 +76,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private HeartbeatManager? _heartbeatManager;
     private ReplicaManager? _replicaManager;
     private ReplicationServer? _replicationServer;
+    private ConnectionPool? _connectionPool;
+    private ControllerClient? _controllerClient;
     private Task? _clusterTask;
 
     // Raft components (only initialized when UseRaftConsensus = true)
@@ -273,6 +282,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _transactionStateStore = new TransactionStateStore(_dataDirectory, txnStateStoreLogger);
         var transactionCoordinator = new TransactionCoordinator(
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
+        _transactionCoordinator = transactionCoordinator;
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
         IProtocolHandler protocolHandler = new KafkaProtocolHandler();
 
@@ -388,13 +398,24 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _clusterState,
             clusteringConfig);
 
-        // Create replica manager
+        // Create the controller client FIRST — it doubles as the leader-side
+        // IIsrChangeNotifier that ReplicaManager fires on ISR change (reverse
+        // ISR propagation, #69). It depends only on peerTransport/state/config,
+        // so there is no cycle with ReplicaManager/ClusterController.
+        var connectionPoolLogger = _loggerFactory.CreateLogger<ConnectionPool>();
+        var controllerClientLogger = _loggerFactory.CreateLogger<ControllerClient>();
+        _connectionPool = new ConnectionPool(connectionPoolLogger, peerTransport);
+        _controllerClient = new ControllerClient(_connectionPool, _clusterState, clusteringConfig, controllerClientLogger);
+
+        // Create replica manager, wiring the notifier so a leader reports ISR
+        // growth back to the controller.
         _replicaManager = new ReplicaManager(
             replicaManagerLogger,
             _clusterState,
             _logManager!,
             clusteringConfig,
-            peerTransport);
+            peerTransport,
+            isrChangeNotifier: _controllerClient);
 
         // Create replication server
         _replicationServer = new ReplicationServer(
@@ -405,7 +426,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             clusteringConfig,
             peerTransport);
 
-        // Create cluster controller
+        // Create cluster controller — it is the controller-side IIsrUpdateApplier.
         _clusterController = new ClusterController(
             clusterControllerLogger,
             _clusterState,
@@ -415,6 +436,23 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);
         _replicationServer.SetHeartbeatManager(_heartbeatManager);
+
+        // Wire up the controller client so the controller can push LeaderAndIsr
+        // to remote brokers when topology changes (topic create, reelection).
+        // Without this the controller updates only its own local state and
+        // followers never learn to fetch, so the ISR never grows past {leader}.
+        _clusterController.SetControllerClient(_controllerClient);
+
+        // Register the inter-broker API handler now that the cluster components
+        // exist. It handles LeaderAndIsr / StopReplica / UpdateMetadata pushed
+        // by the controller over the client port (turning them into
+        // BecomeLeader/BecomeFollower calls), plus AlterPartition reported by
+        // leaders — applied via the controller (IIsrUpdateApplier). The broker
+        // is already serving, so we hot-add it (#69).
+        var interBrokerApiLogger = _loggerFactory.CreateLogger<InterBrokerApiHandler>();
+        _broker!.AddHandler(new InterBrokerApiHandler(
+            config, _clusterState, _replicaManager, _logManager!, interBrokerApiLogger,
+            _transactionCoordinator, isrUpdateApplier: _clusterController));
 
         // Wire up topic admin handler to use cluster controller for topic creation
         _topicAdminHandler?.SetClusterTopicCreator(_clusterController);
@@ -633,6 +671,10 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             await _replicaManager.DisposeAsync();
         if (_replicationServer != null)
             await _replicationServer.DisposeAsync();
+
+        // Dispose the controller client and its connection pool (runtime-owned).
+        _controllerClient?.Dispose();
+        _connectionPool?.Dispose();
 
         // Dispose broker
         if (_broker != null)

@@ -12,7 +12,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Replication;
 /// Used by the controller to broadcast LeaderAndIsr, UpdateMetadata, and StopReplica
 /// requests when partition topology changes.
 /// </summary>
-public sealed partial class ControllerClient : IDisposable
+public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
 {
     private readonly ConnectionPool _connectionPool;
     private readonly ClusterState _clusterState;
@@ -160,6 +160,93 @@ public sealed partial class ControllerClient : IDisposable
         {
             LogLeaderAndIsrFailed(brokerId, ex);
             return (brokerId, null);
+        }
+    }
+
+    /// <summary>
+    /// Reverse ISR propagation (#69): a partition leader reports its new ISR to
+    /// the controller. If this broker IS the controller, the ISR is already in
+    /// the shared ClusterState (the leader mutated it directly), so this only
+    /// re-broadcasts LeaderAndIsr to the other replicas — no self-RPC. Otherwise
+    /// it sends an AlterPartition request (v3) to the controller's CLIENT port,
+    /// exactly like the forward LeaderAndIsr send. Best-effort: a failure just
+    /// means the ISR reconciles on the next fetch report.
+    /// </summary>
+    public async Task NotifyIsrChangedAsync(
+        TopicPartition tp,
+        int leaderId,
+        int leaderEpoch,
+        IReadOnlyList<int> isr,
+        CancellationToken ct = default)
+    {
+        var controllerId = _clusterState.ControllerId;
+        if (controllerId < 0)
+            return;
+
+        if (controllerId == _config.BrokerId)
+        {
+            var state = _clusterState.GetPartitionState(tp);
+            if (state != null)
+            {
+                await SendLeaderAndIsrAsync([(tp, state)], ct).ConfigureAwait(false);
+            }
+            return;
+        }
+
+        var controller = _clusterState.GetBroker(controllerId);
+        if (controller == null)
+        {
+            LogBrokerNotFound(controllerId);
+            return;
+        }
+
+        try
+        {
+            // Use v1 on purpose: it carries the topic NAME over the wire, which
+            // the leader always knows (tp.Topic). v2+ would carry only a TopicId,
+            // and a leader that learned the partition via LeaderAndIsr may not
+            // hold the topic metadata, so it would send Guid.Empty and the
+            // controller could not resolve the topic (ISR update silently
+            // dropped as UnknownTopicId). v1's flat NewIsr is sufficient — the
+            // reverse path doesn't need per-broker epochs (#69).
+            var request = new AlterPartitionRequest
+            {
+                ApiKey = ApiKey.AlterPartition,
+                ApiVersion = 1, // v0-1: TopicName + flat NewIsr
+                CorrelationId = Interlocked.Increment(ref _correlationId),
+                ClientId = $"surgewave-leader-{_config.BrokerId}",
+                BrokerId = _config.BrokerId,
+                BrokerEpoch = -1,
+                Topics =
+                [
+                    new AlterPartitionRequest.TopicData
+                    {
+                        TopicName = tp.Topic,
+                        Partitions =
+                        [
+                            new AlterPartitionRequest.PartitionData
+                            {
+                                PartitionIndex = tp.Partition,
+                                LeaderEpoch = leaderEpoch,
+                                PartitionEpoch = leaderEpoch,
+                                LeaderRecoveryState = 0,
+                                NewIsr = isr.ToList()
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var response = await SendRequestAsync<AlterPartitionResponse>(
+                controller.Host, controller.Port, request,
+                (reader, version, corrId) => AlterPartitionResponse.ReadFrom(reader, version, corrId),
+                ct).ConfigureAwait(false);
+
+            LogAlterPartitionSent(controllerId, tp.Topic, tp.Partition, response?.ErrorCode ?? ErrorCode.Unknown);
+        }
+        catch (Exception ex)
+        {
+            LogAlterPartitionFailed(controllerId, tp.Topic, tp.Partition, ex);
         }
     }
 
@@ -349,6 +436,17 @@ public sealed partial class ControllerClient : IDisposable
     /// <summary>
     /// Send a request and receive a response using the Kafka protocol.
     /// </summary>
+    /// <summary>
+    /// Upper bound on a single controller-to-broker round-trip. Without it an
+    /// unreachable or wedged follower would block the caller forever, because
+    /// <see cref="ReadExactlyAsync"/> only observes the supplied token — and
+    /// the callers (topic create, leader reelection) await the send on their
+    /// critical path. Bounding it keeps a slow broker from stalling the whole
+    /// controller; the send is best-effort and the ISR reconciles on the next
+    /// fetch cycle anyway (#69).
+    /// </summary>
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+
     private async Task<TResponse?> SendRequestAsync<TResponse>(
         string host,
         int port,
@@ -356,7 +454,11 @@ public sealed partial class ControllerClient : IDisposable
         Func<KafkaProtocolReader, short, int, TResponse> responseReader,
         CancellationToken ct) where TResponse : KafkaResponse
     {
-        var connection = await _connectionPool.GetConnectionAsync(host, port, ct);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(RequestTimeout);
+        var timeoutToken = timeoutCts.Token;
+
+        var connection = await _connectionPool.GetConnectionAsync(host, port, timeoutToken);
         try
         {
             var stream = connection.Stream;
@@ -367,18 +469,18 @@ public sealed partial class ControllerClient : IDisposable
             // Write size-prefixed message
             var sizeBuffer = new byte[4];
             BinaryPrimitives.WriteInt32BigEndian(sizeBuffer, requestBytes.Length);
-            await stream.WriteAsync(sizeBuffer, ct);
-            await stream.WriteAsync(requestBytes, ct);
-            await stream.FlushAsync(ct);
+            await stream.WriteAsync(sizeBuffer, timeoutToken);
+            await stream.WriteAsync(requestBytes, timeoutToken);
+            await stream.FlushAsync(timeoutToken);
 
             // Read response size
             var responseSizeBuffer = new byte[4];
-            await ReadExactlyAsync(stream, responseSizeBuffer, ct);
+            await ReadExactlyAsync(stream, responseSizeBuffer, timeoutToken);
             var responseSize = BinaryPrimitives.ReadInt32BigEndian(responseSizeBuffer);
 
             // Read response body
             var responseBuffer = new byte[responseSize];
-            await ReadExactlyAsync(stream, responseBuffer, ct);
+            await ReadExactlyAsync(stream, responseBuffer, timeoutToken);
 
             // Parse response
             var reader = new KafkaProtocolReader(responseBuffer);
@@ -431,4 +533,10 @@ public sealed partial class ControllerClient : IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to send StopReplica to broker {BrokerId}")]
     private partial void LogStopReplicaFailed(int brokerId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AlterPartition sent to controller {ControllerId} for {Topic}-{Partition}, result: {ErrorCode}")]
+    private partial void LogAlterPartitionSent(int controllerId, string topic, int partition, ErrorCode errorCode);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to send AlterPartition to controller {ControllerId} for {Topic}-{Partition}")]
+    private partial void LogAlterPartitionFailed(int controllerId, string topic, int partition, Exception ex);
 }

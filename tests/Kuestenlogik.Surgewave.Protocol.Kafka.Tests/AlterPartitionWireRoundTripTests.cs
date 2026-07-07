@@ -29,7 +29,10 @@ public sealed class AlterPartitionWireRoundTripTests
     {
         var reader = new KafkaProtocolReader(payload);
         reader.ReadInt16(); reader.ReadInt16(); reader.ReadInt32();
-        reader.ReadCompactString(); reader.SkipTaggedFields();
+        // ClientId is ALWAYS a regular (int16-length) NULLABLE_STRING in the
+        // request header, even for flexible request versions (#69). Only the
+        // header's trailing tagged fields are flexible.
+        reader.ReadString(); reader.SkipTaggedFields();
         return reader;
     }
 

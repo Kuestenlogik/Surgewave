@@ -62,6 +62,7 @@ public static class ProtocolVersions
             ApiKey.StopReplica => apiVersion >= 2,       // flexibleVersions: "2+"
             ApiKey.UpdateMetadata => apiVersion >= 6,    // flexibleVersions: "6+"
             ApiKey.ControlledShutdown => apiVersion >= 3,// flexibleVersions: "3+"
+            ApiKey.AlterPartition => true,               // flexibleVersions: "0+"
 
             // KRaft Cluster Membership APIs (always flexible)
             ApiKey.BrokerRegistration => true,           // flexibleVersions: "0+"

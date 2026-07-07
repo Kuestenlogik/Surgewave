@@ -161,4 +161,56 @@ public sealed class InterBrokerApiParseTests
         Assert.Equal(new[] { 2, 3, 1 }, partition.Isr);
         Assert.Equal(2, update.LiveBrokers.Count);
     }
+
+    [Fact]
+    public void ParseRequest_AlterPartition_V3_ReturnsTypedRequest()
+    {
+        // Reverse ISR propagation (#69 Phase 2): a leader sends AlterPartition v3
+        // to the controller. AlterPartition is flexible at v0+, so the header has
+        // trailing tagged fields AND ClientId must be a regular (non-compact)
+        // string — the two header fixes this test locks in. The 9 existing
+        // round-trip tests bypass ReadRequestHeader and cannot catch them.
+        var request = new AlterPartitionRequest
+        {
+            ApiKey = ApiKey.AlterPartition,
+            ApiVersion = 3, // v3: NewIsrWithEpochs + TopicId — exactly what ControllerClient sends
+            CorrelationId = 11,
+            ClientId = "surgewave-leader-2",
+            BrokerId = 2,
+            BrokerEpoch = -1,
+            Topics =
+            [
+                new AlterPartitionRequest.TopicData
+                {
+                    TopicId = Guid.NewGuid(),
+                    Partitions =
+                    [
+                        new AlterPartitionRequest.PartitionData
+                        {
+                            PartitionIndex = 1,
+                            LeaderEpoch = 4,
+                            PartitionEpoch = 4,
+                            LeaderRecoveryState = 0,
+                            NewIsrWithEpochs =
+                            [
+                                new AlterPartitionRequest.BrokerState { BrokerId = 2, BrokerEpoch = -1 },
+                                new AlterPartitionRequest.BrokerState { BrokerId = 3, BrokerEpoch = -1 },
+                                new AlterPartitionRequest.BrokerState { BrokerId = 1, BrokerEpoch = -1 },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var parsed = Handler.ParseRequest(request.Serialize());
+
+        var alter = Assert.IsType<AlterPartitionRequest>(parsed);
+        Assert.Equal(2, alter.BrokerId);
+        var partition = Assert.Single(Assert.Single(alter.Topics).Partitions);
+        Assert.Equal(1, partition.PartitionIndex);
+        Assert.Equal(4, partition.LeaderEpoch);
+        Assert.NotNull(partition.NewIsrWithEpochs);
+        Assert.Equal(new[] { 2, 3, 1 }, partition.NewIsrWithEpochs!.Select(b => b.BrokerId).ToArray());
+    }
 }

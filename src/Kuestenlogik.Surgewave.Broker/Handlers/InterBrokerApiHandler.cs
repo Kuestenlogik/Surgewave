@@ -20,6 +20,7 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
     private readonly ReplicaManager _replicaManager;
     private readonly LogManager _logManager;
     private readonly TransactionCoordinator? _transactionCoordinator;
+    private readonly IIsrUpdateApplier? _isrUpdateApplier;
     private readonly ILogger<InterBrokerApiHandler> _logger;
 
     // Track the current controller epoch to reject stale requests
@@ -31,7 +32,8 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         ApiKey.StopReplica,
         ApiKey.UpdateMetadata,
         ApiKey.ControlledShutdown,
-        ApiKey.WriteTxnMarkers
+        ApiKey.WriteTxnMarkers,
+        ApiKey.AlterPartition
     ];
 
     public InterBrokerApiHandler(
@@ -40,13 +42,15 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         ReplicaManager replicaManager,
         LogManager logManager,
         ILogger<InterBrokerApiHandler> logger,
-        TransactionCoordinator? transactionCoordinator = null)
+        TransactionCoordinator? transactionCoordinator = null,
+        IIsrUpdateApplier? isrUpdateApplier = null)
     {
         _config = config;
         _clusterState = clusterState;
         _replicaManager = replicaManager;
         _logManager = logManager;
         _transactionCoordinator = transactionCoordinator;
+        _isrUpdateApplier = isrUpdateApplier;
         _logger = logger;
     }
 
@@ -59,6 +63,7 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
             UpdateMetadataRequest updateMetadataRequest => HandleUpdateMetadata(updateMetadataRequest),
             ControlledShutdownRequest controlledShutdownRequest => HandleControlledShutdown(controlledShutdownRequest),
             WriteTxnMarkersRequest writeTxnMarkersRequest => await HandleWriteTxnMarkersAsync(writeTxnMarkersRequest, cancellationToken),
+            AlterPartitionRequest alterPartitionRequest => await HandleAlterPartitionAsync(alterPartitionRequest, cancellationToken),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by InterBrokerApiHandler")
         };
     }
@@ -85,10 +90,19 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         _clusterState.ControllerEpoch = request.ControllerEpoch;
         _clusterState.ControllerId = request.ControllerId;
 
-        // Update broker list from LiveLeaders
+        // Update broker list from LiveLeaders — but only for brokers we don't
+        // already know. A broker discovered from cluster-node config carries
+        // its real replication port; LeaderAndIsr's LiveLeaders only advertises
+        // the client host/port, so RegisterBroker would rebuild the node with
+        // the default ReplicationPort (Port + 1000) and clobber the discovered
+        // value. The follower's fetcher would then dial the wrong port and
+        // never catch up, so the ISR would never form (#69).
         foreach (var broker in request.LiveLeaders)
         {
-            _clusterState.RegisterBroker(broker.BrokerId, broker.Host, broker.Port);
+            if (_clusterState.GetBroker(broker.BrokerId) is null)
+            {
+                _clusterState.RegisterBroker(broker.BrokerId, broker.Host, broker.Port);
+            }
         }
 
         var partitionErrors = new List<LeaderAndIsrResponse.LeaderAndIsrPartitionError>();
@@ -159,6 +173,95 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
             PartitionErrors = partitionErrors
         };
     }
+
+    private async Task<AlterPartitionResponse> HandleAlterPartitionAsync(AlterPartitionRequest request, CancellationToken ct)
+    {
+        LogAlterPartitionReceived(request.BrokerId, request.Topics.Count);
+
+        var responseTopics = new List<AlterPartitionResponse.TopicData>();
+
+        foreach (var topic in request.Topics)
+        {
+            // v2+ carries only TopicId over the wire (TopicName is null); v0-1
+            // carries the name. Resolve to a name the controller knows.
+            var topicName = topic.TopicName;
+            if (string.IsNullOrEmpty(topicName))
+            {
+                topicName = _clusterState.GetTopicById(topic.TopicId)?.Name;
+            }
+
+            var responsePartitions = new List<AlterPartitionResponse.PartitionData>();
+
+            foreach (var p in topic.Partitions)
+            {
+                var newIsr = p.NewIsrWithEpochs != null
+                    ? p.NewIsrWithEpochs.Select(b => b.BrokerId).ToList()
+                    : (p.NewIsr ?? []);
+
+                // Unknown TopicId — likely a race with topic creation.
+                if (string.IsNullOrEmpty(topicName))
+                {
+                    responsePartitions.Add(BuildPartitionError(p, ErrorCode.UnknownTopicId, newIsr));
+                    continue;
+                }
+
+                // Only the controller may apply ISR updates.
+                if (_isrUpdateApplier is null || !_isrUpdateApplier.IsController)
+                {
+                    responsePartitions.Add(BuildPartitionError(p, ErrorCode.NotController, newIsr));
+                    continue;
+                }
+
+                var tp = new TopicPartition { Topic = topicName, Partition = p.PartitionIndex };
+                var updated = await _isrUpdateApplier.ApplyIsrUpdateAsync(tp, request.BrokerId, p.LeaderEpoch, newIsr, ct);
+
+                if (updated is null)
+                {
+                    // Controller doesn't track this partition.
+                    responsePartitions.Add(BuildPartitionError(p, ErrorCode.UnknownTopicOrPartition, newIsr));
+                    continue;
+                }
+
+                responsePartitions.Add(new AlterPartitionResponse.PartitionData
+                {
+                    PartitionIndex = p.PartitionIndex,
+                    ErrorCode = ErrorCode.None,
+                    LeaderId = updated.LeaderBrokerId,
+                    LeaderEpoch = updated.LeaderEpoch,
+                    IsrWithEpochs = updated.Isr
+                        .Select(id => new AlterPartitionResponse.BrokerState { BrokerId = id, BrokerEpoch = -1 })
+                        .ToList(),
+                    PartitionEpoch = updated.LeaderEpoch
+                });
+            }
+
+            responseTopics.Add(new AlterPartitionResponse.TopicData
+            {
+                TopicName = topic.TopicName,
+                TopicId = topic.TopicId,
+                Partitions = responsePartitions
+            });
+        }
+
+        return new AlterPartitionResponse
+        {
+            CorrelationId = request.CorrelationId,
+            ApiVersion = request.ApiVersion,
+            ErrorCode = ErrorCode.None,
+            Topics = responseTopics
+        };
+    }
+
+    private static AlterPartitionResponse.PartitionData BuildPartitionError(
+        AlterPartitionRequest.PartitionData p, ErrorCode errorCode, List<int> isr) => new()
+    {
+        PartitionIndex = p.PartitionIndex,
+        ErrorCode = errorCode,
+        LeaderId = -1,
+        LeaderEpoch = p.LeaderEpoch,
+        IsrWithEpochs = isr.Select(id => new AlterPartitionResponse.BrokerState { BrokerId = id, BrokerEpoch = -1 }).ToList(),
+        PartitionEpoch = p.PartitionEpoch
+    };
 
     private async Task<StopReplicaResponse> HandleStopReplicaAsync(StopReplicaRequest request, CancellationToken ct)
     {
@@ -669,6 +772,9 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Received LeaderAndIsr from controller {ControllerId} epoch {ControllerEpoch} with {TopicCount} topics")]
     private partial void LogLeaderAndIsrReceived(int controllerId, int controllerEpoch, int topicCount);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Received AlterPartition from broker {BrokerId} with {TopicCount} topics")]
+    private partial void LogAlterPartitionReceived(int brokerId, int topicCount);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting stale {ApiName} request: epoch {RequestEpoch} < current {CurrentEpoch}")]
     private partial void LogStaleControllerEpoch(string apiName, int requestEpoch, int currentEpoch);
