@@ -319,6 +319,12 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
             // Transaction coordinator (inter-broker)
             ApiKey.WriteTxnMarkers => ReadWriteTxnMarkersRequest(reader, apiVersion, correlationId, clientId),
 
+            // Inter-broker replication (controller -> broker): controller-only
+            // ApiKeys, so adding these cannot affect normal client traffic.
+            ApiKey.LeaderAndIsr => ReadLeaderAndIsrRequest(reader, apiVersion, correlationId, clientId),
+            ApiKey.StopReplica => ReadStopReplicaRequest(reader, apiVersion, correlationId, clientId),
+            ApiKey.UpdateMetadata => ReadUpdateMetadataRequest(reader, apiVersion, correlationId, clientId),
+
             // Log directory management
             ApiKey.AlterReplicaLogDirs => ReadAlterReplicaLogDirsRequest(reader, apiVersion, correlationId, clientId),
             ApiKey.DescribeLogDirs => ReadDescribeLogDirsRequest(reader, apiVersion, correlationId, clientId),
@@ -536,6 +542,36 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
 
         var protocolReader = new KafkaProtocolReader(remainingBytes);
         return OffsetForLeaderEpochRequest.ReadFrom(protocolReader, apiVersion, correlationId, clientId);
+    }
+
+    private static LeaderAndIsrRequest ReadLeaderAndIsrRequest(BinaryReader reader, short apiVersion, int correlationId, string clientId)
+    {
+        var stream = (MemoryStream)reader.BaseStream;
+        var remainingSize = (int)(stream.Length - stream.Position);
+        var remainingBytes = reader.ReadBytes(remainingSize);
+
+        var protocolReader = new KafkaProtocolReader(remainingBytes);
+        return LeaderAndIsrRequest.ReadFrom(protocolReader, apiVersion, correlationId, clientId);
+    }
+
+    private static StopReplicaRequest ReadStopReplicaRequest(BinaryReader reader, short apiVersion, int correlationId, string clientId)
+    {
+        var stream = (MemoryStream)reader.BaseStream;
+        var remainingSize = (int)(stream.Length - stream.Position);
+        var remainingBytes = reader.ReadBytes(remainingSize);
+
+        var protocolReader = new KafkaProtocolReader(remainingBytes);
+        return StopReplicaRequest.ReadFrom(protocolReader, apiVersion, correlationId, clientId);
+    }
+
+    private static UpdateMetadataRequest ReadUpdateMetadataRequest(BinaryReader reader, short apiVersion, int correlationId, string clientId)
+    {
+        var stream = (MemoryStream)reader.BaseStream;
+        var remainingSize = (int)(stream.Length - stream.Position);
+        var remainingBytes = reader.ReadBytes(remainingSize);
+
+        var protocolReader = new KafkaProtocolReader(remainingBytes);
+        return UpdateMetadataRequest.ReadFrom(protocolReader, apiVersion, correlationId, clientId);
     }
 
     private static WriteTxnMarkersRequest ReadWriteTxnMarkersRequest(BinaryReader reader, short apiVersion, int correlationId, string clientId)

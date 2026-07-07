@@ -87,7 +87,9 @@ public sealed class UpdateMetadataRequest : KafkaRequest
 
         if (isFlexible)
         {
-            writer.WriteCompactString(ClientId);
+            // ClientId is a regular NULLABLE_STRING in the header even for
+            // flexible versions (see LeaderAndIsrRequest / #69).
+            writer.WriteString(ClientId);
             writer.WriteVarInt(0); // Header tagged fields
         }
         else
