@@ -490,13 +490,28 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Transport.IPeerTransport>(s
     return transport;
 });
 
+// Controller client (and its connection pool) for pushing LeaderAndIsr to
+// brokers and — as the leader-side IIsrChangeNotifier — reporting ISR changes
+// back to the controller (#69). Registered before ReplicaManager resolves it;
+// ControllerClient has no ReplicaManager/ClusterController dependency, so there
+// is no DI cycle (IPeerTransport -> ConnectionPool -> ControllerClient ->
+// ReplicaManager -> ClusterController).
+builder.Services.AddSingleton(sp => new ConnectionPool(
+    sp.GetRequiredService<ILogger<ConnectionPool>>(),
+    sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
+builder.Services.AddSingleton(sp => new ControllerClient(
+    sp.GetRequiredService<ConnectionPool>(),
+    sp.GetRequiredService<ClusterState>(),
+    sp.GetRequiredService<ClusteringConfig>(),
+    sp.GetRequiredService<ILogger<ControllerClient>>()));
 builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<ILogger<ReplicaManager>>(),
     sp.GetRequiredService<ClusterState>(),
     sp.GetRequiredService<LogManager>(),
     sp.GetRequiredService<ClusteringConfig>(),
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>(),
-    sp.GetRequiredService<BrokerMetrics>()));
+    sp.GetRequiredService<BrokerMetrics>(),
+    sp.GetRequiredService<ControllerClient>()));
 builder.Services.AddSingleton(sp => new ClusterController(
     sp.GetRequiredService<ILogger<ClusterController>>(),
     sp.GetRequiredService<ClusterState>(),
@@ -574,6 +589,13 @@ var clusteringConfig = app.Services.GetRequiredService<ClusteringConfig>();
 var replicaManager = app.Services.GetRequiredService<ReplicaManager>();
 var clusterController = app.Services.GetRequiredService<ClusterController>();
 var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
+
+// Wire the controller client so the controller can push LeaderAndIsr and apply
+// reverse-ISR reports before the cluster starts (#69). This closes the gap
+// where a production broker never pushed LeaderAndIsr at all (only the embedded
+// runtime did), so followers never replicated and the ISR never formed.
+var controllerClient = app.Services.GetRequiredService<ControllerClient>();
+clusterController.SetControllerClient(controllerClient);
 
 // Initialize Raft consensus if enabled
 RaftNode? raftNode = null;
@@ -1323,17 +1345,27 @@ if (config.Telemetry.Enabled && config.Telemetry.TopicSinkEnabled)
     logger.LogInformation("Telemetry topic sink enabled — mirroring OTLP payloads to {Topic}", config.Telemetry.TopicName);
 }
 
+// Metadata handler is hoisted so it can be wired to the cluster state and
+// controller — the Kafka Metadata it serves reads ISR from the local
+// ClusterState, so reverse-ISR propagation (#69) is only visible to clients if
+// this handler is cluster-aware (the embedded runtime already does this; the
+// production broker previously did not, so it always answered standalone).
+var metadataApiHandler = new MetadataApiHandler(config, logManager, metadataApiLogger);
+metadataApiHandler.SetClusterState(clusterState);
+metadataApiHandler.SetClusterTopicCreator(clusterController);
+
 IKafkaRequestHandler[] handlers =
 [
     new DataApiHandler(config, logManager, transactionCoordinator, quotaManager, recordBatchSerializer, aclAuthorizer, deduplicationManager, delayIndex, ttlIndex, metrics, dataApiLogger, bandwidthQuotaManager,
         app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
         coldStartProfiler: app.Services.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()),
-    new MetadataApiHandler(config, logManager, metadataApiLogger),
+    metadataApiHandler,
     new TopicAdminHandler(config, logManager, quotaManager, auditLogger, topicAdminLogger),
     new ConfigApiHandler(config, dynamicBrokerConfig, logManager),
     new SecurityApiHandler(config, saslAuthenticator, aclAuthorizer, auditLogger, securityApiLogger,
         scramSha256Store: scramSha256Store, scramSha512Store: scramSha512Store),
-    new InterBrokerApiHandler(config, clusterState, replicaManager, logManager, interBrokerApiLogger, transactionCoordinator),
+    new InterBrokerApiHandler(config, clusterState, replicaManager, logManager, interBrokerApiLogger, transactionCoordinator,
+        isrUpdateApplier: clusterController),
     new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupApiLogger),
     new ShareGroupApiHandler(shareGroupCoordinator, shareGroupApiLogger),
     new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, consumerGroupV2ApiLogger),

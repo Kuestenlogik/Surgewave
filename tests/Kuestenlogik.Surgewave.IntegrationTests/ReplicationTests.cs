@@ -102,26 +102,31 @@ public class ReplicationTests : IAsyncLifetime
 
         _brokers.Add(broker3);
 
-        // Register all brokers with the controller's ClusterState
-        // This ensures the controller knows about all brokers for replica assignment
-        var controllerClusterState = broker1.ClusterState;
-        if (controllerClusterState != null)
+        // Cross-register every broker into every other broker's ClusterState
+        // with its real replication port. This mirrors a production full-mesh
+        // config (each broker's cluster-nodes list names all peers with their
+        // replication ports). Dynamic-port tests can't express that statically
+        // — broker N starts before broker N+1 exists — so we stitch the mesh
+        // after all brokers are up. Without it a follower that only learns a
+        // peer via LeaderAndIsr's LiveLeaders (client host/port only) would
+        // fall back to the Port+1000 replication-port convention and dial the
+        // wrong port, so its fetch would fail and the ISR would never form (#69).
+        foreach (var self in _brokers)
         {
-            controllerClusterState.AddBroker(new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerNode
+            var state = self.ClusterState;
+            if (state is null) continue;
+            foreach (var peer in _brokers)
             {
-                BrokerId = broker2.BrokerId,
-                Host = broker2.Host,
-                Port = broker2.Port,
-                ReplicationPort = broker2.ReplicationPort
-            });
-            controllerClusterState.AddBroker(new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerNode
-            {
-                BrokerId = broker3.BrokerId,
-                Host = broker3.Host,
-                Port = broker3.Port,
-                ReplicationPort = broker3.ReplicationPort
-            });
-            _output.WriteLine($"Registered brokers 2 and 3 with controller. Total brokers: {controllerClusterState.Brokers.Count}");
+                if (peer.BrokerId == self.BrokerId) continue;
+                state.AddBroker(new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerNode
+                {
+                    BrokerId = peer.BrokerId,
+                    Host = peer.Host,
+                    Port = peer.Port,
+                    ReplicationPort = peer.ReplicationPort
+                });
+            }
+            _output.WriteLine($"Broker {self.BrokerId} knows {state.Brokers.Count} brokers");
         }
 
         // Build bootstrap servers string with all brokers
@@ -445,7 +450,7 @@ public class ReplicationTests : IAsyncLifetime
     // list, no reverse ISR propagation), so no partition's ISR ever grows past
     // its leader. The ISR-catch-up assertion below is the correct acceptance
     // condition; unskip once the replication path is finished. Tracked in #69.
-    [Fact(Skip = "Legacy follower replication is unwired end-to-end — ISR never forms. Tracked in #69.")]
+    [Fact(Timeout = 150000)]
     public async Task Cluster_IsrManagement_FollowersCatchUp()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));

@@ -131,15 +131,18 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         var endpoint = connection.RemoteEndPoint?.ToString() ?? "unknown";
         LogReplicaConnected(endpoint);
 
-        var streamTasks = new List<Task>();
         try
         {
             await using (connection)
             {
-                // Accept inbound streams from the peer. For QUIC each accepted
-                // stream is an independent RPC channel (real parallelism). For
-                // TCP this always returns the single shared stream serialised by
-                // a lock, so it's effectively the same sequential loop as before.
+                // Accept inbound streams from the peer and process one RPC each.
+                // For TCP, AcceptInboundStreamAsync returns the single shared
+                // stream immediately (it does not wait for data), so we MUST
+                // stop the loop as soon as a read hits EOF — otherwise a closed
+                // connection (e.g. a readiness probe) spins on read==0 forever,
+                // saturating the thread pool and starving real fetch reads (#69).
+                // Processing is awaited inline: the TCP stream is shared and
+                // lock-serialised anyway, so there is no parallelism to lose.
                 while (!ct.IsCancellationRequested && connection.IsConnected)
                 {
                     IPeerStreamLease lease;
@@ -156,11 +159,10 @@ public sealed partial class ReplicationServer : IAsyncDisposable
                         break;
                     }
 
-                    streamTasks.Add(HandleSingleRpcAsync(lease, ct));
+                    var alive = await HandleSingleRpcAsync(lease, ct);
+                    if (!alive)
+                        break;
                 }
-
-                try { await Task.WhenAll(streamTasks); }
-                catch { /* per-stream errors already logged */ }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -176,7 +178,12 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         }
     }
 
-    private async Task HandleSingleRpcAsync(IPeerStreamLease lease, CancellationToken ct)
+    /// <summary>
+    /// Process a single RPC on the leased stream. Returns <c>false</c> when the
+    /// stream is finished (EOF / bad frame / cancellation / error) so the caller
+    /// stops looping on a dead connection instead of spinning.
+    /// </summary>
+    private async Task<bool> HandleSingleRpcAsync(IPeerStreamLease lease, CancellationToken ct)
     {
         try
         {
@@ -185,18 +192,21 @@ public sealed partial class ReplicationServer : IAsyncDisposable
                 var stream = lease.Stream;
 
                 var request = await ReadRequestAsync(stream, ct);
-                if (request == null) return;
+                if (request == null) return false;
 
                 var response = await ProcessRequestAsync(request, ct);
                 await WriteResponseAsync(stream, response, ct);
+                return true;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            return false;
         }
         catch (Exception ex)
         {
             LogReplicaClientError("stream-rpc", ex);
+            return false;
         }
     }
 

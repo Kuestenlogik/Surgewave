@@ -115,6 +115,25 @@ public sealed class ClusterState
         return _topics.TryGetValue(topicName, out var topic) ? topic : null;
     }
 
+    /// <summary>
+    /// Resolve a topic by its unique ID. Used by the controller to map the
+    /// TopicId carried in flexible inter-broker requests (e.g. AlterPartition
+    /// v2+) back to a topic name. Returns <c>null</c> if unknown.
+    /// </summary>
+    public TopicMetadata? GetTopicById(Guid topicId)
+    {
+        if (topicId == Guid.Empty)
+            return null;
+
+        foreach (var topic in _topics.Values)
+        {
+            if (topic.TopicId == topicId)
+                return topic;
+        }
+
+        return null;
+    }
+
     public PartitionState? GetPartitionState(TopicPartition tp)
     {
         return _partitionStates.TryGetValue(tp, out var state) ? state : null;
@@ -264,6 +283,21 @@ public sealed class ClusterState
             var state = GetOrCreatePartitionState(tp);
             state.Isr.Clear();
             state.Isr.AddRange(isr);
+        }
+    }
+
+    /// <summary>
+    /// Return a point-in-time copy of a partition's ISR, taken under the state
+    /// lock so callers never observe a torn list mid-mutation. Returns an empty
+    /// list for an unknown partition.
+    /// </summary>
+    public List<int> GetIsrSnapshot(TopicPartition tp)
+    {
+        lock (_stateLock)
+        {
+            return _partitionStates.TryGetValue(tp, out var state)
+                ? [.. state.Isr]
+                : [];
         }
     }
 

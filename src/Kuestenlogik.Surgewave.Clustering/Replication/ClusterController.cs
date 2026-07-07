@@ -28,7 +28,7 @@ public interface IClusterTopicCreator
 /// In a multi-broker setup, one broker becomes the controller.
 /// Supports both simple "lowest broker ID" strategy and Raft consensus.
 /// </summary>
-public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator
+public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IIsrUpdateApplier
 {
     private readonly ILogger<ClusterController> _logger;
     private readonly ClusterState _clusterState;
@@ -897,6 +897,63 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         LogLeaderElected(tp.Topic, tp.Partition, oldLeader, newLeader, newLeaderEpoch);
         return true;
+    }
+
+    /// <summary>
+    /// Controller-side apply of an ISR update reported by a partition leader
+    /// (AlterPartition, reverse ISR propagation #69). Mirrors ElectLeaderAsync's
+    /// "mutate ClusterState, then re-broadcast LeaderAndIsr" pattern so every
+    /// replica — and the Kafka Metadata this controller serves — converges to
+    /// the reported ISR.
+    /// </summary>
+    public async Task<PartitionState?> ApplyIsrUpdateAsync(
+        TopicPartition tp,
+        int leaderId,
+        int leaderEpoch,
+        IReadOnlyList<int> newIsr,
+        CancellationToken ct = default)
+    {
+        if (!_isController)
+        {
+            LogNotController("AlterPartition");
+            return null;
+        }
+
+        var state = _clusterState.GetPartitionState(tp);
+        if (state == null)
+        {
+            LogPartitionNotFound(tp.Topic, tp.Partition);
+            return null;
+        }
+
+        // Fence stale leaders: a leader epoch older than what we already hold
+        // means the reporter was deposed by a reelection — reject with no change.
+        if (leaderEpoch < state.LeaderEpoch)
+        {
+            LogStaleIsrUpdate(tp.Topic, tp.Partition, leaderEpoch, state.LeaderEpoch);
+            return state;
+        }
+
+        // Apply the ISR wholesale (an ISR-only change does not bump LeaderEpoch).
+        if (_config.UseRaftConsensus && _raftNode != null)
+        {
+            await UpdateIsrViaRaftAsync(tp, newIsr.ToList(), ct);
+        }
+        else
+        {
+            _clusterState.UpdateIsr(tp, newIsr.ToList());
+        }
+
+        // Re-broadcast LeaderAndIsr so all replicas (incl. the reporting leader)
+        // and the controller's own metadata view converge.
+        var updated = _clusterState.GetPartitionState(tp);
+        if (_controllerClient != null && updated != null)
+        {
+            await _controllerClient.SendLeaderAndIsrAsync([(tp, updated)], ct).ConfigureAwait(false);
+        }
+
+        LogIsrUpdateApplied(tp.Topic, tp.Partition, leaderId, string.Join(",", newIsr));
+        return updated;
     }
 
     /// <summary>

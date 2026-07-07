@@ -63,7 +63,13 @@ public sealed class AlterPartitionRequest : KafkaRequest
         writer.WriteInt16((short)ApiKey);
         writer.WriteInt16(ApiVersion);
         writer.WriteInt32(CorrelationId);
-        writer.WriteCompactString(ClientId);
+        // ClientId in a Kafka RequestHeader is ALWAYS a regular (int16-length)
+        // NULLABLE_STRING even in flexible request versions — only the header's
+        // trailing tagged fields are flexible. Writing it compact makes the
+        // header unparseable by ReadRequestHeader (which uses ReadString), so
+        // the inter-broker AlterPartition send would never round-trip (#69,
+        // same fix as LeaderAndIsr/StopReplica/UpdateMetadata).
+        writer.WriteString(ClientId);
         writer.WriteVarInt(0); // Header tagged fields
 
         writer.WriteInt32(BrokerId);

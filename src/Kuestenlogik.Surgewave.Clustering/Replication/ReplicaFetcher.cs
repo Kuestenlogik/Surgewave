@@ -234,11 +234,14 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
         // Parse base offset from record batch
         var baseOffset = BinaryPrimitives.ReadInt64BigEndian(data.AsSpan(0, 8));
 
-        // Append to local log
+        // Append to local log. AppendAsync now returns the log-end offset after
+        // the whole batch (baseOffset + recordCount), which is exactly the next
+        // offset to fetch — so no +1 here, otherwise multi-record batches would
+        // skip records and the follower could never catch the leader (#69).
         var appendedOffset = await _replicaManager.AppendAsync(tp, data, ct);
 
         // Update fetch offset for next request
-        state.FetchOffset = appendedOffset + 1;
+        state.FetchOffset = appendedOffset;
         state.LastFetchTime = DateTimeOffset.UtcNow;
 
         // Notify replica manager that we fetched up to this offset
