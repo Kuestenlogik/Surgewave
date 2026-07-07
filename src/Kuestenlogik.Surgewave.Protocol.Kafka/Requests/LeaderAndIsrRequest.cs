@@ -78,7 +78,13 @@ public sealed class LeaderAndIsrRequest : KafkaRequest
 
         if (isFlexible)
         {
-            writer.WriteCompactString(ClientId);
+            // Per the Kafka RequestHeader spec, ClientId is ALWAYS a regular
+            // (non-compact) NULLABLE_STRING even in flexible request versions;
+            // only the header tagged fields are flexible. Writing it compact
+            // here made the header unparseable by ReadRequestHeader on the
+            // receiving broker (the inter-broker send path was never exercised
+            // end-to-end until #69).
+            writer.WriteString(ClientId);
             writer.WriteVarInt(0); // Header tagged fields
         }
         else
