@@ -1,4 +1,4 @@
-using Kuestenlogik.Surgewave.Client.SchemaRegistry;
+using Kuestenlogik.Surgewave.Schema.Registry.Client;
 using Kuestenlogik.Surgewave.Testing;
 using Xunit;
 

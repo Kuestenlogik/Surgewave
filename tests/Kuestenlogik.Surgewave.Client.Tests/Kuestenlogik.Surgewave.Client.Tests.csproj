@@ -20,11 +20,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client.SchemaRegistry\Kuestenlogik.Surgewave.Client.SchemaRegistry.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client.SchemaRegistry.Avro\Kuestenlogik.Surgewave.Client.SchemaRegistry.Avro.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client.SchemaRegistry.Protobuf\Kuestenlogik.Surgewave.Client.SchemaRegistry.Protobuf.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client.SchemaRegistry.FlatBuffers\Kuestenlogik.Surgewave.Client.SchemaRegistry.FlatBuffers.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client.SchemaRegistry.Json\Kuestenlogik.Surgewave.Client.SchemaRegistry.Json.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Client\Kuestenlogik.Surgewave.Schema.Registry.Client.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Protobuf.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Serdes.FlatBuffers\Kuestenlogik.Surgewave.Schema.Registry.Serdes.FlatBuffers.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Json\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Json.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
   </ItemGroup>
