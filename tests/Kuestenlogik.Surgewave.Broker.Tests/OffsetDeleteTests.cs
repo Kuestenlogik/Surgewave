@@ -1,6 +1,5 @@
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -12,6 +11,8 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 /// these tests a refactor that "simplifies" the GroupSubscribedToTopic check
 /// would silently allow an offset delete on an active group's partition,
 /// which could race a future commit and lose progress data.
+/// Exercises the protocol-neutral coordinator surface directly (#59); the
+/// wire-level status -> ErrorCode mapping is covered by the adapter/e2e tests.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class OffsetDeleteTests : IDisposable
@@ -37,29 +38,17 @@ public sealed class OffsetDeleteTests : IDisposable
     [Fact]
     public void UnknownGroup_ReturnsGroupIdNotFoundPerPartition()
     {
-        var resp = _coordinator.HandleOffsetDelete(new OffsetDeleteRequest
+        var resp = _coordinator.DeleteOffsets(new OffsetDeleteCommand
         {
-            ApiKey = ApiKey.OffsetDelete,
-            ApiVersion = 0,
-            CorrelationId = 1,
-            ClientId = "admin",
             GroupId = "ghost-group",
             Topics =
             [
-                new OffsetDeleteRequest.OffsetDeleteTopic
-                {
-                    Name = "orders",
-                    Partitions = [
-                        new OffsetDeleteRequest.OffsetDeletePartition { PartitionIndex = 0 },
-                        new OffsetDeleteRequest.OffsetDeletePartition { PartitionIndex = 1 },
-                    ],
-                },
+                new OffsetDeleteTopic { Name = "orders", Partitions = [0, 1] },
             ],
         });
 
-        Assert.Equal(ErrorCode.None, resp.ErrorCode); // top-level OK
         var topic = Assert.Single(resp.Topics);
-        Assert.All(topic.Partitions, p => Assert.Equal(ErrorCode.GroupIdNotFound, p.ErrorCode));
+        Assert.All(topic.Partitions, p => Assert.Equal(ConsumerGroupErrorStatus.GroupIdNotFound, p.Status));
     }
 
     [Fact]
@@ -70,10 +59,10 @@ public sealed class OffsetDeleteTests : IDisposable
         _offsetStore.CommitOffset("g-empty", "orders", 0, offset: 42);
         ForceGroupExists("g-empty");
 
-        var resp = _coordinator.HandleOffsetDelete(MakeRequest("g-empty", ("orders", 0)));
+        var resp = _coordinator.DeleteOffsets(MakeCommand("g-empty", ("orders", 0)));
 
         var partition = Assert.Single(Assert.Single(resp.Topics).Partitions);
-        Assert.Equal(ErrorCode.None, partition.ErrorCode);
+        Assert.Equal(ConsumerGroupErrorStatus.None, partition.Status);
         // Offset is gone — re-fetching falls back to -1 (no commit recorded).
         Assert.Equal(-1, _offsetStore.GetCommittedOffset("g-empty", "orders", 0));
     }
@@ -84,10 +73,10 @@ public sealed class OffsetDeleteTests : IDisposable
         ForceGroupExists("g-active", memberCount: 2);
         _offsetStore.CommitOffset("g-active", "orders", 0, offset: 100);
 
-        var resp = _coordinator.HandleOffsetDelete(MakeRequest("g-active", ("orders", 0)));
+        var resp = _coordinator.DeleteOffsets(MakeCommand("g-active", ("orders", 0)));
 
         var partition = Assert.Single(Assert.Single(resp.Topics).Partitions);
-        Assert.Equal(ErrorCode.GroupSubscribedToTopic, partition.ErrorCode);
+        Assert.Equal(ConsumerGroupErrorStatus.GroupSubscribedToTopic, partition.Status);
         // Offset must NOT have been deleted — the rejection is structural.
         Assert.Equal(100, _offsetStore.GetCommittedOffset("g-active", "orders", 0));
     }
@@ -99,10 +88,10 @@ public sealed class OffsetDeleteTests : IDisposable
         // returns None for that partition rather than a "not found" error.
         ForceGroupExists("g-idempotent");
 
-        var resp = _coordinator.HandleOffsetDelete(MakeRequest("g-idempotent", ("never-seen", 7)));
+        var resp = _coordinator.DeleteOffsets(MakeCommand("g-idempotent", ("never-seen", 7)));
 
         var partition = Assert.Single(Assert.Single(resp.Topics).Partitions);
-        Assert.Equal(ErrorCode.None, partition.ErrorCode);
+        Assert.Equal(ConsumerGroupErrorStatus.None, partition.Status);
     }
 
     [Fact]
@@ -113,57 +102,35 @@ public sealed class OffsetDeleteTests : IDisposable
         _offsetStore.CommitOffset("g-multi", "orders", 1, offset: 2);
         _offsetStore.CommitOffset("g-multi", "payments", 0, offset: 3);
 
-        var resp = _coordinator.HandleOffsetDelete(new OffsetDeleteRequest
+        var resp = _coordinator.DeleteOffsets(new OffsetDeleteCommand
         {
-            ApiKey = ApiKey.OffsetDelete,
-            ApiVersion = 0,
-            CorrelationId = 1,
-            ClientId = "admin",
             GroupId = "g-multi",
             Topics =
             [
-                new OffsetDeleteRequest.OffsetDeleteTopic
-                {
-                    Name = "orders",
-                    Partitions = [
-                        new OffsetDeleteRequest.OffsetDeletePartition { PartitionIndex = 0 },
-                        new OffsetDeleteRequest.OffsetDeletePartition { PartitionIndex = 1 },
-                    ],
-                },
-                new OffsetDeleteRequest.OffsetDeleteTopic
-                {
-                    Name = "payments",
-                    Partitions = [new OffsetDeleteRequest.OffsetDeletePartition { PartitionIndex = 0 }],
-                },
+                new OffsetDeleteTopic { Name = "orders", Partitions = [0, 1] },
+                new OffsetDeleteTopic { Name = "payments", Partitions = [0] },
             ],
         });
 
         Assert.Equal(2, resp.Topics.Count);
-        Assert.All(resp.Topics, t => Assert.All(t.Partitions, p => Assert.Equal(ErrorCode.None, p.ErrorCode)));
+        Assert.All(resp.Topics, t => Assert.All(t.Partitions, p => Assert.Equal(ConsumerGroupErrorStatus.None, p.Status)));
         Assert.Equal(-1, _offsetStore.GetCommittedOffset("g-multi", "orders", 0));
         Assert.Equal(-1, _offsetStore.GetCommittedOffset("g-multi", "orders", 1));
         Assert.Equal(-1, _offsetStore.GetCommittedOffset("g-multi", "payments", 0));
     }
 
-    private static OffsetDeleteRequest MakeRequest(string groupId, params (string Topic, int Partition)[] tps)
+    private static OffsetDeleteCommand MakeCommand(string groupId, params (string Topic, int Partition)[] tps)
     {
         var topics = tps
             .GroupBy(tp => tp.Topic)
-            .Select(g => new OffsetDeleteRequest.OffsetDeleteTopic
+            .Select(g => new OffsetDeleteTopic
             {
                 Name = g.Key,
-                Partitions = g.Select(tp => new OffsetDeleteRequest.OffsetDeletePartition
-                {
-                    PartitionIndex = tp.Partition,
-                }).ToList(),
+                Partitions = g.Select(tp => tp.Partition).ToList(),
             })
             .ToList();
-        return new OffsetDeleteRequest
+        return new OffsetDeleteCommand
         {
-            ApiKey = ApiKey.OffsetDelete,
-            ApiVersion = 0,
-            CorrelationId = 1,
-            ClientId = "admin",
             GroupId = groupId,
             Topics = topics,
         };

@@ -134,15 +134,21 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
         var securityApiHandler = new SecurityApiHandler(
             config, saslAuthenticator, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>());
 
+        // The classic consumer-group APIs route through the dispatcher now (the broker
+        // fast-path was removed when the coordinator went protocol-neutral, #59), so its
+        // adapter must be registered here for the consume path to work.
+        var consumerGroupApiHandler = new ConsumerGroupApiHandler(
+            consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>());
+
         var handlers = new IKafkaRequestHandler[]
         {
-            dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler
+            dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler
         };
         var dispatcher = new RequestDispatcher(handlers);
 
         _metrics = new BrokerMetrics();
         _broker = new SurgewaveBroker(
-            config, _logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator,
+            config, _logManager, recordBatchSerializer, shareGroupCoordinator, nativeGroupCoordinator,
             transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
 
         _cts = new CancellationTokenSource();

@@ -116,8 +116,8 @@ internal static partial class Log
     public static partial void MetadataPartitionInfo(ILogger logger, int partitionId, int leader, string replicas, string isr, object errorCode);
 
     // ConsumerGroupCoordinator - SyncGroup handling
-    [LoggerMessage(Level = LogLevel.Debug, Message = "[SyncGroup] ApiVersion={ApiVersion}, GroupId={GroupId}, MemberId={MemberId}, GenerationId={GenerationId}")]
-    public static partial void SyncGroupRequest(ILogger logger, short apiVersion, string groupId, string memberId, int generationId);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "[SyncGroup] GroupId={GroupId}, MemberId={MemberId}, GenerationId={GenerationId}")]
+    public static partial void SyncGroupRequest(ILogger logger, string groupId, string memberId, int generationId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "[SyncGroup] Assignments.Length={AssignmentsLength}")]
     public static partial void SyncGroupAssignmentsCount(ILogger logger, int assignmentsLength);
@@ -247,8 +247,8 @@ internal static partial class Log
     public static partial void OffsetFetchFallbackToStore(ILogger logger, string groupId, string topic, int partition, long offset);
 
     // JoinGroup debugging
-    [LoggerMessage(Level = LogLevel.Debug, Message = "[JoinGroup] ApiVersion={ApiVersion}, GroupId={GroupId}, MemberId={MemberId}, Protocols={ProtocolCount}, MetadataSize={MetadataSize}")]
-    public static partial void JoinGroupRequest(ILogger logger, short apiVersion, string groupId, string memberId, int protocolCount, int metadataSize);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "[JoinGroup] GroupId={GroupId}, MemberId={MemberId}, Protocols={ProtocolCount}, MetadataSize={MetadataSize}")]
+    public static partial void JoinGroupRequest(ILogger logger, string groupId, string memberId, int protocolCount, int metadataSize);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "[JoinGroup] Created new group: {GroupId}")]
     public static partial void JoinGroupCreated(ILogger logger, string groupId);
