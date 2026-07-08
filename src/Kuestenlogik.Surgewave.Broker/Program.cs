@@ -553,6 +553,86 @@ builder.Services.AddSingleton(sp => new BandwidthQuotaManager(
     sp.GetRequiredService<BrokerConfig>().BandwidthQuota,
     sp.GetRequiredService<ILogger<BandwidthQuotaManager>>()));
 
+// Group-coordination + offset services in DI (#59 phase 2a). Same singletons as
+// before, now DI-managed, so both hosts compose them identically and the Kafka
+// handlers can later be DI-resolved. Behaviour-preserving.
+builder.Services.AddSingleton(sp => new OffsetStore(
+    sp.GetRequiredService<BrokerConfig>().DataDirectory,
+    sp.GetRequiredService<ILogger<OffsetStore>>()));
+builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
+    sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
+    sp.GetRequiredService<LogManager>(),
+    sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Queue.IQueueViewManager>()));
+builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(
+    sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>>(),
+    sp.GetRequiredService<LogManager>()));
+builder.Services.AddSingleton(sp => new ConsumerGroupCoordinator(
+    sp.GetRequiredService<ILogger<ConsumerGroupCoordinator>>(),
+    sp.GetRequiredService<OffsetStore>(),
+    sp.GetRequiredService<LogManager>(),
+    aclAuthorizer: null,
+    observability: sp.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
+    v2Coordinator: sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>()));
+builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator(
+    sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>>(),
+    sp.GetRequiredService<LogManager>()));
+builder.Services.AddSingleton(sp => new NativeGroupCoordinator(
+    sp.GetRequiredService<ILogger<NativeGroupCoordinator>>(),
+    sp.GetRequiredService<OffsetStore>()));
+
+// Transaction + quota + delegation stack in DI (#59 phase 2a). Same singletons,
+// now DI-managed so the Kafka handlers can be DI-resolved. Behaviour-preserving.
+builder.Services.AddSingleton(sp => new ProducerStateManager());
+builder.Services.AddSingleton(sp => new TransactionIndex());
+builder.Services.AddSingleton(sp => new TransactionStateStore(
+    sp.GetRequiredService<BrokerConfig>().DataDirectory,
+    sp.GetRequiredService<ILogger<TransactionStateStore>>()));
+builder.Services.AddSingleton(sp => new TransactionCoordinator(
+    sp.GetRequiredService<ProducerStateManager>(),
+    sp.GetRequiredService<LogManager>(),
+    sp.GetRequiredService<TransactionIndex>(),
+    sp.GetRequiredService<OffsetStore>(),
+    sp.GetRequiredService<TransactionStateStore>(),
+    sp.GetRequiredService<ILogger<TransactionCoordinator>>()));
+builder.Services.AddSingleton(sp => new QuotaManager(
+    sp.GetRequiredService<BrokerConfig>().Quotas,
+    sp.GetRequiredService<ILogger<QuotaManager>>(),
+    sp.GetRequiredService<BrokerConfig>().DataDirectory));
+builder.Services.AddSingleton(sp => new DelegationTokenManager(
+    sp.GetRequiredService<BrokerConfig>().DelegationTokens,
+    sp.GetRequiredService<BrokerConfig>().DataDirectory,
+    sp.GetRequiredService<ILogger<DelegationTokenManager>>()));
+
+// Neutral broker features in DI (#59 phase 2a). Conditional ones register only when
+// enabled (bootstrap-bound config); the Kafka handlers (2b) DI-resolve them nullable.
+// Post-build side-effects (metrics accessors, audit async init) stay in the bootstrap.
+var featuresConfig = builder.Configuration.GetSection(BrokerConfig.SectionName).Get<BrokerConfig>() ?? new BrokerConfig();
+if (featuresConfig.Audit.Enabled && featuresConfig.Audit.TopicSinkEnabled)
+    builder.Services.AddSingleton(sp => new AuditTopicSink(
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<RecordBatchSerializer>(),
+        sp.GetRequiredService<BrokerConfig>().Audit,
+        sp.GetRequiredService<ILogger<AuditTopicSink>>()));
+builder.Services.AddSingleton(sp => new AuditLogger(
+    sp.GetRequiredService<BrokerConfig>(),
+    sp.GetRequiredService<ILogger<AuditLogger>>(),
+    sp.GetService<AuditTopicSink>()));
+if (featuresConfig.Deduplication.Enabled)
+    builder.Services.AddSingleton(sp => new DeduplicationManager(
+        sp.GetRequiredService<BrokerConfig>().Deduplication,
+        sp.GetRequiredService<BrokerMetrics>(),
+        sp.GetRequiredService<ILogger<DeduplicationManager>>()));
+if (featuresConfig.DelayDelivery.Enabled)
+    builder.Services.AddSingleton(sp => new DelayIndex(
+        sp.GetRequiredService<BrokerConfig>().DelayDelivery,
+        sp.GetRequiredService<BrokerMetrics>(),
+        sp.GetRequiredService<ILogger<DelayIndex>>()));
+if (featuresConfig.Ttl.Enabled)
+    builder.Services.AddSingleton(sp => new TtlIndex(
+        sp.GetRequiredService<BrokerConfig>().Ttl,
+        sp.GetRequiredService<BrokerMetrics>(),
+        sp.GetRequiredService<ILogger<TtlIndex>>()));
+
 var app = builder.Build();
 
 // Get dependencies
@@ -645,14 +725,8 @@ logger.LogInformation("Rolling upgrade infrastructure initialized (version={Vers
 
 // Start Surgewave broker (Kafka wire protocol over TCP)
 var brokerLogger = app.Services.GetRequiredService<ILogger<SurgewaveBroker>>();
-var serializerLogger = app.Services.GetRequiredService<ILogger<RecordBatchSerializer>>();
-var coordinatorLogger = app.Services.GetRequiredService<ILogger<ConsumerGroupCoordinator>>();
-var txnCoordinatorLogger = app.Services.GetRequiredService<ILogger<TransactionCoordinator>>();
-var txnStateStoreLogger = app.Services.GetRequiredService<ILogger<TransactionStateStore>>();
-var quotaManagerLogger = app.Services.GetRequiredService<ILogger<QuotaManager>>();
 var recordBatchSerializer = app.Services.GetRequiredService<RecordBatchSerializer>();
-var offsetStoreLogger = app.Services.GetRequiredService<ILogger<OffsetStore>>();
-var offsetStore = new OffsetStore(config.DataDirectory, offsetStoreLogger);
+var offsetStore = app.Services.GetRequiredService<OffsetStore>();
 
 // Register gRPC service implementations with required dependencies
 ProducerServiceImplHolder.Instance = new ProducerServiceImpl(logManager, recordBatchSerializer.SerializeMessages);
@@ -713,24 +787,17 @@ AdminServiceImplHolder.Instance = new AdminServiceImpl(
             preferredLeader: null,
             CancellationToken.None));
 
-var shareGroupCoordinatorLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>();
 var queueViewManager = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Queue.IQueueViewManager>();
-var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(shareGroupCoordinatorLogger, logManager, queueViewManager);
+var shareGroupCoordinator = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>();
 
-var consumerGroupV2CoordinatorLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>>();
-var consumerGroupV2Coordinator = new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(consumerGroupV2CoordinatorLogger, logManager);
+var consumerGroupV2Coordinator = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>();
 
-// Classic coordinator gets a reference to the v2 coordinator so OffsetCommit/Fetch
+// Classic coordinator resolves the v2 coordinator (DI-wired) so OffsetCommit/Fetch
 // from a KIP-848 consumer falls through to v2 epoch validation when the group is
 // not in the classic state map.
-var consumerGroupCoordinator = new ConsumerGroupCoordinator(
-    coordinatorLogger, offsetStore, logManager,
-    aclAuthorizer: null,
-    observability: app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
-    v2Coordinator: consumerGroupV2Coordinator);
+var consumerGroupCoordinator = app.Services.GetRequiredService<ConsumerGroupCoordinator>();
 
-var streamsGroupCoordinatorLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>>();
-var streamsGroupCoordinator = new Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator(streamsGroupCoordinatorLogger, logManager);
+var streamsGroupCoordinator = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>();
 
 // Background sweep so groups whose last member silently dies eventually GC.
 // The sweep service self-disposes inside the Task.Run so its lifetime is bounded
@@ -742,8 +809,7 @@ Kuestenlogik.Surgewave.Broker.Lifecycle.GroupCoordinatorSweepRunner.Start(
     shareGroupCoordinator,
     streamsGroupCoordinator);
 
-var nativeGroupCoordinatorLogger = app.Services.GetRequiredService<ILogger<NativeGroupCoordinator>>();
-var nativeGroupCoordinator = new NativeGroupCoordinator(nativeGroupCoordinatorLogger, offsetStore);
+var nativeGroupCoordinator = app.Services.GetRequiredService<NativeGroupCoordinator>();
 
 // Register ConsumerGroupServiceImpl with delegates wired to NativeGroupCoordinator
 ConsumerGroupServiceImplHolder.Instance = new ConsumerGroupServiceImpl(
@@ -903,10 +969,10 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
         return result;
     });
 
-var producerStateManager = new ProducerStateManager();
-var transactionIndex = new TransactionIndex();
-var transactionStateStore = new TransactionStateStore(config.DataDirectory, txnStateStoreLogger);
-var transactionCoordinator = new TransactionCoordinator(producerStateManager, logManager, transactionIndex, offsetStore, transactionStateStore, txnCoordinatorLogger);
+var producerStateManager = app.Services.GetRequiredService<ProducerStateManager>();
+var transactionIndex = app.Services.GetRequiredService<TransactionIndex>();
+var transactionStateStore = app.Services.GetRequiredService<TransactionStateStore>();
+var transactionCoordinator = app.Services.GetRequiredService<TransactionCoordinator>();
 
 // Register TransactionServiceImpl with delegates wired to TransactionCoordinator
 TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
@@ -1031,13 +1097,12 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             t.ErrorCode)).ToList();
     });
 
-var quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger, config.DataDirectory);
+var quotaManager = app.Services.GetRequiredService<QuotaManager>();
 
 // Bandwidth quota manager — DI singleton (always-on, toggle is internal)
 var bandwidthQuotaManager = app.Services.GetRequiredService<BandwidthQuotaManager>();
 
-var delegationTokenManagerLogger = app.Services.GetRequiredService<ILogger<DelegationTokenManager>>();
-var delegationTokenManager = new DelegationTokenManager(config.DelegationTokens, config.DataDirectory, delegationTokenManagerLogger);
+var delegationTokenManager = app.Services.GetRequiredService<DelegationTokenManager>();
 
 // Register QuotaServiceImpl with delegates wired to QuotaManager
 QuotaServiceImplHolder.Instance = new QuotaServiceImpl(
@@ -1259,56 +1324,37 @@ var dynamicBrokerConfig = app.Services.GetRequiredService<DynamicBrokerConfig>()
 // Configure() resolves BrokerMetrics, DynamicBrokerConfig and BrokerConfig from DI,
 // builds AutoTuningService, starts the background loop, and maps the REST API.
 
-// Create audit logger. The optional topic sink mirrors events into a Surgewave
-// topic for SIEM / compliance pipelines (G13). It rides on top of the file
-// sink — never replaces it — so a topic-write failure can't drop a record.
-var auditLoggerInstance = app.Services.GetRequiredService<ILogger<AuditLogger>>();
-AuditTopicSink? auditTopicSink = null;
-if (config.Audit.Enabled && config.Audit.TopicSinkEnabled)
-{
-    var sinkLogger = app.Services.GetRequiredService<ILogger<AuditTopicSink>>();
-    auditTopicSink = new AuditTopicSink(logManager, recordBatchSerializer, config.Audit, sinkLogger);
-    logger.LogInformation("Audit topic sink enabled — mirroring events to {Topic}", config.Audit.TopicName);
-}
-// Process-lifetime bootstrap object: consumed by the audit REST API
-// (MapSurgewaveAudit) and, when Kafka is enabled, by the Kafka admin handlers.
-// Not explicitly disposed — consistent with the other bootstrap singletons; it
-// lives until process exit. Gating the Kafka handler array (#58) removed the
-// handler-ctor ownership transfer that previously silenced CA2000 on the
-// Kafka-disabled path, so suppress it explicitly here.
-#pragma warning disable CA2000 // process-lifetime bootstrap object
-var auditLogger = new AuditLogger(config, auditLoggerInstance, auditTopicSink);
-#pragma warning restore CA2000
+// Audit logger (DI). The optional topic sink (registered in DI only when enabled)
+// mirrors events into a Surgewave topic for SIEM / compliance pipelines (G13),
+// riding on top of the file sink — never replacing it — so a topic-write failure
+// can't drop a record. Async restore stays here post-build.
+var auditLogger = app.Services.GetRequiredService<AuditLogger>();
 await auditLogger.InitializeAsync();
+if (config.Audit.Enabled && config.Audit.TopicSinkEnabled)
+    logger.LogInformation("Audit topic sink enabled — mirroring events to {Topic}", config.Audit.TopicName);
 
-// Initialize deduplication manager (if enabled)
-DeduplicationManager? deduplicationManager = null;
-if (config.Deduplication.Enabled)
+// Deduplication manager (DI, registered only when enabled).
+var deduplicationManager = app.Services.GetService<DeduplicationManager>();
+if (deduplicationManager != null)
 {
-    var dedupLogger = app.Services.GetRequiredService<ILogger<DeduplicationManager>>();
-    deduplicationManager = new DeduplicationManager(config.Deduplication, metrics, dedupLogger);
     metrics.RegisterDedupAccessor(() => deduplicationManager.TotalEntries);
     logger.LogInformation("Content-based deduplication enabled (window={WindowMs}ms, max={MaxEntries}/partition)",
         config.Deduplication.WindowSizeMs, config.Deduplication.MaxEntriesPerPartition);
 }
 
-// Initialize delay index (if enabled)
-DelayIndex? delayIndex = null;
-if (config.DelayDelivery.Enabled)
+// Delay index (DI, registered only when enabled).
+var delayIndex = app.Services.GetService<DelayIndex>();
+if (delayIndex != null)
 {
-    var delayLogger = app.Services.GetRequiredService<ILogger<DelayIndex>>();
-    delayIndex = new DelayIndex(config.DelayDelivery, metrics, delayLogger);
     metrics.RegisterDelayAccessor(() => delayIndex.PendingCount);
     logger.LogInformation("Delayed message delivery enabled (maxDelay={MaxDelayMs}ms)",
         config.DelayDelivery.MaxDelayMs);
 }
 
-// Initialize TTL index (if enabled)
-TtlIndex? ttlIndex = null;
-if (config.Ttl.Enabled)
+// TTL index (DI, registered only when enabled).
+var ttlIndex = app.Services.GetService<TtlIndex>();
+if (ttlIndex != null)
 {
-    var ttlLogger = app.Services.GetRequiredService<ILogger<TtlIndex>>();
-    ttlIndex = new TtlIndex(config.Ttl, metrics, ttlLogger);
     metrics.RegisterTtlAccessor(() => ttlIndex.TrackedCount);
     logger.LogInformation("Per-message TTL enabled (maxTtl={MaxTtlMs}ms, defaultTtl={DefaultTtlMs}ms)",
         config.Ttl.MaxTtlMs, config.Ttl.DefaultTtlMs);
