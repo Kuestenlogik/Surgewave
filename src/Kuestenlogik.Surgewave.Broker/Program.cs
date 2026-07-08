@@ -575,7 +575,11 @@ builder.Services.AddSingleton(sp => new ConsumerGroupCoordinator(
     sp.GetRequiredService<LogManager>(),
     aclAuthorizer: null,
     observability: sp.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
-    v2Coordinator: sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>()));
+    v2Coordinator: sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupV2Coordinator>()));
+// Neutral contract (#59) resolves to the same singleton so the Kafka adapter (ConsumerGroupApiHandler)
+// depends only on Coordination, not the broker-internal coordinator type.
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupCoordinator>(
+    sp => sp.GetRequiredService<ConsumerGroupCoordinator>());
 builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator(
     sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>>(),
     sp.GetRequiredService<LogManager>()));
@@ -717,7 +721,7 @@ if (featuresConfig.Kafka.Enabled)
         isrUpdateApplier: sp.GetRequiredService<ClusterController>()));
 
     builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupApiHandler(
-        sp.GetRequiredService<ConsumerGroupCoordinator>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupCoordinator>(),
         sp.GetRequiredService<ILogger<ConsumerGroupApiHandler>>()));
 
     builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ShareGroupApiHandler(
@@ -1488,7 +1492,7 @@ var lagCalculator = new Kuestenlogik.Surgewave.Core.Monitoring.DefaultLagCalcula
     new OffsetStoreProvider(offsetStore, GetGroupInfosForLag),
     new LogManagerWatermarkProvider(logManager));
 
-var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator, transactionCoordinator, quotaManager, protocolHandler, metrics, dispatcher, brokerLogger, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator);
+var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, shareGroupCoordinator, nativeGroupCoordinator, transactionCoordinator, quotaManager, protocolHandler, metrics, dispatcher, brokerLogger, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator);
 
 // Publish the broker as the Surgewave stream handler so alternative transports
 // (QUIC, shared memory, ...) can pump connections into the shared pipeline.

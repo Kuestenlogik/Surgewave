@@ -1,8 +1,7 @@
 using System.Threading;
 using System.Threading.Channels;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Observability;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -14,8 +13,8 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 /// <see cref="SurgewaveBrokerObservability"/> instance it must publish a
 /// <see cref="SurgewaveBrokerEventKind.Rebalanced"/> on the leader's
 /// SyncGroup (i.e. the moment the group's ownership changes). These
-/// tests exercise the coordinator directly so they don't need the
-/// full broker pipeline standing up.
+/// tests exercise the protocol-neutral coordinator surface directly (#59)
+/// so they don't need the full broker pipeline standing up.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public class ObservabilityWiringTests
@@ -36,25 +35,17 @@ public class ObservabilityWiringTests
         var reader = ReadFirstAsync(observability, cts.Token);
 
         // Leader distributes assignments — this is the "rebalance done" tick.
-        var sync = coordinator.HandleSyncGroup(new SyncGroupRequest
+        var sync = coordinator.SyncGroup(new SyncGroupCommand
         {
-            ApiKey = ApiKey.SyncGroup,
-            ApiVersion = 0,
-            CorrelationId = 1,
-            ClientId = "test",
             GroupId = "g1",
             GenerationId = 1,
             MemberId = memberId,
             Assignments =
             [
-                new SyncGroupRequest.GroupAssignment
-                {
-                    MemberId = memberId,
-                    Assignment = [0x01, 0x02, 0x03],
-                },
+                new SyncGroupAssignmentInput(memberId, [0x01, 0x02, 0x03]),
             ],
         });
-        Assert.Equal(ErrorCode.None, sync.ErrorCode);
+        Assert.Equal(ConsumerGroupErrorStatus.None, sync.Status);
 
         var ev = await reader;
         Assert.Equal(SurgewaveBrokerEventKind.Rebalanced, ev.Kind);
@@ -77,18 +68,14 @@ public class ObservabilityWiringTests
 
         // Follower path: Assignments empty — coordinator just returns
         // whatever's stored, no new rebalance signal should fire.
-        var sync = coordinator.HandleSyncGroup(new SyncGroupRequest
+        var sync = coordinator.SyncGroup(new SyncGroupCommand
         {
-            ApiKey = ApiKey.SyncGroup,
-            ApiVersion = 0,
-            CorrelationId = 1,
-            ClientId = "test",
             GroupId = "g2",
             GenerationId = 1,
             MemberId = memberId,
             Assignments = [],
         });
-        Assert.Equal(ErrorCode.None, sync.ErrorCode);
+        Assert.Equal(ConsumerGroupErrorStatus.None, sync.Status);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
@@ -97,18 +84,14 @@ public class ObservabilityWiringTests
 
     private static string JoinAndGetMemberId(ConsumerGroupCoordinator coordinator, string groupId)
     {
-        var join = coordinator.HandleJoinGroup(new JoinGroupRequest
+        var join = coordinator.JoinGroup(new JoinGroupCommand
         {
-            ApiKey = ApiKey.JoinGroup,
-            ApiVersion = 0,
-            CorrelationId = 1,
-            ClientId = "test",
             GroupId = groupId,
             MemberId = string.Empty,
+            ClientId = "test",
             ProtocolType = "consumer",
             SessionTimeoutMs = 10_000,
-            RebalanceTimeoutMs = 10_000,
-            Protocols = [new JoinGroupRequest.GroupProtocol { Name = "range", Metadata = [] }],
+            Protocols = [new GroupJoinProtocol("range", [])],
         });
         Assert.NotEmpty(join.MemberId);
         return join.MemberId;

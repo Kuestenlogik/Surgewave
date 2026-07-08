@@ -93,19 +93,22 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         // Create dynamic broker config for runtime config modifications
         var dynamicBrokerConfig = new DynamicBrokerConfig(config, _loggerFactory.CreateLogger<DynamicBrokerConfig>());
 
-        // Create request handlers
+        // Create request handlers. The classic consumer-group APIs route through the
+        // dispatcher now (the broker fast-path was removed when the coordinator went
+        // protocol-neutral, #59), so its adapter is registered here.
         IKafkaRequestHandler[] handlers =
         [
             new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, _loggerFactory.CreateLogger<DataApiHandler>()),
             new MetadataApiHandler(config, _logManager, _loggerFactory.CreateLogger<MetadataApiHandler>()),
             new TopicAdminHandler(config, _logManager, _quotaManager, auditLogger: null, _loggerFactory.CreateLogger<TopicAdminHandler>()),
             new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
-            new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>())
+            new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
+            new ConsumerGroupApiHandler(consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>())
         ];
         var dispatcher = new RequestDispatcher(handlers);
 
         _broker = new SurgewaveBroker(
-            config, _logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator,
+            config, _logManager, recordBatchSerializer, shareGroupCoordinator, nativeGroupCoordinator,
             transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
 
         _brokerCts = new CancellationTokenSource();

@@ -1,19 +1,19 @@
-using Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Observability;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker;
 
 /// <summary>
-/// Manages consumer group lifecycle, membership, and offset commits.
-/// When wired with a <see cref="ConsumerGroupV2Coordinator"/> reference,
-/// OffsetCommit/OffsetFetch requests that target a KIP-848 v2 group fall
-/// through to a server-side epoch validation against that coordinator.
+/// Manages consumer group lifecycle, membership, and offset commits for the classic
+/// (rebalance-based) consumer-group protocol. Speaks the protocol-neutral
+/// <see cref="IConsumerGroupCoordinator"/> contract — the Kafka DTO conversion and wire
+/// envelope live in the <c>ConsumerGroupApiHandler</c> adapter (#59).
+/// When wired with an <see cref="IConsumerGroupV2Coordinator"/> reference,
+/// OffsetCommit requests that target a KIP-848 v2 group fall through to a server-side
+/// epoch validation against that coordinator.
 /// </summary>
 public sealed class ConsumerGroupCoordinator(
     ILogger<ConsumerGroupCoordinator> logger,
@@ -21,17 +21,20 @@ public sealed class ConsumerGroupCoordinator(
     LogManager? logManager = null,
     AclAuthorizer? aclAuthorizer = null,
     SurgewaveBrokerObservability? observability = null,
-    ConsumerGroupV2Coordinator? v2Coordinator = null)
+    IConsumerGroupV2Coordinator? v2Coordinator = null) : IConsumerGroupCoordinator
 {
     private readonly Dictionary<string, ConsumerGroupState> _consumerGroups = [];
     private readonly Lock _groupLock = new();
 
-    public JoinGroupResponse HandleJoinGroup(JoinGroupRequest request)
+    public JoinGroupResult JoinGroup(JoinGroupCommand request)
     {
         lock (_groupLock)
         {
-            Log.JoinGroupRequest(logger, request.ApiVersion, request.GroupId, request.MemberId,
-                request.Protocols.Length, request.Protocols.FirstOrDefault()?.Metadata?.Length ?? 0);
+            // Only the first join protocol is consulted (Kafka picks one protocol per group).
+            var firstProtocol = request.Protocols.Count > 0 ? request.Protocols[0] : null;
+
+            Log.JoinGroupRequest(logger, request.GroupId, request.MemberId,
+                request.Protocols.Count, firstProtocol?.Metadata?.Length ?? 0);
 
             if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
             {
@@ -40,7 +43,7 @@ public sealed class ConsumerGroupCoordinator(
                     GroupId = request.GroupId,
                     GenerationId = 1,
                     ProtocolType = request.ProtocolType,
-                    ProtocolName = request.Protocols.FirstOrDefault()?.Name ?? "range"
+                    ProtocolName = firstProtocol?.Name ?? "range"
                 };
                 _consumerGroups[request.GroupId] = group;
                 Log.JoinGroupCreated(logger, request.GroupId);
@@ -87,7 +90,7 @@ public sealed class ConsumerGroupCoordinator(
                     MemberId = memberId,
                     GroupInstanceId = request.GroupInstanceId,
                     ClientId = request.ClientId,
-                    Metadata = request.Protocols.FirstOrDefault()?.Metadata ?? Array.Empty<byte>(),
+                    Metadata = firstProtocol?.Metadata ?? Array.Empty<byte>(),
                     Assignment = Array.Empty<byte>()
                 };
                 group.Members[memberId] = member;
@@ -96,7 +99,7 @@ public sealed class ConsumerGroupCoordinator(
             else
             {
                 // Update metadata for existing member, but preserve assignment
-                member.Metadata = request.Protocols.FirstOrDefault()?.Metadata ?? Array.Empty<byte>();
+                member.Metadata = firstProtocol?.Metadata ?? Array.Empty<byte>();
                 Log.JoinGroupMemberUpdated(logger, memberId, member.Metadata.Length);
             }
 
@@ -107,20 +110,15 @@ public sealed class ConsumerGroupCoordinator(
             Log.JoinGroupLeaderInfo(logger, memberId, leaderId, isLeader, group.Members.Count);
 
             // Prepare member list (only for leader) - inline loop avoids LINQ closures
-            JoinGroupResponse.JoinGroupMember[] members;
+            JoinGroupMemberInfo[] members;
             int totalMetadataLength = 0;
             if (isLeader)
             {
-                members = new JoinGroupResponse.JoinGroupMember[group.Members.Count];
+                members = new JoinGroupMemberInfo[group.Members.Count];
                 int i = 0;
                 foreach (var m in group.Members.Values)
                 {
-                    members[i++] = new JoinGroupResponse.JoinGroupMember
-                    {
-                        MemberId = m.MemberId,
-                        GroupInstanceId = m.GroupInstanceId,
-                        Metadata = m.Metadata ?? []
-                    };
+                    members[i++] = new JoinGroupMemberInfo(m.MemberId, m.GroupInstanceId, m.Metadata ?? []);
                     totalMetadataLength += m.Metadata?.Length ?? 0;
                 }
             }
@@ -131,43 +129,34 @@ public sealed class ConsumerGroupCoordinator(
 
             Log.JoinGroupResponse(logger, memberId, members.Length, totalMetadataLength);
 
-            return new JoinGroupResponse
+            return new JoinGroupResult
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
                 GenerationId = group.GenerationId,
                 ProtocolName = group.ProtocolName,
-                Leader = leaderId,
+                LeaderId = leaderId,
                 MemberId = memberId,
                 Members = members
             };
         }
     }
 
-    public SyncGroupResponse HandleSyncGroup(SyncGroupRequest request)
+    public SyncGroupResult SyncGroup(SyncGroupCommand request)
     {
         lock (_groupLock)
         {
-            Log.SyncGroupRequest(logger, request.ApiVersion, request.GroupId, request.MemberId, request.GenerationId);
-            Log.SyncGroupAssignmentsCount(logger, request.Assignments.Length);
+            Log.SyncGroupRequest(logger, request.GroupId, request.MemberId, request.GenerationId);
+            Log.SyncGroupAssignmentsCount(logger, request.Assignments.Count);
 
             if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
             {
                 Log.SyncGroupNotFound(logger, request.GroupId);
-                return new SyncGroupResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.UnknownMemberId,
-                    Assignment = Array.Empty<byte>()
-                };
+                return new SyncGroupResult(ConsumerGroupErrorStatus.UnknownMember, Array.Empty<byte>());
             }
 
             // Store assignments if this is the leader
-            if (request.Assignments.Length > 0)
+            if (request.Assignments.Count > 0)
             {
-                Log.SyncGroupLeaderAssignments(logger, request.Assignments.Length);
+                Log.SyncGroupLeaderAssignments(logger, request.Assignments.Count);
                 foreach (var assignment in request.Assignments)
                 {
                     Log.SyncGroupMemberAssignment(logger, assignment.MemberId, assignment.Assignment.Length);
@@ -203,89 +192,55 @@ public sealed class ConsumerGroupCoordinator(
 
             Log.SyncGroupReturningAssignment(logger, request.MemberId, memberAssignment.Length);
 
-            return new SyncGroupResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
-                Assignment = memberAssignment
-            };
+            return new SyncGroupResult(ConsumerGroupErrorStatus.None, memberAssignment);
         }
     }
 
-    public HeartbeatResponse HandleHeartbeat(HeartbeatRequest request)
+    public GroupHeartbeatResult Heartbeat(GroupHeartbeatCommand request)
     {
         lock (_groupLock)
         {
             if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
             {
-                return new HeartbeatResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.UnknownMemberId
-                };
+                return new GroupHeartbeatResult(ConsumerGroupErrorStatus.UnknownMember);
             }
 
             if (!group.Members.TryGetValue(request.MemberId, out var member))
             {
-                return new HeartbeatResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.UnknownMemberId
-                };
+                return new GroupHeartbeatResult(ConsumerGroupErrorStatus.UnknownMember);
             }
 
             // Update heartbeat timestamp
             member.LastHeartbeat = DateTime.UtcNow;
 
             // Heartbeat successful
-            return new HeartbeatResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None
-            };
+            return new GroupHeartbeatResult(ConsumerGroupErrorStatus.None);
         }
     }
 
-    public LeaveGroupResponse HandleLeaveGroup(LeaveGroupRequest request)
+    public LeaveGroupResult LeaveGroup(LeaveGroupCommand request)
     {
         lock (_groupLock)
         {
             if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
             {
-                return new LeaveGroupResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.UnknownMemberId
-                };
+                return new LeaveGroupResult(ConsumerGroupErrorStatus.UnknownMember, null);
             }
 
             // Handle V3+ batch leave (members array)
-            if (request.Members.Length > 0)
+            if (request.Members.Count > 0)
             {
-                var memberResponses = new List<LeaveGroupResponse.MemberResponse>();
+                var memberResponses = new List<LeaveGroupMemberResult>();
                 foreach (var member in request.Members)
                 {
                     var removed = group.Members.Remove(member.MemberId);
-                    memberResponses.Add(new LeaveGroupResponse.MemberResponse
-                    {
-                        MemberId = member.MemberId,
-                        GroupInstanceId = member.GroupInstanceId,
-                        ErrorCode = removed ? ErrorCode.None : ErrorCode.UnknownMemberId
-                    });
+                    memberResponses.Add(new LeaveGroupMemberResult(
+                        member.MemberId,
+                        member.GroupInstanceId,
+                        removed ? ConsumerGroupErrorStatus.None : ConsumerGroupErrorStatus.UnknownMember));
                 }
 
-                return new LeaveGroupResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.None,
-                    Members = memberResponses.ToArray()
-                };
+                return new LeaveGroupResult(ConsumerGroupErrorStatus.None, memberResponses);
             }
 
             // Handle V0-2 single member leave
@@ -294,151 +249,35 @@ public sealed class ConsumerGroupCoordinator(
                 group.Members.Remove(request.MemberId);
             }
 
-            return new LeaveGroupResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None
-            };
+            return new LeaveGroupResult(ConsumerGroupErrorStatus.None, null);
         }
     }
 
-    public OffsetFetchResponse HandleOffsetFetch(OffsetFetchRequest request)
+    public OffsetFetchResult FetchOffsets(OffsetFetchCommand request)
     {
         lock (_groupLock)
         {
-            // v8+: Multi-group batch fetch using Groups array
-            if (request.ApiVersion >= 8 && request.Groups != null)
+            var groups = new List<OffsetFetchGroupResult>(request.Groups.Count);
+            foreach (var groupRequest in request.Groups)
             {
-                return HandleOffsetFetchV8Plus(request);
+                var topics = FetchOffsetsForGroup(groupRequest.GroupId, groupRequest.Topics, request.UseTopicId);
+                groups.Add(new OffsetFetchGroupResult { GroupId = groupRequest.GroupId, Topics = topics });
             }
 
-            // v1-7: Single group fetch
-            return HandleOffsetFetchSingleGroup(request, request.GroupId ?? string.Empty, request.Topics);
+            return new OffsetFetchResult(groups);
         }
     }
 
-    private OffsetFetchResponse HandleOffsetFetchV8Plus(OffsetFetchRequest request)
+    private List<OffsetFetchTopicResult> FetchOffsetsForGroup(string groupId, IReadOnlyList<OffsetFetchTopicRequest> topicRequests, bool useTopicId)
     {
-        var groups = new List<OffsetFetchResponseGroup>();
+        var topics = new List<OffsetFetchTopicResult>();
 
-        foreach (var groupRequest in request.Groups!)
-        {
-            var topics = FetchOffsetsForGroup(groupRequest.GroupId, groupRequest.Topics, request.ApiVersion);
-            groups.Add(new OffsetFetchResponseGroup
-            {
-                GroupId = groupRequest.GroupId,
-                Topics = topics,
-                ErrorCode = ErrorCode.None
-            });
-        }
-
-        return new OffsetFetchResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            Groups = groups,
-            ErrorCode = ErrorCode.None
-        };
-    }
-
-    private OffsetFetchResponse HandleOffsetFetchSingleGroup(OffsetFetchRequest request, string groupId, List<TopicPartitionRequest>? topicRequests)
-    {
-        var topics = FetchOffsetsForGroup(groupId, topicRequests, request.ApiVersion);
-
-        return new OffsetFetchResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            Topics = topics,
-            ErrorCode = ErrorCode.None
-        };
-    }
-
-    private List<TopicPartitionOffset> FetchOffsetsForGroup(string groupId, List<TopicPartitionRequest>? topicRequests, short apiVersion)
-    {
-        var topics = new List<TopicPartitionOffset>();
-        bool useTopicId = apiVersion >= 10;
-
-        Log.OffsetFetchRequest(logger, groupId, topicRequests?.Count ?? 0);
+        Log.OffsetFetchRequest(logger, groupId, topicRequests.Count);
 
         if (!_consumerGroups.TryGetValue(groupId, out var group))
         {
             Log.OffsetFetchGroupNotInMemory(logger, groupId);
             // Group doesn't exist in memory - try to get from persisted store
-            if (topicRequests != null)
-            {
-                foreach (var topicRequest in topicRequests)
-                {
-                    // For v10+, resolve TopicId to topic name
-                    string topicName = topicRequest.Topic;
-                    Guid topicId = topicRequest.TopicId;
-
-                    if (useTopicId && topicRequest.TopicId != Guid.Empty)
-                    {
-                        var resolved = logManager?.ResolveTopicId(topicRequest.TopicId);
-                        if (resolved == null)
-                        {
-                            // Unknown TopicId - return error for all partitions (inline loop)
-                            var errorPartitions = new List<PartitionOffsetMetadata>(topicRequest.PartitionIndexes.Count);
-                            foreach (var p in topicRequest.PartitionIndexes)
-                            {
-                                errorPartitions.Add(new PartitionOffsetMetadata
-                                {
-                                    PartitionIndex = p,
-                                    CommittedOffset = -1,
-                                    ErrorCode = ErrorCode.UnknownTopicId
-                                });
-                            }
-
-                            topics.Add(new TopicPartitionOffset
-                            {
-                                Topic = string.Empty,
-                                TopicId = topicRequest.TopicId,
-                                Partitions = errorPartitions
-                            });
-                            continue;
-                        }
-                        topicName = resolved;
-                    }
-                    else if (!useTopicId && !string.IsNullOrEmpty(topicRequest.Topic))
-                    {
-                        // For older versions, get TopicId from topic name for response
-                        topicId = logManager?.GetTopicId(topicRequest.Topic) ?? Guid.Empty;
-                    }
-
-                    var partitions = new List<PartitionOffsetMetadata>(topicRequest.PartitionIndexes.Count);
-                    foreach (var partitionIndex in topicRequest.PartitionIndexes)
-                    {
-                        // Try to get from persisted store
-                        var offset = offsetStore?.GetCommittedOffset(groupId, topicName, partitionIndex) ?? -1;
-                        Log.OffsetFetchFromStore(logger, groupId, topicName, partitionIndex, offset);
-
-                        partitions.Add(new PartitionOffsetMetadata
-                        {
-                            PartitionIndex = partitionIndex,
-                            CommittedOffset = offset,
-                            ErrorCode = ErrorCode.None
-                        });
-                    }
-
-                    topics.Add(new TopicPartitionOffset
-                    {
-                        Topic = topicName,
-                        TopicId = topicId,
-                        Partitions = partitions
-                    });
-                }
-            }
-
-            return topics;
-        }
-
-        Log.OffsetFetchGroupInMemory(logger, groupId, group.CommittedOffsets.Count);
-
-        // Group exists in memory - return committed offsets (check store as fallback)
-        if (topicRequests != null)
-        {
             foreach (var topicRequest in topicRequests)
             {
                 // For v10+, resolve TopicId to topic name
@@ -451,18 +290,13 @@ public sealed class ConsumerGroupCoordinator(
                     if (resolved == null)
                     {
                         // Unknown TopicId - return error for all partitions (inline loop)
-                        var errorPartitions = new List<PartitionOffsetMetadata>(topicRequest.PartitionIndexes.Count);
+                        var errorPartitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
                         foreach (var p in topicRequest.PartitionIndexes)
                         {
-                            errorPartitions.Add(new PartitionOffsetMetadata
-                            {
-                                PartitionIndex = p,
-                                CommittedOffset = -1,
-                                ErrorCode = ErrorCode.UnknownTopicId
-                            });
+                            errorPartitions.Add(new OffsetFetchPartitionResult(p, -1, ConsumerGroupErrorStatus.UnknownTopicId));
                         }
 
-                        topics.Add(new TopicPartitionOffset
+                        topics.Add(new OffsetFetchTopicResult
                         {
                             Topic = string.Empty,
                             TopicId = topicRequest.TopicId,
@@ -478,45 +312,97 @@ public sealed class ConsumerGroupCoordinator(
                     topicId = logManager?.GetTopicId(topicRequest.Topic) ?? Guid.Empty;
                 }
 
-                var partitions = new List<PartitionOffsetMetadata>(topicRequest.PartitionIndexes.Count);
+                var partitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
                 foreach (var partitionIndex in topicRequest.PartitionIndexes)
                 {
-                    var key = string.Concat(topicName, ":", partitionIndex.ToString());
-                    var offset = group.CommittedOffsets.GetValueOrDefault(key, -1);
-                    Log.OffsetFetchFromMemory(logger, key, offset);
+                    // Try to get from persisted store
+                    var offset = offsetStore?.GetCommittedOffset(groupId, topicName, partitionIndex) ?? -1;
+                    Log.OffsetFetchFromStore(logger, groupId, topicName, partitionIndex, offset);
 
-                    // If not in memory, check persisted store
-                    if (offset == -1 && offsetStore != null)
-                    {
-                        offset = offsetStore.GetCommittedOffset(groupId, topicName, partitionIndex);
-                        Log.OffsetFetchFallbackToStore(logger, groupId, topicName, partitionIndex, offset);
-                    }
-
-                    partitions.Add(new PartitionOffsetMetadata
-                    {
-                        PartitionIndex = partitionIndex,
-                        CommittedOffset = offset,
-                        ErrorCode = ErrorCode.None
-                    });
+                    partitions.Add(new OffsetFetchPartitionResult(partitionIndex, offset, ConsumerGroupErrorStatus.None));
                 }
 
-                topics.Add(new TopicPartitionOffset
+                topics.Add(new OffsetFetchTopicResult
                 {
                     Topic = topicName,
                     TopicId = topicId,
                     Partitions = partitions
                 });
             }
+
+            return topics;
+        }
+
+        Log.OffsetFetchGroupInMemory(logger, groupId, group.CommittedOffsets.Count);
+
+        // Group exists in memory - return committed offsets (check store as fallback)
+        foreach (var topicRequest in topicRequests)
+        {
+            // For v10+, resolve TopicId to topic name
+            string topicName = topicRequest.Topic;
+            Guid topicId = topicRequest.TopicId;
+
+            if (useTopicId && topicRequest.TopicId != Guid.Empty)
+            {
+                var resolved = logManager?.ResolveTopicId(topicRequest.TopicId);
+                if (resolved == null)
+                {
+                    // Unknown TopicId - return error for all partitions (inline loop)
+                    var errorPartitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
+                    foreach (var p in topicRequest.PartitionIndexes)
+                    {
+                        errorPartitions.Add(new OffsetFetchPartitionResult(p, -1, ConsumerGroupErrorStatus.UnknownTopicId));
+                    }
+
+                    topics.Add(new OffsetFetchTopicResult
+                    {
+                        Topic = string.Empty,
+                        TopicId = topicRequest.TopicId,
+                        Partitions = errorPartitions
+                    });
+                    continue;
+                }
+                topicName = resolved;
+            }
+            else if (!useTopicId && !string.IsNullOrEmpty(topicRequest.Topic))
+            {
+                // For older versions, get TopicId from topic name for response
+                topicId = logManager?.GetTopicId(topicRequest.Topic) ?? Guid.Empty;
+            }
+
+            var partitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
+            foreach (var partitionIndex in topicRequest.PartitionIndexes)
+            {
+                var key = string.Concat(topicName, ":", partitionIndex.ToString());
+                var offset = group.CommittedOffsets.GetValueOrDefault(key, -1);
+                Log.OffsetFetchFromMemory(logger, key, offset);
+
+                // If not in memory, check persisted store
+                if (offset == -1 && offsetStore != null)
+                {
+                    offset = offsetStore.GetCommittedOffset(groupId, topicName, partitionIndex);
+                    Log.OffsetFetchFallbackToStore(logger, groupId, topicName, partitionIndex, offset);
+                }
+
+                partitions.Add(new OffsetFetchPartitionResult(partitionIndex, offset, ConsumerGroupErrorStatus.None));
+            }
+
+            topics.Add(new OffsetFetchTopicResult
+            {
+                Topic = topicName,
+                TopicId = topicId,
+                Partitions = partitions
+            });
         }
 
         return topics;
     }
 
-    public OffsetCommitResponse HandleOffsetCommit(OffsetCommitRequest request)
+    public OffsetCommitResult CommitOffsets(OffsetCommitCommand request)
     {
         lock (_groupLock)
         {
-            bool useTopicId = request.ApiVersion >= 10;
+            bool useTopicId = request.UseTopicId;
 
             if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
             {
@@ -536,25 +422,25 @@ public sealed class ConsumerGroupCoordinator(
 
                     // NotAV2Group is the sentinel for "not a v2 group, fall through to the
                     // classic coordinator" — anything else is an authoritative fence, mapped
-                    // from the neutral status back to the wire error code.
+                    // from the neutral v2 fence status onto the classic error status.
                     if (v2Status != ConsumerGroupFenceStatus.NotAV2Group)
                     {
                         return BuildOffsetCommitErrorResponse(request, v2Status switch
                         {
-                            ConsumerGroupFenceStatus.UnknownMember => ErrorCode.UnknownMemberId,
-                            ConsumerGroupFenceStatus.FencedEpoch => ErrorCode.FencedMemberEpoch,
-                            ConsumerGroupFenceStatus.StaleEpoch => ErrorCode.StaleMemberEpoch,
-                            _ => ErrorCode.UnknownMemberId,
+                            ConsumerGroupFenceStatus.UnknownMember => ConsumerGroupErrorStatus.UnknownMember,
+                            ConsumerGroupFenceStatus.FencedEpoch => ConsumerGroupErrorStatus.FencedMemberEpoch,
+                            ConsumerGroupFenceStatus.StaleEpoch => ConsumerGroupErrorStatus.StaleMemberEpoch,
+                            _ => ConsumerGroupErrorStatus.UnknownMember,
                         });
                     }
                 }
 
                 // Group genuinely unknown.
-                return BuildOffsetCommitErrorResponse(request, ErrorCode.UnknownMemberId);
+                return BuildOffsetCommitErrorResponse(request, ConsumerGroupErrorStatus.UnknownMember);
             }
 
             // Commit the offsets
-            var responseTopics = new List<TopicPartitionCommitResult>();
+            var responseTopics = new List<OffsetCommitTopicResult>();
             foreach (var topic in request.Topics)
             {
                 // For v10+, resolve TopicId to topic name
@@ -567,17 +453,13 @@ public sealed class ConsumerGroupCoordinator(
                     if (resolved == null)
                     {
                         // Unknown TopicId - return error for all partitions (inline loop)
-                        var errorPartitions = new List<PartitionCommitResult>(topic.Partitions.Count);
+                        var errorPartitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
                         foreach (var p in topic.Partitions)
                         {
-                            errorPartitions.Add(new PartitionCommitResult
-                            {
-                                PartitionIndex = p.PartitionIndex,
-                                ErrorCode = ErrorCode.UnknownTopicId
-                            });
+                            errorPartitions.Add(new OffsetCommitPartitionResult(p.PartitionIndex, ConsumerGroupErrorStatus.UnknownTopicId));
                         }
 
-                        responseTopics.Add(new TopicPartitionCommitResult
+                        responseTopics.Add(new OffsetCommitTopicResult
                         {
                             Topic = string.Empty,
                             TopicId = topic.TopicId,
@@ -593,7 +475,7 @@ public sealed class ConsumerGroupCoordinator(
                     topicId = logManager?.GetTopicId(topic.Topic) ?? Guid.Empty;
                 }
 
-                var partitions = new List<PartitionCommitResult>(topic.Partitions.Count);
+                var partitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
                 foreach (var partition in topic.Partitions)
                 {
                     var key = string.Concat(topicName, ":", partition.PartitionIndex.ToString());
@@ -602,14 +484,10 @@ public sealed class ConsumerGroupCoordinator(
                     // Persist to offset store
                     offsetStore?.CommitOffset(request.GroupId, topicName, partition.PartitionIndex, partition.CommittedOffset);
 
-                    partitions.Add(new PartitionCommitResult
-                    {
-                        PartitionIndex = partition.PartitionIndex,
-                        ErrorCode = ErrorCode.None
-                    });
+                    partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, ConsumerGroupErrorStatus.None));
                 }
 
-                responseTopics.Add(new TopicPartitionCommitResult
+                responseTopics.Add(new OffsetCommitTopicResult
                 {
                     Topic = topicName,
                     TopicId = topicId,
@@ -617,12 +495,7 @@ public sealed class ConsumerGroupCoordinator(
                 });
             }
 
-            return new OffsetCommitResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                Topics = responseTopics
-            };
+            return new OffsetCommitResult(responseTopics);
         }
     }
 
@@ -631,9 +504,9 @@ public sealed class ConsumerGroupCoordinator(
     /// The v2 coordinator already validated member identity and epoch; this method just
     /// resolves topic IDs (for v10+) and writes the offsets.
     /// </summary>
-    private OffsetCommitResponse CommitOffsetsForV2Group(OffsetCommitRequest request, bool useTopicId)
+    private OffsetCommitResult CommitOffsetsForV2Group(OffsetCommitCommand request, bool useTopicId)
     {
-        var responseTopics = new List<TopicPartitionCommitResult>(request.Topics.Count);
+        var responseTopics = new List<OffsetCommitTopicResult>(request.Topics.Count);
         foreach (var topic in request.Topics)
         {
             string topicName = topic.Topic;
@@ -644,16 +517,12 @@ public sealed class ConsumerGroupCoordinator(
                 var resolved = logManager?.ResolveTopicId(topic.TopicId);
                 if (resolved == null)
                 {
-                    var errorPartitions = new List<PartitionCommitResult>(topic.Partitions.Count);
+                    var errorPartitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
                     foreach (var p in topic.Partitions)
                     {
-                        errorPartitions.Add(new PartitionCommitResult
-                        {
-                            PartitionIndex = p.PartitionIndex,
-                            ErrorCode = ErrorCode.UnknownTopicId,
-                        });
+                        errorPartitions.Add(new OffsetCommitPartitionResult(p.PartitionIndex, ConsumerGroupErrorStatus.UnknownTopicId));
                     }
-                    responseTopics.Add(new TopicPartitionCommitResult
+                    responseTopics.Add(new OffsetCommitTopicResult
                     {
                         Topic = string.Empty,
                         TopicId = topic.TopicId,
@@ -668,7 +537,7 @@ public sealed class ConsumerGroupCoordinator(
                 topicId = logManager?.GetTopicId(topic.Topic) ?? Guid.Empty;
             }
 
-            var partitions = new List<PartitionCommitResult>(topic.Partitions.Count);
+            var partitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
             foreach (var partition in topic.Partitions)
             {
                 // KIP-1251 — per-partition fence. The member's claimed
@@ -689,23 +558,15 @@ public sealed class ConsumerGroupCoordinator(
                         partitionTopicId,
                         partition.PartitionIndex))
                 {
-                    partitions.Add(new PartitionCommitResult
-                    {
-                        PartitionIndex = partition.PartitionIndex,
-                        ErrorCode = ErrorCode.StaleMemberEpoch,
-                    });
+                    partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, ConsumerGroupErrorStatus.StaleMemberEpoch));
                     continue;
                 }
 
                 offsetStore?.CommitOffset(request.GroupId, topicName, partition.PartitionIndex, partition.CommittedOffset);
-                partitions.Add(new PartitionCommitResult
-                {
-                    PartitionIndex = partition.PartitionIndex,
-                    ErrorCode = ErrorCode.None,
-                });
+                partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, ConsumerGroupErrorStatus.None));
             }
 
-            responseTopics.Add(new TopicPartitionCommitResult
+            responseTopics.Add(new OffsetCommitTopicResult
             {
                 Topic = topicName,
                 TopicId = topicId,
@@ -713,34 +574,25 @@ public sealed class ConsumerGroupCoordinator(
             });
         }
 
-        return new OffsetCommitResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            Topics = responseTopics,
-        };
+        return new OffsetCommitResult(responseTopics);
     }
 
     /// <summary>
-    /// Builds an error response that flat-fills every requested partition with the
-    /// supplied error code. Centralised to avoid the inline-loop variants we used to
+    /// Builds an error result that flat-fills every requested partition with the
+    /// supplied status. Centralised to avoid the inline-loop variants we used to
     /// have at every error branch.
     /// </summary>
-    private static OffsetCommitResponse BuildOffsetCommitErrorResponse(OffsetCommitRequest request, ErrorCode errorCode)
+    private static OffsetCommitResult BuildOffsetCommitErrorResponse(OffsetCommitCommand request, ConsumerGroupErrorStatus status)
     {
-        var errorTopics = new List<TopicPartitionCommitResult>(request.Topics.Count);
+        var errorTopics = new List<OffsetCommitTopicResult>(request.Topics.Count);
         foreach (var topic in request.Topics)
         {
-            var partitions = new List<PartitionCommitResult>(topic.Partitions.Count);
+            var partitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
             foreach (var partition in topic.Partitions)
             {
-                partitions.Add(new PartitionCommitResult
-                {
-                    PartitionIndex = partition.PartitionIndex,
-                    ErrorCode = errorCode,
-                });
+                partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, status));
             }
-            errorTopics.Add(new TopicPartitionCommitResult
+            errorTopics.Add(new OffsetCommitTopicResult
             {
                 Topic = topic.Topic,
                 TopicId = topic.TopicId,
@@ -748,41 +600,36 @@ public sealed class ConsumerGroupCoordinator(
             });
         }
 
-        return new OffsetCommitResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            Topics = errorTopics,
-        };
+        return new OffsetCommitResult(errorTopics);
     }
 
-    public DescribeGroupsResponse HandleDescribeGroups(DescribeGroupsRequest request)
+    public IReadOnlyList<GroupDescription> DescribeGroups(IReadOnlyList<string> groupIds)
     {
         lock (_groupLock)
         {
-            var groups = new List<DescribeGroupsResponse.DescribedGroup>();
+            var groups = new List<GroupDescription>();
 
-            foreach (var groupId in request.GroupIds)
+            foreach (var groupId in groupIds)
             {
                 if (!_consumerGroups.TryGetValue(groupId, out var group))
                 {
-                    groups.Add(new DescribeGroupsResponse.DescribedGroup
+                    groups.Add(new GroupDescription
                     {
-                        ErrorCode = ErrorCode.InvalidGroupId,
+                        Status = ConsumerGroupErrorStatus.InvalidGroupId,
                         GroupId = groupId,
                         GroupState = "",
                         ProtocolType = "",
                         ProtocolData = "",
-                        Members = new List<DescribeGroupsResponse.GroupMember>()
+                        Members = []
                     });
                     continue;
                 }
 
                 // Inline loop avoids LINQ closure allocations
-                var members = new List<DescribeGroupsResponse.GroupMember>(group.Members.Count);
+                var members = new List<GroupDescriptionMember>(group.Members.Count);
                 foreach (var m in group.Members.Values)
                 {
-                    members.Add(new DescribeGroupsResponse.GroupMember
+                    members.Add(new GroupDescriptionMember
                     {
                         MemberId = m.MemberId,
                         GroupInstanceId = m.GroupInstanceId,
@@ -796,9 +643,9 @@ public sealed class ConsumerGroupCoordinator(
                 // Compute authorized operations for this group
                 var authorizedOps = ComputeGroupAuthorizedOperations(groupId);
 
-                groups.Add(new DescribeGroupsResponse.DescribedGroup
+                groups.Add(new GroupDescription
                 {
-                    ErrorCode = ErrorCode.None,
+                    Status = ConsumerGroupErrorStatus.None,
                     GroupId = groupId,
                     GroupState = GetGroupState(group),
                     ProtocolType = group.ProtocolType,
@@ -808,12 +655,7 @@ public sealed class ConsumerGroupCoordinator(
                 });
             }
 
-            return new DescribeGroupsResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                Groups = groups
-            };
+            return groups;
         }
     }
 
@@ -834,67 +676,56 @@ public sealed class ConsumerGroupCoordinator(
         }
     }
 
-    public ListGroupsResponse HandleListGroups(ListGroupsRequest request)
+    public IReadOnlyList<GroupListing> ListGroups(IReadOnlyList<string>? statesFilter)
     {
         lock (_groupLock)
         {
-            var groups = new List<ListGroupsResponse.ListedGroup>();
+            var groups = new List<GroupListing>();
 
             foreach (var (groupId, group) in _consumerGroups)
             {
                 var state = GetGroupState(group);
 
                 // Filter by state if requested
-                if (request.StatesFilter != null && request.StatesFilter.Count > 0)
+                if (statesFilter != null && statesFilter.Count > 0)
                 {
-                    if (!request.StatesFilter.Contains(state, StringComparer.OrdinalIgnoreCase))
+                    if (!statesFilter.Contains(state, StringComparer.OrdinalIgnoreCase))
                     {
                         continue;
                     }
                 }
 
-                groups.Add(new ListGroupsResponse.ListedGroup
-                {
-                    GroupId = groupId,
-                    ProtocolType = group.ProtocolType,
-                    GroupState = state
-                });
+                groups.Add(new GroupListing(groupId, group.ProtocolType, state));
             }
 
-            return new ListGroupsResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
-                Groups = groups
-            };
+            return groups;
         }
     }
 
-    public DeleteGroupsResponse HandleDeleteGroups(DeleteGroupsRequest request)
+    public IReadOnlyList<DeleteGroupResult> DeleteGroups(IReadOnlyList<string> groupIds)
     {
         lock (_groupLock)
         {
-            Log.DeleteGroupsRequest(logger, request.GroupIds.Count);
+            Log.DeleteGroupsRequest(logger, groupIds.Count);
 
-            var results = new List<DeleteGroupsResponse.DeletableGroupResult>();
+            var results = new List<DeleteGroupResult>();
 
-            foreach (var groupId in request.GroupIds)
+            foreach (var groupId in groupIds)
             {
-                ErrorCode errorCode;
+                ConsumerGroupErrorStatus status;
 
                 if (!_consumerGroups.TryGetValue(groupId, out var group))
                 {
                     // Group doesn't exist - report as success per Kafka protocol
                     // (idempotent delete - deleting non-existent group is not an error)
                     Log.DeleteGroupsNotFound(logger, groupId);
-                    errorCode = ErrorCode.None;
+                    status = ConsumerGroupErrorStatus.None;
                 }
                 else if (group.Members.Count > 0)
                 {
                     // Group has active members - cannot delete
                     Log.DeleteGroupsNotEmpty(logger, groupId, group.Members.Count);
-                    errorCode = ErrorCode.NonEmptyGroup;
+                    status = ConsumerGroupErrorStatus.NonEmptyGroup;
                 }
                 else
                 {
@@ -905,23 +736,13 @@ public sealed class ConsumerGroupCoordinator(
                     offsetStore?.DeleteGroup(groupId);
 
                     Log.DeleteGroupsDeleted(logger, groupId);
-                    errorCode = ErrorCode.None;
+                    status = ConsumerGroupErrorStatus.None;
                 }
 
-                results.Add(new DeleteGroupsResponse.DeletableGroupResult
-                {
-                    GroupId = groupId,
-                    ErrorCode = errorCode
-                });
+                results.Add(new DeleteGroupResult(groupId, status));
             }
 
-            return new DeleteGroupsResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                Results = results
-            };
+            return results;
         }
     }
 
@@ -930,20 +751,20 @@ public sealed class ConsumerGroupCoordinator(
     /// (topic, partition) tuples. Per spec a partition can be deleted only when
     /// the group has no active member subscribed to that topic — otherwise the
     /// group could later commit a new offset and the delete would silently
-    /// race. Per-partition error codes:
+    /// race. Per-partition status:
     /// <list type="bullet">
-    ///   <item><see cref="ErrorCode.GroupIdNotFound"/> — group is unknown.</item>
-    ///   <item><see cref="ErrorCode.GroupSubscribedToTopic"/> — at least one
+    ///   <item><see cref="ConsumerGroupErrorStatus.GroupIdNotFound"/> — group is unknown.</item>
+    ///   <item><see cref="ConsumerGroupErrorStatus.GroupSubscribedToTopic"/> — at least one
     ///         active member of the group still subscribes to this topic.</item>
-    ///   <item><see cref="ErrorCode.None"/> — offset deleted (or wasn't there
+    ///   <item><see cref="ConsumerGroupErrorStatus.None"/> — offset deleted (or wasn't there
     ///         to begin with — KIP-496 makes the operation idempotent).</item>
     /// </list>
     /// </summary>
-    public OffsetDeleteResponse HandleOffsetDelete(OffsetDeleteRequest request)
+    public OffsetDeleteResult DeleteOffsets(OffsetDeleteCommand request)
     {
         lock (_groupLock)
         {
-            var topicResults = new List<OffsetDeleteResponse.OffsetDeleteTopicResponse>(request.Topics.Count);
+            var topicResults = new List<OffsetDeleteTopicResult>(request.Topics.Count);
 
             // Group-level pre-check: if the group is unknown every partition
             // result inherits GroupIdNotFound. We still emit per-partition rows
@@ -965,50 +786,39 @@ public sealed class ConsumerGroupCoordinator(
 
             foreach (var topicReq in request.Topics)
             {
-                var partitionResults = new List<OffsetDeleteResponse.OffsetDeletePartitionResponse>(topicReq.Partitions.Count);
+                var partitionResults = new List<OffsetDeletePartitionResult>(topicReq.Partitions.Count);
 
-                ErrorCode topicError;
+                ConsumerGroupErrorStatus topicError;
                 if (group is null)
                 {
-                    topicError = ErrorCode.GroupIdNotFound;
+                    topicError = ConsumerGroupErrorStatus.GroupIdNotFound;
                 }
                 else if (groupHasActiveMembers)
                 {
-                    topicError = ErrorCode.GroupSubscribedToTopic;
+                    topicError = ConsumerGroupErrorStatus.GroupSubscribedToTopic;
                 }
                 else
                 {
-                    topicError = ErrorCode.None;
+                    topicError = ConsumerGroupErrorStatus.None;
                 }
 
-                foreach (var partitionReq in topicReq.Partitions)
+                foreach (var partitionIndex in topicReq.Partitions)
                 {
-                    if (topicError == ErrorCode.None)
+                    if (topicError == ConsumerGroupErrorStatus.None)
                     {
-                        offsetStore?.DeleteOffset(request.GroupId, topicReq.Name, partitionReq.PartitionIndex);
+                        offsetStore?.DeleteOffset(request.GroupId, topicReq.Name, partitionIndex);
                     }
-                    partitionResults.Add(new OffsetDeleteResponse.OffsetDeletePartitionResponse
-                    {
-                        PartitionIndex = partitionReq.PartitionIndex,
-                        ErrorCode = topicError,
-                    });
+                    partitionResults.Add(new OffsetDeletePartitionResult(partitionIndex, topicError));
                 }
 
-                topicResults.Add(new OffsetDeleteResponse.OffsetDeleteTopicResponse
+                topicResults.Add(new OffsetDeleteTopicResult
                 {
                     Name = topicReq.Name,
                     Partitions = partitionResults,
                 });
             }
 
-            return new OffsetDeleteResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
-                ThrottleTimeMs = 0,
-                Topics = topicResults,
-            };
+            return new OffsetDeleteResult(topicResults);
         }
     }
 

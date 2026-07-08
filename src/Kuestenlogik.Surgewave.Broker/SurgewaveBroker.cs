@@ -52,8 +52,7 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     // a plugin (#59). Built from the same startup state as the dispatcher.
     private readonly IConnectionHandler[] _connectionHandlers;
 
-    // Consumer group coordination (delegated handlers use these directly)
-    private readonly ConsumerGroupCoordinator _consumerGroupCoordinator;
+    // Coordinators whose fast-path APIs are still dispatched directly from the broker.
     private readonly ShareGroupCoordinator _shareGroupCoordinator;
     private readonly TransactionCoordinator _transactionCoordinator;
 
@@ -86,7 +85,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         BrokerConfig config,
         LogManager logManager,
         RecordBatchSerializer serializer,
-        ConsumerGroupCoordinator consumerGroupCoordinator,
         ShareGroupCoordinator shareGroupCoordinator,
         NativeGroupCoordinator nativeGroupCoordinator,
         TransactionCoordinator transactionCoordinator,
@@ -106,7 +104,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     {
         _config = config;
         _logManager = logManager;
-        _consumerGroupCoordinator = consumerGroupCoordinator;
         _shareGroupCoordinator = shareGroupCoordinator;
         _transactionCoordinator = transactionCoordinator;
         _protocolHandler = protocolHandler;
@@ -552,30 +549,15 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
 
     private async Task<KafkaResponse> ProcessRequestAsync(KafkaRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
     {
-        // Handle consumer group APIs directly (they use sync methods that return Tasks)
-        // This is faster than going through the dispatcher for these common operations
+        // Fast-path the coordinator APIs that still return synchronously, skipping the
+        // dispatcher for these common operations.
         switch (request)
         {
-            case OffsetCommitRequest offsetCommitRequest:
-                return _consumerGroupCoordinator.HandleOffsetCommit(offsetCommitRequest);
-            case OffsetFetchRequest offsetFetchRequest:
-                return _consumerGroupCoordinator.HandleOffsetFetch(offsetFetchRequest);
-            case JoinGroupRequest joinGroupRequest:
-                return _consumerGroupCoordinator.HandleJoinGroup(joinGroupRequest);
-            case SyncGroupRequest syncGroupRequest:
-                return _consumerGroupCoordinator.HandleSyncGroup(syncGroupRequest);
-            case HeartbeatRequest heartbeatRequest:
-                return _consumerGroupCoordinator.HandleHeartbeat(heartbeatRequest);
-            case LeaveGroupRequest leaveGroupRequest:
-                return _consumerGroupCoordinator.HandleLeaveGroup(leaveGroupRequest);
-            case DescribeGroupsRequest describeGroupsRequest:
-                return _consumerGroupCoordinator.HandleDescribeGroups(describeGroupsRequest);
-            case ListGroupsRequest listGroupsRequest:
-                return _consumerGroupCoordinator.HandleListGroups(listGroupsRequest);
-
-            // Consumer group v2 (KIP-848) + streams group (KIP-1071) APIs route through the
-            // dispatcher -> their ApiHandler adapters, since those coordinators are now
-            // protocol-neutral and the adapters own the Kafka<->neutral conversion (#59).
+            // Classic consumer group (JoinGroup/SyncGroup/Heartbeat/LeaveGroup/OffsetCommit/
+            // OffsetFetch/DescribeGroups/ListGroups/DeleteGroups/OffsetDelete), consumer group
+            // v2 (KIP-848) and streams group (KIP-1071) APIs route through the dispatcher ->
+            // their ApiHandler adapters: those coordinators are now protocol-neutral and the
+            // adapters own the Kafka<->neutral conversion (#59).
 
             // Handle share group APIs directly (fast-path for common operations)
             case ShareGroupHeartbeatRequest shareGroupHeartbeatRequest:
