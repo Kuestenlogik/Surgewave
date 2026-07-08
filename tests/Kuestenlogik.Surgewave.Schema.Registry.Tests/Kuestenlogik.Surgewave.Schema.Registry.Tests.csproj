@@ -20,14 +20,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry\Kuestenlogik.Surgewave.Schema.Registry.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Hyperion\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Hyperion.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.MessagePack\Kuestenlogik.Surgewave.Schema.Registry.Handlers.MessagePack.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Cbor\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Cbor.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Schemaless\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Schemaless.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Bond\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Bond.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Thrift\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Thrift.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.MemoryPack\Kuestenlogik.Surgewave.Schema.Registry.Handlers.MemoryPack.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.CapnProto\Kuestenlogik.Surgewave.Schema.Registry.Handlers.CapnProto.csproj" />
-    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Orleans\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Orleans.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
   </ItemGroup>
 
