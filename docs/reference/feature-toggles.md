@@ -10,6 +10,7 @@ Set via `appsettings.json`, environment variable (`Surgewave__X__Enabled=true`),
 
 | Toggle Key | Default | What It Enables |
 |------------|---------|-----------------|
+| `Surgewave:Kafka:Enabled` | **`true`** | Kafka wire protocol surface (listener acceptance, handler array, dispatcher) on the shared broker port. When `false` the broker runs **native-only** — Kafka clients are rejected, the native protocol still works. Kafka is Surgewave's optional compatibility layer. Note: multi-broker clustering currently uses the Kafka wire for its inter-broker control plane, so native-only is a single-broker mode for now (#60). |
 | `Surgewave:SharedMemory:Enabled` | `false` | Shared memory transport for same-host clients. Sub-microsecond latency IPC. Requires matching client setting. |
 | `Surgewave:SchemaRegistry:Enabled` | **`true`** | Confluent-compatible Schema Registry REST API at `/subjects`, `/schemas`, `/config`. |
 | `Surgewave:SchemaRegistry:Inference:Enabled` | **`true`** | Automatic schema inference from topic messages (`GET /schemas/infer/{topic}`). |

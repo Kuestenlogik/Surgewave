@@ -32,6 +32,7 @@ public sealed class SurgewaveRuntimeBuilder
     private int _defaultNumPartitions = 1;
     private short _defaultReplicationFactor = 1;
     private bool _enableCluster = false;
+    private bool _enableKafka = true;
     private List<string> _clusterNodes = [];
     private bool _useRaftConsensus = false;
     private int _raftElectionTimeoutMinMs = 150;
@@ -236,6 +237,27 @@ public sealed class SurgewaveRuntimeBuilder
     }
 
     /// <summary>
+    /// Enables or disables the Kafka wire protocol (default: enabled). When
+    /// disabled the embedded broker runs native-only — no Kafka handler array,
+    /// no dispatcher, and Kafka connections are rejected (#58).
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithKafka(bool enable = true)
+    {
+        _enableKafka = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Runs the embedded broker native-only (Kafka wire protocol disabled).
+    /// Shorthand for <c>WithKafka(false)</c> (#58).
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithoutKafka()
+    {
+        _enableKafka = false;
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables Raft consensus.
     /// </summary>
     public SurgewaveRuntimeBuilder WithRaft(bool enable = true)
@@ -425,6 +447,7 @@ public sealed class SurgewaveRuntimeBuilder
         DefaultNumPartitions = _defaultNumPartitions,
         DefaultReplicationFactor = _defaultReplicationFactor,
         EnableCluster = _enableCluster,
+        EnableKafka = _enableKafka,
         ClusterNodes = _clusterNodes,
         UseRaftConsensus = _useRaftConsensus,
         RaftElectionTimeoutMinMs = _raftElectionTimeoutMinMs,

@@ -14,6 +14,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol\Kuestenlogik.Surgewave.Protocol.csproj" />
+    <!-- IProtocolPlugin contract for SurgewaveKafkaProtocolPlugin (#58). No cycle:
+         Plugins references only Core + Plugins.Packaging, never Protocol.Kafka. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

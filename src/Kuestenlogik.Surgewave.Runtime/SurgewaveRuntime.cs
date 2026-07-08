@@ -284,7 +284,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         _transactionCoordinator = transactionCoordinator;
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
-        IProtocolHandler protocolHandler = new KafkaProtocolHandler();
+        // Kafka wire protocol handler — built only when EnableKafka (#58);
+        // null means the embedded broker runs native-only.
+        IProtocolHandler? protocolHandler = _options.EnableKafka ? new KafkaProtocolHandler() : null;
 
         _metrics = new BrokerMetrics();
 
@@ -292,26 +294,33 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var dynamicBrokerConfigLogger = _loggerFactory.CreateLogger<DynamicBrokerConfig>();
         var dynamicBrokerConfig = new DynamicBrokerConfig(config, dynamicBrokerConfigLogger);
 
-        // Create request handlers
-        var dataApiLogger = _loggerFactory.CreateLogger<DataApiHandler>();
-        var metadataApiLogger = _loggerFactory.CreateLogger<MetadataApiHandler>();
-        var topicAdminLogger = _loggerFactory.CreateLogger<TopicAdminHandler>();
-        _topicAdminHandler = new TopicAdminHandler(config, _logManager, _quotaManager, auditLogger: null, topicAdminLogger);
-        _metadataApiHandler = new MetadataApiHandler(config, _logManager, metadataApiLogger);
-        IKafkaRequestHandler[] handlers =
-        [
-            new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, dataApiLogger, partitionAppender: _options.PartitionAppender, disaggregatedReader: _options.DisaggregatedReader),
-            _metadataApiHandler,
-            _topicAdminHandler,
-            new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
-            new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
-            new TelemetryApiHandler(
-                _loggerFactory.CreateLogger<TelemetryApiHandler>(),
-                config.Telemetry,
-                new Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor(
-                    _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>()))
-        ];
-        var dispatcher = new RequestDispatcher(handlers);
+        // Kafka handler array + dispatcher — built only when EnableKafka (#58).
+        // When disabled the embedded broker is native-only: no handlers, no
+        // dispatcher; SurgewaveBroker then rejects Kafka connections.
+        RequestDispatcher? dispatcher = null;
+        if (_options.EnableKafka)
+        {
+            // Create request handlers
+            var dataApiLogger = _loggerFactory.CreateLogger<DataApiHandler>();
+            var metadataApiLogger = _loggerFactory.CreateLogger<MetadataApiHandler>();
+            var topicAdminLogger = _loggerFactory.CreateLogger<TopicAdminHandler>();
+            _topicAdminHandler = new TopicAdminHandler(config, _logManager, _quotaManager, auditLogger: null, topicAdminLogger);
+            _metadataApiHandler = new MetadataApiHandler(config, _logManager, metadataApiLogger);
+            IKafkaRequestHandler[] handlers =
+            [
+                new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, dataApiLogger, partitionAppender: _options.PartitionAppender, disaggregatedReader: _options.DisaggregatedReader),
+                _metadataApiHandler,
+                _topicAdminHandler,
+                new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
+                new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
+                new TelemetryApiHandler(
+                    _loggerFactory.CreateLogger<TelemetryApiHandler>(),
+                    config.Telemetry,
+                    new Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor(
+                        _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>()))
+            ];
+            dispatcher = new RequestDispatcher(handlers);
+        }
 
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator,
@@ -449,10 +458,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // BecomeLeader/BecomeFollower calls), plus AlterPartition reported by
         // leaders — applied via the controller (IIsrUpdateApplier). The broker
         // is already serving, so we hot-add it (#69).
-        var interBrokerApiLogger = _loggerFactory.CreateLogger<InterBrokerApiHandler>();
-        _broker!.AddHandler(new InterBrokerApiHandler(
-            config, _clusterState, _replicaManager, _logManager!, interBrokerApiLogger,
-            _transactionCoordinator, isrUpdateApplier: _clusterController));
+        // The inter-broker control plane rides the Kafka wire today, so it only
+        // exists when Kafka is enabled; a native-only broker is single-broker
+        // until the control path is native (#60).
+        if (_options.EnableKafka)
+        {
+            var interBrokerApiLogger = _loggerFactory.CreateLogger<InterBrokerApiHandler>();
+            _broker!.AddHandler(new InterBrokerApiHandler(
+                config, _clusterState, _replicaManager, _logManager!, interBrokerApiLogger,
+                _transactionCoordinator, isrUpdateApplier: _clusterController));
+        }
 
         // Wire up topic admin handler to use cluster controller for topic creation
         _topicAdminHandler?.SetClusterTopicCreator(_clusterController);

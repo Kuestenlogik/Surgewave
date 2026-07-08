@@ -49,6 +49,9 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] End of stream")]
     public static partial void EndOfStream(ILogger logger, object? endpoint);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] Rejected non-native connection: Kafka wire protocol is disabled (Surgewave:Kafka:Enabled=false)")]
+    public static partial void KafkaDisabled(ILogger logger, object? endpoint);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] IO error")]
     public static partial void IoError(ILogger logger, Exception ex, object? endpoint);
 

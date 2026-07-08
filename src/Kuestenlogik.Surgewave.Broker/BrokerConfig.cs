@@ -272,6 +272,9 @@ public sealed class BrokerConfig : IValidatableConfig
     // Kafka Connect settings
     public ConnectConfig Connect { get; set; } = new();
 
+    // Kafka wire-protocol surface (listener acceptance, handler array, dispatcher)
+    public KafkaConfig Kafka { get; set; } = new();
+
     // GC/Performance settings
     public GcConfig Gc { get; set; } = new();
 
@@ -614,6 +617,27 @@ public sealed class SharedMemoryBrokerConfig
     /// Default: 100ms.
     /// </summary>
     public int ClientScanIntervalMs { get; set; } = 100;
+}
+
+/// <summary>
+/// Configuration for the Kafka wire-protocol compatibility surface.
+/// </summary>
+public sealed class KafkaConfig
+{
+    /// <summary>
+    /// Enable the Kafka wire protocol. Default: <c>true</c> (identical behaviour
+    /// to today). When <c>false</c>, the broker runs NATIVE-ONLY: no Kafka
+    /// listener acceptance, no <c>IKafkaRequestHandler</c> array, no Kafka
+    /// <c>RequestDispatcher</c>. Kafka is native-first Surgewave's optional
+    /// compatibility layer (#58 / #41).
+    /// <para>
+    /// Note: multi-broker clustering currently rides the Kafka wire for its
+    /// inter-broker control plane (LeaderAndIsr / AlterPartition), so a
+    /// native-only broker is supported for single-broker deployments; native
+    /// inter-broker control is tracked separately (#60).
+    /// </para>
+    /// </summary>
+    public bool Enabled { get; set; } = true;
 }
 
 /// <summary>
