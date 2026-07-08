@@ -313,8 +313,10 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 _topicAdminHandler,
                 new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
                 new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
-                // Streams-group now routes through the dispatcher (the broker fast-path was removed
-                // when the coordinator went protocol-neutral, #59), so the adapter must be registered here too.
+                // Consumer-group v2 (KIP-848) + streams-group (KIP-1071) now route through the
+                // dispatcher (their broker fast-paths were removed when the coordinators went
+                // protocol-neutral, #59), so the adapters must be registered here too.
+                new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, _loggerFactory.CreateLogger<ConsumerGroupV2ApiHandler>()),
                 new StreamsGroupApiHandler(streamsGroupCoordinator, _loggerFactory.CreateLogger<StreamsGroupApiHandler>()),
                 new TelemetryApiHandler(
                     _loggerFactory.CreateLogger<TelemetryApiHandler>(),
@@ -327,8 +329,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator,
-            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger,
-            consumerGroupV2Coordinator: consumerGroupV2Coordinator);
+            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token), cancellationToken);

@@ -55,7 +55,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     // Consumer group coordination (delegated handlers use these directly)
     private readonly ConsumerGroupCoordinator _consumerGroupCoordinator;
     private readonly ShareGroupCoordinator _shareGroupCoordinator;
-    private readonly ConsumerGroupV2Coordinator _consumerGroupV2Coordinator;
     private readonly TransactionCoordinator _transactionCoordinator;
 
     // Metrics
@@ -96,7 +95,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         BrokerMetrics metrics,
         RequestDispatcher? dispatcher,
         ILogger<SurgewaveBroker> logger,
-        ConsumerGroupV2Coordinator? consumerGroupV2Coordinator = null,
         SchemaStore? schemaStore = null,
         CompatibilityChecker? compatibilityChecker = null,
         ConnectWorker? connectWorker = null,
@@ -110,7 +108,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         _logManager = logManager;
         _consumerGroupCoordinator = consumerGroupCoordinator;
         _shareGroupCoordinator = shareGroupCoordinator;
-        _consumerGroupV2Coordinator = consumerGroupV2Coordinator!;
         _transactionCoordinator = transactionCoordinator;
         _protocolHandler = protocolHandler;
         _metrics = metrics;
@@ -576,14 +573,9 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             case ListGroupsRequest listGroupsRequest:
                 return _consumerGroupCoordinator.HandleListGroups(listGroupsRequest);
 
-            // Handle consumer group v2 APIs directly (fast-path for KIP-848)
-            case ConsumerGroupHeartbeatRequest consumerGroupHeartbeatRequest:
-                return _consumerGroupV2Coordinator.HandleConsumerGroupHeartbeat(consumerGroupHeartbeatRequest);
-            case ConsumerGroupDescribeRequest consumerGroupDescribeRequest:
-                return _consumerGroupV2Coordinator.HandleConsumerGroupDescribe(consumerGroupDescribeRequest);
-
-            // Streams group APIs (KIP-1071) route through the dispatcher -> StreamsGroupApiHandler
-            // (the Kafka<->neutral adapter), since the coordinator is now protocol-neutral (#59).
+            // Consumer group v2 (KIP-848) + streams group (KIP-1071) APIs route through the
+            // dispatcher -> their ApiHandler adapters, since those coordinators are now
+            // protocol-neutral and the adapters own the Kafka<->neutral conversion (#59).
 
             // Handle share group APIs directly (fast-path for common operations)
             case ShareGroupHeartbeatRequest shareGroupHeartbeatRequest:

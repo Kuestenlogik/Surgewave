@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
 using Kuestenlogik.Surgewave.Broker.Security;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Observability;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
@@ -525,19 +526,26 @@ public sealed class ConsumerGroupCoordinator(
                 // entry but they share the same offset persistence.
                 if (v2Coordinator != null)
                 {
-                    var v2Error = v2Coordinator.ValidateMemberForOffsetOperation(
+                    var v2Status = v2Coordinator.ValidateMemberForOffsetOperation(
                         request.GroupId, request.MemberId, request.GenerationIdOrMemberEpoch);
 
-                    if (v2Error == ErrorCode.None)
+                    if (v2Status == ConsumerGroupFenceStatus.Ok)
                     {
                         return CommitOffsetsForV2Group(request, useTopicId);
                     }
 
-                    // The v2 coordinator returns UnknownTopicOrPartition as a sentinel
-                    // for "not a v2 group" — anything else is an authoritative fence.
-                    if (v2Error != ErrorCode.UnknownTopicOrPartition)
+                    // NotAV2Group is the sentinel for "not a v2 group, fall through to the
+                    // classic coordinator" — anything else is an authoritative fence, mapped
+                    // from the neutral status back to the wire error code.
+                    if (v2Status != ConsumerGroupFenceStatus.NotAV2Group)
                     {
-                        return BuildOffsetCommitErrorResponse(request, v2Error);
+                        return BuildOffsetCommitErrorResponse(request, v2Status switch
+                        {
+                            ConsumerGroupFenceStatus.UnknownMember => ErrorCode.UnknownMemberId,
+                            ConsumerGroupFenceStatus.FencedEpoch => ErrorCode.FencedMemberEpoch,
+                            ConsumerGroupFenceStatus.StaleEpoch => ErrorCode.StaleMemberEpoch,
+                            _ => ErrorCode.UnknownMemberId,
+                        });
                     }
                 }
 
