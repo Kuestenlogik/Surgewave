@@ -1,10 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>Kuestenlogik.Surgewave.Schema.Registry.Handlers</RootNamespace>
-    <Description>Microsoft Orleans (schemaless binary) schema handler for Surgewave Schema Registry</Description>
+    <Description>Schemaless binary schema handlers (CBOR, Hyperion, MemoryPack, MessagePack, Orleans) for the Surgewave Schema Registry. These formats are self-describing and version internally, so validation always succeeds and every schema is compatible — the handlers carry no format serializer dependency.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Orleans.Serialization" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
   <ItemGroup>
