@@ -1,5 +1,5 @@
-using Kuestenlogik.Surgewave.Client.SchemaRegistry;
-using Kuestenlogik.Surgewave.Client.SchemaRegistry.Json;
+using Kuestenlogik.Surgewave.Schema.Registry.Client;
+using Kuestenlogik.Surgewave.Schema.Registry.Serdes.Json;
 using Kuestenlogik.Surgewave.Testing;
 using Xunit;
 

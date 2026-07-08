@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Client\Kuestenlogik.Surgewave.Schema.Registry.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dahomey.Cbor" />
+  </ItemGroup>
+
+</Project>
