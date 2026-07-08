@@ -52,6 +52,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#63](https://github.com/Kuestenlogik/Surgewave/issues/63) **Embedded Bowire host: share Kuestenlogik.Surgewave ALC prefix + register SDK services in DI** 
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
+- [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
 
 ---
 
