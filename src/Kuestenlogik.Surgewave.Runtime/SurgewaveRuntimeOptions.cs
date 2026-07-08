@@ -112,6 +112,15 @@ public sealed record SurgewaveRuntimeOptions
     public bool EnableCluster { get; init; } = false;
 
     /// <summary>
+    /// Enable the Kafka wire protocol. Defaults to <c>true</c> (identical to
+    /// today). When <c>false</c>, the embedded broker runs NATIVE-ONLY: no Kafka
+    /// handler array, no dispatcher, and Kafka connections are rejected. The
+    /// native protocol still works. Mirrors <c>Surgewave:Kafka:Enabled</c> on the
+    /// standalone broker (#58).
+    /// </summary>
+    public bool EnableKafka { get; init; } = true;
+
+    /// <summary>
     /// List of other brokers in the cluster (format: "brokerId:host:port").
     /// Example: ["1:localhost:10092", "2:localhost:10093"]
     /// </summary>

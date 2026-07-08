@@ -1093,7 +1093,9 @@ QuotaServiceImplHolder.Instance = new QuotaServiceImpl(
             .ToList();
     });
 
-IProtocolHandler protocolHandler = new KafkaProtocolHandler();
+// Kafka wire protocol handler — built only when Surgewave:Kafka:Enabled (#58);
+// null means the broker runs native-only.
+IProtocolHandler? protocolHandler = config.Kafka.Enabled ? new KafkaProtocolHandler() : null;
 
 // Initialize security components if enabled
 SaslAuthenticator? saslAuthenticator = null;
@@ -1268,7 +1270,15 @@ if (config.Audit.Enabled && config.Audit.TopicSinkEnabled)
     auditTopicSink = new AuditTopicSink(logManager, recordBatchSerializer, config.Audit, sinkLogger);
     logger.LogInformation("Audit topic sink enabled — mirroring events to {Topic}", config.Audit.TopicName);
 }
+// Process-lifetime bootstrap object: consumed by the audit REST API
+// (MapSurgewaveAudit) and, when Kafka is enabled, by the Kafka admin handlers.
+// Not explicitly disposed — consistent with the other bootstrap singletons; it
+// lives until process exit. Gating the Kafka handler array (#58) removed the
+// handler-ctor ownership transfer that previously silenced CA2000 on the
+// Kafka-disabled path, so suppress it explicitly here.
+#pragma warning disable CA2000 // process-lifetime bootstrap object
 var auditLogger = new AuditLogger(config, auditLoggerInstance, auditTopicSink);
+#pragma warning restore CA2000
 await auditLogger.InitializeAsync();
 
 // Initialize deduplication manager (if enabled)
@@ -1345,45 +1355,59 @@ if (config.Telemetry.Enabled && config.Telemetry.TopicSinkEnabled)
     logger.LogInformation("Telemetry topic sink enabled — mirroring OTLP payloads to {Topic}", config.Telemetry.TopicName);
 }
 
-// Metadata handler is hoisted so it can be wired to the cluster state and
-// controller — the Kafka Metadata it serves reads ISR from the local
-// ClusterState, so reverse-ISR propagation (#69) is only visible to clients if
-// this handler is cluster-aware (the embedded runtime already does this; the
-// production broker previously did not, so it always answered standalone).
-var metadataApiHandler = new MetadataApiHandler(config, logManager, metadataApiLogger);
-metadataApiHandler.SetClusterState(clusterState);
-metadataApiHandler.SetClusterTopicCreator(clusterController);
+// Kafka wire surface (#58): the entire IKafkaRequestHandler array + the
+// RequestDispatcher are built ONLY when Surgewave:Kafka:Enabled. When disabled
+// the broker runs native-only — no Kafka handlers, no dispatcher — and
+// SurgewaveBroker rejects Kafka connections at the accept path. There is no
+// per-request cost either way; this is a single startup-time branch, and the
+// dispatcher stays a FrozenDictionary wired once at startup.
+// NOTE: InterBrokerApiHandler lives in this array, so the multi-broker control
+// plane (LeaderAndIsr / AlterPartition) rides the Kafka wire today; native-only
+// is therefore a single-broker mode until the inter-broker control path is
+// native (#60).
+RequestDispatcher? dispatcher = null;
+if (config.Kafka.Enabled)
+{
+    // Metadata handler is hoisted so it can be wired to the cluster state and
+    // controller — the Kafka Metadata it serves reads ISR from the local
+    // ClusterState, so reverse-ISR propagation (#69) is only visible to clients
+    // if this handler is cluster-aware (the embedded runtime already does this;
+    // the production broker previously did not, so it always answered standalone).
+    var metadataApiHandler = new MetadataApiHandler(config, logManager, metadataApiLogger);
+    metadataApiHandler.SetClusterState(clusterState);
+    metadataApiHandler.SetClusterTopicCreator(clusterController);
 
-IKafkaRequestHandler[] handlers =
-[
-    new DataApiHandler(config, logManager, transactionCoordinator, quotaManager, recordBatchSerializer, aclAuthorizer, deduplicationManager, delayIndex, ttlIndex, metrics, dataApiLogger, bandwidthQuotaManager,
-        app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
-        coldStartProfiler: app.Services.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()),
-    metadataApiHandler,
-    new TopicAdminHandler(config, logManager, quotaManager, auditLogger, topicAdminLogger),
-    new ConfigApiHandler(config, dynamicBrokerConfig, logManager),
-    new SecurityApiHandler(config, saslAuthenticator, aclAuthorizer, auditLogger, securityApiLogger,
-        scramSha256Store: scramSha256Store, scramSha512Store: scramSha512Store),
-    new InterBrokerApiHandler(config, clusterState, replicaManager, logManager, interBrokerApiLogger, transactionCoordinator,
-        isrUpdateApplier: clusterController),
-    new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupApiLogger),
-    new ShareGroupApiHandler(shareGroupCoordinator, shareGroupApiLogger),
-    new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, consumerGroupV2ApiLogger),
-    new StreamsGroupApiHandler(streamsGroupCoordinator, streamsGroupApiLogger),
-    new RaftApiHandler(config, raftNode, raftPersistence, clusterState, raftApiLogger),
-    new ClusterAdminHandler(clusterController,
-        app.Services.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>(),
-        clusterState,
-        app.Services.GetRequiredService<ILogger<ClusterAdminHandler>>()),
-    new QuotaApiHandler(quotaManager, quotaApiLogger),
-    new DelegationTokenApiHandler(delegationTokenManager, delegationTokenApiLogger),
-    new TelemetryApiHandler(telemetryApiLogger, config.Telemetry, telemetryIngestor),
-    new ClusterMembershipHandler(
-        app.Services.GetRequiredService<ClusterIdManager>(),
-        clusterState,
-        app.Services.GetRequiredService<ILogger<ClusterMembershipHandler>>())
-];
-var dispatcher = new RequestDispatcher(handlers);
+    IKafkaRequestHandler[] handlers =
+    [
+        new DataApiHandler(config, logManager, transactionCoordinator, quotaManager, recordBatchSerializer, aclAuthorizer, deduplicationManager, delayIndex, ttlIndex, metrics, dataApiLogger, bandwidthQuotaManager,
+            app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
+            coldStartProfiler: app.Services.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()),
+        metadataApiHandler,
+        new TopicAdminHandler(config, logManager, quotaManager, auditLogger, topicAdminLogger),
+        new ConfigApiHandler(config, dynamicBrokerConfig, logManager),
+        new SecurityApiHandler(config, saslAuthenticator, aclAuthorizer, auditLogger, securityApiLogger,
+            scramSha256Store: scramSha256Store, scramSha512Store: scramSha512Store),
+        new InterBrokerApiHandler(config, clusterState, replicaManager, logManager, interBrokerApiLogger, transactionCoordinator,
+            isrUpdateApplier: clusterController),
+        new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupApiLogger),
+        new ShareGroupApiHandler(shareGroupCoordinator, shareGroupApiLogger),
+        new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, consumerGroupV2ApiLogger),
+        new StreamsGroupApiHandler(streamsGroupCoordinator, streamsGroupApiLogger),
+        new RaftApiHandler(config, raftNode, raftPersistence, clusterState, raftApiLogger),
+        new ClusterAdminHandler(clusterController,
+            app.Services.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>(),
+            clusterState,
+            app.Services.GetRequiredService<ILogger<ClusterAdminHandler>>()),
+        new QuotaApiHandler(quotaManager, quotaApiLogger),
+        new DelegationTokenApiHandler(delegationTokenManager, delegationTokenApiLogger),
+        new TelemetryApiHandler(telemetryApiLogger, config.Telemetry, telemetryIngestor),
+        new ClusterMembershipHandler(
+            app.Services.GetRequiredService<ClusterIdManager>(),
+            clusterState,
+            app.Services.GetRequiredService<ILogger<ClusterMembershipHandler>>())
+    ];
+    dispatcher = new RequestDispatcher(handlers);
+}
 
 // Get PluginDiscovery for connector plugins (available even if Connect is disabled)
 var pluginDiscoveryForBroker = app.Services.GetService<PluginDiscovery>();
@@ -1452,7 +1476,10 @@ logger.LogInformation("Replication components started (Controller: {IsController
 
 var brokerTask = Task.Run(() => surgewaveBroker.StartAsync(CancellationToken.None));
 
-logger.LogInformation("Kafka wire protocol listener started on {Host}:{Port}", config.Host, config.Port);
+if (config.Kafka.Enabled)
+    logger.LogInformation("Kafka wire protocol listener started on {Host}:{Port}", config.Host, config.Port);
+else
+    logger.LogInformation("Native-only listener started on {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
 
 app.MapGrpcService<ProducerServiceImpl>();
 app.MapGrpcService<ConsumerServiceImpl>();
@@ -1699,7 +1726,10 @@ app.MapGet("/sd-targets", () =>
 
 logger.LogInformation("gRPC server started on port {GrpcPort}", config.GrpcPort);
 logger.LogInformation("Surgewave broker ready to accept connections");
-logger.LogInformation("  - Kafka wire protocol: {Host}:{Port}", config.Host, config.Port);
+if (config.Kafka.Enabled)
+    logger.LogInformation("  - Kafka wire protocol: {Host}:{Port}", config.Host, config.Port);
+else
+    logger.LogInformation("  - Native protocol only: {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
 logger.LogInformation("  - gRPC API:            {Host}:{GrpcPort}", config.Host, config.GrpcPort);
 logger.LogInformation("  - Metrics:             {Host}:{GrpcPort}/metrics", config.Host, config.GrpcPort);
 foreach (var proto in activatedProtocols)

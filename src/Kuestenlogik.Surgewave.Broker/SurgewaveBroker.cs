@@ -31,7 +31,7 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     private readonly BrokerConfig _config;
     private readonly LogManager _logManager;
     private readonly ILogger<SurgewaveBroker> _logger;
-    private readonly IProtocolHandler _protocolHandler;
+    private readonly IProtocolHandler? _protocolHandler;
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly List<Task> _clientTasks = [];
@@ -42,7 +42,9 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     // inter-broker components exist (#69), after the accept loop is already
     // serving; the frozen map can't be mutated in place, so we publish a
     // fresh instance and let readers pick it up on their next dispatch.
-    private volatile RequestDispatcher _dispatcher;
+    // NULL when the Kafka wire is disabled (Surgewave:Kafka:Enabled=false, #58):
+    // the broker then serves native-only and rejects Kafka connections.
+    private volatile RequestDispatcher? _dispatcher;
 
     // Consumer group coordination (delegated handlers use these directly)
     private readonly ConsumerGroupCoordinator _consumerGroupCoordinator;
@@ -85,9 +87,9 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         NativeGroupCoordinator nativeGroupCoordinator,
         TransactionCoordinator transactionCoordinator,
         QuotaManager quotaManager,
-        IProtocolHandler protocolHandler,
+        IProtocolHandler? protocolHandler,
         BrokerMetrics metrics,
-        RequestDispatcher dispatcher,
+        RequestDispatcher? dispatcher,
         ILogger<SurgewaveBroker> logger,
         ConsumerGroupV2Coordinator? consumerGroupV2Coordinator = null,
         StreamsGroupCoordinator? streamsGroupCoordinator = null,
@@ -296,6 +298,16 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         if (magicBuffer.AsSpan().SequenceEqual(SurgewaveNativeProtocol.Magic))
         {
             await _nativeHandler.HandleConnectionAsync(stream, cancellationToken);
+            return;
+        }
+
+        // Native-only mode (Surgewave:Kafka:Enabled=false, #58): no Kafka
+        // dispatcher was built, so we close any non-native peer instead of
+        // parsing the Kafka wire. This is a per-CONNECTION check on the Kafka
+        // accept path only — never per request; the enabled path is unchanged.
+        if (_dispatcher is null)
+        {
+            Log.KafkaDisabled(_logger, endpoint);
             return;
         }
 
@@ -589,7 +601,10 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             ClientId = request.ClientId
         };
 
-        return await _dispatcher.DispatchAsync(request, context, cancellationToken);
+        // Non-null here: a Kafka connection is never accepted when _dispatcher is
+        // null (HandleAsync closes non-native peers in native-only mode), so this
+        // is a compile-time null-forgive only — the IL / hot path is unchanged.
+        return await _dispatcher!.DispatchAsync(request, context, cancellationToken);
     }
 
     /// <summary>
@@ -603,6 +618,13 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     /// </summary>
     public void AddHandler(IKafkaRequestHandler handler)
     {
+        // No-op when the Kafka wire is disabled (#58): there is no dispatcher to
+        // extend. Multi-broker clustering rides the Kafka wire today, so a
+        // native-only broker skips the inter-broker hot-add rather than NRE
+        // (native inter-broker control is tracked in #60).
+        if (_dispatcher is null)
+            return;
+
         _dispatcher = _dispatcher.WithAdditionalHandler(handler);
     }
 
