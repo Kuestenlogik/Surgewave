@@ -1,6 +1,5 @@
 using Kuestenlogik.Surgewave.Broker.Native.Handlers;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Protocol.Native;
 using Kuestenlogik.Surgewave.Protocol.Native.Payloads;
 using Kuestenlogik.Surgewave.Protocol.Native.Payloads.Transactions;
@@ -9,21 +8,19 @@ using TxnDescription = Kuestenlogik.Surgewave.Protocol.Native.Payloads.Transacti
 namespace Kuestenlogik.Surgewave.Broker.Native.Operations.Transactions;
 
 /// <summary>
-/// Maps Kafka error codes to Surgewave error codes.
+/// Maps protocol-neutral transaction statuses to Surgewave native error codes (#59). The native
+/// transaction ops now speak the neutral coordinator contract directly instead of building Kafka DTOs.
 /// </summary>
-internal static class KafkaErrorMapper
+internal static class TxnStatusMapper
 {
-    public static SurgewaveErrorCode MapKafkaErrorToSurgewave(ErrorCode kafkaError)
+    public static SurgewaveErrorCode ToSurgewave(TxnErrorStatus status)
     {
-        return kafkaError switch
+        return status switch
         {
-            ErrorCode.None => SurgewaveErrorCode.None,
-            ErrorCode.InvalidProducerEpoch => SurgewaveErrorCode.InvalidProducerEpoch,
-            ErrorCode.UnknownProducerId => SurgewaveErrorCode.UnknownProducerId,
-            ErrorCode.InvalidTxnState => SurgewaveErrorCode.InvalidTxnState,
-            ErrorCode.ConcurrentTransactions => SurgewaveErrorCode.ConcurrentTransactions,
-            ErrorCode.DuplicateSequenceNumber => SurgewaveErrorCode.DuplicateSequenceNumber,
-            ErrorCode.OutOfOrderSequenceNumber => SurgewaveErrorCode.OutOfOrderSequenceNumber,
+            TxnErrorStatus.None => SurgewaveErrorCode.None,
+            TxnErrorStatus.InvalidProducerEpoch => SurgewaveErrorCode.InvalidProducerEpoch,
+            TxnErrorStatus.UnknownProducerId => SurgewaveErrorCode.UnknownProducerId,
+            TxnErrorStatus.InvalidTxnState => SurgewaveErrorCode.InvalidTxnState,
             _ => SurgewaveErrorCode.UnknownError
         };
     }
@@ -61,20 +58,16 @@ public sealed class InitProducerIdOperation : IOperationHandler<InitProducerIdRe
 
     public async Task<InitProducerIdResult> ExecuteAsync(InitProducerIdRequestPayload request, CancellationToken cancellationToken)
     {
-        var kafkaRequest = new InitProducerIdRequest
+        var command = new InitProducerIdCommand
         {
-            ApiKey = ApiKey.InitProducerId,
-            ApiVersion = 0,
-            CorrelationId = (int)_requestId,
-            ClientId = "surgewave-native",
             TransactionalId = request.TransactionalId,
             TransactionTimeoutMs = request.TransactionTimeoutMs,
             ProducerId = request.ProducerId,
             ProducerEpoch = request.ProducerEpoch
         };
 
-        var response = await _coordinator.HandleInitProducerIdAsync(kafkaRequest, cancellationToken);
-        var errorCode = KafkaErrorMapper.MapKafkaErrorToSurgewave(response.ErrorCode);
+        var response = await _coordinator.InitProducerIdAsync(command, cancellationToken);
+        var errorCode = TxnStatusMapper.ToSurgewave(response.Status);
 
         var responsePayload = new InitProducerIdResponsePayload
         {
@@ -121,33 +114,35 @@ public sealed class AddPartitionsToTxnOperation : IOperationHandler<AddPartition
 
     public Task<AddPartitionsToTxnResult> ExecuteAsync(AddPartitionsToTxnRequestPayload request, CancellationToken cancellationToken)
     {
-        var kafkaRequest = new AddPartitionsToTxnRequest
+        var commandTopics = new List<AddPartitionsTopic>();
+        foreach (var (topic, partitions) in request.Topics)
         {
-            ApiKey = ApiKey.AddPartitionsToTxn,
-            ApiVersion = 0,
-            CorrelationId = (int)_requestId,
-            ClientId = "surgewave-native",
+            commandTopics.Add(new AddPartitionsTopic(topic, partitions));
+        }
+
+        var command = new AddPartitionsToTxnCommand
+        {
             TransactionalId = request.TransactionalId,
             ProducerId = request.ProducerId,
             ProducerEpoch = request.ProducerEpoch,
-            Topics = request.Topics
+            Topics = commandTopics
         };
 
-        var kafkaResponse = _coordinator.HandleAddPartitionsToTxn(kafkaRequest);
+        var result = _coordinator.AddPartitionsToTxn(command);
 
         var results = new Dictionary<string, List<PartitionResult>>();
-        foreach (var (topic, partitionResults) in kafkaResponse.Results)
+        foreach (var topic in result.Topics)
         {
             var payloadResults = new List<PartitionResult>();
-            foreach (var partitionResult in partitionResults)
+            foreach (var partitionResult in topic.Partitions)
             {
                 payloadResults.Add(new PartitionResult
                 {
                     Partition = partitionResult.Partition,
-                    ErrorCode = (ushort)KafkaErrorMapper.MapKafkaErrorToSurgewave(partitionResult.ErrorCode)
+                    ErrorCode = (ushort)TxnStatusMapper.ToSurgewave(partitionResult.Status)
                 });
             }
-            results[topic] = payloadResults;
+            results[topic.Topic] = payloadResults;
         }
 
         var responsePayload = new AddPartitionsToTxnResponsePayload { Results = results };
@@ -209,20 +204,16 @@ public sealed class AddOffsetsToTxnOperation : IOperationHandler<AddOffsetsToTxn
 
     public Task<AddOffsetsToTxnResult> ExecuteAsync(AddOffsetsToTxnRequest request, CancellationToken cancellationToken)
     {
-        var kafkaRequest = new Protocol.Kafka.Requests.AddOffsetsToTxnRequest
+        var command = new AddOffsetsToTxnCommand
         {
-            ApiKey = ApiKey.AddOffsetsToTxn,
-            ApiVersion = 0,
-            CorrelationId = (int)_requestId,
-            ClientId = "surgewave-native",
             TransactionalId = request.TransactionalId,
             ProducerId = request.ProducerId,
             ProducerEpoch = request.ProducerEpoch,
             GroupId = request.GroupId
         };
 
-        var response = _coordinator.HandleAddOffsetsToTxn(kafkaRequest);
-        var errorCode = KafkaErrorMapper.MapKafkaErrorToSurgewave(response.ErrorCode);
+        var response = _coordinator.AddOffsetsToTxn(command);
+        var errorCode = TxnStatusMapper.ToSurgewave(response.Status);
 
         return Task.FromResult(new AddOffsetsToTxnResult { ErrorCode = errorCode });
     }
@@ -263,46 +254,33 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
     public Task<TxnOffsetCommitResult> ExecuteAsync(TxnOffsetCommitRequestPayload request, CancellationToken cancellationToken)
     {
         // The Surgewave native protocol's TxnOffsetCommit payload still
-        // identifies topics by name. We construct the v0-style Kafka request
-        // (Name set, TopicId left empty) — the v6 wire path only kicks in for
+        // identifies topics by name. We build the neutral command with Name set
+        // and TopicId left empty — the v6 (TopicId) path only kicks in for
         // Kafka-protocol clients negotiated up to v6+, not the native one.
-        var kafkaTopics = new List<TxnOffsetCommitRequest.TxnOffsetCommitTopic>(request.Topics.Count);
+        var commandTopics = new List<TxnOffsetCommitTopic>(request.Topics.Count);
         foreach (var (topic, partitions) in request.Topics)
         {
-            var kafkaPartitions = new List<TxnOffsetCommitRequest.TxnOffsetCommitPartition>();
+            var commandPartitions = new List<global::Kuestenlogik.Surgewave.Coordination.Transactions.TxnOffsetCommitPartition>();
             foreach (var partition in partitions)
             {
-                kafkaPartitions.Add(new TxnOffsetCommitRequest.TxnOffsetCommitPartition
-                {
-                    Partition = partition.Partition,
-                    CommittedOffset = partition.CommittedOffset,
-                    Metadata = partition.Metadata
-                });
+                commandPartitions.Add(new global::Kuestenlogik.Surgewave.Coordination.Transactions.TxnOffsetCommitPartition(partition.Partition, partition.CommittedOffset, partition.Metadata));
             }
-            kafkaTopics.Add(new TxnOffsetCommitRequest.TxnOffsetCommitTopic
-            {
-                Name = topic,
-                Partitions = kafkaPartitions
-            });
+            commandTopics.Add(new TxnOffsetCommitTopic { Name = topic, TopicId = Guid.Empty, Partitions = commandPartitions });
         }
 
-        var kafkaRequest = new TxnOffsetCommitRequest
+        var command = new TxnOffsetCommitCommand
         {
-            ApiKey = ApiKey.TxnOffsetCommit,
-            ApiVersion = 0,
-            CorrelationId = (int)_requestId,
-            ClientId = "surgewave-native",
             TransactionalId = request.TransactionalId,
             GroupId = request.GroupId,
             ProducerId = request.ProducerId,
             ProducerEpoch = request.ProducerEpoch,
-            Topics = kafkaTopics
+            Topics = commandTopics
         };
 
-        var kafkaResponse = _coordinator.HandleTxnOffsetCommit(kafkaRequest);
+        var result = _coordinator.TxnOffsetCommit(command);
 
         var results = new Dictionary<string, List<PartitionResult>>();
-        foreach (var topic in kafkaResponse.Topics)
+        foreach (var topic in result.Topics)
         {
             var payloadResults = new List<PartitionResult>();
             foreach (var partitionResult in topic.Partitions)
@@ -310,7 +288,7 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
                 payloadResults.Add(new PartitionResult
                 {
                     Partition = partitionResult.Partition,
-                    ErrorCode = (ushort)KafkaErrorMapper.MapKafkaErrorToSurgewave(partitionResult.ErrorCode)
+                    ErrorCode = (ushort)TxnStatusMapper.ToSurgewave(partitionResult.Status)
                 });
             }
             // Topic.Name is the working identifier server-side; even after a
@@ -358,20 +336,16 @@ public sealed class EndTxnOperation : IOperationHandler<EndTxnRequestPayload, En
 
     public async Task<EndTxnResult> ExecuteAsync(EndTxnRequestPayload request, CancellationToken cancellationToken)
     {
-        var kafkaRequest = new EndTxnRequest
+        var command = new EndTxnCommand
         {
-            ApiKey = ApiKey.EndTxn,
-            ApiVersion = 0,
-            CorrelationId = (int)_requestId,
-            ClientId = "surgewave-native",
             TransactionalId = request.TransactionalId,
             ProducerId = request.ProducerId,
             ProducerEpoch = request.ProducerEpoch,
             Committed = request.Committed
         };
 
-        var response = await _coordinator.HandleEndTxnAsync(kafkaRequest, cancellationToken);
-        var errorCode = KafkaErrorMapper.MapKafkaErrorToSurgewave(response.ErrorCode);
+        var response = await _coordinator.EndTxnAsync(command, cancellationToken);
+        var errorCode = TxnStatusMapper.ToSurgewave(response.Status);
 
         var responsePayload = new EndTxnResponsePayload { ErrorCode = (ushort)errorCode };
         return new EndTxnResult { Response = responsePayload, ErrorCode = errorCode };

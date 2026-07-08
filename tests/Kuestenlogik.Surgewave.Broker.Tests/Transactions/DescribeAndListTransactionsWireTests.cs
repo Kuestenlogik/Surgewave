@@ -1,5 +1,7 @@
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Transactions;
+using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Broker.Security;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
@@ -13,11 +15,10 @@ namespace Kuestenlogik.Surgewave.Broker.Tests.Transactions;
 /// <summary>
 /// Wire-binding contract for the two transaction admin RPCs that previously
 /// only existed as gRPC paths: <c>DescribeTransactions</c> (API 65) and
-/// <c>ListTransactions</c> (API 66). The semantics are already covered by
-/// <c>Kip994ListTransactionsFiltersTests</c> and the unit-level
-/// DescribeTransactions tests; these tests pin the wire-shape mapping so a
-/// refactor of the response builders can't silently corrupt the on-wire
-/// representation that admin clients decode.
+/// <c>ListTransactions</c> (API 66). The DTO wire-shape mapping now lives in the
+/// <see cref="TransactionApiHandler"/> adapter (#59), so these tests drive the
+/// request through the adapter to pin the on-wire representation that admin
+/// clients decode. The filter semantics are covered by Kip994ListTransactionsFiltersTests.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
@@ -29,6 +30,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
     private readonly OffsetStore _offsetStore;
     private readonly TransactionStateStore _stateStore;
     private readonly TransactionCoordinator _coordinator;
+    private readonly TransactionApiHandler _handler;
 
     public DescribeAndListTransactionsWireTests()
     {
@@ -42,6 +44,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
         _coordinator = new TransactionCoordinator(
             _producerStateManager, _logManager, _transactionIndex, _offsetStore, _stateStore,
             NullLogger<TransactionCoordinator>.Instance);
+        _handler = new TransactionApiHandler(_coordinator, NullLogger<TransactionApiHandler>.Instance);
     }
 
     public async ValueTask DisposeAsync()
@@ -53,11 +56,19 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
         try { Directory.Delete(_testDirectory, recursive: true); } catch { /* best-effort */ }
     }
 
+    private static RequestContext Ctx => new() { ConnectionState = new ConnectionState("wire-test"), ClientId = "admin" };
+
+    private async Task<DescribeTransactionsResponse> Describe(DescribeTransactionsRequest request)
+        => (DescribeTransactionsResponse)await _handler.HandleAsync(request, Ctx, CancellationToken.None);
+
+    private async Task<ListTransactionsResponse> List(ListTransactionsRequest request)
+        => (ListTransactionsResponse)await _handler.HandleAsync(request, Ctx, CancellationToken.None);
+
     [Fact]
     public async Task HandleDescribeTransactions_KnownId_ReturnsPopulatedState()
     {
         await Init("orders-eu");
-        var resp = _coordinator.HandleDescribeTransactions(new DescribeTransactionsRequest
+        var resp = await Describe(new DescribeTransactionsRequest
         {
             ApiKey = ApiKey.DescribeTransactions,
             ApiVersion = 0,
@@ -77,7 +88,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
     public async Task HandleDescribeTransactions_UnknownId_ReturnsErrorRow()
     {
         await Init("present");
-        var resp = _coordinator.HandleDescribeTransactions(new DescribeTransactionsRequest
+        var resp = await Describe(new DescribeTransactionsRequest
         {
             ApiKey = ApiKey.DescribeTransactions,
             ApiVersion = 0,
@@ -100,7 +111,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
         await Init("b");
         await Init("c");
 
-        var resp = _coordinator.HandleListTransactions(new ListTransactionsRequest
+        var resp = await List(new ListTransactionsRequest
         {
             ApiKey = ApiKey.ListTransactions,
             ApiVersion = 0,
@@ -124,7 +135,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
         await Init("orders-us");
         await Init("payments-eu");
 
-        var resp = _coordinator.HandleListTransactions(new ListTransactionsRequest
+        var resp = await List(new ListTransactionsRequest
         {
             ApiKey = ApiKey.ListTransactions,
             ApiVersion = 2,
@@ -145,7 +156,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
     {
         await Init("only-one");
 
-        var resp = _coordinator.HandleListTransactions(new ListTransactionsRequest
+        var resp = await List(new ListTransactionsRequest
         {
             ApiKey = ApiKey.ListTransactions,
             ApiVersion = 0,
@@ -162,12 +173,8 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
     }
 
     private Task Init(string txnId) =>
-        _coordinator.HandleInitProducerIdAsync(new InitProducerIdRequest
+        _coordinator.InitProducerIdAsync(new InitProducerIdCommand
         {
-            ApiKey = ApiKey.InitProducerId,
-            ApiVersion = 4,
-            CorrelationId = 0,
-            ClientId = "wire-test",
             TransactionalId = txnId,
             TransactionTimeoutMs = 60_000,
             ProducerId = -1,

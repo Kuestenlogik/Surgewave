@@ -1,8 +1,11 @@
 using Kuestenlogik.Surgewave.Broker;
+using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Testing;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Kuestenlogik.Surgewave.Broker.Tests;
@@ -105,7 +108,9 @@ public sealed class DescribeProducersTests
         var orders = new TopicPartition { Topic = "orders", Partition = 1 };
         psm.ValidateSequence(pid, epoch, baseSequence: 5, orders);
 
-        var resp = coordinator.HandleDescribeProducers(new DescribeProducersRequest
+        // The DTO wire-shape mapping lives in the adapter now (#59), so drive the request through it.
+        var handler = new TransactionApiHandler(coordinator, NullLogger<TransactionApiHandler>.Instance);
+        var resp = (DescribeProducersResponse)await handler.HandleAsync(new DescribeProducersRequest
         {
             ApiKey = ApiKey.DescribeProducers,
             ApiVersion = 0,
@@ -119,7 +124,7 @@ public sealed class DescribeProducersTests
                     PartitionIndexes = [0, 1, 2],
                 },
             ],
-        });
+        }, new RequestContext { ConnectionState = new ConnectionState("describe-producers-test"), ClientId = "admin" }, CancellationToken.None);
 
         Assert.Equal(7, resp.CorrelationId);
         var topic = Assert.Single(resp.Topics);

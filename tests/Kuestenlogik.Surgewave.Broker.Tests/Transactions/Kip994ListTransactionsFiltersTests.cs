@@ -1,8 +1,7 @@
 using System.Reflection;
 using Kuestenlogik.Surgewave.Broker;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -220,12 +219,8 @@ public sealed class Kip994ListTransactionsFiltersTests : IAsyncDisposable
     }
 
     private Task Init(string txnId) =>
-        _coordinator.HandleInitProducerIdAsync(new InitProducerIdRequest
+        _coordinator.InitProducerIdAsync(new InitProducerIdCommand
         {
-            ApiKey = ApiKey.InitProducerId,
-            ApiVersion = 4,
-            CorrelationId = 0,
-            ClientId = "kip994-test",
             TransactionalId = txnId,
             TransactionTimeoutMs = 60_000,
             ProducerId = -1,

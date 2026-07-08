@@ -139,10 +139,12 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
         // adapter must be registered here for the consume path to work.
         var consumerGroupApiHandler = new ConsumerGroupApiHandler(
             consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>());
+        var transactionApiHandler = new TransactionApiHandler(
+            transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>());
 
         var handlers = new IKafkaRequestHandler[]
         {
-            dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler
+            dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler, transactionApiHandler
         };
         var dispatcher = new RequestDispatcher(handlers);
 

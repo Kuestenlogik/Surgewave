@@ -1,7 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,10 +11,10 @@ namespace Kuestenlogik.Surgewave.Broker.Tests.Transactions;
 /// <summary>
 /// KIP-892 Transactions Server-Side Defense: the broker — not the client — owns the
 /// producer epoch. A request that names a stale (producer-id, epoch) for an existing
-/// transactional-id is fenced with <see cref="ErrorCode.InvalidProducerEpoch"/>; a
+/// transactional-id is fenced with <see cref="TxnErrorStatus.InvalidProducerEpoch"/>; a
 /// fresh-init from the same transactional-id over no in-flight txn forces the epoch
 /// upward so any zombie still using the previous incarnation is fenced on its very
-/// next request.
+/// next request. Exercises the protocol-neutral coordinator surface directly (#59).
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
@@ -63,7 +62,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
     public async Task FreshInit_AllocatesProducerIdAndEpochFromBroker()
     {
         var resp = await Init("tx-fresh", NoProducerId, NoProducerEpoch);
-        Assert.Equal(ErrorCode.None, resp.ErrorCode);
+        Assert.Equal(TxnErrorStatus.None, resp.Status);
         Assert.True(resp.ProducerId > 0);
         // First epoch after the fresh-init bump is 1 (initial 0 → bumped to 1).
         Assert.True(resp.ProducerEpoch >= 1);
@@ -76,7 +75,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
 
         var retry = await Init("tx-idem", first.ProducerId, first.ProducerEpoch);
 
-        Assert.Equal(ErrorCode.None, retry.ErrorCode);
+        Assert.Equal(TxnErrorStatus.None, retry.Status);
         Assert.Equal(first.ProducerId, retry.ProducerId);
         Assert.Equal(first.ProducerEpoch, retry.ProducerEpoch);
     }
@@ -95,7 +94,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
         // old (pid, epoch). Server must fence.
         var zombie = await Init("tx-zombie", live.ProducerId, live.ProducerEpoch);
 
-        Assert.Equal(ErrorCode.InvalidProducerEpoch, zombie.ErrorCode);
+        Assert.Equal(TxnErrorStatus.InvalidProducerEpoch, zombie.Status);
         // The response carries the current authoritative state so a polite client
         // can update its own bookkeeping.
         Assert.Equal(renewed.ProducerEpoch, zombie.ProducerEpoch);
@@ -110,7 +109,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
         // by definition not the current incarnation and must be fenced.
         var foreigner = await Init("tx-foreign", producerId: live.ProducerId + 9999, live.ProducerEpoch);
 
-        Assert.Equal(ErrorCode.InvalidProducerEpoch, foreigner.ErrorCode);
+        Assert.Equal(TxnErrorStatus.InvalidProducerEpoch, foreigner.Status);
     }
 
     [Fact]
@@ -123,13 +122,9 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
         Assert.True(second.ProducerEpoch > first.ProducerEpoch); // server bumped
     }
 
-    private Task<InitProducerIdResponse> Init(string txnId, long producerId, short producerEpoch) =>
-        _coordinator.HandleInitProducerIdAsync(new InitProducerIdRequest
+    private Task<InitProducerIdResult> Init(string txnId, long producerId, short producerEpoch) =>
+        _coordinator.InitProducerIdAsync(new InitProducerIdCommand
         {
-            ApiKey = ApiKey.InitProducerId,
-            ApiVersion = 4,
-            CorrelationId = 0,
-            ClientId = "kip892-test",
             TransactionalId = txnId,
             TransactionTimeoutMs = 60_000,
             ProducerId = producerId,

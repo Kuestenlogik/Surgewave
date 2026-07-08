@@ -103,7 +103,8 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
             new TopicAdminHandler(config, _logManager, _quotaManager, auditLogger: null, _loggerFactory.CreateLogger<TopicAdminHandler>()),
             new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
             new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
-            new ConsumerGroupApiHandler(consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>())
+            new ConsumerGroupApiHandler(consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
+            new TransactionApiHandler(transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>())
         ];
         var dispatcher = new RequestDispatcher(handlers);
 
