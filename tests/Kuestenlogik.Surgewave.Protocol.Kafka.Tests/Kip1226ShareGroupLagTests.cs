@@ -11,11 +11,11 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka.Tests;
 /// <c>LeaderEpoch</c> and <c>ErrorCode</c>. Without it, kafka-share-groups.sh
 /// --describe shows <c>Lag = -1</c> for every partition.
 ///
-/// The wire glue (v1 gating + the Lag field on DescribePartitionResult) and
-/// the broker-side computation (<c>HighWatermark - startOffset</c>, floor 0)
-/// were already in <c>ShareGroupCoordinator.HandleDescribeShareGroupOffsets</c>;
-/// these tests pin the round-trip framing so a future refactor can't silently
-/// drop the field again.
+/// The wire glue (v1 gating + the Lag field on DescribePartitionResult) lives in the DTO;
+/// the broker-side computation (<c>HighWatermark - startOffset</c>, floor 0) is in
+/// <c>ShareGroupCoordinator.DescribeOffsets</c> and the Kafka mapping in the
+/// <c>ShareGroupApiHandler</c> adapter (#59). These tests pin the round-trip framing so a
+/// future refactor can't silently drop the field again.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class Kip1226ShareGroupLagTests

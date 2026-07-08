@@ -141,16 +141,18 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
             consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>());
         var transactionApiHandler = new TransactionApiHandler(
             transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>());
+        var shareGroupApiHandler = new ShareGroupApiHandler(
+            shareGroupCoordinator, _loggerFactory.CreateLogger<ShareGroupApiHandler>());
 
         var handlers = new IKafkaRequestHandler[]
         {
-            dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler, transactionApiHandler
+            dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler, transactionApiHandler, shareGroupApiHandler
         };
         var dispatcher = new RequestDispatcher(handlers);
 
         _metrics = new BrokerMetrics();
         _broker = new SurgewaveBroker(
-            config, _logManager, recordBatchSerializer, shareGroupCoordinator, nativeGroupCoordinator,
+            config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
             transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
 
         _cts = new CancellationTokenSource();

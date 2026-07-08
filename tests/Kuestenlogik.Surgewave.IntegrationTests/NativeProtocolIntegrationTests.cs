@@ -104,12 +104,13 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
             new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
             new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
             new ConsumerGroupApiHandler(consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
-            new TransactionApiHandler(transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>())
+            new TransactionApiHandler(transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>()),
+            new ShareGroupApiHandler(shareGroupCoordinator, _loggerFactory.CreateLogger<ShareGroupApiHandler>())
         ];
         var dispatcher = new RequestDispatcher(handlers);
 
         _broker = new SurgewaveBroker(
-            config, _logManager, recordBatchSerializer, shareGroupCoordinator, nativeGroupCoordinator,
+            config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
             transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
 
         _brokerCts = new CancellationTokenSource();
