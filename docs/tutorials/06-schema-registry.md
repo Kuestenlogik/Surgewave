@@ -99,14 +99,14 @@ mkdir surgewave-schema-tutorial && cd surgewave-schema-tutorial
 dotnet new console -n SchemaProducer
 cd SchemaProducer
 dotnet add package Kuestenlogik.Surgewave.Client
-dotnet add package Kuestenlogik.Surgewave.Client.SchemaRegistry
+dotnet add package Kuestenlogik.Surgewave.Schema.Registry.Client
 ```
 
 `SchemaProducer/Program.cs`:
 
 ```csharp
 using Kuestenlogik.Surgewave.Client;
-using Kuestenlogik.Surgewave.Client.SchemaRegistry;
+using Kuestenlogik.Surgewave.Schema.Registry.Client;
 
 // Define the User type matching the schema
 public record User(int Id, string Name, string Email);
@@ -148,14 +148,14 @@ Console.WriteLine("All users produced with schema validation.");
 dotnet new console -n SchemaConsumer
 cd SchemaConsumer
 dotnet add package Kuestenlogik.Surgewave.Client
-dotnet add package Kuestenlogik.Surgewave.Client.SchemaRegistry
+dotnet add package Kuestenlogik.Surgewave.Schema.Registry.Client
 ```
 
 `SchemaConsumer/Program.cs`:
 
 ```csharp
 using Kuestenlogik.Surgewave.Client;
-using Kuestenlogik.Surgewave.Client.SchemaRegistry;
+using Kuestenlogik.Surgewave.Schema.Registry.Client;
 
 public record User(int Id, string Name, string Email);
 
@@ -281,7 +281,7 @@ surgewave schema register orders-value --type AVRO --schema '{
 Use with the Avro serializer:
 
 ```csharp
-using Kuestenlogik.Surgewave.Client.SchemaRegistry.Avro;
+using Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro;
 
 await using var producer = new SurgewaveProducer<string, Order>(options =>
 {
