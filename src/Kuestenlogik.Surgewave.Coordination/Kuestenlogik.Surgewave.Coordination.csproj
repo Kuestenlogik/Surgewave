@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Protocol-neutral coordinator contracts for Surgewave (group / streams / share / transaction coordination). Interfaces + domain records with no wire-protocol (Kafka) dependency, so both the broker engine and protocol plugins can reference them (#59).</Description>
+  </PropertyGroup>
+</Project>

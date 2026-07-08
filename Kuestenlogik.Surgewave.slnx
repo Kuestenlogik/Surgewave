@@ -8,6 +8,7 @@
     <Project Path="src/Kuestenlogik.Surgewave.Plugins.Packaging.Testing/Kuestenlogik.Surgewave.Plugins.Packaging.Testing.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Sdk/Kuestenlogik.Surgewave.Sdk.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Core/Kuestenlogik.Surgewave.Core.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Coordination/Kuestenlogik.Surgewave.Coordination.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Protocol/Kuestenlogik.Surgewave.Protocol.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Protocol.Kafka/Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Protocol.Native/Kuestenlogik.Surgewave.Protocol.Native.csproj" />
