@@ -150,7 +150,18 @@ public sealed class SurgewaveClientBuilder
 
         if (protocol == ProtocolType.Auto)
         {
-            protocol = await DetectProtocolAsync(cancellationToken);
+            // Native-first: probe the Surgewave native protocol and, if it
+            // connects, reuse that connection (no second connect). The native
+            // protocol has no TLS/SASL yet (see CreateNativeClient), so a secured
+            // Auto build skips the probe and uses Kafka directly. Anything else
+            // falls back to Kafka.
+            if (_ssl is null && _sasl is null)
+            {
+                var native = await TryConnectNativeAsync(cancellationToken);
+                if (native is not null)
+                    return native;
+            }
+            protocol = ProtocolType.Kafka;
         }
 
         ISurgewaveClient client = protocol switch
@@ -191,41 +202,40 @@ public sealed class SurgewaveClientBuilder
 #pragma warning restore CA2000
 
     /// <summary>
-    /// Detect the best protocol by attempting Surgewave Native connection first.
+    /// Probe the Surgewave native protocol and return the CONNECTED client for
+    /// reuse, or <c>null</c> if native isn't reachable (the caller then falls back
+    /// to Kafka). Bounded by a short detection timeout — and that token is actually
+    /// passed to <c>ConnectAsync</c>, so a hung native connect can't stall Auto
+    /// selection. The probe client is the same one Auto would return, so a
+    /// successful probe avoids a second connect.
     /// </summary>
-    private async Task<ProtocolType> DetectProtocolAsync(CancellationToken cancellationToken)
+    // CA2000: on success the connected client is RETURNED and owned by the caller
+    // (same "caller owns the result" pattern as Build/BuildAsync); every failure
+    // path below disposes the probe. The analyzer can't prove the ownership
+    // transfer through the try/catch, so suppress it here.
+#pragma warning disable CA2000
+    private async Task<ISurgewaveClient?> TryConnectNativeAsync(CancellationToken cancellationToken)
     {
+        var client = new SurgewaveClient(_bootstrapServers, _clientId, _transport);
         try
         {
-            var (host, port) = ParseBootstrapServers(_bootstrapServers);
-            var client = new SurgewaveNativeClient(host, port, _transport);
-
-            try
-            {
-                // Try to connect with Surgewave Native protocol
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(5)); // Quick timeout for detection
-
-                await client.ConnectAsync();
-
-                // If we got here, Surgewave Native is supported
-                return ProtocolType.SurgewaveNative;
-            }
-            finally
-            {
-                await client.DisposeAsync();
-            }
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(5)); // Quick timeout for detection
+            await client.ConnectAsync(cts.Token);
+            return client; // caller owns the connected client
+        }
+        catch when (!cancellationToken.IsCancellationRequested)
+        {
+            // A failed / timed-out native probe just means "fall back to Kafka".
+            await client.DisposeAsync();
+            return null;
         }
         catch
         {
-            // Surgewave Native failed, fall back to Kafka
-            return ProtocolType.Kafka;
+            // Real caller cancellation: dispose the probe and propagate.
+            await client.DisposeAsync();
+            throw;
         }
     }
-
-    private static (string host, int port) ParseBootstrapServers(string servers)
-    {
-        var parts = servers.Split(':');
-        return (parts[0], parts.Length > 1 ? int.Parse(parts[1]) : 9092);
-    }
+#pragma warning restore CA2000
 }
