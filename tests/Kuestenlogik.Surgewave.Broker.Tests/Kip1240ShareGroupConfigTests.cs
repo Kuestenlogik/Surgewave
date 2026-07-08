@@ -2,9 +2,8 @@ using System.Reflection;
 using System.Text.Json;
 using Kuestenlogik.Surgewave.Broker.Queue;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
+using Kuestenlogik.Surgewave.Coordination.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,10 +22,11 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 /// Surgewave captures all three as structural state on
 /// <see cref="ShareGroupState"/>. <c>RenewAcknowledgeEnabled</c> is enforced
 /// inline in the coordinator's ack-batch loop: a RENEW ack against a group
-/// where the flag is <c>false</c> returns <see cref="ErrorCode.InvalidRequest"/>
+/// where the flag is <c>false</c> returns <see cref="ShareGroupErrorStatus.InvalidRequest"/>
 /// (per the KIP). The other two are forward-compat state today — full
 /// archive-on-overflow and per-partition lock-cap enforcement are
-/// documented follow-ups (see kips.md).
+/// documented follow-ups (see kips.md). Exercises the protocol-neutral
+/// coordinator surface directly (#59).
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class Kip1240ShareGroupConfigTests : IDisposable
@@ -105,58 +105,14 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         // Set up: establish the group via a heartbeat, then flip
         // RenewAcknowledgeEnabled to false (the IncrementalAlterConfigs path
         // for share groups isn't wired yet — see kips.md follow-up).
-        var hb = _coordinator.HandleShareGroupHeartbeat(new ShareGroupHeartbeatRequest
-        {
-            ApiKey = ApiKey.ShareGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
-            ClientId = "c1",
-            GroupId = "g-renew-off",
-            MemberId = "",
-            MemberEpoch = 0,
-            SubscribedTopicNames = [Topic],
-        });
-        Assert.Equal(ErrorCode.None, hb.ErrorCode);
-
+        var hb = _coordinator.Heartbeat(Join("c1", "g-renew-off"));
         FlipRenewEnabled("g-renew-off", false);
 
-        var ack = _coordinator.HandleShareAcknowledge(new ShareAcknowledgeRequest
-        {
-            ApiKey = ApiKey.ShareAcknowledge,
-            ApiVersion = 2,
-            CorrelationId = 1,
-            ClientId = "c1",
-            GroupId = "g-renew-off",
-            MemberId = hb.MemberId,
-            ShareSessionEpoch = 1,
-            IsRenewAck = true,
-            Topics =
-            [
-                new ShareAcknowledgeRequest.AcknowledgeTopic
-                {
-                    TopicId = _logManager.GetTopicId(Topic),
-                    Partitions =
-                    [
-                        new ShareAcknowledgeRequest.AcknowledgePartition
-                        {
-                            PartitionIndex = 0,
-                            AcknowledgementBatches =
-                            [
-                                new ShareAcknowledgeRequest.AcknowledgementBatch
-                                {
-                                    FirstOffset = 0,
-                                    LastOffset = 0,
-                                    AcknowledgeTypes = [(sbyte)4], // Renew
-                                },
-                            ],
-                        },
-                    ],
-                },
-            ],
-        });
+        var ack = _coordinator.ShareAcknowledge(RenewAck("g-renew-off"));
 
         var partition = ack.Responses.Single().Partitions.Single();
-        Assert.Equal(ErrorCode.InvalidRequest, partition.ErrorCode);
+        Assert.Equal(ShareGroupErrorStatus.InvalidRequest, partition.Status);
+        Assert.NotEqual("", hb.MemberId);
     }
 
     [Fact]
@@ -165,58 +121,14 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         // Default group has RenewAcknowledgeEnabled=true (upstream default),
         // so a RENEW ack must NOT fail with InvalidRequest. The ack itself
         // may still error (UnknownTopicOrPartition because the QueueView
-        // doesn't have the message ID), but the per-partition error code
+        // doesn't have the message ID), but the per-partition status
         // must not be InvalidRequest — that's what proves the gate is open.
-        var hb = _coordinator.HandleShareGroupHeartbeat(new ShareGroupHeartbeatRequest
-        {
-            ApiKey = ApiKey.ShareGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
-            ClientId = "c2",
-            GroupId = "g-renew-on",
-            MemberId = "",
-            MemberEpoch = 0,
-            SubscribedTopicNames = [Topic],
-        });
-        Assert.Equal(ErrorCode.None, hb.ErrorCode);
+        _ = _coordinator.Heartbeat(Join("c2", "g-renew-on"));
 
-        var ack = _coordinator.HandleShareAcknowledge(new ShareAcknowledgeRequest
-        {
-            ApiKey = ApiKey.ShareAcknowledge,
-            ApiVersion = 2,
-            CorrelationId = 1,
-            ClientId = "c2",
-            GroupId = "g-renew-on",
-            MemberId = hb.MemberId,
-            ShareSessionEpoch = 1,
-            IsRenewAck = true,
-            Topics =
-            [
-                new ShareAcknowledgeRequest.AcknowledgeTopic
-                {
-                    TopicId = _logManager.GetTopicId(Topic),
-                    Partitions =
-                    [
-                        new ShareAcknowledgeRequest.AcknowledgePartition
-                        {
-                            PartitionIndex = 0,
-                            AcknowledgementBatches =
-                            [
-                                new ShareAcknowledgeRequest.AcknowledgementBatch
-                                {
-                                    FirstOffset = 0,
-                                    LastOffset = 0,
-                                    AcknowledgeTypes = [(sbyte)4], // Renew
-                                },
-                            ],
-                        },
-                    ],
-                },
-            ],
-        });
+        var ack = _coordinator.ShareAcknowledge(RenewAck("g-renew-on"));
 
         var partition = ack.Responses.Single().Partitions.Single();
-        Assert.NotEqual(ErrorCode.InvalidRequest, partition.ErrorCode);
+        Assert.NotEqual(ShareGroupErrorStatus.InvalidRequest, partition.Status);
     }
 
     [Fact]
@@ -226,44 +138,45 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         // first-heartbeat with first-fetch in some configs). The coordinator
         // must NOT reject with InvalidRequest just because the group hasn't
         // been established — fallback is the broker default (true).
-        var ack = _coordinator.HandleShareAcknowledge(new ShareAcknowledgeRequest
+        var ack = _coordinator.ShareAcknowledge(RenewAck("g-doesnt-exist-yet"));
+
+        var partition = ack.Responses.Single().Partitions.Single();
+        Assert.NotEqual(ShareGroupErrorStatus.InvalidRequest, partition.Status);
+    }
+
+    private ShareGroupHeartbeatCommand Join(string clientId, string groupId)
+        => new()
         {
-            ApiKey = ApiKey.ShareAcknowledge,
-            ApiVersion = 2,
-            CorrelationId = 1,
-            ClientId = "c3",
-            GroupId = "g-doesnt-exist-yet",
-            MemberId = "anyone",
-            ShareSessionEpoch = 0,
-            IsRenewAck = true,
+            GroupId = groupId,
+            MemberId = "",
+            MemberEpoch = 0,
+            ClientId = clientId,
+            SubscribedTopicNames = [Topic],
+        };
+
+    private ShareAcknowledgeCommand RenewAck(string groupId)
+        => new()
+        {
+            GroupId = groupId,
             Topics =
             [
-                new ShareAcknowledgeRequest.AcknowledgeTopic
+                new ShareAcknowledgeTopic
                 {
                     TopicId = _logManager.GetTopicId(Topic),
                     Partitions =
                     [
-                        new ShareAcknowledgeRequest.AcknowledgePartition
+                        new ShareAcknowledgePartition
                         {
                             PartitionIndex = 0,
                             AcknowledgementBatches =
                             [
-                                new ShareAcknowledgeRequest.AcknowledgementBatch
-                                {
-                                    FirstOffset = 0,
-                                    LastOffset = 0,
-                                    AcknowledgeTypes = [(sbyte)4],
-                                },
+                                new ShareAcknowledgementBatch(0, 0, [(sbyte)4]), // Renew
                             ],
                         },
                     ],
                 },
             ],
-        });
-
-        var partition = ack.Responses.Single().Partitions.Single();
-        Assert.NotEqual(ErrorCode.InvalidRequest, partition.ErrorCode);
-    }
+        };
 
     /// <summary>
     /// Reaches into the coordinator's private <c>_shareGroups</c> dictionary to

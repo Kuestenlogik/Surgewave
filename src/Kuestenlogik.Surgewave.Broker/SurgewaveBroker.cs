@@ -52,9 +52,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     // a plugin (#59). Built from the same startup state as the dispatcher.
     private readonly IConnectionHandler[] _connectionHandlers;
 
-    // Coordinators whose fast-path APIs are still dispatched directly from the broker.
-    private readonly ShareGroupCoordinator _shareGroupCoordinator;
-
     // Metrics
     private readonly BrokerMetrics _metrics;
 
@@ -84,7 +81,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         BrokerConfig config,
         LogManager logManager,
         RecordBatchSerializer serializer,
-        ShareGroupCoordinator shareGroupCoordinator,
         NativeGroupCoordinator nativeGroupCoordinator,
         TransactionCoordinator transactionCoordinator,
         QuotaManager quotaManager,
@@ -103,7 +99,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     {
         _config = config;
         _logManager = logManager;
-        _shareGroupCoordinator = shareGroupCoordinator;
         _protocolHandler = protocolHandler;
         _metrics = metrics;
         _dispatcher = dispatcher;
@@ -547,28 +542,12 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
 
     private async Task<KafkaResponse> ProcessRequestAsync(KafkaRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
     {
-        // Fast-path the coordinator APIs that still return synchronously, skipping the
-        // dispatcher for these common operations.
-        switch (request)
-        {
-            // Classic consumer group (JoinGroup/SyncGroup/Heartbeat/LeaveGroup/OffsetCommit/
-            // OffsetFetch/DescribeGroups/ListGroups/DeleteGroups/OffsetDelete), consumer group
-            // v2 (KIP-848), streams group (KIP-1071) and the transaction APIs (InitProducerId/
-            // AddPartitionsToTxn/AddOffsetsToTxn/TxnOffsetCommit/EndTxn/DescribeProducers/
-            // DescribeTransactions/ListTransactions) route through the dispatcher -> their
-            // ApiHandler adapters: those coordinators are now protocol-neutral and the adapters
-            // own the Kafka<->neutral conversion (#59).
+        // All coordinator APIs — consumer group (classic + KIP-848 v2), streams group (KIP-1071),
+        // transactions and share groups (KIP-932) — now route through the dispatcher to their
+        // protocol-neutral ApiHandler adapters, which own the Kafka<->neutral conversion (#59).
+        // The broker no longer holds any coordinator reference for a request fast-path.
 
-            // Handle share group APIs directly (fast-path for common operations)
-            case ShareGroupHeartbeatRequest shareGroupHeartbeatRequest:
-                return _shareGroupCoordinator.HandleShareGroupHeartbeat(shareGroupHeartbeatRequest);
-            case ShareFetchRequest shareFetchRequest:
-                return await _shareGroupCoordinator.HandleShareFetch(shareFetchRequest, cancellationToken);
-            case ShareAcknowledgeRequest shareAcknowledgeRequest:
-                return _shareGroupCoordinator.HandleShareAcknowledge(shareAcknowledgeRequest);
-        }
-
-        // Use dispatcher for all other requests (O(1) frozen dictionary lookup)
+        // Dispatch via the frozen dictionary (O(1) lookup).
         var context = new RequestContext
         {
             ConnectionState = connectionState,

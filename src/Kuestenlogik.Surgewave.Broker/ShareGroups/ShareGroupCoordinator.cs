@@ -1,9 +1,8 @@
 using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
+using Kuestenlogik.Surgewave.Coordination.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Queue;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
@@ -12,8 +11,11 @@ namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
 /// Manages share group lifecycle, membership, record acquisition, and acknowledgements (KIP-932).
 /// Share groups deliver every record to exactly one member at a time, with per-message acknowledgement.
 /// Unlike consumer groups, ALL partitions of subscribed topics are assigned to ALL members.
+/// Speaks the protocol-neutral <see cref="IShareGroupCoordinator"/> contract; the Kafka DTO conversion
+/// lives in the <c>ShareGroupApiHandler</c> adapter (#59). The fetched record bytes are passed through
+/// by reference to keep the share-consume path zero-copy.
 /// </summary>
-public sealed class ShareGroupCoordinator
+public sealed class ShareGroupCoordinator : IShareGroupCoordinator
 {
     private readonly ILogger<ShareGroupCoordinator> logger;
     private readonly LogManager logManager;
@@ -49,7 +51,7 @@ public sealed class ShareGroupCoordinator
     // ShareGroupHeartbeat (API Key 76)
     // ─────────────────────────────────────────────────────────────
 
-    public ShareGroupHeartbeatResponse HandleShareGroupHeartbeat(ShareGroupHeartbeatRequest request)
+    public ShareGroupHeartbeatResult Heartbeat(ShareGroupHeartbeatCommand request)
     {
         lock (_groupLock)
         {
@@ -106,7 +108,7 @@ public sealed class ShareGroupCoordinator
             bool subscriptionChanged = false;
             if (request.SubscribedTopicNames != null)
             {
-                member.SubscribedTopicNames = request.SubscribedTopicNames;
+                member.SubscribedTopicNames = [.. request.SubscribedTopicNames];
                 subscriptionChanged = true;
             }
 
@@ -123,11 +125,8 @@ public sealed class ShareGroupCoordinator
 
             _persistence?.Save(group.GroupId, group);
 
-            return new ShareGroupHeartbeatResponse
+            return new ShareGroupHeartbeatResult
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
                 MemberId = memberId,
                 MemberEpoch = member.MemberEpoch,
                 HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
@@ -136,7 +135,7 @@ public sealed class ShareGroupCoordinator
         }
     }
 
-    private ShareGroupHeartbeatResponse HandleShareGroupLeave(ShareGroupHeartbeatRequest request)
+    private ShareGroupHeartbeatResult HandleShareGroupLeave(ShareGroupHeartbeatCommand request)
     {
         if (_shareGroups.TryGetValue(request.GroupId, out var group))
         {
@@ -158,11 +157,8 @@ public sealed class ShareGroupCoordinator
             }
         }
 
-        return new ShareGroupHeartbeatResponse
+        return new ShareGroupHeartbeatResult
         {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
             MemberId = request.MemberId,
             MemberEpoch = -1,
             HeartbeatIntervalMs = DefaultHeartbeatIntervalMs
@@ -173,19 +169,19 @@ public sealed class ShareGroupCoordinator
     // ShareGroupDescribe (API Key 77)
     // ─────────────────────────────────────────────────────────────
 
-    public ShareGroupDescribeResponse HandleShareGroupDescribe(ShareGroupDescribeRequest request)
+    public IReadOnlyList<ShareGroupDescription> Describe(IReadOnlyList<string> groupIds)
     {
         lock (_groupLock)
         {
-            var groups = new List<ShareGroupDescribeResponse.DescribedGroup>(request.GroupIds.Count);
+            var groups = new List<ShareGroupDescription>(groupIds.Count);
 
-            foreach (var groupId in request.GroupIds)
+            foreach (var groupId in groupIds)
             {
                 if (!_shareGroups.TryGetValue(groupId, out var group))
                 {
-                    groups.Add(new ShareGroupDescribeResponse.DescribedGroup
+                    groups.Add(new ShareGroupDescription
                     {
-                        ErrorCode = ErrorCode.InvalidGroupId,
+                        Status = ShareGroupErrorStatus.InvalidGroupId,
                         GroupId = groupId,
                         GroupState = "",
                         AssignorName = "uniform",
@@ -194,11 +190,11 @@ public sealed class ShareGroupCoordinator
                     continue;
                 }
 
-                var members = new List<ShareGroupDescribeResponse.Member>(group.Members.Count);
+                var members = new List<ShareGroupMemberDescription>(group.Members.Count);
                 foreach (var m in group.Members.Values)
                 {
                     var assignment = BuildDescribeAssignment(group, m);
-                    members.Add(new ShareGroupDescribeResponse.Member
+                    members.Add(new ShareGroupMemberDescription
                     {
                         MemberId = m.MemberId,
                         RackId = m.RackId,
@@ -210,9 +206,9 @@ public sealed class ShareGroupCoordinator
                     });
                 }
 
-                groups.Add(new ShareGroupDescribeResponse.DescribedGroup
+                groups.Add(new ShareGroupDescription
                 {
-                    ErrorCode = ErrorCode.None,
+                    Status = ShareGroupErrorStatus.None,
                     GroupId = groupId,
                     GroupState = GetGroupState(group),
                     GroupEpoch = group.GroupEpoch,
@@ -226,12 +222,7 @@ public sealed class ShareGroupCoordinator
                 });
             }
 
-            return new ShareGroupDescribeResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                Groups = groups
-            };
+            return groups;
         }
     }
 
@@ -239,25 +230,25 @@ public sealed class ShareGroupCoordinator
     // ShareFetch (API Key 78)
     // ─────────────────────────────────────────────────────────────
 
-    public async Task<ShareFetchResponse> HandleShareFetch(ShareFetchRequest request, CancellationToken cancellationToken)
+    public async Task<ShareFetchResult> ShareFetchAsync(ShareFetchCommand request, CancellationToken cancellationToken)
     {
-        var responses = new List<ShareFetchResponse.ShareFetchableTopicResponse>(request.Topics.Count);
+        var responses = new List<ShareFetchTopicResult>(request.Topics.Count);
         // KIP-1240 — group-level renew gate, looked up once per request.
         var renewEnabled = LookupRenewEnabled(request.GroupId);
 
         foreach (var fetchTopic in request.Topics)
         {
             var topicName = logManager.ResolveTopicId(fetchTopic.TopicId);
-            var partitions = new List<ShareFetchResponse.PartitionData>(fetchTopic.Partitions.Count);
+            var partitions = new List<ShareFetchPartitionResult>(fetchTopic.Partitions.Count);
 
             foreach (var fetchPartition in fetchTopic.Partitions)
             {
-                var acknowledgeErrorCode = ErrorCode.None;
+                var acknowledgeStatus = ShareGroupErrorStatus.None;
 
                 // Process inline acknowledgement batches first
                 if (fetchPartition.AcknowledgementBatches.Count > 0 && topicName != null)
                 {
-                    acknowledgeErrorCode = ProcessAcknowledgementBatches(
+                    acknowledgeStatus = ProcessAcknowledgementBatches(
                         topicName, fetchPartition.PartitionIndex, fetchPartition.AcknowledgementBatches, renewEnabled);
                 }
 
@@ -268,12 +259,12 @@ public sealed class ShareGroupCoordinator
                 // emittiert keine Metrics fuer null-Topics, also kein NPE-Pfad.
                 if (topicName == null)
                 {
-                    partitions.Add(new ShareFetchResponse.PartitionData
+                    partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
-                        ErrorCode = ErrorCode.UnknownTopicId,
-                        AcknowledgeErrorCode = acknowledgeErrorCode,
-                        CurrentLeader = new ShareFetchResponse.LeaderIdAndEpoch { LeaderId = -1, LeaderEpoch = -1 },
+                        Status = ShareGroupErrorStatus.UnknownTopicId,
+                        AcknowledgeStatus = acknowledgeStatus,
+                        CurrentLeader = new ShareLeader(-1, -1),
                         AcquiredRecords = []
                     });
                     continue;
@@ -283,12 +274,12 @@ public sealed class ShareGroupCoordinator
                 var log = logManager.GetLog(tp);
                 if (log == null)
                 {
-                    partitions.Add(new ShareFetchResponse.PartitionData
+                    partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
-                        ErrorCode = ErrorCode.UnknownTopicOrPartition,
-                        AcknowledgeErrorCode = acknowledgeErrorCode,
-                        CurrentLeader = new ShareFetchResponse.LeaderIdAndEpoch { LeaderId = -1, LeaderEpoch = -1 },
+                        Status = ShareGroupErrorStatus.UnknownTopicOrPartition,
+                        AcknowledgeStatus = acknowledgeStatus,
+                        CurrentLeader = new ShareLeader(-1, -1),
                         AcquiredRecords = []
                     });
                     continue;
@@ -310,7 +301,7 @@ public sealed class ShareGroupCoordinator
 
                     // Build records from in-flight messages
                     byte[]? records = null;
-                    var acquiredRecords = new List<ShareFetchResponse.AcquiredRecords>();
+                    var acquiredRecords = new List<ShareAcquiredRecords>();
 
                     if (messages.Count > 0)
                     {
@@ -343,31 +334,21 @@ public sealed class ShareGroupCoordinator
                             }
                             else
                             {
-                                acquiredRecords.Add(new ShareFetchResponse.AcquiredRecords
-                                {
-                                    FirstOffset = rangeStart.Offset,
-                                    LastOffset = rangeLast.Offset,
-                                    DeliveryCount = (short)rangeStart.DeliveryCount
-                                });
+                                acquiredRecords.Add(new ShareAcquiredRecords(rangeStart.Offset, rangeLast.Offset, (short)rangeStart.DeliveryCount));
                                 rangeStart = current;
                                 rangeLast = current;
                             }
                         }
 
-                        acquiredRecords.Add(new ShareFetchResponse.AcquiredRecords
-                        {
-                            FirstOffset = rangeStart.Offset,
-                            LastOffset = rangeLast.Offset,
-                            DeliveryCount = (short)rangeStart.DeliveryCount
-                        });
+                        acquiredRecords.Add(new ShareAcquiredRecords(rangeStart.Offset, rangeLast.Offset, (short)rangeStart.DeliveryCount));
                     }
 
-                    partitions.Add(new ShareFetchResponse.PartitionData
+                    partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
-                        ErrorCode = ErrorCode.None,
-                        AcknowledgeErrorCode = acknowledgeErrorCode,
-                        CurrentLeader = new ShareFetchResponse.LeaderIdAndEpoch { LeaderId = 0, LeaderEpoch = 0 },
+                        Status = ShareGroupErrorStatus.None,
+                        AcknowledgeStatus = acknowledgeStatus,
+                        CurrentLeader = new ShareLeader(0, 0),
                         Records = records,
                         AcquiredRecords = acquiredRecords
                     });
@@ -375,123 +356,100 @@ public sealed class ShareGroupCoordinator
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "ShareFetch error for {Topic}-{Partition}", topicName, fetchPartition.PartitionIndex);
-                    partitions.Add(new ShareFetchResponse.PartitionData
+                    partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
-                        ErrorCode = ErrorCode.Unknown,
-                        AcknowledgeErrorCode = acknowledgeErrorCode,
-                        CurrentLeader = new ShareFetchResponse.LeaderIdAndEpoch { LeaderId = -1, LeaderEpoch = -1 },
+                        Status = ShareGroupErrorStatus.Unknown,
+                        AcknowledgeStatus = acknowledgeStatus,
+                        CurrentLeader = new ShareLeader(-1, -1),
                         AcquiredRecords = []
                     });
                 }
             }
 
-            responses.Add(new ShareFetchResponse.ShareFetchableTopicResponse
-            {
-                TopicId = fetchTopic.TopicId,
-                Partitions = partitions
-            });
+            responses.Add(new ShareFetchTopicResult(fetchTopic.TopicId, partitions));
         }
 
-        return new ShareFetchResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            Responses = responses,
-            NodeEndpoints = []
-        };
+        return new ShareFetchResult(responses);
     }
 
     // ─────────────────────────────────────────────────────────────
     // ShareAcknowledge (API Key 79)
     // ─────────────────────────────────────────────────────────────
 
-    public ShareAcknowledgeResponse HandleShareAcknowledge(ShareAcknowledgeRequest request)
+    public ShareAcknowledgeResult ShareAcknowledge(ShareAcknowledgeCommand request)
     {
-        var responses = new List<ShareAcknowledgeResponse.ShareAcknowledgeTopicResponse>(request.Topics.Count);
+        var responses = new List<ShareAcknowledgeTopicResult>(request.Topics.Count);
         // KIP-1240 — group-level renew gate, looked up once per request.
         var renewEnabled = LookupRenewEnabled(request.GroupId);
 
         foreach (var ackTopic in request.Topics)
         {
             var topicName = logManager.ResolveTopicId(ackTopic.TopicId);
-            var partitions = new List<ShareAcknowledgeResponse.PartitionData>(ackTopic.Partitions.Count);
+            var partitions = new List<ShareAcknowledgePartitionResult>(ackTopic.Partitions.Count);
 
             foreach (var ackPartition in ackTopic.Partitions)
             {
                 if (topicName == null)
                 {
-                    partitions.Add(new ShareAcknowledgeResponse.PartitionData
+                    partitions.Add(new ShareAcknowledgePartitionResult
                     {
                         PartitionIndex = ackPartition.PartitionIndex,
-                        ErrorCode = ErrorCode.UnknownTopicId,
-                        CurrentLeader = new ShareAcknowledgeResponse.LeaderIdAndEpoch { LeaderId = -1, LeaderEpoch = -1 }
+                        Status = ShareGroupErrorStatus.UnknownTopicId,
+                        CurrentLeader = new ShareLeader(-1, -1)
                     });
                     continue;
                 }
 
-                var errorCode = ProcessAcknowledgementBatches(
+                var status = ProcessAcknowledgementBatches(
                     topicName, ackPartition.PartitionIndex, ackPartition.AcknowledgementBatches, renewEnabled);
 
-                partitions.Add(new ShareAcknowledgeResponse.PartitionData
+                partitions.Add(new ShareAcknowledgePartitionResult
                 {
                     PartitionIndex = ackPartition.PartitionIndex,
-                    ErrorCode = errorCode,
-                    CurrentLeader = new ShareAcknowledgeResponse.LeaderIdAndEpoch { LeaderId = 0, LeaderEpoch = 0 }
+                    Status = status,
+                    CurrentLeader = new ShareLeader(0, 0)
                 });
             }
 
-            responses.Add(new ShareAcknowledgeResponse.ShareAcknowledgeTopicResponse
-            {
-                TopicId = ackTopic.TopicId,
-                Partitions = partitions
-            });
+            responses.Add(new ShareAcknowledgeTopicResult(ackTopic.TopicId, partitions));
         }
 
-        return new ShareAcknowledgeResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            Responses = responses,
-            NodeEndpoints = []
-        };
+        return new ShareAcknowledgeResult(responses);
     }
 
     // ─────────────────────────────────────────────────────────────
     // DescribeShareGroupOffsets (API Key 90)
     // ─────────────────────────────────────────────────────────────
 
-    public DescribeShareGroupOffsetsResponse HandleDescribeShareGroupOffsets(DescribeShareGroupOffsetsRequest request)
+    public DescribeShareOffsetsResult DescribeOffsets(DescribeShareOffsetsCommand request)
     {
         lock (_groupLock)
         {
-            var groups = new List<DescribeShareGroupOffsetsResponse.DescribeGroupResult>(request.Groups.Count);
+            var groups = new List<DescribeShareOffsetsGroupResult>(request.Groups.Count);
 
             foreach (var groupReq in request.Groups)
             {
                 if (!_shareGroups.TryGetValue(groupReq.GroupId, out var group))
                 {
-                    groups.Add(new DescribeShareGroupOffsetsResponse.DescribeGroupResult
+                    groups.Add(new DescribeShareOffsetsGroupResult
                     {
                         GroupId = groupReq.GroupId,
                         Topics = [],
-                        ErrorCode = ErrorCode.InvalidGroupId,
+                        Status = ShareGroupErrorStatus.InvalidGroupId,
                         ErrorMessage = "Share group not found"
                     });
                     continue;
                 }
 
-                var topics = new List<DescribeShareGroupOffsetsResponse.DescribeTopicResult>();
+                var topics = new List<DescribeShareOffsetsTopicResult>();
 
                 if (groupReq.Topics != null)
                 {
                     foreach (var topicReq in groupReq.Topics)
                     {
                         var topicId = logManager.GetTopicId(topicReq.TopicName);
-                        var metadata = logManager.GetTopicMetadata(topicReq.TopicName);
-                        var partitions = new List<DescribeShareGroupOffsetsResponse.DescribePartitionResult>(topicReq.Partitions.Count);
+                        var partitions = new List<DescribeShareOffsetsPartitionResult>(topicReq.Partitions.Count);
 
                         foreach (var partitionIndex in topicReq.Partitions)
                         {
@@ -508,17 +466,17 @@ public sealed class ShareGroupCoordinator
                                 if (lag < 0) lag = 0;
                             }
 
-                            partitions.Add(new DescribeShareGroupOffsetsResponse.DescribePartitionResult
+                            partitions.Add(new DescribeShareOffsetsPartitionResult
                             {
                                 PartitionIndex = partitionIndex,
                                 StartOffset = startOffset,
                                 LeaderEpoch = 0,
                                 Lag = lag,
-                                ErrorCode = ErrorCode.None
+                                Status = ShareGroupErrorStatus.None
                             });
                         }
 
-                        topics.Add(new DescribeShareGroupOffsetsResponse.DescribeTopicResult
+                        topics.Add(new DescribeShareOffsetsTopicResult
                         {
                             TopicName = topicReq.TopicName,
                             TopicId = topicId,
@@ -535,7 +493,7 @@ public sealed class ShareGroupCoordinator
                         var metadata = logManager.GetTopicMetadata(topicName);
                         if (metadata == null) continue;
 
-                        var partitions = new List<DescribeShareGroupOffsetsResponse.DescribePartitionResult>(metadata.PartitionCount);
+                        var partitions = new List<DescribeShareOffsetsPartitionResult>(metadata.PartitionCount);
                         for (int i = 0; i < metadata.PartitionCount; i++)
                         {
                             var key = string.Concat(topicName, ":", i.ToString());
@@ -550,17 +508,17 @@ public sealed class ShareGroupCoordinator
                                 if (lag < 0) lag = 0;
                             }
 
-                            partitions.Add(new DescribeShareGroupOffsetsResponse.DescribePartitionResult
+                            partitions.Add(new DescribeShareOffsetsPartitionResult
                             {
                                 PartitionIndex = i,
                                 StartOffset = startOffset,
                                 LeaderEpoch = 0,
                                 Lag = lag,
-                                ErrorCode = ErrorCode.None
+                                Status = ShareGroupErrorStatus.None
                             });
                         }
 
-                        topics.Add(new DescribeShareGroupOffsetsResponse.DescribeTopicResult
+                        topics.Add(new DescribeShareOffsetsTopicResult
                         {
                             TopicName = topicName,
                             TopicId = topicId,
@@ -569,20 +527,15 @@ public sealed class ShareGroupCoordinator
                     }
                 }
 
-                groups.Add(new DescribeShareGroupOffsetsResponse.DescribeGroupResult
+                groups.Add(new DescribeShareOffsetsGroupResult
                 {
                     GroupId = groupReq.GroupId,
                     Topics = topics,
-                    ErrorCode = ErrorCode.None
+                    Status = ShareGroupErrorStatus.None
                 });
             }
 
-            return new DescribeShareGroupOffsetsResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                Groups = groups
-            };
+            return new DescribeShareOffsetsResult(groups);
         }
     }
 
@@ -590,17 +543,15 @@ public sealed class ShareGroupCoordinator
     // AlterShareGroupOffsets (API Key 91)
     // ─────────────────────────────────────────────────────────────
 
-    public AlterShareGroupOffsetsResponse HandleAlterShareGroupOffsets(AlterShareGroupOffsetsRequest request)
+    public AlterShareOffsetsResult AlterOffsets(AlterShareOffsetsCommand request)
     {
         lock (_groupLock)
         {
             if (!_shareGroups.TryGetValue(request.GroupId, out var group))
             {
-                return new AlterShareGroupOffsetsResponse
+                return new AlterShareOffsetsResult
                 {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.InvalidGroupId,
+                    Status = ShareGroupErrorStatus.InvalidGroupId,
                     ErrorMessage = "Share group not found",
                     Responses = []
                 };
@@ -609,36 +560,30 @@ public sealed class ShareGroupCoordinator
             // Can only alter offsets when group is empty
             if (group.Members.Count > 0)
             {
-                return new AlterShareGroupOffsetsResponse
+                return new AlterShareOffsetsResult
                 {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.NonEmptyGroup,
+                    Status = ShareGroupErrorStatus.NonEmptyGroup,
                     ErrorMessage = "Cannot alter offsets while group has active members",
                     Responses = []
                 };
             }
 
-            var responses = new List<AlterShareGroupOffsetsResponse.AlterTopicResult>(request.Topics.Count);
+            var responses = new List<AlterShareOffsetsTopicResult>(request.Topics.Count);
 
             foreach (var topic in request.Topics)
             {
                 var topicId = logManager.GetTopicId(topic.TopicName);
-                var partitions = new List<AlterShareGroupOffsetsResponse.AlterPartitionResult>(topic.Partitions.Count);
+                var partitions = new List<AlterShareOffsetsPartitionResult>(topic.Partitions.Count);
 
                 foreach (var partition in topic.Partitions)
                 {
                     var key = string.Concat(topic.TopicName, ":", partition.PartitionIndex.ToString());
                     group.StartOffsets[key] = partition.StartOffset;
 
-                    partitions.Add(new AlterShareGroupOffsetsResponse.AlterPartitionResult
-                    {
-                        PartitionIndex = partition.PartitionIndex,
-                        ErrorCode = ErrorCode.None
-                    });
+                    partitions.Add(new AlterShareOffsetsPartitionResult(partition.PartitionIndex, ShareGroupErrorStatus.None));
                 }
 
-                responses.Add(new AlterShareGroupOffsetsResponse.AlterTopicResult
+                responses.Add(new AlterShareOffsetsTopicResult
                 {
                     TopicName = topic.TopicName,
                     TopicId = topicId,
@@ -651,11 +596,9 @@ public sealed class ShareGroupCoordinator
 
             _persistence?.Save(group.GroupId, group);
 
-            return new AlterShareGroupOffsetsResponse
+            return new AlterShareOffsetsResult
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
+                Status = ShareGroupErrorStatus.None,
                 Responses = responses
             };
         }
@@ -665,17 +608,15 @@ public sealed class ShareGroupCoordinator
     // DeleteShareGroupOffsets (API Key 92)
     // ─────────────────────────────────────────────────────────────
 
-    public DeleteShareGroupOffsetsResponse HandleDeleteShareGroupOffsets(DeleteShareGroupOffsetsRequest request)
+    public DeleteShareOffsetsResult DeleteOffsets(DeleteShareOffsetsCommand request)
     {
         lock (_groupLock)
         {
             if (!_shareGroups.TryGetValue(request.GroupId, out var group))
             {
-                return new DeleteShareGroupOffsetsResponse
+                return new DeleteShareOffsetsResult
                 {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.InvalidGroupId,
+                    Status = ShareGroupErrorStatus.InvalidGroupId,
                     ErrorMessage = "Share group not found",
                     Responses = []
                 };
@@ -684,17 +625,15 @@ public sealed class ShareGroupCoordinator
             // Can only delete offsets when group is empty
             if (group.Members.Count > 0)
             {
-                return new DeleteShareGroupOffsetsResponse
+                return new DeleteShareOffsetsResult
                 {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ErrorCode = ErrorCode.NonEmptyGroup,
+                    Status = ShareGroupErrorStatus.NonEmptyGroup,
                     ErrorMessage = "Cannot delete offsets while group has active members",
                     Responses = []
                 };
             }
 
-            var responses = new List<DeleteShareGroupOffsetsResponse.DeleteTopicResult>(request.Topics.Count);
+            var responses = new List<DeleteShareOffsetsTopicResult>(request.Topics.Count);
 
             foreach (var topic in request.Topics)
             {
@@ -720,11 +659,11 @@ public sealed class ShareGroupCoordinator
                     }
                 }
 
-                responses.Add(new DeleteShareGroupOffsetsResponse.DeleteTopicResult
+                responses.Add(new DeleteShareOffsetsTopicResult
                 {
                     TopicName = topic.TopicName,
                     TopicId = topicId,
-                    ErrorCode = ErrorCode.None
+                    Status = ShareGroupErrorStatus.None
                 });
             }
 
@@ -740,11 +679,9 @@ public sealed class ShareGroupCoordinator
                 _persistence?.Save(group.GroupId, group);
             }
 
-            return new DeleteShareGroupOffsetsResponse
+            return new DeleteShareOffsetsResult
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
+                Status = ShareGroupErrorStatus.None,
                 Responses = responses
             };
         }
@@ -755,22 +692,14 @@ public sealed class ShareGroupCoordinator
     // ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Common surface across <see cref="ShareFetchRequest.AcknowledgementBatch"/> and
-    /// <see cref="ShareAcknowledgeRequest.AcknowledgementBatch"/>. Both wire types carry
-    /// the same fields; this lets the per-record dispatcher live in one place.
-    /// </summary>
-    private readonly record struct AckBatch(long FirstOffset, long LastOffset, IReadOnlyList<sbyte> AcknowledgeTypes);
-
-    /// <summary>
     /// Processes acknowledgement batches against the QueueView for a given topic+partition.
     /// AcknowledgeType (KIP-932):
     ///   0=Gap (skip), 1=Accept (Ack), 2=Release (Nack+requeue), 3=Reject (DLQ), 4=Renew (extend lease).
     /// </summary>
-    private ErrorCode ProcessAcknowledgementBatches<TBatch>(
+    private ShareGroupErrorStatus ProcessAcknowledgementBatches(
         string topicName,
         int partitionIndex,
-        List<TBatch> batches,
-        Func<TBatch, AckBatch> project,
+        IReadOnlyList<ShareAcknowledgementBatch> batches,
         bool renewAcknowledgeEnabled)
     {
         // KIP-1240 — RENEW gate is checked up-front so it takes precedence
@@ -778,12 +707,11 @@ public sealed class ShareGroupCoordinator
         // config says so, regardless of whether the queue happens to exist.
         if (!renewAcknowledgeEnabled)
         {
-            foreach (var batch in batches)
+            foreach (var ack in batches)
             {
-                var ack = project(batch);
                 foreach (var ackType in ack.AcknowledgeTypes)
                 {
-                    if (ackType == 4) return ErrorCode.InvalidRequest;
+                    if (ackType == 4) return ShareGroupErrorStatus.InvalidRequest;
                 }
             }
         }
@@ -791,15 +719,13 @@ public sealed class ShareGroupCoordinator
         var queueView = queueViewManager.Get(topicName);
         if (queueView == null)
         {
-            return ErrorCode.UnknownTopicOrPartition;
+            return ShareGroupErrorStatus.UnknownTopicOrPartition;
         }
 
         try
         {
-            foreach (var batch in batches)
+            foreach (var ack in batches)
             {
-                var ack = project(batch);
-
                 for (long offset = ack.FirstOffset; offset <= ack.LastOffset; offset++)
                 {
                     var ackTypeIndex = (int)(offset - ack.FirstOffset);
@@ -831,33 +757,15 @@ public sealed class ShareGroupCoordinator
                 }
             }
 
-            return ErrorCode.None;
+            return ShareGroupErrorStatus.None;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error processing acknowledgement batches for {Topic}-{Partition}",
                 topicName, partitionIndex);
-            return ErrorCode.Unknown;
+            return ShareGroupErrorStatus.Unknown;
         }
     }
-
-    private ErrorCode ProcessAcknowledgementBatches(
-        string topicName,
-        int partitionIndex,
-        List<ShareFetchRequest.AcknowledgementBatch> batches,
-        bool renewAcknowledgeEnabled) =>
-        ProcessAcknowledgementBatches(topicName, partitionIndex, batches,
-            b => new AckBatch(b.FirstOffset, b.LastOffset, b.AcknowledgeTypes),
-            renewAcknowledgeEnabled);
-
-    private ErrorCode ProcessAcknowledgementBatches(
-        string topicName,
-        int partitionIndex,
-        List<ShareAcknowledgeRequest.AcknowledgementBatch> batches,
-        bool renewAcknowledgeEnabled) =>
-        ProcessAcknowledgementBatches(topicName, partitionIndex, batches,
-            b => new AckBatch(b.FirstOffset, b.LastOffset, b.AcknowledgeTypes),
-            renewAcknowledgeEnabled);
 
     /// <summary>
     /// KIP-1240 — look up a group's <see cref="ShareGroupState.RenewAcknowledgeEnabled"/>
@@ -1005,14 +913,14 @@ public sealed class ShareGroupCoordinator
     /// <summary>
     /// Builds the heartbeat assignment for a member: all partitions of all topics the member subscribed to.
     /// </summary>
-    private ShareGroupHeartbeatResponse.AssignmentInfo? BuildAssignment(ShareGroupState group, ShareGroupMember member)
+    private ShareAssignment? BuildAssignment(ShareGroupState group, ShareGroupMember member)
     {
         if (member.SubscribedTopicNames.Count == 0)
         {
             return null;
         }
 
-        var topicPartitions = new List<ShareGroupHeartbeatResponse.TopicPartitions>();
+        var topicPartitions = new List<ShareTopicPartitions>();
 
         foreach (var topicName in member.SubscribedTopicNames)
         {
@@ -1025,24 +933,20 @@ public sealed class ShareGroupCoordinator
                 partitions.Add(i);
             }
 
-            topicPartitions.Add(new ShareGroupHeartbeatResponse.TopicPartitions
-            {
-                TopicId = metadata.TopicId,
-                Partitions = partitions
-            });
+            topicPartitions.Add(new ShareTopicPartitions(metadata.TopicId, partitions));
         }
 
         return topicPartitions.Count > 0
-            ? new ShareGroupHeartbeatResponse.AssignmentInfo { TopicPartitions = topicPartitions }
+            ? new ShareAssignment(topicPartitions)
             : null;
     }
 
     /// <summary>
     /// Builds the describe assignment for a member (includes topic names in addition to IDs).
     /// </summary>
-    private ShareGroupDescribeResponse.AssignmentInfo BuildDescribeAssignment(ShareGroupState group, ShareGroupMember member)
+    private ShareDescribeAssignment BuildDescribeAssignment(ShareGroupState group, ShareGroupMember member)
     {
-        var topicPartitions = new List<ShareGroupDescribeResponse.ShareTopicPartitions>();
+        var topicPartitions = new List<ShareDescribeTopicPartitions>();
 
         foreach (var topicName in member.SubscribedTopicNames)
         {
@@ -1055,7 +959,7 @@ public sealed class ShareGroupCoordinator
                 partitions.Add(i);
             }
 
-            topicPartitions.Add(new ShareGroupDescribeResponse.ShareTopicPartitions
+            topicPartitions.Add(new ShareDescribeTopicPartitions
             {
                 TopicId = metadata.TopicId,
                 TopicName = topicName,
@@ -1063,7 +967,7 @@ public sealed class ShareGroupCoordinator
             });
         }
 
-        return new ShareGroupDescribeResponse.AssignmentInfo { TopicPartitions = topicPartitions };
+        return new ShareDescribeAssignment(topicPartitions);
     }
 
     private static string GetGroupState(ShareGroupState group)
