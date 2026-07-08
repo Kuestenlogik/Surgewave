@@ -633,6 +633,142 @@ if (featuresConfig.Ttl.Enabled)
         sp.GetRequiredService<BrokerMetrics>(),
         sp.GetRequiredService<ILogger<TtlIndex>>()));
 
+// Kafka-protocol auth stack in DI (#59 phase 2b). AclAuthorizer is SHARED broker-core
+// (native gRPC + REST consume it too, must resolve with Kafka off); SASL + SCRAM are
+// Kafka-only. Conditional on Security config; the SCRAM holder is always registered.
+builder.Services.AddKafkaSecurityServices(featuresConfig);
+
+// Kafka request handlers in DI (#59 phase 2b). Registered as IKafkaRequestHandler so the
+// dispatcher is built from GetServices<IKafkaRequestHandler>() (below) instead of a
+// hand-built array — the seam that later lets the handler stack move into the Kafka
+// plugin. Each factory is a 1:1 transcription of the former inline array, resolving the
+// (now DI-registered) coordinators/stores/auth. Gated on Kafka:Enabled; RaftApiHandler is
+// appended post-build because raftNode/raftPersistence are post-build locals.
+if (featuresConfig.Kafka.Enabled)
+{
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new DataApiHandler(
+        sp.GetRequiredService<BrokerConfig>(),
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<TransactionCoordinator>(),
+        sp.GetRequiredService<QuotaManager>(),
+        sp.GetRequiredService<RecordBatchSerializer>(),
+        sp.GetService<AclAuthorizer>(),
+        sp.GetService<DeduplicationManager>(),
+        sp.GetService<DelayIndex>(),
+        sp.GetService<TtlIndex>(),
+        sp.GetRequiredService<BrokerMetrics>(),
+        sp.GetRequiredService<ILogger<DataApiHandler>>(),
+        sp.GetRequiredService<BandwidthQuotaManager>(),
+        sp.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
+        coldStartProfiler: sp.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp =>
+    {
+        // Metadata handler is cluster-aware so the Kafka Metadata it serves reads ISR
+        // from the local ClusterState (reverse-ISR propagation, #69). Setter-wired here.
+        var metadataApiHandler = new MetadataApiHandler(
+            sp.GetRequiredService<BrokerConfig>(),
+            sp.GetRequiredService<LogManager>(),
+            sp.GetRequiredService<ILogger<MetadataApiHandler>>());
+        metadataApiHandler.SetClusterState(sp.GetRequiredService<ClusterState>());
+        metadataApiHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
+        return metadataApiHandler;
+    });
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new TopicAdminHandler(
+        sp.GetRequiredService<BrokerConfig>(),
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<QuotaManager>(),
+        sp.GetRequiredService<AuditLogger>(),
+        sp.GetRequiredService<ILogger<TopicAdminHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConfigApiHandler(
+        sp.GetRequiredService<BrokerConfig>(),
+        sp.GetRequiredService<DynamicBrokerConfig>(),
+        sp.GetRequiredService<LogManager>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp =>
+    {
+        var scram = sp.GetRequiredService<ScramStores>();
+        return new SecurityApiHandler(
+            sp.GetRequiredService<BrokerConfig>(),
+            sp.GetService<SaslAuthenticator>(),
+            sp.GetService<AclAuthorizer>(),
+            sp.GetRequiredService<AuditLogger>(),
+            sp.GetRequiredService<ILogger<SecurityApiHandler>>(),
+            scramSha256Store: scram.Sha256,
+            scramSha512Store: scram.Sha512);
+    });
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new InterBrokerApiHandler(
+        sp.GetRequiredService<BrokerConfig>(),
+        sp.GetRequiredService<ClusterState>(),
+        sp.GetRequiredService<ReplicaManager>(),
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<ILogger<InterBrokerApiHandler>>(),
+        sp.GetRequiredService<TransactionCoordinator>(),
+        isrUpdateApplier: sp.GetRequiredService<ClusterController>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupApiHandler(
+        sp.GetRequiredService<ConsumerGroupCoordinator>(),
+        sp.GetRequiredService<ILogger<ConsumerGroupApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ShareGroupApiHandler(
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>(),
+        sp.GetRequiredService<ILogger<ShareGroupApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupV2ApiHandler(
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>(),
+        sp.GetRequiredService<ILogger<ConsumerGroupV2ApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new StreamsGroupApiHandler(
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>(),
+        sp.GetRequiredService<ILogger<StreamsGroupApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterAdminHandler(
+        sp.GetRequiredService<ClusterController>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>(),
+        sp.GetRequiredService<ClusterState>(),
+        sp.GetRequiredService<ILogger<ClusterAdminHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new QuotaApiHandler(
+        sp.GetRequiredService<QuotaManager>(),
+        sp.GetRequiredService<ILogger<QuotaApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new DelegationTokenApiHandler(
+        sp.GetRequiredService<DelegationTokenManager>(),
+        sp.GetRequiredService<ILogger<DelegationTokenApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp =>
+    {
+        // KIP-714 telemetry: base logging ingestor, optionally wrapped with the topic
+        // sink decorator when Surgewave:Telemetry:TopicSinkEnabled (mirrors OTLP to a topic).
+        var telemetryConfig = sp.GetRequiredService<BrokerConfig>().Telemetry;
+        Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetryIngestor ingestor =
+            sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>();
+        if (telemetryConfig.Enabled && telemetryConfig.TopicSinkEnabled)
+        {
+            var telemetrySink = new Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink(
+                sp.GetRequiredService<LogManager>(),
+                sp.GetRequiredService<RecordBatchSerializer>(),
+                telemetryConfig,
+                sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink>>());
+            ingestor = new Kuestenlogik.Surgewave.Broker.Telemetry.TopicForwardingTelemetryIngestor(ingestor, telemetrySink);
+            sp.GetRequiredService<ILogger<TelemetryApiHandler>>().LogInformation(
+                "Telemetry topic sink enabled — mirroring OTLP payloads to {Topic}", telemetryConfig.TopicName);
+        }
+        return new TelemetryApiHandler(
+            sp.GetRequiredService<ILogger<TelemetryApiHandler>>(),
+            telemetryConfig,
+            ingestor);
+    });
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterMembershipHandler(
+        sp.GetRequiredService<ClusterIdManager>(),
+        sp.GetRequiredService<ClusterState>(),
+        sp.GetRequiredService<ILogger<ClusterMembershipHandler>>()));
+}
+
 var app = builder.Build();
 
 // Get dependencies
@@ -1162,86 +1298,11 @@ QuotaServiceImplHolder.Instance = new QuotaServiceImpl(
 // null means the broker runs native-only.
 IProtocolHandler? protocolHandler = config.Kafka.Enabled ? new KafkaProtocolHandler() : null;
 
-// Initialize security components if enabled
-SaslAuthenticator? saslAuthenticator = null;
-AclAuthorizer? aclAuthorizer = null;
-ScramCredentialStore? scramSha256Store = null;
-ScramCredentialStore? scramSha512Store = null;
-
-if (config.Security.SaslEnabled)
-{
-    var credentialStore = new CredentialStore(config.Security.CredentialsFile);
-
-    // Add users from config if specified
-    foreach (var userEntry in config.Security.Users)
-    {
-        var parts = userEntry.Split(':');
-        if (parts.Length == 2)
-        {
-            credentialStore.AddUser(parts[0], parts[1]);
-        }
-    }
-
-    // OAUTHBEARER (KIP-936): if the operator listed the mechanism in SaslMechanisms
-    // and supplied an OIDC authority or a JWKS URI, stand up a JWT validator and
-    // wire the SASL frame parser. Without the config block we leave OAUTHBEARER
-    // unbound — the SaslAuthenticator will reject the mechanism cleanly.
-    OAuthBearerAuthenticator? oauthBearerAuthenticator = null;
-    var oauthBearerEnabled = config.Security.OAuthBearer.Enabled
-        && config.Security.SaslMechanisms.Contains(SaslAuthenticator.MechanismOAuthBearer, StringComparer.OrdinalIgnoreCase);
-    if (oauthBearerEnabled)
-    {
-        var httpFactory = app.Services.GetRequiredService<IHttpClientFactory>();
-        var oauthHttp = httpFactory.CreateClient("oauthbearer-jwks");
-        oauthHttp.Timeout = TimeSpan.FromSeconds(30);
-        var jwksLogger = app.Services.GetRequiredService<ILogger<JwksTokenValidator>>();
-        var validator = new JwksTokenValidator(config.Security.OAuthBearer, jwksLogger, oauthHttp);
-        oauthBearerAuthenticator = new OAuthBearerAuthenticator(validator, config.Security.OAuthBearer);
-        logger.LogInformation(
-            "OAUTHBEARER enabled (issuer={Issuer}, jwksUri={Jwks}, principalClaim={Claim})",
-            config.Security.OAuthBearer.ValidIssuer ?? config.Security.OAuthBearer.OidcAuthority ?? "(none)",
-            config.Security.OAuthBearer.JwksUri ?? "(via discovery)",
-            config.Security.OAuthBearer.PrincipalClaim);
-    }
-
-    // SCRAM credential stores. We stand them up in-memory whenever the
-    // mechanism is in the allow-list so AlterUserScramCredentials (KIP-554)
-    // can populate them at runtime — the admin RPC is the canonical way
-    // to provision SCRAM users; static config files would always lag the
-    // wire path.
-    if (config.Security.SaslMechanisms.Contains(SaslAuthenticator.MechanismScramSha256, StringComparer.OrdinalIgnoreCase))
-    {
-        scramSha256Store = new ScramCredentialStore(hashAlgorithm: System.Security.Cryptography.HashAlgorithmName.SHA256);
-        logger.LogInformation("SCRAM-SHA-256 store initialised (in-memory)");
-    }
-    if (config.Security.SaslMechanisms.Contains(SaslAuthenticator.MechanismScramSha512, StringComparer.OrdinalIgnoreCase))
-    {
-        scramSha512Store = new ScramCredentialStore(hashAlgorithm: System.Security.Cryptography.HashAlgorithmName.SHA512);
-        logger.LogInformation("SCRAM-SHA-512 store initialised (in-memory)");
-    }
-
-    saslAuthenticator = new SaslAuthenticator(
-        credentialStore,
-        config.Security.SaslMechanisms,
-        scramSha256Store: scramSha256Store,
-        scramSha512Store: scramSha512Store,
-        oauthBearer: oauthBearerAuthenticator);
-    logger.LogInformation("SASL authentication enabled with mechanisms: {Mechanisms}",
-        string.Join(", ", config.Security.SaslMechanisms));
-}
-
-if (config.Security.AclEnabled)
-{
-    aclAuthorizer = new AclAuthorizer(
-        logger: app.Services.GetRequiredService<ILogger<AclAuthorizer>>(),
-        allowIfNoAclFound: config.Security.AllowIfNoAclFound,
-        superUsers: config.Security.SuperUsers,
-        aclFilePath: config.Security.AclFile);
-
-    logger.LogInformation("ACL authorization enabled (AllowIfNoAclFound: {AllowIfNoAclFound}, SuperUsers: {SuperUsers})",
-        config.Security.AllowIfNoAclFound,
-        config.Security.SuperUsers.Length > 0 ? string.Join(", ", config.Security.SuperUsers) : "none");
-}
+// AclAuthorizer (DI, #59 phase 2b) — a SHARED broker-core service resolved here for the
+// native gRPC SecurityServiceImpl delegates + the REST /admin/acls surface below, which
+// consume it even when Kafka is off. SASL + the SCRAM stores are Kafka-only and now flow
+// straight into the SecurityApiHandler DI factory, so they need no locals here.
+var aclAuthorizer = app.Services.GetService<AclAuthorizer>();
 
 // Register SecurityServiceImpl with delegates wired to AclAuthorizer
 // Note: aclAuthorizer may be null if ACL is disabled, so we handle this in the delegates
@@ -1370,89 +1431,23 @@ if (config.BrokerDlq.Enabled)
         config.BrokerDlq.MaxRetries, config.BrokerDlq.RetryBackoffMs, config.BrokerDlq.TopicSuffix);
 }
 
-// Create request handlers
-var dataApiLogger = app.Services.GetRequiredService<ILogger<DataApiHandler>>();
-var metadataApiLogger = app.Services.GetRequiredService<ILogger<MetadataApiHandler>>();
-var topicAdminLogger = app.Services.GetRequiredService<ILogger<TopicAdminHandler>>();
-var configApiLogger = app.Services.GetRequiredService<ILogger<ConfigApiHandler>>();
-var securityApiLogger = app.Services.GetRequiredService<ILogger<SecurityApiHandler>>();
-var interBrokerApiLogger = app.Services.GetRequiredService<ILogger<InterBrokerApiHandler>>();
-var consumerGroupApiLogger = app.Services.GetRequiredService<ILogger<ConsumerGroupApiHandler>>();
-var shareGroupApiLogger = app.Services.GetRequiredService<ILogger<ShareGroupApiHandler>>();
-var consumerGroupV2ApiLogger = app.Services.GetRequiredService<ILogger<ConsumerGroupV2ApiHandler>>();
-var streamsGroupApiLogger = app.Services.GetRequiredService<ILogger<StreamsGroupApiHandler>>();
-var raftApiLogger = app.Services.GetRequiredService<ILogger<RaftApiHandler>>();
-var quotaApiLogger = app.Services.GetRequiredService<ILogger<QuotaApiHandler>>();
-var delegationTokenApiLogger = app.Services.GetRequiredService<ILogger<DelegationTokenApiHandler>>();
-var telemetryApiLogger = app.Services.GetRequiredService<ILogger<TelemetryApiHandler>>();
-
-// KIP-714 client telemetry (G9 follow-up): default ingestor logs + meters every
-// PushTelemetry payload. Operators flip Surgewave:Telemetry:Enabled=true to start
-// advertising a real subscription set; the disabled path keeps the pre-G9
-// stub semantics so a config-flag-only change doesn't surprise existing clients.
-Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetryIngestor telemetryIngestor =
-    app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>();
-if (config.Telemetry.Enabled && config.Telemetry.TopicSinkEnabled)
-{
-    var sinkLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink>>();
-    var telemetrySink = new Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink(
-        logManager, recordBatchSerializer, config.Telemetry, sinkLogger);
-    telemetryIngestor = new Kuestenlogik.Surgewave.Broker.Telemetry.TopicForwardingTelemetryIngestor(telemetryIngestor, telemetrySink);
-    logger.LogInformation("Telemetry topic sink enabled — mirroring OTLP payloads to {Topic}", config.Telemetry.TopicName);
-}
-
-// Kafka wire surface (#58): the entire IKafkaRequestHandler array + the
-// RequestDispatcher are built ONLY when Surgewave:Kafka:Enabled. When disabled
-// the broker runs native-only — no Kafka handlers, no dispatcher — and
-// SurgewaveBroker rejects Kafka connections at the accept path. There is no
-// per-request cost either way; this is a single startup-time branch, and the
-// dispatcher stays a FrozenDictionary wired once at startup.
-// NOTE: InterBrokerApiHandler lives in this array, so the multi-broker control
-// plane (LeaderAndIsr / AlterPartition) rides the Kafka wire today; native-only
-// is therefore a single-broker mode until the inter-broker control path is
-// native (#60).
+// Kafka wire surface (#58/#59 phase 2b): the Kafka handlers are registered as
+// IKafkaRequestHandler in DI (AddKafkaRequestHandlers, pre-build, gated on
+// Surgewave:Kafka:Enabled). The RequestDispatcher is built ONCE from that DI set here —
+// a single startup-time branch, no per-request cost; it stays a FrozenDictionary wired
+// once at startup. When Kafka is disabled the set is empty and the dispatcher stays null
+// (native-only; SurgewaveBroker rejects Kafka connections at the accept path).
+// NOTE: RaftApiHandler is appended here rather than DI-registered because raftNode/
+// raftPersistence are post-build locals (null unless UseRaftConsensus). InterBrokerApiHandler
+// IS in the DI set, so the multi-broker control plane (LeaderAndIsr / AlterPartition) still
+// rides the Kafka wire today; native-only is single-broker until that path is native (#60).
 RequestDispatcher? dispatcher = null;
 if (config.Kafka.Enabled)
 {
-    // Metadata handler is hoisted so it can be wired to the cluster state and
-    // controller — the Kafka Metadata it serves reads ISR from the local
-    // ClusterState, so reverse-ISR propagation (#69) is only visible to clients
-    // if this handler is cluster-aware (the embedded runtime already does this;
-    // the production broker previously did not, so it always answered standalone).
-    var metadataApiHandler = new MetadataApiHandler(config, logManager, metadataApiLogger);
-    metadataApiHandler.SetClusterState(clusterState);
-    metadataApiHandler.SetClusterTopicCreator(clusterController);
-
-    IKafkaRequestHandler[] handlers =
-    [
-        new DataApiHandler(config, logManager, transactionCoordinator, quotaManager, recordBatchSerializer, aclAuthorizer, deduplicationManager, delayIndex, ttlIndex, metrics, dataApiLogger, bandwidthQuotaManager,
-            app.Services.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
-            coldStartProfiler: app.Services.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()),
-        metadataApiHandler,
-        new TopicAdminHandler(config, logManager, quotaManager, auditLogger, topicAdminLogger),
-        new ConfigApiHandler(config, dynamicBrokerConfig, logManager),
-        new SecurityApiHandler(config, saslAuthenticator, aclAuthorizer, auditLogger, securityApiLogger,
-            scramSha256Store: scramSha256Store, scramSha512Store: scramSha512Store),
-        new InterBrokerApiHandler(config, clusterState, replicaManager, logManager, interBrokerApiLogger, transactionCoordinator,
-            isrUpdateApplier: clusterController),
-        new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupApiLogger),
-        new ShareGroupApiHandler(shareGroupCoordinator, shareGroupApiLogger),
-        new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, consumerGroupV2ApiLogger),
-        new StreamsGroupApiHandler(streamsGroupCoordinator, streamsGroupApiLogger),
-        new RaftApiHandler(config, raftNode, raftPersistence, clusterState, raftApiLogger),
-        new ClusterAdminHandler(clusterController,
-            app.Services.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>(),
-            clusterState,
-            app.Services.GetRequiredService<ILogger<ClusterAdminHandler>>()),
-        new QuotaApiHandler(quotaManager, quotaApiLogger),
-        new DelegationTokenApiHandler(delegationTokenManager, delegationTokenApiLogger),
-        new TelemetryApiHandler(telemetryApiLogger, config.Telemetry, telemetryIngestor),
-        new ClusterMembershipHandler(
-            app.Services.GetRequiredService<ClusterIdManager>(),
-            clusterState,
-            app.Services.GetRequiredService<ILogger<ClusterMembershipHandler>>())
-    ];
-    dispatcher = new RequestDispatcher(handlers);
+    var kafkaHandlers = app.Services.GetServices<IKafkaRequestHandler>().ToList();
+    kafkaHandlers.Add(new RaftApiHandler(config, raftNode, raftPersistence, clusterState,
+        app.Services.GetRequiredService<ILogger<RaftApiHandler>>()));
+    dispatcher = new RequestDispatcher(kafkaHandlers);
 }
 
 // Get PluginDiscovery for connector plugins (available even if Connect is disabled)
