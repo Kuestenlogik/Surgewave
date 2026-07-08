@@ -46,6 +46,12 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     // the broker then serves native-only and rejects Kafka connections.
     private volatile RequestDispatcher? _dispatcher;
 
+    // Frozen at construction: the ordered per-connection protocol handlers, walked
+    // once per CONNECTION in HandleAsync (native first, Kafka fallback) — never per
+    // request. Replaces the hardwired native-vs-Kafka branch so Kafka can move into
+    // a plugin (#59). Built from the same startup state as the dispatcher.
+    private readonly IConnectionHandler[] _connectionHandlers;
+
     // Consumer group coordination (delegated handlers use these directly)
     private readonly ConsumerGroupCoordinator _consumerGroupCoordinator;
     private readonly ShareGroupCoordinator _shareGroupCoordinator;
@@ -183,6 +189,15 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             repositoryManager: _connectorRepositoryManager,
             lagCalculator: lagCalculator);
 
+        // The broker owns only the NATIVE protocol handler; Kafka is still
+        // dispatched inline in HandleAsync as a transitional fallback until its
+        // wire loop moves into the Kafka plugin as a registered IConnectionHandler
+        // (#59) — the broker must not carry a Kafka-named type. Additional
+        // (plugin-provided) connection handlers will be contributed here. Frozen
+        // + order-sorted at ctor, walked once per CONNECTION — never per request.
+        var connectionHandlers = new List<IConnectionHandler> { new NativeConnectionHandler(_nativeHandler) };
+        _connectionHandlers = [.. connectionHandlers.OrderBy(h => h.Order)];
+
         // Enterprise plugin: Kuestenlogik.Surgewave.Transport.SharedMemory
         // Shared memory handler requires the Kuestenlogik.Surgewave.Transport.SharedMemory package.
     }
@@ -295,24 +310,33 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             totalRead += n;
         }
 
-        if (magicBuffer.AsSpan().SequenceEqual(SurgewaveNativeProtocol.Magic))
+        // Hand the connection to the first registered protocol handler that claims
+        // the peeked magic bytes. The registry is frozen at construction and walked
+        // once per CONNECTION — never per request (#59). Today it holds only the
+        // native handler; plugin-provided handlers join it later.
+        foreach (var handler in _connectionHandlers)
         {
-            await _nativeHandler.HandleConnectionAsync(stream, cancellationToken);
+            if (handler.CanHandle(magicBuffer))
+            {
+                await handler.HandleConnectionAsync(
+                    stream, magicBuffer, new ConnectionContext(clientHost, endpoint), cancellationToken);
+                return;
+            }
+        }
+
+        // Transitional Kafka fallback: the Kafka wire loop still lives in the
+        // broker and is dispatched inline until it moves into the Kafka plugin as a
+        // registered IConnectionHandler (#59). magicBuffer is passed through with
+        // no extra copy, and this runs once per CONNECTION, not per request — the
+        // Kafka hot path is unchanged. Native-only mode (Kafka disabled, #58) has
+        // no dispatcher, so a non-native peer is closed.
+        if (_dispatcher is not null)
+        {
+            await HandleKafkaConnectionAsync(stream, magicBuffer, new ConnectionState(clientHost), endpoint, cancellationToken);
             return;
         }
 
-        // Native-only mode (Surgewave:Kafka:Enabled=false, #58): no Kafka
-        // dispatcher was built, so we close any non-native peer instead of
-        // parsing the Kafka wire. This is a per-CONNECTION check on the Kafka
-        // accept path only — never per request; the enabled path is unchanged.
-        if (_dispatcher is null)
-        {
-            Log.KafkaDisabled(_logger, endpoint);
-            return;
-        }
-
-        var connectionState = new ConnectionState(clientHost);
-        await HandleKafkaConnectionAsync(stream, magicBuffer, connectionState, endpoint, cancellationToken);
+        Log.KafkaDisabled(_logger, endpoint);
     }
 
     private async Task HandleKafkaConnectionAsync(
