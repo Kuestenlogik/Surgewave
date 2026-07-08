@@ -1,6 +1,5 @@
+using Kuestenlogik.Surgewave.Coordination.Streams;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.StreamsGroups;
@@ -12,7 +11,7 @@ namespace Kuestenlogik.Surgewave.Broker.StreamsGroups;
 /// </summary>
 public sealed class StreamsGroupCoordinator(
     ILogger<StreamsGroupCoordinator> logger,
-    LogManager logManager)
+    LogManager logManager) : IStreamsGroupCoordinator
 {
     private readonly Dictionary<string, StreamsGroupState> _groups = [];
     private readonly Lock _groupLock = new();
@@ -26,35 +25,35 @@ public sealed class StreamsGroupCoordinator(
     // StreamsGroupHeartbeat (API Key 88)
     // ─────────────────────────────────────────────────────────────
 
-    public StreamsGroupHeartbeatResponse HandleStreamsGroupHeartbeat(StreamsGroupHeartbeatRequest request)
+    public StreamsHeartbeatResult Heartbeat(StreamsHeartbeatCommand command)
     {
         lock (_groupLock)
         {
             logger.LogDebug("StreamsGroupHeartbeat: GroupId={GroupId}, MemberId={MemberId}, MemberEpoch={MemberEpoch}",
-                request.GroupId, request.MemberId, request.MemberEpoch);
+                command.GroupId, command.MemberId, command.MemberEpoch);
 
             // MemberEpoch -2 means shutdown (leave with intent to rejoin as static member)
             // MemberEpoch -1 means leave
-            if (request.MemberEpoch == -1 || request.MemberEpoch == -2)
+            if (command.MemberEpoch == -1 || command.MemberEpoch == -2)
             {
-                return HandleLeave(request);
+                return HandleLeave(command);
             }
 
-            if (!_groups.TryGetValue(request.GroupId, out var group))
+            if (!_groups.TryGetValue(command.GroupId, out var group))
             {
-                group = new StreamsGroupState { GroupId = request.GroupId };
-                _groups[request.GroupId] = group;
-                logger.LogInformation("StreamsGroup created: {GroupId}", request.GroupId);
+                group = new StreamsGroupState { GroupId = command.GroupId };
+                _groups[command.GroupId] = group;
+                logger.LogInformation("StreamsGroup created: {GroupId}", command.GroupId);
             }
 
             // Clean stale members
             CleanStaleMembers(group);
 
             // Store topology if provided (typically on first join, MemberEpoch=0)
-            if (request.Topology != null)
+            if (command.Topology != null)
             {
-                var subtopologies = new List<StoredSubtopology>(request.Topology.Subtopologies.Count);
-                foreach (var sub in request.Topology.Subtopologies)
+                var subtopologies = new List<StoredSubtopology>(command.Topology.Subtopologies.Count);
+                foreach (var sub in command.Topology.Subtopologies)
                 {
                     subtopologies.Add(new StoredSubtopology
                     {
@@ -65,19 +64,19 @@ public sealed class StreamsGroupCoordinator(
 
                 group.Topology = new StoredTopology
                 {
-                    Epoch = request.Topology.Epoch,
+                    Epoch = command.Topology.Epoch,
                     Subtopologies = subtopologies
                 };
-                group.TopologyEpoch = request.Topology.Epoch;
+                group.TopologyEpoch = command.Topology.Epoch;
                 logger.LogInformation("StreamsGroup {GroupId}: topology updated (epoch={Epoch}, subtopologies={Count})",
-                    request.GroupId, request.Topology.Epoch, subtopologies.Count);
+                    command.GroupId, command.Topology.Epoch, subtopologies.Count);
             }
 
             // Generate member ID if epoch is 0 (join)
-            var memberId = request.MemberId;
-            if (request.MemberEpoch == 0 && string.IsNullOrEmpty(memberId))
+            var memberId = command.MemberId;
+            if (command.MemberEpoch == 0 && string.IsNullOrEmpty(memberId))
             {
-                memberId = $"{request.ClientId}-{Guid.NewGuid()}";
+                memberId = $"{command.ClientId}-{Guid.NewGuid()}";
             }
 
             // Add or update member
@@ -87,34 +86,34 @@ public sealed class StreamsGroupCoordinator(
                 member = new StreamsGroupMember
                 {
                     MemberId = memberId,
-                    InstanceId = request.InstanceId,
-                    RackId = request.RackId,
-                    ClientId = request.ClientId,
+                    InstanceId = command.InstanceId,
+                    RackId = command.RackId,
+                    ClientId = command.ClientId,
                     ClientHost = "*",
-                    ProcessId = request.ProcessId
+                    ProcessId = command.ProcessId
                 };
                 group.Members[memberId] = member;
                 memberJoined = true;
                 group.GroupEpoch++;
                 logger.LogInformation("StreamsGroup {GroupId}: member {MemberId} joined (epoch={Epoch})",
-                    request.GroupId, memberId, group.GroupEpoch);
+                    command.GroupId, memberId, group.GroupEpoch);
             }
 
             member.LastHeartbeat = DateTime.UtcNow;
 
-            if (request.InstanceId != null)
+            if (command.InstanceId != null)
             {
-                member.InstanceId = request.InstanceId;
+                member.InstanceId = command.InstanceId;
             }
 
-            if (request.RackId != null)
+            if (command.RackId != null)
             {
-                member.RackId = request.RackId;
+                member.RackId = command.RackId;
             }
 
-            if (request.ProcessId != null)
+            if (command.ProcessId != null)
             {
-                member.ProcessId = request.ProcessId;
+                member.ProcessId = command.ProcessId;
             }
 
             member.TopologyEpoch = group.TopologyEpoch;
@@ -127,48 +126,37 @@ public sealed class StreamsGroupCoordinator(
 
             member.MemberEpoch = group.GroupEpoch;
 
-            // Build assignment response
-            var activeTasks = ConvertToResponseTaskIds(member.ActiveTasks);
-            var standbyTasks = ConvertToResponseTaskIds(member.StandbyTasks);
-            var warmupTasks = ConvertToResponseTaskIds(member.WarmupTasks);
-
-            return new StreamsGroupHeartbeatResponse
+            return new StreamsHeartbeatResult
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
                 MemberId = memberId,
                 MemberEpoch = member.MemberEpoch,
                 HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
                 AcceptableRecoveryLag = DefaultAcceptableRecoveryLag,
                 TaskOffsetIntervalMs = DefaultTaskOffsetIntervalMs,
-                ActiveTasks = activeTasks,
-                StandbyTasks = standbyTasks,
-                WarmupTasks = warmupTasks
+                ActiveTasks = ToTaskAssignments(member.ActiveTasks),
+                StandbyTasks = ToTaskAssignments(member.StandbyTasks),
+                WarmupTasks = ToTaskAssignments(member.WarmupTasks)
             };
         }
     }
 
-    private StreamsGroupHeartbeatResponse HandleLeave(StreamsGroupHeartbeatRequest request)
+    private StreamsHeartbeatResult HandleLeave(StreamsHeartbeatCommand command)
     {
-        if (_groups.TryGetValue(request.GroupId, out var group))
+        if (_groups.TryGetValue(command.GroupId, out var group))
         {
-            if (group.Members.Remove(request.MemberId))
+            if (group.Members.Remove(command.MemberId))
             {
                 group.GroupEpoch++;
                 RebalanceTasks(group);
                 logger.LogInformation("StreamsGroup {GroupId}: member {MemberId} left (epoch={Epoch})",
-                    request.GroupId, request.MemberId, group.GroupEpoch);
+                    command.GroupId, command.MemberId, group.GroupEpoch);
             }
         }
 
-        return new StreamsGroupHeartbeatResponse
+        return new StreamsHeartbeatResult
         {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            MemberId = request.MemberId,
-            MemberEpoch = request.MemberEpoch, // Echo back -1 or -2
+            MemberId = command.MemberId,
+            MemberEpoch = command.MemberEpoch, // Echo back -1 or -2
             HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
             AcceptableRecoveryLag = DefaultAcceptableRecoveryLag,
             TaskOffsetIntervalMs = DefaultTaskOffsetIntervalMs
@@ -179,76 +167,62 @@ public sealed class StreamsGroupCoordinator(
     // StreamsGroupDescribe (API Key 89)
     // ─────────────────────────────────────────────────────────────
 
-    public StreamsGroupDescribeResponse HandleStreamsGroupDescribe(StreamsGroupDescribeRequest request)
+    public IReadOnlyList<StreamsGroupDescription> Describe(IReadOnlyList<string> groupIds)
     {
         lock (_groupLock)
         {
-            var groups = new List<StreamsGroupDescribeResponse.DescribedGroup>(request.GroupIds.Count);
+            var result = new List<StreamsGroupDescription>(groupIds.Count);
 
-            foreach (var groupId in request.GroupIds)
+            foreach (var groupId in groupIds)
             {
                 if (!_groups.TryGetValue(groupId, out var group))
                 {
-                    groups.Add(new StreamsGroupDescribeResponse.DescribedGroup
+                    result.Add(new StreamsGroupDescription
                     {
-                        ErrorCode = ErrorCode.InvalidGroupId,
                         GroupId = groupId,
-                        GroupState = "",
-                        Members = []
+                        Status = StreamsGroupStatus.GroupNotFound
                     });
                     continue;
                 }
 
-                var members = new List<StreamsGroupDescribeResponse.Member>(group.Members.Count);
+                var members = new List<StreamsGroupMemberDescription>(group.Members.Count);
                 foreach (var m in group.Members.Values)
                 {
-                    members.Add(new StreamsGroupDescribeResponse.Member
+                    // Neutral member projection — the adapter applies the wire null-defaults
+                    // (ClientId->"", ClientHost->"*", ProcessId->"") and duplicates Assignment
+                    // into TargetAssignment when building the Kafka DTO.
+                    members.Add(new StreamsGroupMemberDescription
                     {
                         MemberId = m.MemberId,
                         MemberEpoch = m.MemberEpoch,
                         InstanceId = m.InstanceId,
                         RackId = m.RackId,
-                        ClientId = m.ClientId ?? "",
-                        ClientHost = m.ClientHost ?? "*",
+                        ClientId = m.ClientId,
+                        ClientHost = m.ClientHost,
                         TopologyEpoch = m.TopologyEpoch,
-                        ProcessId = m.ProcessId ?? "",
-                        ClientTags = [],
-                        TaskOffsets = [],
-                        TaskEndOffsets = [],
-                        Assignment = ConvertToDescribeAssignment(m.ActiveTasks, m.StandbyTasks, m.WarmupTasks),
-                        TargetAssignment = ConvertToDescribeAssignment(m.ActiveTasks, m.StandbyTasks, m.WarmupTasks)
+                        ProcessId = m.ProcessId,
+                        ActiveTasks = ToTaskAssignments(m.ActiveTasks),
+                        StandbyTasks = ToTaskAssignments(m.StandbyTasks),
+                        WarmupTasks = ToTaskAssignments(m.WarmupTasks)
                     });
                 }
 
-                // Build topology for describe response
-                StreamsGroupDescribeResponse.TopologyInfo? topology = null;
+                StreamsTopology? topology = null;
                 if (group.Topology != null)
                 {
-                    var subtopologies = new List<StreamsGroupDescribeResponse.SubtopologyInfo>(group.Topology.Subtopologies.Count);
+                    var subtopologies = new List<StreamsSubtopology>(group.Topology.Subtopologies.Count);
                     foreach (var sub in group.Topology.Subtopologies)
                     {
-                        subtopologies.Add(new StreamsGroupDescribeResponse.SubtopologyInfo
-                        {
-                            SubtopologyId = sub.SubtopologyId,
-                            SourceTopics = new List<string>(sub.SourceTopics),
-                            RepartitionSinkTopics = [],
-                            StateChangelogTopics = [],
-                            RepartitionSourceTopics = []
-                        });
+                        subtopologies.Add(new StreamsSubtopology(sub.SubtopologyId, new List<string>(sub.SourceTopics)));
                     }
-
-                    topology = new StreamsGroupDescribeResponse.TopologyInfo
-                    {
-                        Epoch = group.Topology.Epoch,
-                        Subtopologies = subtopologies
-                    };
+                    topology = new StreamsTopology(group.Topology.Epoch, subtopologies);
                 }
 
-                groups.Add(new StreamsGroupDescribeResponse.DescribedGroup
+                result.Add(new StreamsGroupDescription
                 {
-                    ErrorCode = ErrorCode.None,
                     GroupId = groupId,
-                    GroupState = GetGroupState(group),
+                    Status = StreamsGroupStatus.Ok,
+                    Phase = GetGroupPhase(group),
                     GroupEpoch = group.GroupEpoch,
                     // StreamsGroup-State haelt KEIN separates AssignmentEpoch-Feld (anders als
                     // Java/Kafka). AssignmentEpoch == GroupEpoch ist damit by-construction
@@ -260,12 +234,7 @@ public sealed class StreamsGroupCoordinator(
                 });
             }
 
-            return new StreamsGroupDescribeResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                Groups = groups
-            };
+            return result;
         }
     }
 
@@ -499,52 +468,22 @@ public sealed class StreamsGroupCoordinator(
         }
     }
 
-    private static List<StreamsGroupHeartbeatResponse.TaskIds>? ConvertToResponseTaskIds(List<StreamsTaskIds> tasks)
+    /// <summary>
+    /// Projects the internal task list into neutral <see cref="StreamsTaskAssignment"/> records
+    /// (empty list when none — the Kafka adapter maps empty to the wire's null-means-unchanged).
+    /// </summary>
+    private static IReadOnlyList<StreamsTaskAssignment> ToTaskAssignments(List<StreamsTaskIds> tasks)
     {
-        if (tasks.Count == 0) return null;
+        if (tasks.Count == 0) return [];
 
-        var result = new List<StreamsGroupHeartbeatResponse.TaskIds>(tasks.Count);
+        var result = new List<StreamsTaskAssignment>(tasks.Count);
         foreach (var task in tasks)
         {
-            result.Add(new StreamsGroupHeartbeatResponse.TaskIds
-            {
-                SubtopologyId = task.SubtopologyId,
-                Partitions = new List<int>(task.Partitions)
-            });
+            result.Add(new StreamsTaskAssignment(task.SubtopologyId, new List<int>(task.Partitions)));
         }
         return result;
     }
 
-    private static StreamsGroupDescribeResponse.AssignmentInfo ConvertToDescribeAssignment(
-        List<StreamsTaskIds> activeTasks,
-        List<StreamsTaskIds> standbyTasks,
-        List<StreamsTaskIds> warmupTasks)
-    {
-        return new StreamsGroupDescribeResponse.AssignmentInfo
-        {
-            ActiveTasks = ConvertToDescribeTaskIds(activeTasks),
-            StandbyTasks = ConvertToDescribeTaskIds(standbyTasks),
-            WarmupTasks = ConvertToDescribeTaskIds(warmupTasks)
-        };
-    }
-
-    private static List<StreamsGroupDescribeResponse.TaskIds> ConvertToDescribeTaskIds(List<StreamsTaskIds> tasks)
-    {
-        var result = new List<StreamsGroupDescribeResponse.TaskIds>(tasks.Count);
-        foreach (var task in tasks)
-        {
-            result.Add(new StreamsGroupDescribeResponse.TaskIds
-            {
-                SubtopologyId = task.SubtopologyId,
-                Partitions = new List<int>(task.Partitions)
-            });
-        }
-        return result;
-    }
-
-    private static string GetGroupState(StreamsGroupState group)
-    {
-        if (group.Members.Count == 0) return "Empty";
-        return "Stable";
-    }
+    private static StreamsGroupPhase GetGroupPhase(StreamsGroupState group)
+        => group.Members.Count == 0 ? StreamsGroupPhase.Empty : StreamsGroupPhase.Stable;
 }

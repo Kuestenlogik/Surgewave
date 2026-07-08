@@ -144,7 +144,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator,
             transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger,
-            consumerGroupV2Coordinator: consumerGroupV2Coordinator, streamsGroupCoordinator: streamsGroupCoordinator);
+            consumerGroupV2Coordinator: consumerGroupV2Coordinator);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token));

@@ -1,7 +1,6 @@
 using Kuestenlogik.Surgewave.Broker.StreamsGroups;
+using Kuestenlogik.Surgewave.Coordination.Streams;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -95,18 +94,15 @@ public sealed class StreamsGroupStickyTests : IDisposable
         Assert.Equal(6, afterC1Tasks.Count);
     }
 
-    private StreamsGroupHeartbeatResponse SendHeartbeat(
+    private StreamsHeartbeatResult SendHeartbeat(
         string group,
         string clientId,
         string memberId,
         int memberEpoch,
-        StreamsGroupHeartbeatRequest.TopologyInfo? topology)
+        StreamsTopology? topology)
     {
-        return _coordinator.HandleStreamsGroupHeartbeat(new StreamsGroupHeartbeatRequest
+        return _coordinator.Heartbeat(new StreamsHeartbeatCommand
         {
-            ApiKey = ApiKey.StreamsGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = clientId,
             GroupId = group,
             MemberId = memberId,
@@ -115,38 +111,19 @@ public sealed class StreamsGroupStickyTests : IDisposable
         });
     }
 
-    private static StreamsGroupHeartbeatRequest.TopologyInfo BuildSingleSubtopologyTopology() =>
-        new()
-        {
-            Epoch = 1,
-            Subtopologies =
-            [
-                new StreamsGroupHeartbeatRequest.SubtopologyInfo
-                {
-                    SubtopologyId = "0",
-                    SourceTopics = ["source-topic"],
-                    SourceTopicRegex = [],
-                    StateChangelogTopics = [],
-                    RepartitionSinkTopics = [],
-                    RepartitionSourceTopics = [],
-                    CopartitionGroups = [],
-                }
-            ],
-        };
+    private static StreamsTopology BuildSingleSubtopologyTopology() =>
+        new(1, [new StreamsSubtopology("0", ["source-topic"])]);
 
-    private static HashSet<int> ExtractTaskPartitions(StreamsGroupHeartbeatResponse response)
+    private static HashSet<int> ExtractTaskPartitions(StreamsHeartbeatResult result)
     {
-        var result = new HashSet<int>();
-        if (response.ActiveTasks != null)
+        var partitions = new HashSet<int>();
+        foreach (var task in result.ActiveTasks)
         {
-            foreach (var task in response.ActiveTasks)
+            foreach (var partition in task.Partitions)
             {
-                foreach (var partition in task.Partitions)
-                {
-                    result.Add(partition);
-                }
+                partitions.Add(partition);
             }
         }
-        return result;
+        return partitions;
     }
 }
