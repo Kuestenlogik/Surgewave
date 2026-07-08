@@ -123,7 +123,7 @@ surgewave schema delete-version user-value 1
 
 ```csharp
 using Kuestenlogik.Surgewave.Client;
-using Kuestenlogik.Surgewave.Client.SchemaRegistry.Avro;
+using Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro;
 
 await using var producer = new SurgewaveProducer<string, User>(options =>
 {
