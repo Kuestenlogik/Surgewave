@@ -605,6 +605,10 @@ builder.Services.AddSingleton(sp => new TransactionCoordinator(
     sp.GetRequiredService<OffsetStore>(),
     sp.GetRequiredService<TransactionStateStore>(),
     sp.GetRequiredService<ILogger<TransactionCoordinator>>()));
+// Neutral contract (#59) resolves to the same singleton so the Kafka adapter (TransactionApiHandler)
+// depends only on Coordination, not the broker-internal coordinator type.
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionCoordinator>(
+    sp => sp.GetRequiredService<TransactionCoordinator>());
 builder.Services.AddSingleton(sp => new QuotaManager(
     sp.GetRequiredService<BrokerConfig>().Quotas,
     sp.GetRequiredService<ILogger<QuotaManager>>(),
@@ -727,6 +731,10 @@ if (featuresConfig.Kafka.Enabled)
     builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ShareGroupApiHandler(
         sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>(),
         sp.GetRequiredService<ILogger<ShareGroupApiHandler>>()));
+
+    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new TransactionApiHandler(
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionCoordinator>(),
+        sp.GetRequiredService<ILogger<TransactionApiHandler>>()));
 
     builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupV2ApiHandler(
         sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupV2Coordinator>(),
@@ -1125,105 +1133,80 @@ var transactionCoordinator = app.Services.GetRequiredService<TransactionCoordina
 TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
     initProducerId: (transactionalId, transactionTimeoutMs, producerId, producerEpoch) =>
     {
-        var request = new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.InitProducerIdRequest
+        var command = new Kuestenlogik.Surgewave.Coordination.Transactions.InitProducerIdCommand
         {
-            ApiKey = Kuestenlogik.Surgewave.Protocol.Kafka.ApiKey.InitProducerId,
-            CorrelationId = 0,
-            ApiVersion = 4,
-            ClientId = "grpc",
             TransactionalId = transactionalId,
             TransactionTimeoutMs = transactionTimeoutMs,
             ProducerId = producerId,
             ProducerEpoch = (short)producerEpoch
         };
-        var response = transactionCoordinator.HandleInitProducerIdAsync(request, CancellationToken.None).GetAwaiter().GetResult();
-        return new InitProducerIdResultDto((int)response.ErrorCode, response.ProducerId, response.ProducerEpoch);
+        var response = transactionCoordinator.InitProducerIdAsync(command, CancellationToken.None).GetAwaiter().GetResult();
+        return new InitProducerIdResultDto((int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(response.Status), response.ProducerId, response.ProducerEpoch);
     },
     addPartitionsToTxn: (transactionalId, producerId, producerEpoch, partitions) =>
     {
-        var topicsDict = partitions.GroupBy(p => p.Topic)
-            .ToDictionary(g => g.Key, g => g.Select(p => p.Partition).ToList());
-        var request = new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.AddPartitionsToTxnRequest
+        var commandTopics = partitions.GroupBy(p => p.Topic)
+            .Select(g => new Kuestenlogik.Surgewave.Coordination.Transactions.AddPartitionsTopic(g.Key, g.Select(p => p.Partition).ToList()))
+            .ToList();
+        var command = new Kuestenlogik.Surgewave.Coordination.Transactions.AddPartitionsToTxnCommand
         {
-            ApiKey = Kuestenlogik.Surgewave.Protocol.Kafka.ApiKey.AddPartitionsToTxn,
-            CorrelationId = 0,
-            ApiVersion = 3,
-            ClientId = "grpc",
             TransactionalId = transactionalId,
             ProducerId = producerId,
             ProducerEpoch = (short)producerEpoch,
-            Topics = topicsDict
+            Topics = commandTopics
         };
-        var response = transactionCoordinator.HandleAddPartitionsToTxn(request);
-        var results = response.Results.SelectMany(kvp =>
-            kvp.Value.Select(p => (kvp.Key, p.Partition, (int)p.ErrorCode))).ToList();
+        var response = transactionCoordinator.AddPartitionsToTxn(command);
+        var results = response.Topics.SelectMany(t =>
+            t.Partitions.Select(p => (t.Topic, p.Partition, (int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
         return new AddPartitionsToTxnResultDto(results);
     },
     addOffsetsToTxn: (transactionalId, producerId, producerEpoch, groupId) =>
     {
-        var request = new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.AddOffsetsToTxnRequest
+        var command = new Kuestenlogik.Surgewave.Coordination.Transactions.AddOffsetsToTxnCommand
         {
-            ApiKey = Kuestenlogik.Surgewave.Protocol.Kafka.ApiKey.AddOffsetsToTxn,
-            CorrelationId = 0,
-            ApiVersion = 3,
-            ClientId = "grpc",
             TransactionalId = transactionalId,
             ProducerId = producerId,
             ProducerEpoch = (short)producerEpoch,
             GroupId = groupId
         };
-        var response = transactionCoordinator.HandleAddOffsetsToTxn(request);
-        return new AddOffsetsToTxnResultDto((int)response.ErrorCode);
+        var response = transactionCoordinator.AddOffsetsToTxn(command);
+        return new AddOffsetsToTxnResultDto((int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(response.Status));
     },
     txnOffsetCommit: (transactionalId, groupId, producerId, producerEpoch, generationId, memberId, offsets) =>
     {
         // gRPC path is name-keyed; v6 (TopicId) is a wire-only concern.
         var topicEntries = offsets.GroupBy(o => o.Topic)
-            .Select(g => new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest.TxnOffsetCommitTopic
+            .Select(g => new Kuestenlogik.Surgewave.Coordination.Transactions.TxnOffsetCommitTopic
             {
                 Name = g.Key,
-                Partitions = g.Select(o => new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest.TxnOffsetCommitPartition
-                {
-                    Partition = o.Partition,
-                    CommittedOffset = o.Offset,
-                    Metadata = o.Metadata
-                }).ToList()
+                TopicId = Guid.Empty,
+                Partitions = g.Select(o => new Kuestenlogik.Surgewave.Coordination.Transactions.TxnOffsetCommitPartition(o.Partition, o.Offset, o.Metadata)).ToList()
             })
             .ToList();
-        var request = new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.TxnOffsetCommitRequest
+        var command = new Kuestenlogik.Surgewave.Coordination.Transactions.TxnOffsetCommitCommand
         {
-            ApiKey = Kuestenlogik.Surgewave.Protocol.Kafka.ApiKey.TxnOffsetCommit,
-            CorrelationId = 0,
-            ApiVersion = 3,
-            ClientId = "grpc",
             TransactionalId = transactionalId,
             GroupId = groupId,
             ProducerId = producerId,
             ProducerEpoch = (short)producerEpoch,
-            GenerationId = generationId,
-            MemberId = memberId,
             Topics = topicEntries
         };
-        var response = transactionCoordinator.HandleTxnOffsetCommit(request);
+        var response = transactionCoordinator.TxnOffsetCommit(command);
         var results = response.Topics.SelectMany(t =>
-            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, (int)p.ErrorCode))).ToList();
+            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, (int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
         return new TxnOffsetCommitResultDto(results);
     },
     endTxn: (transactionalId, producerId, producerEpoch, commit) =>
     {
-        var request = new Kuestenlogik.Surgewave.Protocol.Kafka.Requests.EndTxnRequest
+        var command = new Kuestenlogik.Surgewave.Coordination.Transactions.EndTxnCommand
         {
-            ApiKey = Kuestenlogik.Surgewave.Protocol.Kafka.ApiKey.EndTxn,
-            CorrelationId = 0,
-            ApiVersion = 3,
-            ClientId = "grpc",
             TransactionalId = transactionalId,
             ProducerId = producerId,
             ProducerEpoch = (short)producerEpoch,
             Committed = commit
         };
-        var response = transactionCoordinator.HandleEndTxnAsync(request, CancellationToken.None).GetAwaiter().GetResult();
-        return new EndTxnResultDto((int)response.ErrorCode);
+        var response = transactionCoordinator.EndTxnAsync(command, CancellationToken.None).GetAwaiter().GetResult();
+        return new EndTxnResultDto((int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(response.Status));
     },
     listTransactions: (statesFilter, producerIdFilter) =>
     {

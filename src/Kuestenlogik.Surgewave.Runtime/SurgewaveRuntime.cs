@@ -320,6 +320,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 new ConsumerGroupApiHandler(consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
                 new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, _loggerFactory.CreateLogger<ConsumerGroupV2ApiHandler>()),
                 new StreamsGroupApiHandler(streamsGroupCoordinator, _loggerFactory.CreateLogger<StreamsGroupApiHandler>()),
+                // Transaction APIs also route through the dispatcher now (broker fast-path removed, #59).
+                new TransactionApiHandler(transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>()),
                 new TelemetryApiHandler(
                     _loggerFactory.CreateLogger<TelemetryApiHandler>(),
                     config.Telemetry,

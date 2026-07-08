@@ -1,19 +1,22 @@
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
 
 namespace Kuestenlogik.Surgewave.Broker.Transactions;
 
 /// <summary>
-/// Cluster-aware transaction coordinator that extends the base TransactionCoordinator
-/// with marker replication to ensure durability across replicas.
+/// Cluster-aware transaction coordinator that mirrors the base TransactionCoordinator's
+/// lifecycle on the protocol-neutral contracts (#59) and adds marker replication for
+/// durability across replicas. Not on the Kafka wire path (only cluster state sync + tests
+/// use it directly), so it neutralises its method signatures without implementing the adapter
+/// contract. <see cref="ValidateProduceBatch"/> stays Kafka-coupled (produce hot path).
 /// </summary>
 public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
 {
@@ -125,21 +128,13 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Handles InitProducerId request for transactional producers.
     /// </summary>
-    public async Task<InitProducerIdResponse> HandleInitProducerIdAsync(InitProducerIdRequest request, CancellationToken cancellationToken)
+    public async Task<InitProducerIdResult> InitProducerIdAsync(InitProducerIdCommand request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(request.TransactionalId))
         {
             // Non-transactional idempotent producer
             var (producerId, epoch) = _producerStateManager.AllocateProducerId();
-            return new InitProducerIdResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.None,
-                ProducerId = producerId,
-                ProducerEpoch = epoch
-            };
+            return new InitProducerIdResult(TxnErrorStatus.None, producerId, epoch);
         }
 
         // Transactional producer
@@ -206,44 +201,29 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new InitProducerIdResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None,
-            ProducerId = txnMetadata.ProducerId,
-            ProducerEpoch = txnMetadata.ProducerEpoch
-        };
+        return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
     }
 
     /// <summary>
     /// Handles AddPartitionsToTxn request.
     /// </summary>
-    public AddPartitionsToTxnResponse HandleAddPartitionsToTxn(AddPartitionsToTxnRequest request)
+    public AddPartitionsToTxnResult AddPartitionsToTxn(AddPartitionsToTxnCommand request)
     {
-        var results = new Dictionary<string, List<AddPartitionsToTxnResponse.PartitionResult>>();
-
         // Validate request
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            foreach (var (topic, partitions) in request.Topics)
+            var errorTopics = new List<AddPartitionsTopicResult>(request.Topics.Count);
+            foreach (var topic in request.Topics)
             {
-                results[topic] = partitions.Select(p => new AddPartitionsToTxnResponse.PartitionResult
+                var parts = new List<TxnPartitionStatus>(topic.Partitions.Count);
+                foreach (var p in topic.Partitions)
                 {
-                    Partition = p,
-                    ErrorCode = errorCode
-                }).ToList();
+                    parts.Add(new TxnPartitionStatus(p, status));
+                }
+                errorTopics.Add(new AddPartitionsTopicResult(topic.Topic, parts));
             }
-
-            return new AddPartitionsToTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                Results = results
-            };
+            return new AddPartitionsToTxnResult(errorTopics);
         }
 
         // Start transaction if not already started
@@ -261,60 +241,39 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
         }
 
         // Add partitions
-        foreach (var (topic, partitions) in request.Topics)
+        var results = new List<AddPartitionsTopicResult>(request.Topics.Count);
+        foreach (var topic in request.Topics)
         {
-            var partitionResults = new List<AddPartitionsToTxnResponse.PartitionResult>();
-            foreach (var partition in partitions)
+            var partitionResults = new List<TxnPartitionStatus>(topic.Partitions.Count);
+            foreach (var partition in topic.Partitions)
             {
-                var tp = new TopicPartition { Topic = topic, Partition = partition };
+                var tp = new TopicPartition { Topic = topic.Topic, Partition = partition };
                 txnMetadata.Partitions.Add(tp);
-                partitionResults.Add(new AddPartitionsToTxnResponse.PartitionResult
-                {
-                    Partition = partition,
-                    ErrorCode = ErrorCode.None
-                });
+                partitionResults.Add(new TxnPartitionStatus(partition, TxnErrorStatus.None));
             }
-            results[topic] = partitionResults;
+            results.Add(new AddPartitionsTopicResult(topic.Topic, partitionResults));
         }
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new AddPartitionsToTxnResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            Results = results
-        };
+        return new AddPartitionsToTxnResult(results);
     }
 
     /// <summary>
     /// Handles AddOffsetsToTxn request - adds consumer group offsets to a transaction.
     /// </summary>
-    public AddOffsetsToTxnResponse HandleAddOffsetsToTxn(AddOffsetsToTxnRequest request)
+    public AddOffsetsToTxnResult AddOffsetsToTxn(AddOffsetsToTxnCommand request)
     {
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            return new AddOffsetsToTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = errorCode
-            };
+            return new AddOffsetsToTxnResult(status);
         }
 
         // Transaction must be ongoing or empty
         if (txnMetadata!.State != TransactionState.Ongoing && txnMetadata.State != TransactionState.Empty)
         {
-            return new AddOffsetsToTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.InvalidTxnState
-            };
+            return new AddOffsetsToTxnResult(TxnErrorStatus.InvalidTxnState);
         }
 
         txnMetadata.ConsumerGroups.Add(request.GroupId);
@@ -329,35 +288,29 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new AddOffsetsToTxnResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None
-        };
+        return new AddOffsetsToTxnResult(TxnErrorStatus.None);
     }
 
     /// <summary>
     /// Handles TxnOffsetCommit request - commits consumer offsets as part of a transaction.
     /// </summary>
-    public TxnOffsetCommitResponse HandleTxnOffsetCommit(TxnOffsetCommitRequest request)
+    public TxnOffsetCommitResult TxnOffsetCommit(TxnOffsetCommitCommand request)
     {
         // KIP-1319 (v6): resolve each topic's identity once so the
         // pending-offset store sees a Name and the response wire can echo
         // back either Name (v0-5) or TopicId (v6+).
-        var resolved = new List<(string? Name, Guid TopicId, ErrorCode ResolveError, List<TxnOffsetCommitRequest.TxnOffsetCommitPartition> Partitions)>(request.Topics.Count);
+        var resolved = new List<(string? Name, Guid TopicId, TxnErrorStatus ResolveError, IReadOnlyList<TxnOffsetCommitPartition> Partitions)>(request.Topics.Count);
         foreach (var t in request.Topics)
         {
             string? name = t.Name;
             var topicId = t.TopicId;
-            var resolveError = ErrorCode.None;
+            var resolveError = TxnErrorStatus.None;
             if (topicId != Guid.Empty && string.IsNullOrEmpty(name))
             {
                 var meta = _logManager.GetTopicMetadataById(topicId);
                 if (meta is null)
                 {
-                    resolveError = ErrorCode.UnknownTopicId;
+                    resolveError = TxnErrorStatus.UnknownTopicId;
                 }
                 else
                 {
@@ -371,41 +324,32 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
             resolved.Add((name, topicId, resolveError, t.Partitions));
         }
 
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            return new TxnOffsetCommitResponse
+            var errorTopics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
+            foreach (var r in resolved)
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                Topics = resolved.Select(r => new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult
+                var parts = new List<TxnOffsetCommitPartitionResult>(r.Partitions.Count);
+                foreach (var p in r.Partitions)
                 {
-                    Name = r.Name,
-                    TopicId = r.TopicId,
-                    Partitions = r.Partitions.Select(p => new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                    {
-                        Partition = p.Partition,
-                        ErrorCode = errorCode,
-                    }).ToList(),
-                }).ToList(),
-            };
+                    parts.Add(new TxnOffsetCommitPartitionResult(p.Partition, status));
+                }
+                errorTopics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = parts });
+            }
+            return new TxnOffsetCommitResult(errorTopics);
         }
 
-        var topics = new List<TxnOffsetCommitResponse.TxnOffsetCommitTopicResult>(resolved.Count);
+        var topics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
         var stagedCount = 0;
         foreach (var r in resolved)
         {
-            var partitionResults = new List<TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult>(r.Partitions.Count);
+            var partitionResults = new List<TxnOffsetCommitPartitionResult>(r.Partitions.Count);
             foreach (var partition in r.Partitions)
             {
-                if (r.ResolveError != ErrorCode.None)
+                if (r.ResolveError != TxnErrorStatus.None)
                 {
-                    partitionResults.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                    {
-                        Partition = partition.Partition,
-                        ErrorCode = r.ResolveError,
-                    });
+                    partitionResults.Add(new TxnOffsetCommitPartitionResult(partition.Partition, r.ResolveError));
                     continue;
                 }
                 txnMetadata!.PendingOffsets.Add(new PendingTxnOffset
@@ -417,18 +361,9 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
                     Metadata = partition.Metadata,
                 });
                 stagedCount++;
-                partitionResults.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                {
-                    Partition = partition.Partition,
-                    ErrorCode = ErrorCode.None,
-                });
+                partitionResults.Add(new TxnOffsetCommitPartitionResult(partition.Partition, TxnErrorStatus.None));
             }
-            topics.Add(new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult
-            {
-                Name = r.Name,
-                TopicId = r.TopicId,
-                Partitions = partitionResults,
-            });
+            topics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = partitionResults });
         }
 
         _logger.LogDebug("Staged {Count} offsets for transaction {TransactionalId}, group {GroupId}",
@@ -436,41 +371,23 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata!);
 
-        return new TxnOffsetCommitResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            Topics = topics,
-        };
+        return new TxnOffsetCommitResult(topics);
     }
 
     /// <summary>
     /// Handles EndTxn request (commit or abort) with cluster-aware marker replication.
     /// </summary>
-    public async Task<EndTxnResponse> HandleEndTxnAsync(EndTxnRequest request, CancellationToken cancellationToken)
+    public async Task<EndTxnResult> EndTxnAsync(EndTxnCommand request, CancellationToken cancellationToken)
     {
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            return new EndTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = errorCode
-            };
+            return new EndTxnResult(status);
         }
 
         if (txnMetadata!.State != TransactionState.Ongoing)
         {
-            return new EndTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.InvalidTxnState
-            };
+            return new EndTxnResult(TxnErrorStatus.InvalidTxnState);
         }
 
         // Transition to prepare state
@@ -528,36 +445,30 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new EndTxnResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None
-        };
+        return new EndTxnResult(TxnErrorStatus.None);
     }
 
     /// <summary>
     /// Validates a transaction request's transactional ID, producer ID, and epoch.
     /// </summary>
-    private ErrorCode ValidateTransactionRequest(string? transactionalId, long producerId, short producerEpoch, out TransactionMetadata? txnMetadata)
+    private TxnErrorStatus ValidateTransactionRequest(string? transactionalId, long producerId, short producerEpoch, out TransactionMetadata? txnMetadata)
     {
         txnMetadata = null;
 
         if (string.IsNullOrEmpty(transactionalId))
-            return ErrorCode.InvalidTxnState;
+            return TxnErrorStatus.InvalidTxnState;
 
         if (!_transactionsByTxnId.TryGetValue(transactionalId, out txnMetadata))
-            return ErrorCode.UnknownProducerId;
+            return TxnErrorStatus.UnknownProducerId;
 
         if (producerId != txnMetadata.ProducerId || producerEpoch != txnMetadata.ProducerEpoch)
         {
             return producerEpoch < txnMetadata.ProducerEpoch
-                ? ErrorCode.InvalidProducerEpoch
-                : ErrorCode.UnknownProducerId;
+                ? TxnErrorStatus.InvalidProducerEpoch
+                : TxnErrorStatus.UnknownProducerId;
         }
 
-        return ErrorCode.None;
+        return TxnErrorStatus.None;
     }
 
     /// <summary>

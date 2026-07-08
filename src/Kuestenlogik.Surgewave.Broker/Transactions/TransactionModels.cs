@@ -3,23 +3,9 @@ using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionS
 
 namespace Kuestenlogik.Surgewave.Broker.Transactions;
 
-/// <summary>
-/// Transaction listing for ListTransactions API.
-/// </summary>
-public record TransactionListing(string TransactionalId, long ProducerId, string State);
-
-/// <summary>
-/// Transaction description for DescribeTransactions API.
-/// </summary>
-public record TransactionDescription(
-    string TransactionalId,
-    string State,
-    long ProducerId,
-    short ProducerEpoch,
-    int TransactionTimeoutMs,
-    long TransactionStartTimeMs,
-    List<(string Topic, int Partition)> Partitions,
-    int ErrorCode);
+// TransactionListing and TransactionDescription (the neutral ListTransactions /
+// DescribeTransactions projections) now live in Kuestenlogik.Surgewave.Coordination.Transactions
+// so the neutral ITransactionCoordinator contract can expose them without a Kafka dependency (#59).
 
 /// <summary>
 /// Internal transaction metadata tracking state of an active transaction.

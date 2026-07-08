@@ -54,7 +54,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
 
     // Coordinators whose fast-path APIs are still dispatched directly from the broker.
     private readonly ShareGroupCoordinator _shareGroupCoordinator;
-    private readonly TransactionCoordinator _transactionCoordinator;
 
     // Metrics
     private readonly BrokerMetrics _metrics;
@@ -105,7 +104,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         _config = config;
         _logManager = logManager;
         _shareGroupCoordinator = shareGroupCoordinator;
-        _transactionCoordinator = transactionCoordinator;
         _protocolHandler = protocolHandler;
         _metrics = metrics;
         _dispatcher = dispatcher;
@@ -555,9 +553,11 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         {
             // Classic consumer group (JoinGroup/SyncGroup/Heartbeat/LeaveGroup/OffsetCommit/
             // OffsetFetch/DescribeGroups/ListGroups/DeleteGroups/OffsetDelete), consumer group
-            // v2 (KIP-848) and streams group (KIP-1071) APIs route through the dispatcher ->
-            // their ApiHandler adapters: those coordinators are now protocol-neutral and the
-            // adapters own the Kafka<->neutral conversion (#59).
+            // v2 (KIP-848), streams group (KIP-1071) and the transaction APIs (InitProducerId/
+            // AddPartitionsToTxn/AddOffsetsToTxn/TxnOffsetCommit/EndTxn/DescribeProducers/
+            // DescribeTransactions/ListTransactions) route through the dispatcher -> their
+            // ApiHandler adapters: those coordinators are now protocol-neutral and the adapters
+            // own the Kafka<->neutral conversion (#59).
 
             // Handle share group APIs directly (fast-path for common operations)
             case ShareGroupHeartbeatRequest shareGroupHeartbeatRequest:
@@ -566,24 +566,6 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
                 return await _shareGroupCoordinator.HandleShareFetch(shareFetchRequest, cancellationToken);
             case ShareAcknowledgeRequest shareAcknowledgeRequest:
                 return _shareGroupCoordinator.HandleShareAcknowledge(shareAcknowledgeRequest);
-
-            // Handle transaction APIs directly
-            case InitProducerIdRequest initProducerIdRequest:
-                return await _transactionCoordinator.HandleInitProducerIdAsync(initProducerIdRequest, cancellationToken);
-            case AddPartitionsToTxnRequest addPartitionsToTxnRequest:
-                return _transactionCoordinator.HandleAddPartitionsToTxn(addPartitionsToTxnRequest);
-            case AddOffsetsToTxnRequest addOffsetsToTxnRequest:
-                return _transactionCoordinator.HandleAddOffsetsToTxn(addOffsetsToTxnRequest);
-            case EndTxnRequest endTxnRequest:
-                return await _transactionCoordinator.HandleEndTxnAsync(endTxnRequest, cancellationToken);
-            case TxnOffsetCommitRequest txnOffsetCommitRequest:
-                return _transactionCoordinator.HandleTxnOffsetCommit(txnOffsetCommitRequest);
-            case DescribeProducersRequest describeProducersRequest:
-                return _transactionCoordinator.HandleDescribeProducers(describeProducersRequest);
-            case DescribeTransactionsRequest describeTransactionsRequest:
-                return _transactionCoordinator.HandleDescribeTransactions(describeTransactionsRequest);
-            case ListTransactionsRequest listTransactionsRequest:
-                return _transactionCoordinator.HandleListTransactions(listTransactionsRequest);
         }
 
         // Use dispatcher for all other requests (O(1) frozen dictionary lookup)

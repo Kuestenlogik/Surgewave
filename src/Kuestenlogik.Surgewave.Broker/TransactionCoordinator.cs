@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Broker.Transactions;
 using Microsoft.Extensions.Logging;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
@@ -12,9 +12,12 @@ namespace Kuestenlogik.Surgewave.Broker;
 
 /// <summary>
 /// Coordinates transactions for transactional producers.
-/// Manages transaction state, handles transaction APIs, and writes transaction markers.
+/// Manages transaction state and implements the protocol-neutral <see cref="ITransactionCoordinator"/>
+/// wire-API surface (#59); the Kafka DTO conversion lives in the <c>TransactionApiHandler</c> adapter.
+/// The produce-hot-path helpers (<see cref="ValidateProduceBatch"/> / <see cref="RecordTransactionalBatch"/>)
+/// stay Kafka-coupled and move alongside the produce handler later.
 /// </summary>
-public sealed class TransactionCoordinator : IAsyncDisposable
+public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator
 {
     private readonly ProducerStateManager _producerStateManager;
     private readonly TransactionIndex _transactionIndex;
@@ -91,7 +94,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Validates a produce batch for idempotence (sequence number validation).
+    /// Validates a produce batch for idempotence (sequence number validation). Produce-hot-path;
+    /// stays on the Kafka <see cref="ErrorCode"/> as it feeds the (still Kafka) produce handler.
     /// </summary>
     public ErrorCode ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
     {
@@ -99,23 +103,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Handles InitProducerId request for transactional producers.
+    /// Handles InitProducerId for transactional producers.
     /// </summary>
-    public async Task<InitProducerIdResponse> HandleInitProducerIdAsync(InitProducerIdRequest request, CancellationToken cancellationToken)
+    public async Task<InitProducerIdResult> InitProducerIdAsync(InitProducerIdCommand request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(request.TransactionalId))
         {
             // Non-transactional idempotent producer
             var (producerId, epoch) = _producerStateManager.AllocateProducerId();
-            return new InitProducerIdResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.None,
-                ProducerId = producerId,
-                ProducerEpoch = epoch
-            };
+            return new InitProducerIdResult(TxnErrorStatus.None, producerId, epoch);
         }
 
         // Transactional producer
@@ -156,30 +152,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     txnMetadata.ProducerId,
                     txnMetadata.ProducerEpoch);
 
-                return new InitProducerIdResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ThrottleTimeMs = 0,
-                    ErrorCode = ErrorCode.InvalidProducerEpoch,
-                    ProducerId = txnMetadata.ProducerId,
-                    ProducerEpoch = txnMetadata.ProducerEpoch,
-                };
+                return new InitProducerIdResult(TxnErrorStatus.InvalidProducerEpoch, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
             }
 
             if (request.ProducerEpoch == txnMetadata.ProducerEpoch
                 && txnMetadata.State == TransactionState.Empty)
             {
                 // Idempotent retry from the current incarnation, nothing in flight — return as-is.
-                return new InitProducerIdResponse
-                {
-                    CorrelationId = request.CorrelationId,
-                    ApiVersion = request.ApiVersion,
-                    ThrottleTimeMs = 0,
-                    ErrorCode = ErrorCode.None,
-                    ProducerId = txnMetadata.ProducerId,
-                    ProducerEpoch = txnMetadata.ProducerEpoch,
-                };
+                return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
             }
         }
 
@@ -218,44 +198,29 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new InitProducerIdResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None,
-            ProducerId = txnMetadata.ProducerId,
-            ProducerEpoch = txnMetadata.ProducerEpoch
-        };
+        return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
     }
 
     /// <summary>
-    /// Handles AddPartitionsToTxn request.
+    /// Handles AddPartitionsToTxn.
     /// </summary>
-    public AddPartitionsToTxnResponse HandleAddPartitionsToTxn(AddPartitionsToTxnRequest request)
+    public AddPartitionsToTxnResult AddPartitionsToTxn(AddPartitionsToTxnCommand request)
     {
-        var results = new Dictionary<string, List<AddPartitionsToTxnResponse.PartitionResult>>();
-
         // Validate request
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            foreach (var (topic, partitions) in request.Topics)
+            var errorTopics = new List<AddPartitionsTopicResult>(request.Topics.Count);
+            foreach (var topic in request.Topics)
             {
-                results[topic] = partitions.Select(p => new AddPartitionsToTxnResponse.PartitionResult
+                var parts = new List<TxnPartitionStatus>(topic.Partitions.Count);
+                foreach (var p in topic.Partitions)
                 {
-                    Partition = p,
-                    ErrorCode = errorCode
-                }).ToList();
+                    parts.Add(new TxnPartitionStatus(p, status));
+                }
+                errorTopics.Add(new AddPartitionsTopicResult(topic.Topic, parts));
             }
-
-            return new AddPartitionsToTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                Results = results
-            };
+            return new AddPartitionsToTxnResult(errorTopics);
         }
 
         // Start transaction if not already started
@@ -273,60 +238,39 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
 
         // Add partitions
-        foreach (var (topic, partitions) in request.Topics)
+        var results = new List<AddPartitionsTopicResult>(request.Topics.Count);
+        foreach (var topic in request.Topics)
         {
-            var partitionResults = new List<AddPartitionsToTxnResponse.PartitionResult>();
-            foreach (var partition in partitions)
+            var partitionResults = new List<TxnPartitionStatus>(topic.Partitions.Count);
+            foreach (var partition in topic.Partitions)
             {
-                var tp = new TopicPartition { Topic = topic, Partition = partition };
+                var tp = new TopicPartition { Topic = topic.Topic, Partition = partition };
                 txnMetadata.Partitions.Add(tp);
-                partitionResults.Add(new AddPartitionsToTxnResponse.PartitionResult
-                {
-                    Partition = partition,
-                    ErrorCode = ErrorCode.None
-                });
+                partitionResults.Add(new TxnPartitionStatus(partition, TxnErrorStatus.None));
             }
-            results[topic] = partitionResults;
+            results.Add(new AddPartitionsTopicResult(topic.Topic, partitionResults));
         }
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new AddPartitionsToTxnResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            Results = results
-        };
+        return new AddPartitionsToTxnResult(results);
     }
 
     /// <summary>
-    /// Handles AddOffsetsToTxn request - adds consumer group offsets to a transaction.
+    /// Handles AddOffsetsToTxn - adds consumer group offsets to a transaction.
     /// </summary>
-    public AddOffsetsToTxnResponse HandleAddOffsetsToTxn(AddOffsetsToTxnRequest request)
+    public AddOffsetsToTxnResult AddOffsetsToTxn(AddOffsetsToTxnCommand request)
     {
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            return new AddOffsetsToTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = errorCode
-            };
+            return new AddOffsetsToTxnResult(status);
         }
 
         // Transaction must be ongoing or empty
         if (txnMetadata!.State != TransactionState.Ongoing && txnMetadata.State != TransactionState.Empty)
         {
-            return new AddOffsetsToTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.InvalidTxnState
-            };
+            return new AddOffsetsToTxnResult(TxnErrorStatus.InvalidTxnState);
         }
 
         txnMetadata.ConsumerGroups.Add(request.GroupId);
@@ -341,37 +285,31 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new AddOffsetsToTxnResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None
-        };
+        return new AddOffsetsToTxnResult(TxnErrorStatus.None);
     }
 
     /// <summary>
-    /// Handles TxnOffsetCommit request - commits consumer offsets as part of a transaction.
+    /// Handles TxnOffsetCommit - commits consumer offsets as part of a transaction.
     /// </summary>
-    public TxnOffsetCommitResponse HandleTxnOffsetCommit(TxnOffsetCommitRequest request)
+    public TxnOffsetCommitResult TxnOffsetCommit(TxnOffsetCommitCommand request)
     {
         // Resolve each topic to its (Name, TopicId) pair once so both the
         // pending-offset store (name-keyed) and the v6 response wire (id-keyed)
         // see consistent values. KIP-1319 (v6) sends only TopicId on the wire;
         // pre-v6 sends only Name.
-        var resolved = new List<(string? Name, Guid TopicId, ErrorCode ResolveError, List<TxnOffsetCommitRequest.TxnOffsetCommitPartition> Partitions)>(request.Topics.Count);
+        var resolved = new List<(string? Name, Guid TopicId, TxnErrorStatus ResolveError, IReadOnlyList<TxnOffsetCommitPartition> Partitions)>(request.Topics.Count);
         foreach (var t in request.Topics)
         {
             string? name = t.Name;
             var topicId = t.TopicId;
-            var resolveError = ErrorCode.None;
+            var resolveError = TxnErrorStatus.None;
             if (topicId != Guid.Empty && string.IsNullOrEmpty(name))
             {
                 // v6 path — resolve TopicId → Name via the log manager.
                 var meta = _logManager.GetTopicMetadataById(topicId);
                 if (meta is null)
                 {
-                    resolveError = ErrorCode.UnknownTopicId;
+                    resolveError = TxnErrorStatus.UnknownTopicId;
                 }
                 else
                 {
@@ -387,42 +325,33 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             resolved.Add((name, topicId, resolveError, t.Partitions));
         }
 
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            return new TxnOffsetCommitResponse
+            var errorTopics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
+            foreach (var r in resolved)
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                Topics = resolved.Select(r => new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult
+                var parts = new List<TxnOffsetCommitPartitionResult>(r.Partitions.Count);
+                foreach (var p in r.Partitions)
                 {
-                    Name = r.Name,
-                    TopicId = r.TopicId,
-                    Partitions = r.Partitions.Select(p => new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                    {
-                        Partition = p.Partition,
-                        ErrorCode = errorCode,
-                    }).ToList(),
-                }).ToList(),
-            };
+                    parts.Add(new TxnOffsetCommitPartitionResult(p.Partition, status));
+                }
+                errorTopics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = parts });
+            }
+            return new TxnOffsetCommitResult(errorTopics);
         }
 
         // Store pending offsets
-        var topics = new List<TxnOffsetCommitResponse.TxnOffsetCommitTopicResult>(resolved.Count);
+        var topics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
         var stagedCount = 0;
         foreach (var r in resolved)
         {
-            var partitionResults = new List<TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult>(r.Partitions.Count);
+            var partitionResults = new List<TxnOffsetCommitPartitionResult>(r.Partitions.Count);
             foreach (var partition in r.Partitions)
             {
-                if (r.ResolveError != ErrorCode.None)
+                if (r.ResolveError != TxnErrorStatus.None)
                 {
-                    partitionResults.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                    {
-                        Partition = partition.Partition,
-                        ErrorCode = r.ResolveError,
-                    });
+                    partitionResults.Add(new TxnOffsetCommitPartitionResult(partition.Partition, r.ResolveError));
                     continue;
                 }
                 txnMetadata!.PendingOffsets.Add(new PendingTxnOffset
@@ -434,18 +363,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     Metadata = partition.Metadata,
                 });
                 stagedCount++;
-                partitionResults.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult
-                {
-                    Partition = partition.Partition,
-                    ErrorCode = ErrorCode.None,
-                });
+                partitionResults.Add(new TxnOffsetCommitPartitionResult(partition.Partition, TxnErrorStatus.None));
             }
-            topics.Add(new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult
-            {
-                Name = r.Name,
-                TopicId = r.TopicId,
-                Partitions = partitionResults,
-            });
+            topics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = partitionResults });
         }
 
         _logger.LogDebug("Staged {Count} offsets for transaction {TransactionalId}, group {GroupId}",
@@ -453,42 +373,24 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata!);
 
-        return new TxnOffsetCommitResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            Topics = topics,
-        };
+        return new TxnOffsetCommitResult(topics);
     }
 
     /// <summary>
-    /// Handles EndTxn request (commit or abort).
+    /// Handles EndTxn (commit or abort).
     /// </summary>
-    public async Task<EndTxnResponse> HandleEndTxnAsync(EndTxnRequest request, CancellationToken cancellationToken)
+    public async Task<EndTxnResult> EndTxnAsync(EndTxnCommand request, CancellationToken cancellationToken)
     {
-        var errorCode = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (errorCode != ErrorCode.None)
+        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
+        if (status != TxnErrorStatus.None)
         {
-            return new EndTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = errorCode
-            };
+            return new EndTxnResult(status);
         }
 
         // Allow EndTxn from Empty state (no-op transaction) or Ongoing state
         if (txnMetadata!.State != TransactionState.Ongoing && txnMetadata.State != TransactionState.Empty)
         {
-            return new EndTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.InvalidTxnState
-            };
+            return new EndTxnResult(TxnErrorStatus.InvalidTxnState);
         }
 
         // Handle empty transaction (no partitions, no data) - just transition state
@@ -498,13 +400,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             txnMetadata.State = request.Committed ? TransactionState.CompleteCommit : TransactionState.CompleteAbort;
             _statePersistence.PersistState(txnMetadata);
 
-            return new EndTxnResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.None
-            };
+            return new EndTxnResult(TxnErrorStatus.None);
         }
 
         // Transition to prepare state
@@ -542,36 +438,30 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         _statePersistence.PersistState(txnMetadata);
 
-        return new EndTxnResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None
-        };
+        return new EndTxnResult(TxnErrorStatus.None);
     }
 
     /// <summary>
     /// Validates a transaction request's transactional ID, producer ID, and epoch.
     /// </summary>
-    private ErrorCode ValidateTransactionRequest(string? transactionalId, long producerId, short producerEpoch, out TransactionMetadata? txnMetadata)
+    private TxnErrorStatus ValidateTransactionRequest(string? transactionalId, long producerId, short producerEpoch, out TransactionMetadata? txnMetadata)
     {
         txnMetadata = null;
 
         if (string.IsNullOrEmpty(transactionalId))
-            return ErrorCode.InvalidTxnState;
+            return TxnErrorStatus.InvalidTxnState;
 
         if (!_transactionsByTxnId.TryGetValue(transactionalId, out txnMetadata))
-            return ErrorCode.UnknownProducerId;
+            return TxnErrorStatus.UnknownProducerId;
 
         if (producerId != txnMetadata.ProducerId || producerEpoch != txnMetadata.ProducerEpoch)
         {
             return producerEpoch < txnMetadata.ProducerEpoch
-                ? ErrorCode.InvalidProducerEpoch
-                : ErrorCode.UnknownProducerId;
+                ? TxnErrorStatus.InvalidProducerEpoch
+                : TxnErrorStatus.UnknownProducerId;
         }
 
-        return ErrorCode.None;
+        return TxnErrorStatus.None;
     }
 
     /// <summary>
@@ -644,37 +534,31 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// KIP-664 <c>DescribeProducers</c> wire handler. Builds a
-    /// <see cref="DescribeProducersResponse"/> by asking the producer-state
-    /// manager which producer ids have written to (or hold a transaction on)
-    /// each requested partition. Per Kafka the response is per-partition;
-    /// unknown topics still produce a partition entry with
-    /// <see cref="ErrorCode.UnknownTopicOrPartition"/> rather than dropping
-    /// the row, so admin tools can correlate request and response indices.
+    /// KIP-664 <c>DescribeProducers</c>: builds a per-partition producer snapshot by asking the
+    /// producer-state manager which producer ids have written to (or hold a transaction on) each
+    /// requested partition. Per Kafka the response is per-partition; the neutral status is None
+    /// on every row (as before) — unknown-topic rows still surface so admin tools can correlate
+    /// request and response indices.
     /// </summary>
-    public DescribeProducersResponse HandleDescribeProducers(DescribeProducersRequest request)
+    public DescribeProducersResult DescribeProducers(DescribeProducersCommand request)
     {
-        var topicResponses = new List<DescribeProducersResponse.TopicResponse>(request.Topics.Count);
+        var topicResults = new List<DescribeProducersTopicResult>(request.Topics.Count);
         foreach (var topic in request.Topics)
         {
-            var partitionResponses = new List<DescribeProducersResponse.PartitionResponse>(topic.PartitionIndexes.Count);
+            var partitionResults = new List<DescribeProducersPartitionResult>(topic.PartitionIndexes.Count);
             foreach (var partitionIndex in topic.PartitionIndexes)
             {
                 var partition = new TopicPartition { Topic = topic.Name, Partition = partitionIndex };
                 var producers = _producerStateManager.GetActiveProducersForPartition(partition);
 
-                var producerStates = new List<DescribeProducersResponse.ProducerState>(producers.Count);
+                var producerStates = new List<TxnProducerState>(producers.Count);
                 foreach (var p in producers)
                 {
                     // Surgewave doesn't track per-partition LastTimestamp on the
                     // producer state directly — fall back to -1 (KIP-664 says
                     // "may be -1 if not tracked"). CoordinatorEpoch / TxnStartOffset
-                    // are also returned as -1 unless the producer is mid-txn,
-                    // in which case the txn coordinator surfaces them through
-                    // a future DescribeTransactions follow-up. The HasOngoing
-                    // Transaction bit on the snapshot tells admin tools "yes,
-                    // this producer holds a partition lock right now".
-                    producerStates.Add(new DescribeProducersResponse.ProducerState
+                    // are also returned as -1 unless the producer is mid-txn.
+                    producerStates.Add(new TxnProducerState
                     {
                         ProducerId = p.ProducerId,
                         ProducerEpoch = p.Epoch,
@@ -685,105 +569,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     });
                 }
 
-                partitionResponses.Add(new DescribeProducersResponse.PartitionResponse
+                partitionResults.Add(new DescribeProducersPartitionResult
                 {
                     PartitionIndex = partitionIndex,
-                    ErrorCode = ErrorCode.None,
+                    Status = TxnErrorStatus.None,
                     ErrorMessage = null,
                     ActiveProducers = producerStates,
                 });
             }
-            topicResponses.Add(new DescribeProducersResponse.TopicResponse
-            {
-                Name = topic.Name,
-                Partitions = partitionResponses,
-            });
+            topicResults.Add(new DescribeProducersTopicResult(topic.Name, partitionResults));
         }
 
-        return new DescribeProducersResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            Topics = topicResponses,
-        };
-    }
-
-    /// <summary>
-    /// Kafka-wire handler for <c>DescribeTransactions</c> (API key 65). Maps
-    /// the existing <see cref="DescribeTransactions(IEnumerable{string})"/>
-    /// projection onto the on-the-wire response shape so admin clients
-    /// (Confluent.Kafka.Admin / Java AdminClient) can call the RPC directly
-    /// instead of going through Surgewave's gRPC AdminService.
-    /// </summary>
-    public DescribeTransactionsResponse HandleDescribeTransactions(DescribeTransactionsRequest request)
-    {
-        var descriptions = DescribeTransactions(request.TransactionalIds);
-        var states = new List<DescribeTransactionsResponse.TransactionState>(descriptions.Count);
-        foreach (var d in descriptions)
-        {
-            // Existing DescribeTransactions returns ErrorCode=59 (UnknownProducerId)
-            // for ids the broker has never seen; map straight through.
-            var topics = d.Partitions
-                .GroupBy(p => p.Topic, StringComparer.Ordinal)
-                .Select(g => new DescribeTransactionsResponse.TopicPartition
-                {
-                    Topic = g.Key,
-                    Partitions = g.Select(p => p.Partition).ToList(),
-                })
-                .ToList();
-
-            states.Add(new DescribeTransactionsResponse.TransactionState
-            {
-                ErrorCode = (ErrorCode)d.ErrorCode,
-                TransactionalId = d.TransactionalId,
-                State = d.State,
-                TransactionTimeoutMs = d.TransactionTimeoutMs,
-                TransactionStartTimeMs = d.TransactionStartTimeMs,
-                ProducerId = d.ProducerId,
-                ProducerEpoch = d.ProducerEpoch,
-                Topics = topics,
-            });
-        }
-
-        return new DescribeTransactionsResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            TransactionStates = states,
-        };
-    }
-
-    /// <summary>
-    /// Kafka-wire handler for <c>ListTransactions</c> (API key 66, v0–v2).
-    /// Wraps the existing <see cref="ListTransactions"/> + KIP-994 / KIP-1152
-    /// filter logic. The wire-level <c>DurationFilter</c> and
-    /// <c>TransactionalIdPattern</c> fields read by the request parser flow
-    /// straight through.
-    /// </summary>
-    public ListTransactionsResponse HandleListTransactions(ListTransactionsRequest request)
-    {
-        var listings = ListTransactions(
-            statesFilter: request.StateFilters,
-            producerIdFilter: request.ProducerIdFilters,
-            minDurationMs: request.DurationFilter,
-            transactionalIdPattern: request.TransactionalIdPattern);
-
-        return new ListTransactionsResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = 0,
-            ErrorCode = ErrorCode.None,
-            UnknownStateFilters = [],
-            TransactionStates = listings.Select(l => new ListTransactionsResponse.TransactionListing
-            {
-                TransactionalId = l.TransactionalId,
-                ProducerId = l.ProducerId,
-                TransactionState = l.State,
-            }).ToList(),
-        };
+        return new DescribeProducersResult(topicResults);
     }
 
     /// <summary>

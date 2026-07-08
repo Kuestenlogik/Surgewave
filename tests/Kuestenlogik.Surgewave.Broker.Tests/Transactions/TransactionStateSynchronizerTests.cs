@@ -2,10 +2,9 @@ using System.Text.Json;
 using Kuestenlogik.Surgewave.Broker.Transactions;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -103,18 +102,14 @@ public class TransactionStateSynchronizerTests : IAsyncDisposable
         // Create some transactions
         for (int i = 0; i < 3; i++)
         {
-            var request = new InitProducerIdRequest
+            var request = new InitProducerIdCommand
             {
-                ApiKey = ApiKey.InitProducerId,
-                ApiVersion = 4,
-                CorrelationId = i,
-                ClientId = "test-client",
                 TransactionalId = $"export-txn-{i}",
                 TransactionTimeoutMs = 60000,
                 ProducerId = -1,
                 ProducerEpoch = -1
             };
-            await _coordinator.HandleInitProducerIdAsync(request, CancellationToken.None);
+            await _coordinator.InitProducerIdAsync(request, CancellationToken.None);
         }
 
         // Act
@@ -135,35 +130,27 @@ public class TransactionStateSynchronizerTests : IAsyncDisposable
         // Arrange
         var synchronizer = CreateSynchronizer();
 
-        var initRequest = new InitProducerIdRequest
+        var initRequest = new InitProducerIdCommand
         {
-            ApiKey = ApiKey.InitProducerId,
-            ApiVersion = 4,
-            CorrelationId = 1,
-            ClientId = "test-client",
             TransactionalId = "txn-with-parts",
             TransactionTimeoutMs = 60000,
             ProducerId = -1,
             ProducerEpoch = -1
         };
-        var initResponse = await _coordinator.HandleInitProducerIdAsync(initRequest, CancellationToken.None);
+        var initResponse = await _coordinator.InitProducerIdAsync(initRequest, CancellationToken.None);
 
-        var addRequest = new AddPartitionsToTxnRequest
+        var addRequest = new AddPartitionsToTxnCommand
         {
-            ApiKey = ApiKey.AddPartitionsToTxn,
-            ApiVersion = 3,
-            CorrelationId = 2,
-            ClientId = "test-client",
             TransactionalId = "txn-with-parts",
             ProducerId = initResponse.ProducerId,
             ProducerEpoch = initResponse.ProducerEpoch,
-            Topics = new Dictionary<string, List<int>>
-            {
-                ["topic-x"] = [0, 1],
-                ["topic-y"] = [2]
-            }
+            Topics =
+            [
+                new AddPartitionsTopic("topic-x", [0, 1]),
+                new AddPartitionsTopic("topic-y", [2]),
+            ]
         };
-        _coordinator.HandleAddPartitionsToTxn(addRequest);
+        _coordinator.AddPartitionsToTxn(addRequest);
 
         // Act
         var exported = synchronizer.ExportTransactionState();
