@@ -18,7 +18,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
 - [#54](https://github.com/Kuestenlogik/Surgewave/issues/54) **Vulnerable transitives shipped by 0.3.0 packages: Microsoft.OpenApi 2.0.0 (fix available) + SQLitePCLRaw.lib.e_sqlite3 2.1.11 (no upstream fix yet)** 
-- [#56](https://github.com/Kuestenlogik/Surgewave/issues/56) **Flaky: ReplicationTests.Cluster_IsrManagement_FollowersCatchUp fails intermittently in Release CI** 
 
 ### v0.5 — AI-friendly broker
 
@@ -53,8 +52,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#63](https://github.com/Kuestenlogik/Surgewave/issues/63) **Embedded Bowire host: share Kuestenlogik.Surgewave ALC prefix + register SDK services in DI** 
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
-- [#69](https://github.com/Kuestenlogik/Surgewave/issues/69) **Epic: legacy (non-Raft) follower replication is unwired end-to-end — ISR never forms** 
 
 ---
 
-*Generated 2026-07-07 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-07-08 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
