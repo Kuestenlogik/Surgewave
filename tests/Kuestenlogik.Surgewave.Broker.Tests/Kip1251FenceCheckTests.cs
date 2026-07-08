@@ -1,6 +1,6 @@
 using Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -158,7 +158,7 @@ public sealed class Kip1251FenceCheckTests : IDisposable
         // per-partition. The pre-flight should now return None for the
         // old-epoch case (was StaleMemberEpoch).
         SeedGroup("g7", groupEpoch: 7, ("m1", MemberEpoch: 7, [0], [5]));
-        Assert.Equal(ErrorCode.None,
+        Assert.Equal(ConsumerGroupFenceStatus.Ok,
             _coordinator.ValidateMemberForOffsetOperation("g7", "m1", memberEpoch: 5));
     }
 
@@ -169,7 +169,7 @@ public sealed class Kip1251FenceCheckTests : IDisposable
         // THE FUTURE is impossible (the broker never issued it), so the
         // pre-flight still rejects with FencedMemberEpoch.
         SeedGroup("g8", groupEpoch: 5, ("m1", MemberEpoch: 5, [0], [5]));
-        Assert.Equal(ErrorCode.FencedMemberEpoch,
+        Assert.Equal(ConsumerGroupFenceStatus.FencedEpoch,
             _coordinator.ValidateMemberForOffsetOperation("g8", "m1", memberEpoch: 99));
     }
 }

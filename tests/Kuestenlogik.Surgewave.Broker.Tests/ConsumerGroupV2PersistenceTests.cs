@@ -1,8 +1,7 @@
 using Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
 using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -50,11 +49,8 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
         {
             var coordinator = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, store);
 
-            var resp = coordinator.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+            var resp = coordinator.Heartbeat(new ConsumerHeartbeatCommand
             {
-                ApiKey = ApiKey.ConsumerGroupHeartbeat,
-                ApiVersion = 0,
-                CorrelationId = 0,
                 ClientId = "c1",
                 GroupId = "persist-g",
                 MemberId = "",
@@ -73,17 +69,10 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
         using var store2 = new JsonFileGroupStateStore<ConsumerGroupV2State>(_dataDir, "consumer-groups-v2", NullLogger.Instance);
         var coordinator2 = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, store2);
 
-        var describe = coordinator2.HandleConsumerGroupDescribe(new ConsumerGroupDescribeRequest
-        {
-            ApiKey = ApiKey.ConsumerGroupDescribe,
-            ApiVersion = 0,
-            CorrelationId = 0,
-            ClientId = "test",
-            GroupIds = ["persist-g"],
-        });
+        var describe = coordinator2.Describe(["persist-g"]);
 
-        var group = Assert.Single(describe.Groups);
-        Assert.Equal(ErrorCode.None, group.ErrorCode);
+        var group = Assert.Single(describe);
+        Assert.Equal(ConsumerGroupDescribeStatus.Ok, group.Status);
         var member = Assert.Single(group.Members);
         Assert.Equal(memberId, member.MemberId);
         Assert.Contains(TopicA, member.SubscribedTopicNames);
@@ -96,11 +85,8 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
         using var store = new JsonFileGroupStateStore<ConsumerGroupV2State>(_dataDir, "consumer-groups-v2", NullLogger.Instance);
         var coordinator = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, store);
 
-        var first = coordinator.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        var first = coordinator.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = "c1",
             GroupId = "ephemeral-g",
             MemberId = "",
@@ -109,11 +95,8 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
         });
 
         // Member leaves.
-        coordinator.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        coordinator.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = "c1",
             GroupId = "ephemeral-g",
             MemberId = first.MemberId!,
@@ -132,11 +115,8 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
         var coordinator = new ConsumerGroupV2Coordinator(
             NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, persistence: null);
 
-        var resp = coordinator.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        var resp = coordinator.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = "c1",
             GroupId = "no-persist-g",
             MemberId = "",
@@ -144,6 +124,6 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
             SubscribedTopicNames = [TopicA],
         });
 
-        Assert.Equal(ErrorCode.None, resp.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
     }
 }

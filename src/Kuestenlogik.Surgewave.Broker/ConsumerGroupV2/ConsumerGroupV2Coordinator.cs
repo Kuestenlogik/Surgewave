@@ -1,8 +1,7 @@
 using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
 using Kuestenlogik.Surgewave.Broker.Native.Assignors;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
@@ -19,7 +18,7 @@ namespace Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
 /// Once every member's <c>OwnedTopicPartitions</c> matches its target the group reaches
 /// the Stable state.
 /// </summary>
-public sealed class ConsumerGroupV2Coordinator
+public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
 {
     private readonly ILogger<ConsumerGroupV2Coordinator> _logger;
     private readonly Dictionary<string, ConsumerGroupV2State> _groups;
@@ -52,36 +51,35 @@ public sealed class ConsumerGroupV2Coordinator
     // ConsumerGroupHeartbeat (API Key 68)
     // ─────────────────────────────────────────────────────────────
 
-    public ConsumerGroupHeartbeatResponse HandleConsumerGroupHeartbeat(ConsumerGroupHeartbeatRequest request)
+    public ConsumerHeartbeatResult Heartbeat(ConsumerHeartbeatCommand command)
     {
         lock (_groupLock)
         {
             _logger.LogDebug("ConsumerGroupV2Heartbeat: GroupId={GroupId}, MemberId={MemberId}, MemberEpoch={MemberEpoch}",
-                request.GroupId, request.MemberId, request.MemberEpoch);
+                command.GroupId, command.MemberId, command.MemberEpoch);
 
             // MemberEpoch -1 means leave
-            if (request.MemberEpoch == -1)
+            if (command.MemberEpoch == -1)
             {
-                return HandleLeave(request);
+                return HandleLeave(command);
             }
 
-            if (!_groups.TryGetValue(request.GroupId, out var group))
+            if (!_groups.TryGetValue(command.GroupId, out var group))
             {
-                group = new ConsumerGroupV2State { GroupId = request.GroupId };
-                _groups[request.GroupId] = group;
-                _logger.LogInformation("ConsumerGroupV2 created: {GroupId}", request.GroupId);
+                group = new ConsumerGroupV2State { GroupId = command.GroupId };
+                _groups[command.GroupId] = group;
+                _logger.LogInformation("ConsumerGroupV2 created: {GroupId}", command.GroupId);
             }
 
             // KIP-848 heartbeat-epoch fencing: a heartbeat carrying a non-zero
             // MemberEpoch must match the broker's view exactly. A behind-by-one
-            // member gets STALE_MEMBER_EPOCH (113) and re-fetches; a member
-            // claiming an epoch the broker never assigned is impossible state
-            // and gets FENCED_MEMBER_EPOCH (110); a non-zero epoch with an
-            // unknown memberId is UNKNOWN_MEMBER_ID. The check runs before any
-            // mutation so a malformed client can never silently advance state.
-            if (TryValidateHeartbeatEpoch(request, group, out var fenceResponse))
+            // member gets StaleEpoch and re-fetches; a member claiming an epoch the
+            // broker never assigned is impossible state and gets FencedEpoch; a
+            // non-zero epoch with an unknown memberId is UnknownMember. The check runs
+            // before any mutation so a malformed client can never silently advance state.
+            if (TryValidateHeartbeatEpoch(command, group, out var fenceResult))
             {
-                return fenceResponse;
+                return fenceResult;
             }
 
             // KIP-955: the founding member's first heartbeat seeds group-level metadata
@@ -89,21 +87,21 @@ public sealed class ConsumerGroupV2Coordinator
             // the rebalance timeout downward but cannot push it back up — a slow member
             // must not relax the group's tolerance once others are coordinating against
             // the original value.
-            ApplyInitMetadata(group, request);
+            ApplyInitMetadata(group, command);
 
             bool targetNeedsRecompute = false;
 
-            if (TryUpdateAssignor(group, request.ServerAssignor))
+            if (TryUpdateAssignor(group, command.ServerAssignor))
             {
                 targetNeedsRecompute = true;
             }
 
             CleanStaleMembers(group, ref targetNeedsRecompute);
 
-            var memberId = request.MemberId;
-            if (request.MemberEpoch == 0 && string.IsNullOrEmpty(memberId))
+            var memberId = command.MemberId;
+            if (command.MemberEpoch == 0 && string.IsNullOrEmpty(memberId))
             {
-                memberId = $"{request.ClientId}-{Guid.NewGuid()}";
+                memberId = $"{command.ClientId}-{Guid.NewGuid()}";
             }
 
             if (!group.Members.TryGetValue(memberId, out var member))
@@ -111,26 +109,26 @@ public sealed class ConsumerGroupV2Coordinator
                 member = new ConsumerGroupV2Member
                 {
                     MemberId = memberId,
-                    InstanceId = request.InstanceId,
-                    RackId = request.RackId,
-                    ClientId = request.ClientId,
+                    InstanceId = command.InstanceId,
+                    RackId = command.RackId,
+                    ClientId = command.ClientId,
                     ClientHost = "*"
                 };
                 group.Members[memberId] = member;
                 group.GroupEpoch++;
                 targetNeedsRecompute = true;
                 _logger.LogInformation("ConsumerGroupV2 {GroupId}: member {MemberId} joined (epoch={Epoch})",
-                    request.GroupId, memberId, group.GroupEpoch);
+                    command.GroupId, memberId, group.GroupEpoch);
             }
 
             member.LastHeartbeat = DateTime.UtcNow;
-            if (request.InstanceId != null) member.InstanceId = request.InstanceId;
-            if (request.RackId != null) member.RackId = request.RackId;
+            if (command.InstanceId != null) member.InstanceId = command.InstanceId;
+            if (command.RackId != null) member.RackId = command.RackId;
 
-            if (request.SubscribedTopicNames != null
-                && !AreSubscriptionsEqual(member.SubscribedTopicNames, request.SubscribedTopicNames))
+            if (command.SubscribedTopicNames != null
+                && !AreSubscriptionsEqual(member.SubscribedTopicNames, command.SubscribedTopicNames))
             {
-                member.SubscribedTopicNames = request.SubscribedTopicNames;
+                member.SubscribedTopicNames = [.. command.SubscribedTopicNames];
                 group.GroupEpoch++;
                 targetNeedsRecompute = true;
             }
@@ -138,9 +136,9 @@ public sealed class ConsumerGroupV2Coordinator
             // Update what the member reports owning. KIP-848: this is what the
             // reconciler uses to decide when a partition is safe to hand to its new
             // owner. Treat null as "unchanged since last heartbeat".
-            if (request.TopicPartitions != null)
+            if (command.OwnedTopicPartitions != null)
             {
-                member.OwnedTopicPartitions = ConvertOwnedFromRequest(request.TopicPartitions);
+                member.OwnedTopicPartitions = ToInternalAssignment(command.OwnedTopicPartitions);
             }
 
             if (targetNeedsRecompute)
@@ -157,29 +155,27 @@ public sealed class ConsumerGroupV2Coordinator
             // store debounces writes internally so this is cheap.
             _persistence?.Save(group.GroupId, group);
 
-            return new ConsumerGroupHeartbeatResponse
+            return new ConsumerHeartbeatResult
             {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.None,
+                Status = ConsumerGroupFenceStatus.Ok,
                 MemberId = memberId,
                 MemberEpoch = member.MemberEpoch,
                 HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
-                MemberAssignment = BuildHeartbeatAssignment(safeAssignment),
+                Assignment = ToNeutralAssignment(safeAssignment),
             };
         }
     }
 
-    private ConsumerGroupHeartbeatResponse HandleLeave(ConsumerGroupHeartbeatRequest request)
+    private ConsumerHeartbeatResult HandleLeave(ConsumerHeartbeatCommand command)
     {
-        if (_groups.TryGetValue(request.GroupId, out var group))
+        if (_groups.TryGetValue(command.GroupId, out var group))
         {
-            if (group.Members.Remove(request.MemberId))
+            if (group.Members.Remove(command.MemberId))
             {
                 group.GroupEpoch++;
                 _assignmentComputer.Compute(group);
                 _logger.LogInformation("ConsumerGroupV2 {GroupId}: member {MemberId} left (epoch={Epoch})",
-                    request.GroupId, request.MemberId, group.GroupEpoch);
+                    command.GroupId, command.MemberId, group.GroupEpoch);
 
                 if (group.Members.Count == 0)
                 {
@@ -192,14 +188,12 @@ public sealed class ConsumerGroupV2Coordinator
             }
         }
 
-        return new ConsumerGroupHeartbeatResponse
+        return new ConsumerHeartbeatResult
         {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            MemberId = request.MemberId,
+            Status = ConsumerGroupFenceStatus.Ok,
+            MemberId = command.MemberId,
             MemberEpoch = -1,
-            HeartbeatIntervalMs = DefaultHeartbeatIntervalMs
+            HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
         };
     }
 
@@ -207,67 +201,58 @@ public sealed class ConsumerGroupV2Coordinator
     // ConsumerGroupDescribe (API Key 69)
     // ─────────────────────────────────────────────────────────────
 
-    public ConsumerGroupDescribeResponse HandleConsumerGroupDescribe(ConsumerGroupDescribeRequest request)
+    public IReadOnlyList<ConsumerGroupDescription> Describe(IReadOnlyList<string> groupIds)
     {
         lock (_groupLock)
         {
-            var groups = new List<ConsumerGroupDescribeResponse.DescribedGroup>(request.GroupIds.Count);
+            var result = new List<ConsumerGroupDescription>(groupIds.Count);
 
-            foreach (var groupId in request.GroupIds)
+            foreach (var groupId in groupIds)
             {
                 if (!_groups.TryGetValue(groupId, out var group))
                 {
-                    groups.Add(new ConsumerGroupDescribeResponse.DescribedGroup
+                    result.Add(new ConsumerGroupDescription
                     {
-                        ErrorCode = ErrorCode.InvalidGroupId,
                         GroupId = groupId,
-                        GroupState = "",
-                        AssignorName = "range",
-                        Members = []
+                        Status = ConsumerGroupDescribeStatus.GroupNotFound,
                     });
                     continue;
                 }
 
-                var members = new List<ConsumerGroupDescribeResponse.Member>(group.Members.Count);
+                var members = new List<ConsumerGroupMemberDescription>(group.Members.Count);
                 foreach (var m in group.Members.Values)
                 {
-                    members.Add(new ConsumerGroupDescribeResponse.Member
+                    members.Add(new ConsumerGroupMemberDescription
                     {
                         MemberId = m.MemberId,
                         InstanceId = m.InstanceId,
                         RackId = m.RackId,
                         MemberEpoch = m.MemberEpoch,
-                        ClientId = m.ClientId ?? "",
-                        ClientHost = m.ClientHost ?? "*",
-                        SubscribedTopicNames = m.SubscribedTopicNames,
-                        SubscribedTopicRegex = m.SubscribedTopicRegex,
+                        ClientId = m.ClientId,
+                        ClientHost = m.ClientHost,
+                        SubscribedTopicNames = [.. m.SubscribedTopicNames],
                         // KAFKA-20431: MemberAssignment muss assigned + pending-revocation enthalten,
                         // sonst "verschwinden" Partitions waehrend der Reconciliation aus Admin-Sicht.
                         // Pending-Revocation in Surgewave = OwnedTopicPartitions \ Assignment
                         // (was der Member noch besitzt, aber nicht mehr kommuniziert bekommen soll).
-                        MemberAssignment = ConvertToDescribeAssignmentWithPendingRevocation(m),
-                        TargetAssignment = ConvertToDescribeAssignment(m.TargetAssignment)
+                        MemberAssignment = ToNeutralAssignmentWithPendingRevocation(m),
+                        TargetAssignment = ToNeutralAssignment(m.TargetAssignment),
                     });
                 }
 
-                groups.Add(new ConsumerGroupDescribeResponse.DescribedGroup
+                result.Add(new ConsumerGroupDescription
                 {
-                    ErrorCode = ErrorCode.None,
                     GroupId = groupId,
-                    GroupState = GetGroupState(group),
+                    Status = ConsumerGroupDescribeStatus.Ok,
+                    Phase = GetGroupPhase(group),
                     GroupEpoch = group.GroupEpoch,
                     AssignmentEpoch = group.AssignmentEpoch,
                     AssignorName = group.AssignorName,
-                    Members = members
+                    Members = members,
                 });
             }
 
-            return new ConsumerGroupDescribeResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                Groups = groups
-            };
+            return result;
         }
     }
 
@@ -285,22 +270,22 @@ public sealed class ConsumerGroupV2Coordinator
     /// monotonically-tightening updates on subsequent heartbeats (rebalance timeout
     /// can only shrink). Idempotent — safe to call from every heartbeat.
     /// </summary>
-    private static void ApplyInitMetadata(ConsumerGroupV2State group, ConsumerGroupHeartbeatRequest request)
+    private static void ApplyInitMetadata(ConsumerGroupV2State group, ConsumerHeartbeatCommand command)
     {
         if (!group.Initialized)
         {
             group.Initialized = true;
-            if (request.RebalanceTimeoutMs > 0)
+            if (command.RebalanceTimeoutMs > 0)
             {
-                group.RebalanceTimeoutMs = request.RebalanceTimeoutMs;
+                group.RebalanceTimeoutMs = command.RebalanceTimeoutMs;
             }
             return;
         }
 
-        if (request.RebalanceTimeoutMs > 0
-            && (group.RebalanceTimeoutMs <= 0 || request.RebalanceTimeoutMs < group.RebalanceTimeoutMs))
+        if (command.RebalanceTimeoutMs > 0
+            && (group.RebalanceTimeoutMs <= 0 || command.RebalanceTimeoutMs < group.RebalanceTimeoutMs))
         {
-            group.RebalanceTimeoutMs = request.RebalanceTimeoutMs;
+            group.RebalanceTimeoutMs = command.RebalanceTimeoutMs;
         }
     }
 
@@ -331,107 +316,88 @@ public sealed class ConsumerGroupV2Coordinator
     }
 
     /// <summary>
-    /// Validates that a (groupId, memberId, memberEpoch) tuple from a non-heartbeat
-    /// request (typically OffsetCommit / OffsetFetch v9+ in the KIP-848 path) refers
-    /// to a current member of a known v2 group. Returns:
-    /// <list type="bullet">
-    ///   <item><see cref="ErrorCode.None"/> — group + member known and epoch matches.</item>
-    ///   <item><see cref="ErrorCode.StaleMemberEpoch"/> — group + member known but the supplied epoch is older than the current one.</item>
-    ///   <item><see cref="ErrorCode.UnknownMemberId"/> — group exists but the memberId is unknown (or the supplied epoch is from the future, which we treat the same way).</item>
-    ///   <item><see cref="ErrorCode.GroupIdNotFound"/> — sentinel-coded as <c>UnknownTopicOrPartition</c>: group itself isn't tracked here, callers may fall back to the classic coordinator. We use a dedicated value so callers can distinguish "fall through" from a real error.</item>
-    /// </list>
-    /// </summary>
-    /// <summary>
     /// Heartbeat-path epoch fence. Returns <c>true</c> with a populated
-    /// <paramref name="fenceResponse"/> when the request must be rejected;
-    /// <c>false</c> when the heartbeat is structurally valid and the caller
-    /// should continue. The semantics mirror KIP-848:
-    /// <list type="bullet">
-    ///   <item><c>MemberEpoch == 0</c> → join / rejoin path; allowed regardless of memberId.</item>
-    ///   <item><c>MemberEpoch &gt; 0</c> + unknown memberId → <see cref="ErrorCode.UnknownMemberId"/>.</item>
-    ///   <item><c>MemberEpoch &gt; 0</c> + known memberId + epoch &lt; stored → <see cref="ErrorCode.StaleMemberEpoch"/> (the client is behind).</item>
-    ///   <item><c>MemberEpoch &gt; 0</c> + known memberId + epoch &gt; stored → <see cref="ErrorCode.FencedMemberEpoch"/> (impossible — broker never issued this).</item>
-    /// </list>
-    /// Without this fence a stale or replayed heartbeat silently inherits the
-    /// current group epoch on line ~142 and walks back into reconciliation
-    /// with state the broker never authorised.
+    /// <paramref name="fenceResult"/> when the heartbeat must be rejected; <c>false</c> when
+    /// it is structurally valid and the caller should continue. Mirrors KIP-848:
+    /// epoch 0 = join/rejoin (allowed); non-zero + unknown member = UnknownMember; behind =
+    /// StaleEpoch; ahead of the broker = FencedEpoch. Runs before any mutation so a stale or
+    /// replayed heartbeat can't silently inherit the current group epoch.
     /// </summary>
     private bool TryValidateHeartbeatEpoch(
-        ConsumerGroupHeartbeatRequest request,
+        ConsumerHeartbeatCommand command,
         ConsumerGroupV2State group,
-        out ConsumerGroupHeartbeatResponse fenceResponse)
+        out ConsumerHeartbeatResult fenceResult)
     {
-        fenceResponse = null!;
+        fenceResult = null!;
 
         // Join / rejoin paths run with epoch 0 — any memberId behaviour is
         // handled below the fence.
-        if (request.MemberEpoch == 0) return false;
+        if (command.MemberEpoch == 0) return false;
 
-        var memberId = request.MemberId;
+        var memberId = command.MemberId;
         if (string.IsNullOrEmpty(memberId) || !group.Members.TryGetValue(memberId, out var member))
         {
-            fenceResponse = HeartbeatErrorResponse(request, ErrorCode.UnknownMemberId);
+            fenceResult = FenceResult(command, ConsumerGroupFenceStatus.UnknownMember);
             return true;
         }
 
-        if (request.MemberEpoch < member.MemberEpoch)
+        if (command.MemberEpoch < member.MemberEpoch)
         {
-            fenceResponse = HeartbeatErrorResponse(request, ErrorCode.StaleMemberEpoch);
+            fenceResult = FenceResult(command, ConsumerGroupFenceStatus.StaleEpoch);
             return true;
         }
 
-        if (request.MemberEpoch > member.MemberEpoch)
+        if (command.MemberEpoch > member.MemberEpoch)
         {
-            fenceResponse = HeartbeatErrorResponse(request, ErrorCode.FencedMemberEpoch);
+            fenceResult = FenceResult(command, ConsumerGroupFenceStatus.FencedEpoch);
             return true;
         }
 
         return false;
     }
 
-    private static ConsumerGroupHeartbeatResponse HeartbeatErrorResponse(
-        ConsumerGroupHeartbeatRequest request,
-        ErrorCode errorCode) => new()
+    private static ConsumerHeartbeatResult FenceResult(
+        ConsumerHeartbeatCommand command,
+        ConsumerGroupFenceStatus status) => new()
         {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ErrorCode = errorCode,
-            MemberId = request.MemberId,
-            MemberEpoch = request.MemberEpoch,
+            Status = status,
+            MemberId = command.MemberId,
+            MemberEpoch = command.MemberEpoch,
             HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
         };
 
-    public ErrorCode ValidateMemberForOffsetOperation(string groupId, string? memberId, int memberEpoch)
+    /// <summary>
+    /// Validates a (groupId, memberId, memberEpoch) tuple from a non-heartbeat request
+    /// (KIP-848 OffsetCommit / OffsetFetch path). Returns <see cref="ConsumerGroupFenceStatus.NotAV2Group"/>
+    /// (distinct sentinel) when the group isn't a KIP-848 group so the caller can fall through
+    /// to the classic coordinator; <see cref="ConsumerGroupFenceStatus.UnknownMember"/> when the
+    /// group exists but the member doesn't; <see cref="ConsumerGroupFenceStatus.FencedEpoch"/> for a
+    /// future epoch; otherwise <see cref="ConsumerGroupFenceStatus.Ok"/> (KIP-1251: older epochs pass
+    /// here — the per-partition check fences).
+    /// </summary>
+    public ConsumerGroupFenceStatus ValidateMemberForOffsetOperation(string groupId, string? memberId, int memberEpoch)
     {
         lock (_groupLock)
         {
             if (!_groups.TryGetValue(groupId, out var group))
             {
-                // Sentinel: caller should treat this as "not a v2 group" rather than a hard error.
-                return ErrorCode.UnknownTopicOrPartition;
+                return ConsumerGroupFenceStatus.NotAV2Group;
             }
 
             if (string.IsNullOrEmpty(memberId) || !group.Members.TryGetValue(memberId, out var member))
             {
-                return ErrorCode.UnknownMemberId;
+                return ConsumerGroupFenceStatus.UnknownMember;
             }
 
             if (memberEpoch > member.MemberEpoch)
             {
-                // Future epoch — the member is ahead of what we recorded. Treat as fenced
-                // so the client re-authenticates against the current state.
-                return ErrorCode.FencedMemberEpoch;
+                // Future epoch — the member is ahead of what we recorded. Treat as fenced.
+                return ConsumerGroupFenceStatus.FencedEpoch;
             }
 
-            // KIP-1251 — pre-flight no longer fences on memberEpoch <
-            // member.MemberEpoch. Older epochs are accepted at this layer
-            // and the per-partition check (IsPartitionAssignmentValid) does
-            // the fine-grained fence. The motivating case: an old member
-            // tries to commit for a partition it still holds across a
-            // rebalance — the group-level epoch moved, but the partition's
-            // assignment epoch didn't (it stayed with this member). Today
-            // we let that commit through.
-            return ErrorCode.None;
+            // KIP-1251 — older epochs are accepted here; IsPartitionAssignmentValid does the
+            // fine-grained per-partition fence.
+            return ConsumerGroupFenceStatus.Ok;
         }
     }
 
@@ -535,7 +501,7 @@ public sealed class ConsumerGroupV2Coordinator
         needsRecompute = true;
     }
 
-    private static bool AreSubscriptionsEqual(List<string> current, List<string> incoming)
+    private static bool AreSubscriptionsEqual(List<string> current, IReadOnlyList<string> incoming)
     {
         if (current.Count != incoming.Count) return false;
         for (int i = 0; i < current.Count; i++)
@@ -545,11 +511,10 @@ public sealed class ConsumerGroupV2Coordinator
         return true;
     }
 
-    private static List<TopicPartitionAssignment> ConvertOwnedFromRequest(
-        List<ConsumerGroupHeartbeatRequest.Assignor> ownedFromRequest)
+    private static List<TopicPartitionAssignment> ToInternalAssignment(IReadOnlyList<ConsumerTopicPartitions> owned)
     {
-        var result = new List<TopicPartitionAssignment>(ownedFromRequest.Count);
-        foreach (var item in ownedFromRequest)
+        var result = new List<TopicPartitionAssignment>(owned.Count);
+        foreach (var item in owned)
         {
             result.Add(new TopicPartitionAssignment
             {
@@ -560,51 +525,26 @@ public sealed class ConsumerGroupV2Coordinator
         return result;
     }
 
-    private static ConsumerGroupHeartbeatResponse.Assignment? BuildHeartbeatAssignment(
-        List<TopicPartitionAssignment> assignment)
+    /// <summary>Projects the internal assignment into neutral records (empty list when none).</summary>
+    private static IReadOnlyList<ConsumerTopicPartitions> ToNeutralAssignment(List<TopicPartitionAssignment> assignment)
     {
-        if (assignment.Count == 0) return null;
+        if (assignment.Count == 0) return [];
 
-        var topicPartitions = new List<ConsumerGroupHeartbeatResponse.TopicPartitions>(assignment.Count);
+        var result = new List<ConsumerTopicPartitions>(assignment.Count);
         foreach (var a in assignment)
         {
-            topicPartitions.Add(new ConsumerGroupHeartbeatResponse.TopicPartitions
-            {
-                TopicId = a.TopicId,
-                Partitions = [.. a.Partitions]
-            });
+            result.Add(new ConsumerTopicPartitions(a.TopicId, [.. a.Partitions]));
         }
-
-        return new ConsumerGroupHeartbeatResponse.Assignment { TopicPartitions = topicPartitions };
-    }
-
-    private static ConsumerGroupDescribeResponse.Assignment ConvertToDescribeAssignment(
-        List<TopicPartitionAssignment> assignments)
-    {
-        var topicPartitions = new List<ConsumerGroupDescribeResponse.TopicPartitions>(assignments.Count);
-        foreach (var a in assignments)
-        {
-            topicPartitions.Add(new ConsumerGroupDescribeResponse.TopicPartitions
-            {
-                TopicId = a.TopicId,
-                Partitions = [.. a.Partitions]
-            });
-        }
-
-        return new ConsumerGroupDescribeResponse.Assignment { TopicPartitions = topicPartitions };
+        return result;
     }
 
     /// <summary>
-    /// KAFKA-20431: Baut die <c>MemberAssignment</c>-Liste fuer
-    /// <c>ConsumerGroupDescribeResponse</c> aus der Vereinigung von <see
-    /// cref="ConsumerGroupV2Member.Assignment"/> (was der Member kommuniziert bekommt) und
-    /// <see cref="ConsumerGroupV2Member.OwnedTopicPartitions"/> (was er aktuell noch besitzt).
-    /// Letzteres entspricht semantisch dem Java-Konzept <c>partitionsPendingRevocation</c> —
-    /// Partitions, die der Member noch konsumiert, bis die Revocation abgeschlossen ist. Ohne
-    /// dieses Merge wuerden sie waehrend der Reconciliation aus der Describe-Response verschwinden.
+    /// KAFKA-20431: the describe MemberAssignment is the union of <see cref="ConsumerGroupV2Member.Assignment"/>
+    /// (what the member is told to own) and <see cref="ConsumerGroupV2Member.OwnedTopicPartitions"/> (what it
+    /// still owns) — semantically Java's <c>partitionsPendingRevocation</c>. Without this merge those
+    /// partitions would vanish from the describe view during reconciliation.
     /// </summary>
-    private static ConsumerGroupDescribeResponse.Assignment ConvertToDescribeAssignmentWithPendingRevocation(
-        ConsumerGroupV2Member member)
+    private static IReadOnlyList<ConsumerTopicPartitions> ToNeutralAssignmentWithPendingRevocation(ConsumerGroupV2Member member)
     {
         var perTopic = new Dictionary<Guid, SortedSet<int>>();
 
@@ -627,22 +567,17 @@ public sealed class ConsumerGroupV2Coordinator
         Accumulate(member.Assignment);
         Accumulate(member.OwnedTopicPartitions);
 
-        var topicPartitions = new List<ConsumerGroupDescribeResponse.TopicPartitions>(perTopic.Count);
+        var result = new List<ConsumerTopicPartitions>(perTopic.Count);
         foreach (var (topicId, partitions) in perTopic)
         {
-            topicPartitions.Add(new ConsumerGroupDescribeResponse.TopicPartitions
-            {
-                TopicId = topicId,
-                Partitions = [.. partitions]
-            });
+            result.Add(new ConsumerTopicPartitions(topicId, [.. partitions]));
         }
-
-        return new ConsumerGroupDescribeResponse.Assignment { TopicPartitions = topicPartitions };
+        return result;
     }
 
-    private static string GetGroupState(ConsumerGroupV2State group)
+    private static ConsumerGroupPhase GetGroupPhase(ConsumerGroupV2State group)
     {
-        if (group.Members.Count == 0) return "Empty";
-        return ConsumerGroupV2Reconciler.IsStable(group) ? "Stable" : "Reconciling";
+        if (group.Members.Count == 0) return ConsumerGroupPhase.Empty;
+        return ConsumerGroupV2Reconciler.IsStable(group) ? ConsumerGroupPhase.Stable : ConsumerGroupPhase.Reconciling;
     }
 }

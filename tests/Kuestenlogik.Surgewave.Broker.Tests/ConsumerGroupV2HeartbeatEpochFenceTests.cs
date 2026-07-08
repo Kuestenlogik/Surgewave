@@ -1,7 +1,6 @@
 using Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -44,7 +43,7 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
     {
         // Member joins (epoch=0 → broker assigns epoch=1).
         var join = Heartbeat("g", "c1", memberId: "", memberEpoch: 0);
-        Assert.Equal(ErrorCode.None, join.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.Ok, join.Status);
         Assert.True(join.MemberEpoch >= 1);
         var assignedId = join.MemberId!;
         var currentEpoch = join.MemberEpoch;
@@ -53,17 +52,17 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
         // an older epoch that the client never reset.
         var stale = Heartbeat("g", "c1", memberId: assignedId, memberEpoch: currentEpoch - 1);
 
-        Assert.Equal(ErrorCode.StaleMemberEpoch, stale.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.StaleEpoch, stale.Status);
         // The fenced response must NOT carry an assignment — the client has
         // to resync via a fresh init before it gets state again.
-        Assert.Null(stale.MemberAssignment);
+        Assert.Empty(stale.Assignment);
     }
 
     [Fact]
     public void Heartbeat_FutureEpoch_ReturnsFencedMemberEpoch()
     {
         var join = Heartbeat("g", "c1", memberId: "", memberEpoch: 0);
-        Assert.Equal(ErrorCode.None, join.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.Ok, join.Status);
         var assignedId = join.MemberId!;
 
         // Future-epoch heartbeat — impossible state, the broker never issued
@@ -71,7 +70,7 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
         // discards local state and rejoins.
         var fenced = Heartbeat("g", "c1", memberId: assignedId, memberEpoch: join.MemberEpoch + 5);
 
-        Assert.Equal(ErrorCode.FencedMemberEpoch, fenced.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.FencedEpoch, fenced.Status);
     }
 
     [Fact]
@@ -82,7 +81,7 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
         // on the epoch-0 join) and must be UNKNOWN_MEMBER_ID.
         var resp = Heartbeat("g", "c1", memberId: "ghost-member", memberEpoch: 7);
 
-        Assert.Equal(ErrorCode.UnknownMemberId, resp.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.UnknownMember, resp.Status);
     }
 
     [Fact]
@@ -94,7 +93,7 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
         // NOT trip.
         var resp = Heartbeat("g", "c1", memberId: "static-1", memberEpoch: 0);
 
-        Assert.Equal(ErrorCode.None, resp.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
         Assert.Equal("static-1", resp.MemberId);
     }
 
@@ -109,20 +108,17 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
 
         var second = Heartbeat("g", "c1", memberId: assignedId, memberEpoch: firstEpoch);
 
-        Assert.Equal(ErrorCode.None, second.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.Ok, second.Status);
         Assert.Equal(assignedId, second.MemberId);
     }
 
-    private ConsumerGroupHeartbeatResponse Heartbeat(
+    private ConsumerHeartbeatResult Heartbeat(
         string group,
         string clientId,
         string memberId,
         int memberEpoch) =>
-        _coordinator.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        _coordinator.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = clientId,
             GroupId = group,
             MemberId = memberId,

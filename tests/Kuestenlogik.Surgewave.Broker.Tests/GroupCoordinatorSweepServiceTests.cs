@@ -4,9 +4,8 @@ using Kuestenlogik.Surgewave.Broker.Hosting;
 using Kuestenlogik.Surgewave.Broker.Queue;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
 using Kuestenlogik.Surgewave.Broker.StreamsGroups;
+using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging;
@@ -70,18 +69,15 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
     public void SweepOnce_RemovesStaleMembersFromConsumerGroupV2()
     {
         // Arrange: add a member, then back-date its heartbeat past the timeout.
-        var resp = _v2.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        var resp = _v2.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = "c1",
             GroupId = "sweep-g",
             MemberId = "",
             MemberEpoch = 0,
             SubscribedTopicNames = ["sweep-topic"],
         });
-        Assert.Equal(ErrorCode.None, resp.ErrorCode);
+        Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
 
         BackdateLastHeartbeat(_v2, "sweep-g", resp.MemberId!);
 
@@ -89,25 +85,15 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
         _sweep.SweepOnce();
 
         // Assert: describe should show no members.
-        var described = _v2.HandleConsumerGroupDescribe(new ConsumerGroupDescribeRequest
-        {
-            ApiKey = ApiKey.ConsumerGroupDescribe,
-            ApiVersion = 0,
-            CorrelationId = 0,
-            ClientId = "test",
-            GroupIds = ["sweep-g"],
-        });
-        Assert.Empty(described.Groups[0].Members);
+        var described = _v2.Describe(["sweep-g"]);
+        Assert.Empty(described[0].Members);
     }
 
     [Fact]
     public void SweepOnce_DoesNothing_WhenAllMembersFresh()
     {
-        var resp = _v2.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        var resp = _v2.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = "c1",
             GroupId = "sweep-g2",
             MemberId = "",
@@ -117,27 +103,17 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
 
         _sweep.SweepOnce();
 
-        var described = _v2.HandleConsumerGroupDescribe(new ConsumerGroupDescribeRequest
-        {
-            ApiKey = ApiKey.ConsumerGroupDescribe,
-            ApiVersion = 0,
-            CorrelationId = 0,
-            ClientId = "test",
-            GroupIds = ["sweep-g2"],
-        });
-        Assert.Single(described.Groups[0].Members);
-        Assert.Equal(resp.MemberId, described.Groups[0].Members[0].MemberId);
+        var described = _v2.Describe(["sweep-g2"]);
+        Assert.Single(described[0].Members);
+        Assert.Equal(resp.MemberId, described[0].Members[0].MemberId);
     }
 
     [Fact]
     public async Task PeriodicLoop_FiresSweepRepeatedly()
     {
         // Add a stale member, start the loop, observe the sweep removes it.
-        var resp = _v2.HandleConsumerGroupHeartbeat(new ConsumerGroupHeartbeatRequest
+        var resp = _v2.Heartbeat(new ConsumerHeartbeatCommand
         {
-            ApiKey = ApiKey.ConsumerGroupHeartbeat,
-            ApiVersion = 0,
-            CorrelationId = 0,
             ClientId = "c1",
             GroupId = "loop-g",
             MemberId = "",
@@ -153,15 +129,8 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
         bool removed = false;
         while (DateTime.UtcNow < deadline)
         {
-            var described = _v2.HandleConsumerGroupDescribe(new ConsumerGroupDescribeRequest
-            {
-                ApiKey = ApiKey.ConsumerGroupDescribe,
-                ApiVersion = 0,
-                CorrelationId = 0,
-                ClientId = "test",
-                GroupIds = ["loop-g"],
-            });
-            if (described.Groups[0].Members.Count == 0)
+            var described = _v2.Describe(["loop-g"]);
+            if (described[0].Members.Count == 0)
             {
                 removed = true;
                 break;

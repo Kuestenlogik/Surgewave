@@ -320,8 +320,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
         _metrics = new BrokerMetrics();
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, consumerGroupCoordinator, shareGroupCoordinator, nativeGroupCoordinator,
-            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger,
-            consumerGroupV2Coordinator: consumerGroupV2Coordinator);
+            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token));
