@@ -1,6 +1,5 @@
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Plugins;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
