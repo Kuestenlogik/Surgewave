@@ -173,7 +173,7 @@ public sealed class StreamSubscription : IAsyncDisposable
 
                     try
                     {
-                        totalMessages += _recordBatchSerializer.StreamBatchRawToWriter(batchSpan, writer);
+                        totalMessages += RecordBatchStreamer.StreamBatchRawToWriter(batchSpan, writer);
                     }
                     catch (Exception ex)
                     {

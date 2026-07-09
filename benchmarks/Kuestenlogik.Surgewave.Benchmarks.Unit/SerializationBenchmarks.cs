@@ -2,6 +2,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
