@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using Kuestenlogik.Surgewave.Broker.AutoTuning;
 using Kuestenlogik.Surgewave.Broker.Quotas;
 using Kuestenlogik.Surgewave.Broker.Security;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Observability;
@@ -205,15 +206,24 @@ public sealed class DataApiHandler : IKafkaRequestHandler
 
                     if (producerId != KafkaConstants.Producer.NoProducerId)
                     {
-                        var validationError = _transactionCoordinator.ValidateProduceBatch(
+                        var validationStatus = _transactionCoordinator.ValidateProduceBatch(
                             producerId, producerEpoch, baseSequence, topicPartition);
 
-                        if (validationError != ErrorCode.None)
+                        if (validationStatus != ProduceSequenceStatus.Ok)
                         {
+                            // Map the neutral sequence-validation status to the Kafka wire
+                            // error code at the protocol boundary (part-c TxnErrorStatus pattern).
                             partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                             {
                                 Index = partitionData.Index,
-                                ErrorCode = validationError,
+                                ErrorCode = validationStatus switch
+                                {
+                                    ProduceSequenceStatus.InvalidProducerEpoch => ErrorCode.InvalidProducerEpoch,
+                                    ProduceSequenceStatus.UnknownProducerId => ErrorCode.UnknownProducerId,
+                                    ProduceSequenceStatus.DuplicateSequence => ErrorCode.DuplicateSequenceNumber,
+                                    ProduceSequenceStatus.OutOfOrderSequence => ErrorCode.OutOfOrderSequenceNumber,
+                                    _ => ErrorCode.Unknown,
+                                },
                                 BaseOffset = -1,
                                 LogAppendTimeMs = -1
                             });

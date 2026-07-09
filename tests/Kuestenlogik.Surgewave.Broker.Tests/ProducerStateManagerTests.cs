@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
@@ -127,7 +128,7 @@ public class ProducerStateManagerTests
         var error = _manager.ValidateSequence(
             KafkaConstants.Producer.NoProducerId, 0, 0, Tp0);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, error);
     }
 
     [Fact]
@@ -137,7 +138,7 @@ public class ProducerStateManagerTests
 
         var error = _manager.ValidateSequence(id, epoch: 0, baseSequence: 42, Tp0);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, error);
     }
 
     [Fact]
@@ -150,7 +151,7 @@ public class ProducerStateManagerTests
         // Next expected: 1
         var error = _manager.ValidateSequence(id, 0, 1, Tp0);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, error);
     }
 
     [Fact]
@@ -161,7 +162,7 @@ public class ProducerStateManagerTests
         _manager.ValidateSequence(id, 0, 0, Tp0);
         var error = _manager.ValidateSequence(id, 0, 0, Tp0); // repeat seq 0
 
-        Assert.Equal(ErrorCode.DuplicateSequenceNumber, error);
+        Assert.Equal(ProduceSequenceStatus.DuplicateSequence, error);
     }
 
     [Fact]
@@ -172,7 +173,7 @@ public class ProducerStateManagerTests
         _manager.ValidateSequence(id, 0, 0, Tp0); // sets last to 0
         var error = _manager.ValidateSequence(id, 0, 5, Tp0); // skipped 1-4
 
-        Assert.Equal(ErrorCode.OutOfOrderSequenceNumber, error);
+        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence, error);
     }
 
     [Fact]
@@ -185,7 +186,7 @@ public class ProducerStateManagerTests
         var error = _manager.ValidateSequence(id, epoch: 99, baseSequence: 0, Tp0);
 
         // Future epoch is treated as UnknownProducerId
-        Assert.Equal(ErrorCode.UnknownProducerId, error);
+        Assert.Equal(ProduceSequenceStatus.UnknownProducerId, error);
     }
 
     [Fact]
@@ -200,7 +201,7 @@ public class ProducerStateManagerTests
         // Tp1 starts fresh – seq 0 is fine
         var error = _manager.ValidateSequence(id, 0, 0, Tp1);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, error);
     }
 
     [Fact]
@@ -209,7 +210,7 @@ public class ProducerStateManagerTests
         // Unknown producer should be accepted and tracked
         var error = _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, Tp0);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, error);
     }
 
     // ── Transaction lifecycle ────────────────────────────────────────────────
@@ -367,7 +368,7 @@ public class ProducerStateManagerTests
 
         // After epoch reset, seq 0 should be accepted again
         var seqError = _manager.ValidateSequence(id, epoch: 7, baseSequence: 0, Tp0);
-        Assert.Equal(ErrorCode.None, seqError);
+        Assert.Equal(ProduceSequenceStatus.Ok, seqError);
     }
 
     [Fact]

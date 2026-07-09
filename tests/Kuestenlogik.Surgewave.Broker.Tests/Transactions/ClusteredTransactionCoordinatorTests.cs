@@ -14,7 +14,7 @@ namespace Kuestenlogik.Surgewave.Broker.Tests.Transactions;
 
 /// <summary>
 /// Tests for ClusteredTransactionCoordinator. Exercises the protocol-neutral coordinator
-/// surface directly (#59); ValidateProduceBatch stays on the Kafka ErrorCode (produce path).
+/// surface directly (#59); ValidateProduceBatch returns the neutral ProduceSequenceStatus (b2).
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public class ClusteredTransactionCoordinatorTests : IAsyncDisposable
@@ -266,10 +266,10 @@ public class ClusteredTransactionCoordinatorTests : IAsyncDisposable
         var tp = new TopicPartition { Topic = "test-topic", Partition = 0 };
         var (producerId, epoch) = _producerStateManager.AllocateProducerId();
 
-        // First batch with sequence 0 — produce path still returns the Kafka ErrorCode.
+        // First batch with sequence 0 — produce path returns the neutral ProduceSequenceStatus (b2).
         var result1 = _coordinator.ValidateProduceBatch(producerId, epoch, baseSequence: 0, tp);
 
-        Assert.Equal(ErrorCode.None, result1);
+        Assert.Equal(ProduceSequenceStatus.Ok, result1);
     }
 
     [Fact]

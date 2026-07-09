@@ -15,7 +15,8 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// Manages transaction state and implements the protocol-neutral <see cref="ITransactionCoordinator"/>
 /// wire-API surface (#59); the Kafka DTO conversion lives in the <c>TransactionApiHandler</c> adapter.
 /// The produce-hot-path helpers (<see cref="ValidateProduceBatch"/> / <see cref="RecordTransactionalBatch"/>)
-/// stay Kafka-coupled and move alongside the produce handler later.
+/// are protocol-neutral (b2): the former returns <c>ProduceSequenceStatus</c>, the latter takes
+/// only neutral types; the Kafka Produce handler maps to the wire error code at the boundary.
 /// </summary>
 public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator
 {
@@ -95,9 +96,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
     /// <summary>
     /// Validates a produce batch for idempotence (sequence number validation). Produce-hot-path;
-    /// stays on the Kafka <see cref="ErrorCode"/> as it feeds the (still Kafka) produce handler.
+    /// returns the neutral <c>ProduceSequenceStatus</c> — the Kafka Produce handler maps it to a
+    /// wire <see cref="ErrorCode"/> at the boundary (b2).
     /// </summary>
-    public ErrorCode ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
+    public ProduceSequenceStatus ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
     {
         return _producerStateManager.ValidateSequence(producerId, epoch, baseSequence, topicPartition);
     }
