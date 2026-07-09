@@ -1,6 +1,7 @@
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.Handlers;
 using Kuestenlogik.Surgewave.Broker.Security;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
@@ -46,7 +47,7 @@ public sealed class DescribeProducersTests
 
         // ValidateSequence updates the per-partition last-seq state on success.
         var result = psm.ValidateSequence(pid, epoch, baseSequence: 0, orders);
-        Assert.Equal(ErrorCode.None, result);
+        Assert.Equal(ProduceSequenceStatus.Ok, result);
 
         var producers = psm.GetActiveProducersForPartition(orders);
 

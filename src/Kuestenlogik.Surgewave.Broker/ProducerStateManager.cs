@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
 
@@ -136,12 +137,12 @@ public sealed class ProducerStateManager
     /// <summary>
     /// Validates a produce request's sequence number for idempotent delivery.
     /// </summary>
-    public ErrorCode ValidateSequence(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
+    public ProduceSequenceStatus ValidateSequence(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
     {
         if (producerId == KafkaConstants.Producer.NoProducerId)
         {
             // Non-idempotent producer - no validation needed
-            return ErrorCode.None;
+            return ProduceSequenceStatus.Ok;
         }
 
         if (!_producers.TryGetValue(producerId, out var state))
@@ -150,15 +151,15 @@ public sealed class ProducerStateManager
             var newState = new ProducerState(producerId, epoch);
             _producers[producerId] = newState;
             newState.UpdateSequence(topicPartition, baseSequence);
-            return ErrorCode.None;
+            return ProduceSequenceStatus.Ok;
         }
 
         // Validate epoch
         if (epoch != state.Epoch)
         {
             return epoch < state.Epoch
-                ? ErrorCode.InvalidProducerEpoch
-                : ErrorCode.UnknownProducerId;
+                ? ProduceSequenceStatus.InvalidProducerEpoch
+                : ProduceSequenceStatus.UnknownProducerId;
         }
 
         // Validate sequence
@@ -167,7 +168,7 @@ public sealed class ProducerStateManager
         {
             // First batch for this partition - accept any sequence
             state.UpdateSequence(topicPartition, baseSequence);
-            return ErrorCode.None;
+            return ProduceSequenceStatus.Ok;
         }
 
         var expectedSequence = (lastSequence + 1) & int.MaxValue; // Wrap around
@@ -175,17 +176,17 @@ public sealed class ProducerStateManager
         {
             // Expected sequence - accept
             state.UpdateSequence(topicPartition, baseSequence);
-            return ErrorCode.None;
+            return ProduceSequenceStatus.Ok;
         }
 
         if (baseSequence == lastSequence)
         {
             // Duplicate - reject silently (or return specific error)
-            return ErrorCode.DuplicateSequenceNumber;
+            return ProduceSequenceStatus.DuplicateSequence;
         }
 
         // Out of order
-        return ErrorCode.OutOfOrderSequenceNumber;
+        return ProduceSequenceStatus.OutOfOrderSequence;
     }
 
     /// <summary>

@@ -16,7 +16,8 @@ namespace Kuestenlogik.Surgewave.Broker.Transactions;
 /// lifecycle on the protocol-neutral contracts (#59) and adds marker replication for
 /// durability across replicas. Not on the Kafka wire path (only cluster state sync + tests
 /// use it directly), so it neutralises its method signatures without implementing the adapter
-/// contract. <see cref="ValidateProduceBatch"/> stays Kafka-coupled (produce hot path).
+/// contract. <see cref="ValidateProduceBatch"/> returns the neutral <c>ProduceSequenceStatus</c>
+/// (b2); the Kafka Produce handler maps it to a wire error code at the boundary.
 /// </summary>
 public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
 {
@@ -120,7 +121,7 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Validates a produce batch for idempotence (sequence number validation).
     /// </summary>
-    public ErrorCode ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
+    public ProduceSequenceStatus ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
     {
         return _producerStateManager.ValidateSequence(producerId, epoch, baseSequence, topicPartition);
     }
