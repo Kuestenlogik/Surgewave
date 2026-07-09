@@ -1,4 +1,4 @@
-namespace Kuestenlogik.Surgewave.Broker.Security;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Tracks the authentication state of a client connection

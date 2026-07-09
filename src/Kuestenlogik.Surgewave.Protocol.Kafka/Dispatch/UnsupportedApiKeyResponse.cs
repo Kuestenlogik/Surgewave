@@ -1,6 +1,4 @@
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Minimal Kafka response for API keys that have no registered handler. Returns just

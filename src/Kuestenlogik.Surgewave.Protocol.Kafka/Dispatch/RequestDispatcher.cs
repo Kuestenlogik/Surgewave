@@ -1,8 +1,7 @@
 using System.Collections.Frozen;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Fast O(1) request dispatcher using frozen dictionary lookup.

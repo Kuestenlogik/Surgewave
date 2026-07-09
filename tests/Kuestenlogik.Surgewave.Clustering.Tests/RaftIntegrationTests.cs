@@ -1407,7 +1407,7 @@ public class RaftIntegrationTests : IAsyncLifetime
     {
         return new RequestContext
         {
-            ConnectionState = new Broker.Security.ConnectionState("127.0.0.1"),
+            ConnectionState = new Kuestenlogik.Surgewave.Protocol.Kafka.ConnectionState("127.0.0.1"),
             ClientId = "test-client"
         };
     }
