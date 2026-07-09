@@ -505,7 +505,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
 
             try
             {
-                totalMessageCount += _recordBatchSerializer.StreamBatchRawToWriter(batchSpan, writer);
+                totalMessageCount += RecordBatchStreamer.StreamBatchRawToWriter(batchSpan, writer);
             }
             catch (Exception ex)
             {
