@@ -1,4 +1,4 @@
-namespace Kuestenlogik.Surgewave.Broker.Serialization;
+namespace Kuestenlogik.Surgewave.Core.Util;
 
 /// <summary>
 /// Inline varint/varlong encoding and decoding for high-performance serialization.

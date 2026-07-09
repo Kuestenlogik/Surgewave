@@ -1,11 +1,9 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using Kuestenlogik.Surgewave.Broker.Native;
-using Kuestenlogik.Surgewave.Broker.Serialization;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Util;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Microsoft.Extensions.Logging;
 using CompressionCodec = Kuestenlogik.Surgewave.Core.Util.CompressionCodec;
 
@@ -155,18 +153,18 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // timestampDelta (varlong, zigzag encoded)
             var timestampDelta = message.Timestamp - baseTimestamp;
-            var timestampDeltaEncoded = KafkaProtocolPrimitives.ZigzagEncode(timestampDelta);
+            var timestampDeltaEncoded = ZigZag.Encode(timestampDelta);
             recordPos += VarintCodec.WriteVarLong(span.Slice(recordPos), (long)timestampDeltaEncoded);
 
             // offsetDelta (varint, signed zigzag encoded)
             var offsetDelta = (int)(message.Offset - baseOffset);
-            var offsetDeltaEncoded = KafkaProtocolPrimitives.ZigzagEncode(offsetDelta);
+            var offsetDeltaEncoded = ZigZag.Encode(offsetDelta);
             recordPos += VarintCodec.WriteVarInt(span.Slice(recordPos), (int)offsetDeltaEncoded);
 
             // key (varint length + bytes, signed zigzag encoded)
             if (message.Key.Length > 0)
             {
-                var keyLengthEncoded = KafkaProtocolPrimitives.ZigzagEncode(message.Key.Length);
+                var keyLengthEncoded = ZigZag.Encode(message.Key.Length);
                 recordPos += VarintCodec.WriteVarInt(span.Slice(recordPos), (int)keyLengthEncoded);
                 message.Key.Span.CopyTo(span.Slice(recordPos));
                 recordPos += message.Key.Length;
@@ -180,7 +178,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
             // value (varint length + bytes, signed zigzag encoded)
             if (message.Value.Length > 0)
             {
-                var valueLengthEncoded = KafkaProtocolPrimitives.ZigzagEncode(message.Value.Length);
+                var valueLengthEncoded = ZigZag.Encode(message.Value.Length);
                 recordPos += VarintCodec.WriteVarInt(span.Slice(recordPos), (int)valueLengthEncoded);
                 message.Value.Span.CopyTo(span.Slice(recordPos));
                 recordPos += message.Value.Length;
@@ -198,7 +196,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // Calculate actual record content length
             var recordContentLength = recordPos - recordStartPos;
-            var recordLengthEncoded = KafkaProtocolPrimitives.ZigzagEncode(recordContentLength);
+            var recordLengthEncoded = ZigZag.Encode(recordContentLength);
 
             // Write record length varint and shift content if needed
             var lengthVarIntBytes = VarintCodec.WriteVarInt(varintScratch, (int)recordLengthEncoded);
@@ -327,7 +325,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // Read the record length - zigzag-encoded varint
             var recordLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var recordLength = KafkaProtocolPrimitives.ZigzagDecode((uint)recordLengthRaw);
+            var recordLength = ZigZag.Decode((uint)recordLengthRaw);
             Log.ParseRecordBatchRecordLength(logger, i, recordLength, recordLengthRaw);
 
             // Parse record content inline
@@ -338,17 +336,17 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // timestampDelta - zigzag-encoded varlong
             var timestampDeltaRaw = VarintCodec.ReadVarLong(recordsSpan, ref recordsPos);
-            var timestampDelta = KafkaProtocolPrimitives.ZigzagDecode((ulong)timestampDeltaRaw);
+            var timestampDelta = ZigZag.Decode((ulong)timestampDeltaRaw);
             Log.ParseRecordBatchTimestampDelta(logger, i, timestampDelta, timestampDeltaRaw);
 
             // offsetDelta - zigzag-encoded varint
             var offsetDeltaRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var offsetDelta = KafkaProtocolPrimitives.ZigzagDecode((uint)offsetDeltaRaw);
+            var offsetDelta = ZigZag.Decode((uint)offsetDeltaRaw);
             Log.ParseRecordBatchOffsetDelta(logger, i, offsetDelta, offsetDeltaRaw);
 
             // keyLength - zigzag-encoded varint
             var keyLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var keyLength = KafkaProtocolPrimitives.ZigzagDecode((uint)keyLengthRaw);
+            var keyLength = ZigZag.Decode((uint)keyLengthRaw);
             Log.ParseRecordBatchKeyLength(logger, i, keyLength, keyLengthRaw);
 
             // Zero-copy: use Memory slice instead of ToArray
@@ -365,7 +363,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // valueLength - zigzag-encoded varint
             var valueLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var valueLength = KafkaProtocolPrimitives.ZigzagDecode((uint)valueLengthRaw);
+            var valueLength = ZigZag.Decode((uint)valueLengthRaw);
             Log.ParseRecordBatchValueLength(logger, i, valueLength, valueLengthRaw);
 
             // Zero-copy: use Memory slice instead of ToArray
@@ -382,12 +380,12 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // Read headers count and skip them (zigzag-signed varints, siehe
             // WriteHeadersFromNativeBlock).
-            var headerCount = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+            var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             for (int h = 0; h < headerCount; h++)
             {
-                var headerKeyLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+                var headerKeyLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerKeyLen > 0) recordsPos += headerKeyLen;
-                var headerValueLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+                var headerValueLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerValueLen > 0) recordsPos += headerValueLen;
             }
 
@@ -483,15 +481,15 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // timestampDelta
             var timestampDeltaRaw = VarintCodec.ReadVarLong(recordsSpan, ref recordsPos);
-            var timestampDelta = KafkaProtocolPrimitives.ZigzagDecode((ulong)timestampDeltaRaw);
+            var timestampDelta = ZigZag.Decode((ulong)timestampDeltaRaw);
 
             // offsetDelta
             var offsetDeltaRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var offsetDelta = KafkaProtocolPrimitives.ZigzagDecode((uint)offsetDeltaRaw);
+            var offsetDelta = ZigZag.Decode((uint)offsetDeltaRaw);
 
             // keyLength
             var keyLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var keyLength = KafkaProtocolPrimitives.ZigzagDecode((uint)keyLengthRaw);
+            var keyLength = ZigZag.Decode((uint)keyLengthRaw);
 
             // Write to output: offset, timestamp
             writer.Write(baseOffset + offsetDelta);
@@ -511,7 +509,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // valueLength
             var valueLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var valueLength = KafkaProtocolPrimitives.ZigzagDecode((uint)valueLengthRaw);
+            var valueLength = ZigZag.Decode((uint)valueLengthRaw);
 
             // Write value
             writer.Write(valueLength);
@@ -523,12 +521,12 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // Skip headers — Kafka-v2 header lengths sind zigzag-signed
             // varints (siehe WriteHeadersFromNativeBlock fuer den Hintergrund).
-            var headerCount = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+            var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             for (int h = 0; h < headerCount; h++)
             {
-                var headerKeyLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+                var headerKeyLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerKeyLen > 0) recordsPos += headerKeyLen;
-                var headerValueLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+                var headerValueLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 if (headerValueLen > 0) recordsPos += headerValueLen;
             }
         }
@@ -649,15 +647,15 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // timestampDelta
             var timestampDeltaRaw = VarintCodec.ReadVarLong(recordsSpan, ref recordsPos);
-            var timestampDelta = KafkaProtocolPrimitives.ZigzagDecode((ulong)timestampDeltaRaw);
+            var timestampDelta = ZigZag.Decode((ulong)timestampDeltaRaw);
 
             // offsetDelta
             var offsetDeltaRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var offsetDelta = KafkaProtocolPrimitives.ZigzagDecode((uint)offsetDeltaRaw);
+            var offsetDelta = ZigZag.Decode((uint)offsetDeltaRaw);
 
             // keyLength
             var keyLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var keyLength = KafkaProtocolPrimitives.ZigzagDecode((uint)keyLengthRaw);
+            var keyLength = ZigZag.Decode((uint)keyLengthRaw);
 
             // Write offset + timestamp
             writer.Write(baseOffset + offsetDelta);
@@ -677,7 +675,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             // valueLength
             var valueLengthRaw = VarintCodec.ReadVarInt(recordsSpan, ref recordsPos);
-            var valueLength = KafkaProtocolPrimitives.ZigzagDecode((uint)valueLengthRaw);
+            var valueLength = ZigZag.Decode((uint)valueLengthRaw);
 
             // Write value
             writer.Write(valueLength);
@@ -692,18 +690,18 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
             // decode them with NativeMessageHeaderCodec. Kafka-v2 header
             // lengths sind zigzag-signed varints, der native Block ist
             // int32 big-endian (Decoder-friendly).
-            var headerCount = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+            var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             writer.Write(headerCount);
             for (int h = 0; h < headerCount; h++)
             {
-                var headerKeyLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+                var headerKeyLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 writer.Write(headerKeyLen);
                 if (headerKeyLen > 0)
                 {
                     writer.Write(recordsSpan.Slice(recordsPos, headerKeyLen));
                     recordsPos += headerKeyLen;
                 }
-                var headerValueLen = KafkaProtocolPrimitives.ZigzagDecode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
+                var headerValueLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
                 writer.Write(headerValueLen);
                 if (headerValueLen > 0)
                 {
@@ -799,12 +797,12 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
         // wurde als naechster Record interpretiert → unendlicher Read
         // bzw. Linux-Deadlock im Interop-Mix (Issue gefunden 2026-06-01,
         // war seit Header-Refactor in f609a7e drin).
-        var destPos = destOffset + VarintCodec.WriteVarInt(dest.Slice(destOffset), (int)KafkaProtocolPrimitives.ZigzagEncode(count));
+        var destPos = destOffset + VarintCodec.WriteVarInt(dest.Slice(destOffset), (int)ZigZag.Encode(count));
         for (var i = 0; i < count; i++)
         {
             var keyLen = BinaryPrimitives.ReadInt32BigEndian(nativeBlock[srcPos..]);
             srcPos += 4;
-            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)KafkaProtocolPrimitives.ZigzagEncode(keyLen));
+            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)ZigZag.Encode(keyLen));
             if (keyLen > 0)
             {
                 nativeBlock.Slice(srcPos, keyLen).CopyTo(dest.Slice(destPos));
@@ -817,7 +815,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
             // Akka tombstones nutzen value-length = 0; Kafka-Spec erlaubt
             // -1 fuer null. Wir clampen unter Null auf 0 weil Native-Wire
             // im Kontext keine echten Nulls schickt.
-            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)KafkaProtocolPrimitives.ZigzagEncode(Math.Max(0, valLen)));
+            destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)ZigZag.Encode(Math.Max(0, valLen)));
             if (valLen > 0)
             {
                 nativeBlock.Slice(srcPos, valLen).CopyTo(dest.Slice(destPos));

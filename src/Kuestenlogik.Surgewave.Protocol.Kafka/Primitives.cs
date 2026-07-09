@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text;
+using Kuestenlogik.Surgewave.Core.Util;
 
 namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
@@ -246,37 +247,25 @@ public static class KafkaProtocolPrimitives
         throw new InvalidDataException("Incomplete VarLong");
     }
 
-    /// <summary>
-    /// Zigzag encoding for signed integers (used in Kafka protocol)
-    /// </summary>
-    public static uint ZigzagEncode(int value)
-    {
-        return (uint)((value << 1) ^ (value >> 31));
-    }
+    // Zigzag lives in Core.Util.ZigZag (the RecordBatch-v2 storage codec, shared with the
+    // native/storage paths). These stay as the Kafka wire primitives' entry points and
+    // forward to the single Core implementation (inlined, zero-cost).
 
-    /// <summary>
-    /// Zigzag decoding for signed integers
-    /// </summary>
-    public static int ZigzagDecode(uint value)
-    {
-        return (int)((value >> 1) ^ (-(value & 1)));
-    }
+    /// <summary>Zigzag encoding for signed integers (used in Kafka protocol).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static uint ZigzagEncode(int value) => ZigZag.Encode(value);
 
-    /// <summary>
-    /// Zigzag encoding for signed longs
-    /// </summary>
-    public static ulong ZigzagEncode(long value)
-    {
-        return (ulong)((value << 1) ^ (value >> 63));
-    }
+    /// <summary>Zigzag decoding for signed integers.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int ZigzagDecode(uint value) => ZigZag.Decode(value);
 
-    /// <summary>
-    /// Zigzag decoding for signed longs
-    /// </summary>
-    public static long ZigzagDecode(ulong value)
-    {
-        return (long)(value >> 1) ^ (-(long)(value & 1));
-    }
+    /// <summary>Zigzag encoding for signed longs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong ZigzagEncode(long value) => ZigZag.Encode(value);
+
+    /// <summary>Zigzag decoding for signed longs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static long ZigzagDecode(ulong value) => ZigZag.Decode(value);
 }
 
 /// <summary>
