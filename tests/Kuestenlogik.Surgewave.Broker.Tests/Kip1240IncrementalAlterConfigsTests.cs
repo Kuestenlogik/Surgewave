@@ -89,7 +89,7 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
     {
         var ctx = new RequestContext
         {
-            ConnectionState = new Kuestenlogik.Surgewave.Broker.Security.ConnectionState("127.0.0.1"),
+            ConnectionState = new Kuestenlogik.Surgewave.Protocol.Kafka.ConnectionState("127.0.0.1"),
             ClientId = request.ClientId,
         };
         var response = await _configHandler.HandleAsync(request, ctx, CancellationToken.None);

@@ -1,5 +1,6 @@
 using System.Text;
 using Kuestenlogik.Surgewave.Broker.Security;
+using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Testing;
 using Xunit;
 
