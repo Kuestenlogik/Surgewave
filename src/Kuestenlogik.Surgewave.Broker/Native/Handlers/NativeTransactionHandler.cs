@@ -1,5 +1,4 @@
 using Kuestenlogik.Surgewave.Broker.Native.Operations.Transactions;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Native;
 using Kuestenlogik.Surgewave.Protocol.Native.Payloads.Transactions;
 
