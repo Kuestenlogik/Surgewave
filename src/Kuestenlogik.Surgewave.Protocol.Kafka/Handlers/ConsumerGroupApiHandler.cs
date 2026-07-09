@@ -3,7 +3,7 @@ using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Handler for the classic consumer-group coordination APIs: JoinGroup, SyncGroup, Heartbeat,

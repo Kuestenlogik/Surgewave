@@ -17,6 +17,10 @@
     <!-- IProtocolPlugin contract for SurgewaveKafkaProtocolPlugin (#58). No cycle:
          Plugins references only Core + Plugins.Packaging, never Protocol.Kafka. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
+    <!-- Protocol-neutral coordinator contracts (#59 part b). The Kafka DTO adapters
+         (Consumer/Share/Streams/Transaction ApiHandlers) live here and target these
+         interfaces. Coordination is a leaf assembly, so there is no reference cycle. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Coordination\Kuestenlogik.Surgewave.Coordination.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

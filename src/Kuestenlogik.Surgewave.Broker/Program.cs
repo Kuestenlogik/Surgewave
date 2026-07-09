@@ -1145,7 +1145,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch
         };
         var response = transactionCoordinator.InitProducerIdAsync(command, CancellationToken.None).GetAwaiter().GetResult();
-        return new InitProducerIdResultDto((int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(response.Status), response.ProducerId, response.ProducerEpoch);
+        return new InitProducerIdResultDto((int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(response.Status), response.ProducerId, response.ProducerEpoch);
     },
     addPartitionsToTxn: (transactionalId, producerId, producerEpoch, partitions) =>
     {
@@ -1161,7 +1161,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
         };
         var response = transactionCoordinator.AddPartitionsToTxn(command);
         var results = response.Topics.SelectMany(t =>
-            t.Partitions.Select(p => (t.Topic, p.Partition, (int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
+            t.Partitions.Select(p => (t.Topic, p.Partition, (int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
         return new AddPartitionsToTxnResultDto(results);
     },
     addOffsetsToTxn: (transactionalId, producerId, producerEpoch, groupId) =>
@@ -1174,7 +1174,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             GroupId = groupId
         };
         var response = transactionCoordinator.AddOffsetsToTxn(command);
-        return new AddOffsetsToTxnResultDto((int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(response.Status));
+        return new AddOffsetsToTxnResultDto((int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(response.Status));
     },
     txnOffsetCommit: (transactionalId, groupId, producerId, producerEpoch, generationId, memberId, offsets) =>
     {
@@ -1197,7 +1197,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
         };
         var response = transactionCoordinator.TxnOffsetCommit(command);
         var results = response.Topics.SelectMany(t =>
-            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, (int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
+            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, (int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
         return new TxnOffsetCommitResultDto(results);
     },
     endTxn: (transactionalId, producerId, producerEpoch, commit) =>
@@ -1210,7 +1210,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             Committed = commit
         };
         var response = transactionCoordinator.EndTxnAsync(command, CancellationToken.None).GetAwaiter().GetResult();
-        return new EndTxnResultDto((int)Kuestenlogik.Surgewave.Broker.Handlers.TransactionApiHandler.ToErrorCode(response.Status));
+        return new EndTxnResultDto((int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(response.Status));
     },
     listTransactions: (statesFilter, producerIdFilter) =>
     {

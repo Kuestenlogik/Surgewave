@@ -3,7 +3,7 @@ using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Handler for consumer group v2 APIs (KIP-848): ConsumerGroupHeartbeat, ConsumerGroupDescribe.
