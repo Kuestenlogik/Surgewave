@@ -1,15 +1,16 @@
+using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Handler for Kafka quota APIs: DescribeClientQuotas, AlterClientQuotas
 /// </summary>
 public sealed partial class QuotaApiHandler : IKafkaRequestHandler
 {
-    private readonly QuotaManager _quotaManager;
+    private readonly IQuotaManager _quotaManager;
     private readonly ILogger<QuotaApiHandler> _logger;
 
     // Kafka quota configuration keys
@@ -19,7 +20,7 @@ public sealed partial class QuotaApiHandler : IKafkaRequestHandler
 
     public IEnumerable<ApiKey> SupportedApiKeys => [ApiKey.DescribeClientQuotas, ApiKey.AlterClientQuotas];
 
-    public QuotaApiHandler(QuotaManager quotaManager, ILogger<QuotaApiHandler> logger)
+    public QuotaApiHandler(IQuotaManager quotaManager, ILogger<QuotaApiHandler> logger)
     {
         _quotaManager = quotaManager;
         _logger = logger;
