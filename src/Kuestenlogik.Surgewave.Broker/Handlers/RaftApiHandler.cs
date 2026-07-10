@@ -13,7 +13,7 @@ namespace Kuestenlogik.Surgewave.Broker.Handlers;
 /// </summary>
 public sealed partial class RaftApiHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
+    private readonly IBrokerConfigView _config;
     private readonly RaftNode? _raftNode;
     private readonly RaftPersistence? _raftPersistence;
     private readonly ClusterState _clusterState;
@@ -43,7 +43,7 @@ public sealed partial class RaftApiHandler : IKafkaRequestHandler
     ];
 
     public RaftApiHandler(
-        BrokerConfig config,
+        IBrokerConfigView config,
         RaftNode? raftNode,
         RaftPersistence? raftPersistence,
         ClusterState clusterState,

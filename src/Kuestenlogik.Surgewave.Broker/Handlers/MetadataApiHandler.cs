@@ -13,7 +13,7 @@ namespace Kuestenlogik.Surgewave.Broker.Handlers;
 /// </summary>
 public sealed class MetadataApiHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
+    private readonly IBrokerConfigView _config;
     private readonly LogManager _logManager;
     private readonly ILogger<MetadataApiHandler> _logger;
     private ClusterState? _clusterState;
@@ -46,7 +46,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     ];
 
     public MetadataApiHandler(
-        BrokerConfig config,
+        IBrokerConfigView config,
         LogManager logManager,
         ILogger<MetadataApiHandler> logger)
     {
