@@ -25,7 +25,7 @@ public readonly record struct TtlRecord(long ExpiryMs, long Offset) : IComparabl
 /// Per-partition TTL index tracking messages with expiry timestamps.
 /// Used to filter expired messages from fetch responses after their TTL has elapsed.
 /// </summary>
-public sealed class TtlIndex : IDisposable
+public sealed class TtlIndex : IDisposable, ITtlIndex
 {
     private readonly ConcurrentDictionary<TopicPartition, SortedSet<TtlRecord>> _expiring = new();
     private readonly TtlConfig _config;

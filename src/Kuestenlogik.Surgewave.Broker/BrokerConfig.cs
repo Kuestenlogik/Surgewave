@@ -544,6 +544,10 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     IReadOnlyList<string> IBrokerConfigView.SaslMechanisms => Security.SaslMechanisms;
     long IBrokerConfigView.ProducerQuotaBytesPerSecond => Quotas.ProducerBytesPerSecond;
     long IBrokerConfigView.ConsumerQuotaBytesPerSecond => Quotas.ConsumerBytesPerSecond;
+    bool IBrokerConfigView.TtlEnabled => Ttl.Enabled;
+    long IBrokerConfigView.DefaultTtlMs => Ttl.DefaultTtlMs;
+    bool IBrokerConfigView.DeduplicationEnabled => Deduplication.Enabled;
+    bool IBrokerConfigView.DelayDeliveryEnabled => DelayDelivery.Enabled;
 }
 
 /// <summary>

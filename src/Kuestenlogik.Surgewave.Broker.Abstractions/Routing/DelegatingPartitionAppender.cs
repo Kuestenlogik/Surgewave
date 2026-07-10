@@ -6,8 +6,8 @@ namespace Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 /// Adapter that turns a plain <see cref="Func{T1,T2,T3,T4,TResult}"/>
 /// (the LogManager.AppendBatchAsync signature) into an
 /// <see cref="IPartitionAppender"/>. Lets the broker wire up the
-/// default replicated-mode appender without making the Disaggregated
-/// project depend on Core's LogManager type.
+/// default replicated-mode appender without making the seam depend on
+/// Core's LogManager type.
 /// </summary>
 public sealed class DelegatingPartitionAppender : IPartitionAppender
 {

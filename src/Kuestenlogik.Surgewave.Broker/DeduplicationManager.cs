@@ -6,16 +6,11 @@ using Microsoft.Extensions.Logging;
 namespace Kuestenlogik.Surgewave.Broker;
 
 /// <summary>
-/// Result of a deduplication check.
-/// </summary>
-public readonly record struct DeduplicationResult(bool IsDuplicate, long OriginalOffset);
-
-/// <summary>
 /// Broker-level content deduplication manager.
 /// Detects duplicate messages by computing XxHash64 content fingerprints
 /// and maintaining a bounded per-partition deduplication window.
 /// </summary>
-public sealed class DeduplicationManager : IDisposable
+public sealed class DeduplicationManager : IDisposable, IDeduplicationManager
 {
     private readonly ConcurrentDictionary<TopicPartition, PartitionDeduplicationWindow> _windows = new();
     private readonly DeduplicationConfig _config;

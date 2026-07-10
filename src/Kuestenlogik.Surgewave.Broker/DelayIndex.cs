@@ -25,7 +25,7 @@ public readonly record struct DelayedRecord(long DeliverAtMs, long Offset) : ICo
 /// Per-partition delay index tracking messages with future delivery timestamps.
 /// Used to filter delayed messages from fetch responses until their delivery time.
 /// </summary>
-public sealed class DelayIndex : IDisposable
+public sealed class DelayIndex : IDisposable, IDelayIndex
 {
     private readonly ConcurrentDictionary<TopicPartition, SortedSet<DelayedRecord>> _delayed = new();
     private readonly DeliveryDelayConfig _config;

@@ -17,7 +17,7 @@ namespace Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 /// "manifest + remote", which is what makes the disaggregated read
 /// path testable in isolation.
 /// </summary>
-public sealed class DisaggregatedSegmentReader
+public sealed class DisaggregatedSegmentReader : IDisaggregatedSegmentReader
 {
     private readonly IPartitionManifestStore _manifests;
     private readonly IRemoteStorageProvider _remote;
