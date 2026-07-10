@@ -5,7 +5,6 @@ using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Microsoft.Extensions.Logging;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
 

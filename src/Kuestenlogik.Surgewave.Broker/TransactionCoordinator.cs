@@ -3,7 +3,6 @@ using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Broker.Transactions;
 using Microsoft.Extensions.Logging;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
@@ -112,7 +111,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// <summary>
     /// Validates a produce batch for idempotence (sequence number validation). Produce-hot-path;
     /// returns the neutral <c>ProduceSequenceStatus</c> — the Kafka Produce handler maps it to a
-    /// wire <see cref="ErrorCode"/> at the boundary (b2).
+    /// wire <c>ErrorCode</c> at the boundary (b2).
     /// </summary>
     public ProduceSequenceStatus ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
     {

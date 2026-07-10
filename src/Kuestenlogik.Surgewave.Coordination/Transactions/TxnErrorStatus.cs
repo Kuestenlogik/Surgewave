@@ -19,6 +19,9 @@ public enum TxnErrorStatus
     /// <summary>The transactional id / producer id is unknown to the coordinator.</summary>
     UnknownProducerId,
 
+    /// <summary>A transaction is already in progress for this producer; the requested operation conflicts with it.</summary>
+    ConcurrentTransactions,
+
     /// <summary>A supplied topic id could not be resolved to a topic name.</summary>
     UnknownTopicId,
 }
