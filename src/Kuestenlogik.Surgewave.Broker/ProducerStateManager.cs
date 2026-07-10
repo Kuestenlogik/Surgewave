@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
 
 namespace Kuestenlogik.Surgewave.Broker;
@@ -89,7 +88,7 @@ public sealed class ProducerStateManager
     /// <summary>
     /// Gets or bumps the epoch for an existing producer (for transactional producers).
     /// </summary>
-    public (long ProducerId, short Epoch, ErrorCode Error) GetOrBumpEpoch(
+    public (long ProducerId, short Epoch, TxnErrorStatus Error) GetOrBumpEpoch(
         long producerId,
         short currentEpoch,
         string? transactionalId)
@@ -102,14 +101,14 @@ public sealed class ProducerStateManager
             {
                 _producers[newId].TransactionalId = transactionalId;
             }
-            return (newId, epoch, ErrorCode.None);
+            return (newId, epoch, TxnErrorStatus.None);
         }
 
         if (!_producers.TryGetValue(producerId, out var state))
         {
             // Unknown producer - allocate new
             var (newId, epoch) = AllocateProducerId();
-            return (newId, epoch, ErrorCode.None);
+            return (newId, epoch, TxnErrorStatus.None);
         }
 
         // Validate epoch
@@ -118,7 +117,7 @@ public sealed class ProducerStateManager
             if (currentEpoch < state.Epoch)
             {
                 // Fenced - old producer
-                return (producerId, state.Epoch, ErrorCode.InvalidProducerEpoch);
+                return (producerId, state.Epoch, TxnErrorStatus.InvalidProducerEpoch);
             }
             // Future epoch - bump to match
             state.Epoch = currentEpoch;
@@ -131,7 +130,7 @@ public sealed class ProducerStateManager
             state.TransactionalId = transactionalId;
         }
 
-        return (producerId, state.Epoch, ErrorCode.None);
+        return (producerId, state.Epoch, TxnErrorStatus.None);
     }
 
     /// <summary>
@@ -192,79 +191,79 @@ public sealed class ProducerStateManager
     /// <summary>
     /// Begins a transaction for a producer.
     /// </summary>
-    public ErrorCode BeginTransaction(long producerId, short epoch)
+    public TxnErrorStatus BeginTransaction(long producerId, short epoch)
     {
         if (!_producers.TryGetValue(producerId, out var state))
         {
-            return ErrorCode.UnknownProducerId;
+            return TxnErrorStatus.UnknownProducerId;
         }
 
         if (epoch != state.Epoch)
         {
-            return ErrorCode.InvalidProducerEpoch;
+            return TxnErrorStatus.InvalidProducerEpoch;
         }
 
         if (state.TransactionState != TransactionState.Empty &&
             state.TransactionState != TransactionState.CompleteCommit &&
             state.TransactionState != TransactionState.CompleteAbort)
         {
-            return ErrorCode.ConcurrentTransactions;
+            return TxnErrorStatus.ConcurrentTransactions;
         }
 
         state.TransactionState = TransactionState.Ongoing;
         state.TransactionPartitions.Clear();
-        return ErrorCode.None;
+        return TxnErrorStatus.None;
     }
 
     /// <summary>
     /// Adds a partition to an ongoing transaction.
     /// </summary>
-    public ErrorCode AddPartitionToTransaction(long producerId, short epoch, TopicPartition partition)
+    public TxnErrorStatus AddPartitionToTransaction(long producerId, short epoch, TopicPartition partition)
     {
         if (!_producers.TryGetValue(producerId, out var state))
         {
-            return ErrorCode.UnknownProducerId;
+            return TxnErrorStatus.UnknownProducerId;
         }
 
         if (epoch != state.Epoch)
         {
-            return ErrorCode.InvalidProducerEpoch;
+            return TxnErrorStatus.InvalidProducerEpoch;
         }
 
         if (state.TransactionState != TransactionState.Ongoing)
         {
-            return ErrorCode.InvalidTxnState;
+            return TxnErrorStatus.InvalidTxnState;
         }
 
         state.TransactionPartitions.Add(partition);
-        return ErrorCode.None;
+        return TxnErrorStatus.None;
     }
 
     /// <summary>
     /// Prepares to commit or abort a transaction.
     /// </summary>
-    public ErrorCode PrepareEndTransaction(long producerId, short epoch, bool commit)
+    public TxnErrorStatus PrepareEndTransaction(long producerId, short epoch, bool commit)
     {
         if (!_producers.TryGetValue(producerId, out var state))
         {
-            return ErrorCode.UnknownProducerId;
+            return TxnErrorStatus.UnknownProducerId;
         }
 
         if (epoch != state.Epoch)
         {
-            return ErrorCode.InvalidProducerEpoch;
+            return TxnErrorStatus.InvalidProducerEpoch;
         }
 
         if (state.TransactionState != TransactionState.Ongoing)
         {
-            return ErrorCode.InvalidTxnState;
+            return TxnErrorStatus.InvalidTxnState;
         }
 
         state.TransactionState = commit
             ? TransactionState.PrepareCommit
             : TransactionState.PrepareAbort;
 
-        return ErrorCode.None;
+        return TxnErrorStatus.None;
     }
 
     /// <summary>

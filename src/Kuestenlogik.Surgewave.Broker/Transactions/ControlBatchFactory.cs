@@ -1,5 +1,5 @@
 using Kuestenlogik.Surgewave.Core;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
+using Kuestenlogik.Surgewave.Core.Util;
 
 namespace Kuestenlogik.Surgewave.Broker.Transactions;
 
@@ -46,12 +46,12 @@ public static class ControlBatchFactory
         recordStream.WriteByte(0);
 
         // keyLength (varint zigzag)
-        var keyLengthEncoded = KafkaProtocolPrimitives.ZigzagEncode(controlKey.Length);
+        var keyLengthEncoded = ZigZag.Encode(controlKey.Length);
         WriteVarInt(recordStream, (int)keyLengthEncoded);
         recordStream.Write(controlKey, 0, controlKey.Length);
 
         // valueLength (varint zigzag)
-        var valueLengthEncoded = KafkaProtocolPrimitives.ZigzagEncode(controlValue.Length);
+        var valueLengthEncoded = ZigZag.Encode(controlValue.Length);
         WriteVarInt(recordStream, (int)valueLengthEncoded);
         recordStream.Write(controlValue, 0, controlValue.Length);
 
@@ -91,7 +91,7 @@ public static class ControlBatchFactory
         WriteBigEndianInt32(crcWriter, 1); // Record Count
 
         // Record length (zigzag varint)
-        var recordLengthEncoded = KafkaProtocolPrimitives.ZigzagEncode(recordBytes.Length);
+        var recordLengthEncoded = ZigZag.Encode(recordBytes.Length);
         WriteVarInt(crcStream, (int)recordLengthEncoded);
         crcStream.Write(recordBytes, 0, recordBytes.Length);
 

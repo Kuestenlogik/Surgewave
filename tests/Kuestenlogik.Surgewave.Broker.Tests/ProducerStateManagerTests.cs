@@ -1,7 +1,6 @@
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Testing;
 using Xunit;
 
@@ -76,7 +75,7 @@ public class ProducerStateManagerTests
 
         Assert.True(pid > 0);
         Assert.Equal(0, epoch);
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
     }
 
     [Fact]
@@ -86,7 +85,7 @@ public class ProducerStateManagerTests
             999_999, currentEpoch: 0, transactionalId: null);
 
         Assert.True(pid > 0);
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
     }
 
     [Fact]
@@ -100,7 +99,7 @@ public class ProducerStateManagerTests
         // Client still sends with old epoch 0 → fenced
         var (_, _, error) = _manager.GetOrBumpEpoch(id, currentEpoch: 0, transactionalId: null);
 
-        Assert.Equal(ErrorCode.InvalidProducerEpoch, error);
+        Assert.Equal(TxnErrorStatus.InvalidProducerEpoch, error);
     }
 
     [Fact]
@@ -115,7 +114,7 @@ public class ProducerStateManagerTests
         // Second init – use the epoch returned by the first call
         var (_, newEpoch, error) = _manager.GetOrBumpEpoch(id, currentEpoch: epochAfterFirst, transactionalId: "tx-1");
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
         // epoch could stay same on first init (state is Empty initially)
         Assert.True(newEpoch >= 0);
     }
@@ -219,7 +218,7 @@ public class ProducerStateManagerTests
     public void BeginTransaction_UnknownProducer_ReturnsError()
     {
         var error = _manager.BeginTransaction(producerId: 9999, epoch: 0);
-        Assert.Equal(ErrorCode.UnknownProducerId, error);
+        Assert.Equal(TxnErrorStatus.UnknownProducerId, error);
     }
 
     [Fact]
@@ -228,7 +227,7 @@ public class ProducerStateManagerTests
         var (id, _) = _manager.AllocateProducerId();
 
         var error = _manager.BeginTransaction(id, epoch: 99);
-        Assert.Equal(ErrorCode.InvalidProducerEpoch, error);
+        Assert.Equal(TxnErrorStatus.InvalidProducerEpoch, error);
     }
 
     [Fact]
@@ -238,7 +237,7 @@ public class ProducerStateManagerTests
 
         var error = _manager.BeginTransaction(id, epoch);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
         Assert.True(_manager.HasOngoingTransaction(id));
     }
 
@@ -249,7 +248,7 @@ public class ProducerStateManagerTests
         _manager.BeginTransaction(id, epoch);
 
         var error = _manager.BeginTransaction(id, epoch);
-        Assert.Equal(ErrorCode.ConcurrentTransactions, error);
+        Assert.Equal(TxnErrorStatus.ConcurrentTransactions, error);
     }
 
     [Fact]
@@ -260,7 +259,7 @@ public class ProducerStateManagerTests
 
         var error = _manager.AddPartitionToTransaction(id, epoch, Tp0);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
         var partitions = _manager.GetTransactionPartitions(id);
         Assert.NotNull(partitions);
         Assert.Contains(Tp0, partitions);
@@ -273,7 +272,7 @@ public class ProducerStateManagerTests
         // Not started yet
 
         var error = _manager.AddPartitionToTransaction(id, epoch, Tp0);
-        Assert.Equal(ErrorCode.InvalidTxnState, error);
+        Assert.Equal(TxnErrorStatus.InvalidTxnState, error);
     }
 
     [Fact]
@@ -284,7 +283,7 @@ public class ProducerStateManagerTests
 
         var error = _manager.PrepareEndTransaction(id, epoch, commit: true);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
         Assert.Equal(KafkaConstants.TransactionState.PrepareCommit, _manager.GetTransactionState(id));
     }
 
@@ -296,7 +295,7 @@ public class ProducerStateManagerTests
 
         var error = _manager.PrepareEndTransaction(id, epoch, commit: false);
 
-        Assert.Equal(ErrorCode.None, error);
+        Assert.Equal(TxnErrorStatus.None, error);
         Assert.Equal(KafkaConstants.TransactionState.PrepareAbort, _manager.GetTransactionState(id));
     }
 
