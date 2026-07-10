@@ -1,6 +1,7 @@
 using Kuestenlogik.Surgewave.Clustering;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
@@ -15,11 +16,11 @@ namespace Kuestenlogik.Surgewave.Broker.Handlers;
 /// </summary>
 public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
+    private readonly IBrokerConfigView _config;
     private readonly ClusterState _clusterState;
     private readonly ReplicaManager _replicaManager;
     private readonly LogManager _logManager;
-    private readonly TransactionCoordinator? _transactionCoordinator;
+    private readonly ITransactionMarkerSink? _transactionCoordinator;
     private readonly IIsrUpdateApplier? _isrUpdateApplier;
     private readonly ILogger<InterBrokerApiHandler> _logger;
 
@@ -37,12 +38,12 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
     ];
 
     public InterBrokerApiHandler(
-        BrokerConfig config,
+        IBrokerConfigView config,
         ClusterState clusterState,
         ReplicaManager replicaManager,
         LogManager logManager,
         ILogger<InterBrokerApiHandler> logger,
-        TransactionCoordinator? transactionCoordinator = null,
+        ITransactionMarkerSink? transactionCoordinator = null,
         IIsrUpdateApplier? isrUpdateApplier = null)
     {
         _config = config;
@@ -574,14 +575,14 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                             {
                                 if (marker.TransactionResult)
                                 {
-                                    _transactionCoordinator.TransactionIndex.CommitTransaction(
+                                    _transactionCoordinator.CommitTransaction(
                                         marker.ProducerId,
                                         [tp],
                                         offset);
                                 }
                                 else
                                 {
-                                    _transactionCoordinator.TransactionIndex.AbortTransaction(
+                                    _transactionCoordinator.AbortTransaction(
                                         marker.ProducerId,
                                         [tp],
                                         offset);

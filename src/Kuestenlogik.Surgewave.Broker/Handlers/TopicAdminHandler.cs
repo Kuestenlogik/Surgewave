@@ -13,10 +13,10 @@ namespace Kuestenlogik.Surgewave.Broker.Handlers;
 /// </summary>
 public sealed class TopicAdminHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
+    private readonly IBrokerConfigView _config;
     private readonly LogManager _logManager;
-    private readonly QuotaManager _quotaManager;
-    private readonly AuditLogger? _auditLogger;
+    private readonly IQuotaManager _quotaManager;
+    private readonly IAuditLogger? _auditLogger;
     private readonly ILogger<TopicAdminHandler> _logger;
     private IClusterTopicCreator? _clusterTopicCreator;
 
@@ -40,10 +40,10 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
     }
 
     public TopicAdminHandler(
-        BrokerConfig config,
+        IBrokerConfigView config,
         LogManager logManager,
-        QuotaManager quotaManager,
-        AuditLogger? auditLogger,
+        IQuotaManager quotaManager,
+        IAuditLogger? auditLogger,
         ILogger<TopicAdminHandler> logger)
     {
         _config = config;
