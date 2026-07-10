@@ -138,6 +138,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker.Abstractions\Kuestenlogik.Surgewave.Broker.Abstractions.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Coordination\Kuestenlogik.Surgewave.Coordination.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Storage.Engine\Kuestenlogik.Surgewave.Storage.Engine.csproj" />

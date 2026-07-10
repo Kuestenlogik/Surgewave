@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Protocol-neutral service seams for the Surgewave broker (authorization, quotas, dynamic config, delegation tokens, telemetry ingestion). Interfaces + neutral POCOs with no wire-protocol (Kafka) dependency, so protocol plugins can depend on them while the concrete services stay in the broker (#59 b4-tier2). References Core only.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

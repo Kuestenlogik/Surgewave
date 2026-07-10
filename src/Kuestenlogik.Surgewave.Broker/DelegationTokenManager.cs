@@ -10,7 +10,7 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// Manages delegation tokens for authentication delegation.
 /// Tokens are HMAC-signed bearer tokens that can be used for authentication.
 /// </summary>
-public sealed class DelegationTokenManager
+public sealed class DelegationTokenManager : IDelegationTokenService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -329,69 +329,6 @@ public sealed class DelegationTokenManager
     }
 }
 
-/// <summary>
-/// Configuration for delegation tokens.
-/// </summary>
-public sealed class DelegationTokenConfig
-{
-    /// <summary>
-    /// Whether delegation tokens are enabled. Default: false — opt-in security feature.
-    /// </summary>
-    public bool Enabled { get; set; } = false;
-
-    /// <summary>
-    /// Base64-encoded secret key for HMAC generation.
-    /// If not set, a random key is generated (tokens won't survive restarts).
-    /// </summary>
-    public string? SecretKey { get; set; }
-
-    /// <summary>
-    /// Default token max lifetime in milliseconds. Default: 7 days.
-    /// </summary>
-    public long DefaultMaxLifetimeMs { get; set; } = 7 * 24 * 60 * 60 * 1000L;
-
-    /// <summary>
-    /// Maximum allowed max lifetime in milliseconds. Default: 7 days.
-    /// </summary>
-    public long MaxMaxLifetimeMs { get; set; } = 7 * 24 * 60 * 60 * 1000L;
-
-    /// <summary>
-    /// Default renewal period in milliseconds. Default: 24 hours.
-    /// </summary>
-    public long DefaultRenewalPeriodMs { get; set; } = 24 * 60 * 60 * 1000L;
-}
-
-/// <summary>
-/// Represents a delegation token.
-/// </summary>
-public sealed class DelegationToken
-{
-    public required string TokenId { get; init; }
-    public required byte[] Hmac { get; init; }
-    public required string OwnerPrincipalType { get; init; }
-    public required string OwnerPrincipalName { get; init; }
-    public required string RequesterPrincipalType { get; init; }
-    public required string RequesterPrincipalName { get; init; }
-    public required long IssueTimestampMs { get; init; }
-    public long ExpiryTimestampMs { get; set; }
-    public required long MaxTimestampMs { get; init; }
-    public required List<TokenRenewer> Renewers { get; init; }
-}
-
-/// <summary>
-/// Represents a principal that can renew a delegation token.
-/// </summary>
-public sealed class TokenRenewer
-{
-    public required string PrincipalType { get; init; }
-    public required string PrincipalName { get; init; }
-}
-
-/// <summary>
-/// Represents a token owner for filtering.
-/// </summary>
-public sealed class TokenOwner
-{
-    public required string PrincipalType { get; init; }
-    public required string PrincipalName { get; init; }
-}
+// DelegationTokenConfig, DelegationToken, TokenRenewer and TokenOwner were relocated
+// to Kuestenlogik.Surgewave.Broker.Abstractions (namespace preserved) alongside
+// IDelegationTokenService (#59 b4-tier2). See src/Kuestenlogik.Surgewave.Broker.Abstractions/DelegationTokens/.

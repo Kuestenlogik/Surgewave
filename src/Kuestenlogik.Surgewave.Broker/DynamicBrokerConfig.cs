@@ -18,7 +18,7 @@ public sealed class ConfigChangedEventArgs : EventArgs
 /// Manages dynamic broker configuration that can be modified at runtime via AlterConfigs API.
 /// Dynamic configs take precedence over static configs from appsettings.json.
 /// </summary>
-public sealed class DynamicBrokerConfig
+public sealed class DynamicBrokerConfig : IDynamicBrokerConfig
 {
     private readonly ConcurrentDictionary<string, string> _dynamicConfigs = new();
     private readonly BrokerConfig _staticConfig;
@@ -98,6 +98,11 @@ public sealed class DynamicBrokerConfig
         "log.dir",
         "cluster.id"
     };
+
+    // Explicit interface forwarders exposing the static allow/deny key sets as
+    // instance members (the static/instance name collision requires explicit impl).
+    IReadOnlySet<string> IDynamicBrokerConfig.DynamicConfigKeys => DynamicConfigKeys;
+    IReadOnlySet<string> IDynamicBrokerConfig.ReadOnlyConfigKeys => ReadOnlyConfigKeys;
 
     /// <summary>
     /// Event raised when a config is changed.
