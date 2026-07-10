@@ -1,20 +1,21 @@
+using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Handler for configuration APIs: DescribeConfigs, AlterConfigs
 /// </summary>
 public sealed class ConfigApiHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
-    private readonly DynamicBrokerConfig _dynamicConfig;
+    private readonly IBrokerConfigView _config;
+    private readonly IDynamicBrokerConfig _dynamicConfig;
     private readonly LogManager _logManager;
-    private readonly ShareGroupCoordinator? _shareGroupCoordinator;
+    private readonly IShareGroupConfigStore? _shareGroupCoordinator;
 
     private static readonly HashSet<string> ValidTopicConfigs =
     [
@@ -28,7 +29,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
 
     public IEnumerable<ApiKey> SupportedApiKeys => [ApiKey.DescribeConfigs, ApiKey.AlterConfigs, ApiKey.IncrementalAlterConfigs];
 
-    public ConfigApiHandler(BrokerConfig config, DynamicBrokerConfig dynamicConfig, LogManager logManager, ShareGroupCoordinator? shareGroupCoordinator = null)
+    public ConfigApiHandler(IBrokerConfigView config, IDynamicBrokerConfig dynamicConfig, LogManager logManager, IShareGroupConfigStore? shareGroupCoordinator = null)
     {
         _config = config;
         _dynamicConfig = dynamicConfig;
@@ -131,11 +132,11 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                     // Validate only mode - check if configs are valid without applying
                     foreach (var config in resource.Configs)
                     {
-                        if (DynamicBrokerConfig.ReadOnlyConfigKeys.Contains(config.Name))
+                        if (_dynamicConfig.ReadOnlyConfigKeys.Contains(config.Name))
                         {
                             errors.Add($"Config '{config.Name}' is read-only and requires broker restart");
                         }
-                        else if (!DynamicBrokerConfig.DynamicConfigKeys.Contains(config.Name))
+                        else if (!_dynamicConfig.DynamicConfigKeys.Contains(config.Name))
                         {
                             errors.Add($"Config '{config.Name}' is not a recognized dynamic broker config");
                         }
@@ -295,13 +296,13 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
             ["transactional.id.expiration.ms"] = ("604800000", ConfigSource.DefaultConfig, false),
 
             // Security settings
-            ["security.inter.broker.protocol"] = (_config.Security.SaslEnabled ? "SASL_PLAINTEXT" : "PLAINTEXT", ConfigSource.StaticBrokerConfig, false),
-            ["sasl.enabled.mechanisms"] = (string.Join(",", _config.Security.SaslMechanisms), ConfigSource.StaticBrokerConfig, false),
+            ["security.inter.broker.protocol"] = (_config.SaslEnabled ? "SASL_PLAINTEXT" : "PLAINTEXT", ConfigSource.StaticBrokerConfig, false),
+            ["sasl.enabled.mechanisms"] = (string.Join(",", _config.SaslMechanisms), ConfigSource.StaticBrokerConfig, false),
             ["ssl.endpoint.identification.algorithm"] = ("https", ConfigSource.DefaultConfig, false),
 
             // Quota settings
-            ["quota.producer.default"] = (_config.Quotas.ProducerBytesPerSecond.ToString(), ConfigSource.StaticBrokerConfig, false),
-            ["quota.consumer.default"] = (_config.Quotas.ConsumerBytesPerSecond.ToString(), ConfigSource.StaticBrokerConfig, false),
+            ["quota.producer.default"] = (_config.ProducerQuotaBytesPerSecond.ToString(), ConfigSource.StaticBrokerConfig, false),
+            ["quota.consumer.default"] = (_config.ConsumerQuotaBytesPerSecond.ToString(), ConfigSource.StaticBrokerConfig, false),
 
             // Cluster settings
             ["cluster.id"] = (_config.ClusterId ?? "surgewave-cluster", ConfigSource.StaticBrokerConfig, true),
@@ -503,9 +504,9 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                 {
                     foreach (var config in resource.Configs)
                     {
-                        if (DynamicBrokerConfig.ReadOnlyConfigKeys.Contains(config.Name))
+                        if (_dynamicConfig.ReadOnlyConfigKeys.Contains(config.Name))
                             errors.Add($"Config '{config.Name}' is read-only");
-                        else if (!DynamicBrokerConfig.DynamicConfigKeys.Contains(config.Name))
+                        else if (!_dynamicConfig.DynamicConfigKeys.Contains(config.Name))
                             errors.Add($"Config '{config.Name}' is not a recognized dynamic broker config");
                     }
                 }

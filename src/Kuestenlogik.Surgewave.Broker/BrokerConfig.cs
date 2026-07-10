@@ -19,7 +19,7 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// <summary>
 /// Broker configuration - bound from appsettings.json "Surgewave" section
 /// </summary>
-public sealed class BrokerConfig : IValidatableConfig
+public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
 {
     /// <summary>
     /// Configuration section name in appsettings.json
@@ -531,6 +531,19 @@ public sealed class BrokerConfig : IValidatableConfig
     /// </summary>
     [Range(0, int.MaxValue)]
     public int StreamsGroupAssignmentIntervalMs { get; set; } = 1000;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // IBrokerConfigView flattened members (#59 b4-tier2)
+    // ─────────────────────────────────────────────────────────────────────
+    // Explicit interface implementations so the nested Security.* / Quotas.*
+    // reads the Kafka config handler needs stay off BrokerConfig's public
+    // surface. The direct scalar members are satisfied implicitly by the
+    // public getters above.
+
+    bool IBrokerConfigView.SaslEnabled => Security.SaslEnabled;
+    IReadOnlyList<string> IBrokerConfigView.SaslMechanisms => Security.SaslMechanisms;
+    long IBrokerConfigView.ProducerQuotaBytesPerSecond => Quotas.ProducerBytesPerSecond;
+    long IBrokerConfigView.ConsumerQuotaBytesPerSecond => Quotas.ConsumerBytesPerSecond;
 }
 
 /// <summary>
