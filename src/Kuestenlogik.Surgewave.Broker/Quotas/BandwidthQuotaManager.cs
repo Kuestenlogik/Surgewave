@@ -8,7 +8,7 @@ namespace Kuestenlogik.Surgewave.Broker.Quotas;
 /// Resolves the effective quota for a client (user override > client override > default),
 /// tracks bandwidth via sliding window counters, and enforces throttling.
 /// </summary>
-public sealed partial class BandwidthQuotaManager : IDisposable
+public sealed partial class BandwidthQuotaManager : IDisposable, IBandwidthQuota
 {
     private bool _disposed;
     private readonly BandwidthQuotaConfig _config;

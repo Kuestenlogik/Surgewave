@@ -144,20 +144,6 @@ public sealed record AclEntry
 }
 
 /// <summary>
-/// Resource types that can be protected by ACLs
-/// </summary>
-public enum AclResourceType
-{
-    Unknown = 0,
-    Any = 1,
-    Topic = 2,
-    Group = 3,
-    Cluster = 4,
-    TransactionalId = 5,
-    DelegationToken = 6
-}
-
-/// <summary>
 /// Pattern types for matching resource names
 /// </summary>
 public enum AclPatternType
@@ -175,26 +161,6 @@ public enum AclPatternType
     /// Regex matching - resource name must match the regex pattern
     /// </summary>
     Regex = 6
-}
-
-/// <summary>
-/// Operations that can be authorized
-/// </summary>
-public enum AclOperation
-{
-    Unknown = 0,
-    Any = 1,
-    All = 2,
-    Read = 3,
-    Write = 4,
-    Create = 5,
-    Delete = 6,
-    Alter = 7,
-    Describe = 8,
-    ClusterAction = 9,
-    DescribeConfigs = 10,
-    AlterConfigs = 11,
-    IdempotentWrite = 12
 }
 
 /// <summary>
