@@ -37,6 +37,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker" />
     <InternalsVisibleTo Include="surgewave-broker" />
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker.Tests" />
   </ItemGroup>
 
 </Project>

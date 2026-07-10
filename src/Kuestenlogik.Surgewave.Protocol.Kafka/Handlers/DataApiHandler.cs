@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.AutoTuning;
 using Kuestenlogik.Surgewave.Broker.Quotas;
 using Kuestenlogik.Surgewave.Broker.Security;
@@ -16,29 +17,29 @@ using Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Handler for core data APIs: Produce, Fetch, ListOffsets
 /// </summary>
-public sealed class DataApiHandler : IKafkaRequestHandler
+public sealed partial class DataApiHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
+    private readonly IBrokerConfigView _config;
     private readonly LogManager _logManager;
-    private readonly TransactionCoordinator _transactionCoordinator;
-    private readonly QuotaManager _quotaManager;
-    private readonly BandwidthQuotaManager? _bandwidthQuotaManager;
+    private readonly IProduceTransactionCoordinator _transactionCoordinator;
+    private readonly IQuotaManager _quotaManager;
+    private readonly IBandwidthQuota? _bandwidthQuotaManager;
     private readonly RecordBatchSerializer _recordBatchSerializer;
-    private readonly AclAuthorizer? _aclAuthorizer;
-    private readonly DeduplicationManager? _deduplicationManager;
-    private readonly DelayIndex? _delayIndex;
-    private readonly TtlIndex? _ttlIndex;
-    private readonly BrokerMetrics? _metrics;
+    private readonly IAuthorizer? _aclAuthorizer;
+    private readonly IDeduplicationManager? _deduplicationManager;
+    private readonly IDelayIndex? _delayIndex;
+    private readonly ITtlIndex? _ttlIndex;
+    private readonly IBrokerMetrics? _metrics;
     private readonly SurgewaveBrokerObservability? _observability;
     private readonly IRecordTransformPipeline? _recordTransform;
-    private readonly ColdStartWorkloadProfiler? _coldStartProfiler;
+    private readonly IColdStartProfiler? _coldStartProfiler;
     private readonly IPartitionAppender _partitionAppender;
-    private readonly DisaggregatedSegmentReader? _disaggregatedReader;
+    private readonly IDisaggregatedSegmentReader? _disaggregatedReader;
     private readonly ILogger<DataApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -49,23 +50,23 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     ];
 
     public DataApiHandler(
-        BrokerConfig config,
+        IBrokerConfigView config,
         LogManager logManager,
-        TransactionCoordinator transactionCoordinator,
-        QuotaManager quotaManager,
+        IProduceTransactionCoordinator transactionCoordinator,
+        IQuotaManager quotaManager,
         RecordBatchSerializer recordBatchSerializer,
-        AclAuthorizer? aclAuthorizer,
-        DeduplicationManager? deduplicationManager,
-        DelayIndex? delayIndex,
-        TtlIndex? ttlIndex,
-        BrokerMetrics? metrics,
+        IAuthorizer? aclAuthorizer,
+        IDeduplicationManager? deduplicationManager,
+        IDelayIndex? delayIndex,
+        ITtlIndex? ttlIndex,
+        IBrokerMetrics? metrics,
         ILogger<DataApiHandler> logger,
-        BandwidthQuotaManager? bandwidthQuotaManager = null,
+        IBandwidthQuota? bandwidthQuotaManager = null,
         SurgewaveBrokerObservability? observability = null,
         IRecordTransformPipeline? recordTransform = null,
-        ColdStartWorkloadProfiler? coldStartProfiler = null,
+        IColdStartProfiler? coldStartProfiler = null,
         IPartitionAppender? partitionAppender = null,
-        DisaggregatedSegmentReader? disaggregatedReader = null)
+        IDisaggregatedSegmentReader? disaggregatedReader = null)
     {
         _config = config;
         _logManager = logManager;
@@ -309,11 +310,11 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                         {
                             _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, expiryMs.Value);
                         }
-                        else if (_config.Ttl.DefaultTtlMs > 0)
+                        else if (_config.DefaultTtlMs > 0)
                         {
                             // Apply default TTL when no header is present
                             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                            _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, nowMs + _config.Ttl.DefaultTtlMs);
+                            _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, nowMs + _config.DefaultTtlMs);
                         }
                     }
 
@@ -324,7 +325,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                         _transactionCoordinator.RecordTransactionalBatch(topicPartition, producerId, baseOffset);
                     }
 
-                    Log.RecordBatchStored(_logger, topic, partitionData.Index, baseOffset, partitionData.Records.Length);
+                    RecordBatchStored(topic, partitionData.Index, baseOffset, partitionData.Records.Length);
 
                     // Record produce metrics
                     var recordCount = CompressionCodec.GetRecordCount(partitionData.Records.Span);
@@ -362,7 +363,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                 }
                 catch (Exception ex)
                 {
-                    Log.ProduceError(_logger, ex, topic, partitionData.Index);
+                    ProduceError(ex, topic, partitionData.Index);
                     _metrics?.RecordProduceError(topic, partitionData.Index, ErrorCode.Unknown.ToString());
 
                     partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
@@ -482,7 +483,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                     var log = _logManager.GetLog(topicPartition);
 
                     // Debug: Log the state before fetch (Trace level - only when debugging)
-                    Log.FetchDebug(_logger, topic, partitionData.Partition, partitionData.FetchOffset,
+                    FetchDebug(topic, partitionData.Partition, partitionData.FetchOffset,
                         log?.LogStartOffset ?? -1, log?.NextOffset ?? -1, log != null);
 
                     var highWatermark = log?.HighWatermark ?? 0;
@@ -550,7 +551,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                             topicPartition, partitionData.FetchOffset,
                             maxBytes: partitionData.MaxBytes, cancellationToken);
 
-                        Log.BatchesRead(_logger, batchOffsets.Count, topic, partitionData.Partition, partitionData.FetchOffset);
+                        BatchesRead(batchOffsets.Count, topic, partitionData.Partition, partitionData.FetchOffset);
 
                         recordSet = contiguousData.Length > 0
                             ? contiguousData.ToArray()   // single copy for the response
@@ -571,7 +572,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                             topicPartition, partitionData.FetchOffset,
                             maxBytes: partitionData.MaxBytes, cancellationToken);
 
-                        Log.BatchesRead(_logger, recordBatches.Count, topic, partitionData.Partition, partitionData.FetchOffset);
+                        BatchesRead(recordBatches.Count, topic, partitionData.Partition, partitionData.FetchOffset);
 
                         var filteredBatches = recordBatches.Count > 0
                             ? FilterBatchesForIsolationLevel(topicPartition, recordBatches, isReadCommitted, highWatermark)
@@ -598,8 +599,8 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                             messageCount += CompressionCodec.GetRecordCount(b);
                     }
 
-                    Log.BatchesCombined(_logger, 0, recordSet.Length);
-                    Log.LogOffsets(_logger, log?.LogStartOffset ?? 0, highWatermark);
+                    BatchesCombined(0, recordSet.Length);
+                    LogOffsets(log?.LogStartOffset ?? 0, highWatermark);
 
                     totalBytesFetched += recordSet.Length;
                     _metrics?.RecordFetch(topic, partitionData.Partition, messageCount, recordSet.Length, 0);
@@ -634,7 +635,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
                 }
                 catch (Exception ex)
                 {
-                    Log.FetchError(_logger, ex, topic, partitionData.Partition);
+                    FetchError(ex, topic, partitionData.Partition);
                     _metrics?.RecordError(ErrorCode.Unknown.ToString());
 
                     partitionResponses.Add(new FetchResponse.PartitionResponse
@@ -684,15 +685,13 @@ public sealed class DataApiHandler : IKafkaRequestHandler
         bool isReadCommitted,
         long highWatermark)
     {
-        var txnIndex = _transactionCoordinator.TransactionIndex;
-
         if (isReadCommitted)
         {
-            return txnIndex.FilterForReadCommitted(partition, batches, highWatermark);
+            return _transactionCoordinator.FilterForReadCommitted(partition, batches, highWatermark);
         }
         else
         {
-            return txnIndex.FilterForReadUncommitted(batches);
+            return _transactionCoordinator.FilterForReadUncommitted(batches);
         }
     }
 
@@ -821,7 +820,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     /// </summary>
     private bool IsDeduplicationEnabled(string topic)
     {
-        if (!_config.Deduplication.Enabled)
+        if (!_config.DeduplicationEnabled)
             return false;
 
         var metadata = _logManager.GetTopicMetadata(topic);
@@ -835,7 +834,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     /// </summary>
     private bool IsTtlEnabled(string topic)
     {
-        if (!_config.Ttl.Enabled)
+        if (!_config.TtlEnabled)
             return false;
 
         var metadata = _logManager.GetTopicMetadata(topic);
@@ -849,7 +848,7 @@ public sealed class DataApiHandler : IKafkaRequestHandler
     /// </summary>
     private bool IsDelayDeliveryEnabled(string topic)
     {
-        if (!_config.DelayDelivery.Enabled)
+        if (!_config.DelayDeliveryEnabled)
             return false;
 
         var metadata = _logManager.GetTopicMetadata(topic);
@@ -883,4 +882,28 @@ public sealed class DataApiHandler : IKafkaRequestHandler
 
         return result.IsAllowed;
     }
+
+    // Source-generated high-performance logging (relocated from the broker's shared Log class
+    // in #59 b4-tier2; kept as instance [LoggerMessage] methods over the _logger field, matching
+    // the sibling Kafka handlers).
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Stored RecordBatch for {Topic}-{Partition}, baseOffset={BaseOffset}, size={Size} bytes")]
+    private partial void RecordBatchStored(string topic, int partition, long baseOffset, int size);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error producing to {Topic}-{Partition}")]
+    private partial void ProduceError(Exception ex, string topic, int partition);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Read {BatchCount} batches from {Topic}-{Partition} at offset {FetchOffset}")]
+    private partial void BatchesRead(int batchCount, string topic, int partition, long fetchOffset);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Combined {BatchCount} batches into {RecordSetSize} bytes")]
+    private partial void BatchesCombined(int batchCount, int recordSetSize);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "LogStartOffset={LogStartOffset}, HighWatermark={HighWatermark}")]
+    private partial void LogOffsets(long logStartOffset, long highWatermark);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error fetching from {Topic}-{Partition}")]
+    private partial void FetchError(Exception ex, string topic, int partition);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "[FetchDebug] {Topic}-{Partition} fetchOffset={FetchOffset}, logStartOffset={LogStartOffset}, nextOffset={NextOffset}, logExists={LogExists}")]
+    private partial void FetchDebug(string topic, int partition, long fetchOffset, long logStartOffset, long nextOffset, bool logExists);
 }
