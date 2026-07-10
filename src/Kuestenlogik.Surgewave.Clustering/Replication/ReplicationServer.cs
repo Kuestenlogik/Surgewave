@@ -4,7 +4,6 @@ using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Raft;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Transport;
 using Microsoft.Extensions.Logging;
 
@@ -485,7 +484,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
             AppendEntriesApiKey => await HandleAppendEntriesAsync(request, ct),
             MetadataUpdateApiKey => HandleMetadataUpdate(request),
             PreVoteApiKey => await HandlePreVoteAsync(request, ct),
-            _ => BuildErrorResponse(request.CorrelationId, ErrorCode.UnsupportedVersion)
+            _ => BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.UnsupportedVersion)
         };
     }
 
@@ -494,7 +493,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         if (_metadataStateMachine == null || request.MetadataUpdateRequest == null)
         {
             return SerializeMetadataUpdateResponse(request.CorrelationId,
-                new MetadataUpdateResponse(_config.BrokerId, (short)ErrorCode.Unknown, 0));
+                new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.Unknown, 0));
         }
 
         var req = request.MetadataUpdateRequest;
@@ -504,7 +503,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         {
             LogStaleMetadataUpdate(req.ControllerId, req.ControllerEpoch, _clusterState.ControllerEpoch);
             return SerializeMetadataUpdateResponse(request.CorrelationId,
-                new MetadataUpdateResponse(_config.BrokerId, (short)ErrorCode.StaleControllerEpoch, _clusterState.MetadataVersion));
+                new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.StaleControllerEpoch, _clusterState.MetadataVersion));
         }
 
         // Update controller epoch if newer
@@ -530,7 +529,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         LogMetadataUpdateApplied(req.CommandType, req.MetadataVersion, req.ControllerId);
 
         return SerializeMetadataUpdateResponse(request.CorrelationId,
-            new MetadataUpdateResponse(_config.BrokerId, (short)ErrorCode.None, _clusterState.MetadataVersion));
+            new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.None, _clusterState.MetadataVersion));
     }
 
     private static byte[] SerializeMetadataUpdateResponse(int correlationId, MetadataUpdateResponse response)
@@ -550,7 +549,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     {
         if (_raftNode == null || request.RequestVoteRequest == null)
         {
-            return BuildErrorResponse(request.CorrelationId, ErrorCode.Unknown);
+            return BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.Unknown);
         }
 
         var response = await _raftNode.HandleRequestVoteAsync(request.RequestVoteRequest, ct);
@@ -561,7 +560,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     {
         if (_raftNode == null || request.AppendEntriesRequest == null)
         {
-            return BuildErrorResponse(request.CorrelationId, ErrorCode.Unknown);
+            return BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.Unknown);
         }
 
         var response = await _raftNode.HandleAppendEntriesAsync(request.AppendEntriesRequest, ct);
@@ -572,7 +571,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     {
         if (_raftNode == null || request.PreVoteRequest == null)
         {
-            return BuildErrorResponse(request.CorrelationId, ErrorCode.Unknown);
+            return BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.Unknown);
         }
 
         var response = await _raftNode.HandlePreVoteAsync(request.PreVoteRequest, ct);
@@ -620,7 +619,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     {
         if (_heartbeatManager == null || request.HeartbeatRequest == null)
         {
-            return BuildErrorResponse(request.CorrelationId, ErrorCode.Unknown);
+            return BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.Unknown);
         }
 
         var response = _heartbeatManager.ProcessHeartbeat(request.HeartbeatRequest);
@@ -690,7 +689,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
                 // Check if we're the leader
                 if (!_replicaManager.IsLeader(tp))
                 {
-                    WritePartitionError(writer, partitionData.Partition, ErrorCode.NotLeaderForPartition);
+                    WritePartitionError(writer, partitionData.Partition, ClusterRpcStatus.NotLeaderForPartition);
                     continue;
                 }
 
@@ -708,7 +707,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
                 // Write partition response
                 writer.Write(BinaryPrimitives.ReverseEndianness(partitionData.Partition));
-                writer.Write(BinaryPrimitives.ReverseEndianness((short)ErrorCode.None));
+                writer.Write(BinaryPrimitives.ReverseEndianness((short)ClusterRpcStatus.None));
                 writer.Write(BinaryPrimitives.ReverseEndianness(hw));
                 writer.Write(BinaryPrimitives.ReverseEndianness(-1L)); // Last stable offset
                 writer.Write(BinaryPrimitives.ReverseEndianness(logStartOffset));
@@ -732,7 +731,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return ms.ToArray();
     }
 
-    private void WritePartitionError(BinaryWriter writer, int partition, ErrorCode errorCode)
+    private void WritePartitionError(BinaryWriter writer, int partition, ClusterRpcStatus errorCode)
     {
         writer.Write(BinaryPrimitives.ReverseEndianness(partition));
         writer.Write(BinaryPrimitives.ReverseEndianness((short)errorCode));
@@ -744,7 +743,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         writer.Write(BinaryPrimitives.ReverseEndianness(0)); // Records length
     }
 
-    private byte[] BuildErrorResponse(int correlationId, ErrorCode errorCode)
+    private byte[] BuildErrorResponse(int correlationId, ClusterRpcStatus errorCode)
     {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
