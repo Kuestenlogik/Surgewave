@@ -21,6 +21,11 @@
          (Consumer/Share/Streams/Transaction ApiHandlers) live here and target these
          interfaces. Coordination is a leaf assembly, so there is no reference cycle. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Coordination\Kuestenlogik.Surgewave.Coordination.csproj" />
+    <!-- Neutral broker service seams (#59 b4-tier2 increment D): the relocated Kafka
+         handlers (Quota/DelegationToken/Telemetry/Data) depend on these interfaces, not
+         the concrete broker services. Broker.Abstractions references Core only — the
+         one-way triangle Protocol.Kafka -> Broker.Abstractions <- Broker holds. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker.Abstractions\Kuestenlogik.Surgewave.Broker.Abstractions.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

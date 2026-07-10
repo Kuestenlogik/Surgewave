@@ -1,15 +1,16 @@
+using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Handler for Kafka delegation token APIs (API Keys 38-41).
 /// </summary>
 public sealed partial class DelegationTokenApiHandler : IKafkaRequestHandler
 {
-    private readonly DelegationTokenManager _tokenManager;
+    private readonly IDelegationTokenService _tokenManager;
     private readonly ILogger<DelegationTokenApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -20,7 +21,7 @@ public sealed partial class DelegationTokenApiHandler : IKafkaRequestHandler
         ApiKey.DescribeDelegationToken
     ];
 
-    public DelegationTokenApiHandler(DelegationTokenManager tokenManager, ILogger<DelegationTokenApiHandler> logger)
+    public DelegationTokenApiHandler(IDelegationTokenService tokenManager, ILogger<DelegationTokenApiHandler> logger)
     {
         _tokenManager = tokenManager;
         _logger = logger;
