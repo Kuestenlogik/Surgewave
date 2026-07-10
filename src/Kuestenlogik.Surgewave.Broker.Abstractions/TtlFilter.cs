@@ -6,6 +6,8 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// <summary>
 /// Filters expired record batches from fetch responses.
 /// Batches whose TTL has elapsed (expiry time is in the past) are excluded.
+/// Typed on the neutral <see cref="ITtlIndex"/> seam so the fetch slow path can run in a
+/// protocol plugin without referencing the broker engine (#59 b4-tier2).
 /// </summary>
 public static class TtlFilter
 {
@@ -14,7 +16,7 @@ public static class TtlFilter
     /// </summary>
     public static List<byte[]> FilterExpiredBatches(
         List<byte[]> batches,
-        TtlIndex ttlIndex,
+        ITtlIndex ttlIndex,
         TopicPartition partition,
         long currentTimeMs)
     {

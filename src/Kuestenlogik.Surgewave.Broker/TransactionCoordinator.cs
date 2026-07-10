@@ -18,7 +18,7 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// are protocol-neutral (b2): the former returns <c>ProduceSequenceStatus</c>, the latter takes
 /// only neutral types; the Kafka Produce handler maps to the wire error code at the boundary.
 /// </summary>
-public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator
+public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator, IProduceTransactionCoordinator
 {
     private readonly ProducerStateManager _producerStateManager;
     private readonly TransactionIndex _transactionIndex;
@@ -68,6 +68,21 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// Get the TransactionIndex for fetch filtering.
     /// </summary>
     public TransactionIndex TransactionIndex => _transactionIndex;
+
+    /// <summary>
+    /// Filters record batches for READ_COMMITTED isolation. Forwards to the concrete
+    /// <see cref="TransactionIndex"/> so the neutral <see cref="IProduceTransactionCoordinator"/>
+    /// keeps that type off the data-plane handler's surface (#59 b4-tier2).
+    /// </summary>
+    public List<byte[]> FilterForReadCommitted(TopicPartition partition, List<byte[]> batches, long highWatermark)
+        => _transactionIndex.FilterForReadCommitted(partition, batches, highWatermark);
+
+    /// <summary>
+    /// Filters record batches for READ_UNCOMMITTED isolation. Forwards to the concrete
+    /// <see cref="TransactionIndex"/>.
+    /// </summary>
+    public List<byte[]> FilterForReadUncommitted(List<byte[]> batches)
+        => _transactionIndex.FilterForReadUncommitted(batches);
 
     /// <summary>
     /// Records a transactional batch being written. Called from produce path.

@@ -55,4 +55,12 @@ public interface IBrokerConfigView
     // Flattened Quotas.* reads
     long ProducerQuotaBytesPerSecond { get; }
     long ConsumerQuotaBytesPerSecond { get; }
+
+    // Flattened Ttl.* / Deduplication.* / DelayDelivery.* reads (data-plane feature gates).
+    // Flat scalars only — exposing the nested config structs through the interface would box
+    // on every produce-path read (#59 b4-tier2, perf risk §5).
+    bool TtlEnabled { get; }
+    long DefaultTtlMs { get; }
+    bool DeduplicationEnabled { get; }
+    bool DelayDeliveryEnabled { get; }
 }

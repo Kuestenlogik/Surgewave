@@ -31,7 +31,7 @@ namespace Kuestenlogik.Surgewave.Broker.AutoTuning;
 /// 24 h window without sleeping.
 /// </para>
 /// </remarks>
-public sealed class ColdStartWorkloadProfiler
+public sealed class ColdStartWorkloadProfiler : IColdStartProfiler
 {
     private readonly TimeProvider _time;
     private readonly TimeSpan _observationWindow;

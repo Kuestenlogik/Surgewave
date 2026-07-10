@@ -10,8 +10,12 @@ namespace Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 ///
 /// The default impl is a thin wrapper around <c>LogManager.AppendBatchAsync</c>;
 /// when disaggregated storage is enabled, a routing decorator
-/// (<see cref="RoutingPartitionAppender"/>) sits in front and dispatches
-/// stateless-mode topics to the <see cref="Stateless.StatelessAgent"/>.
+/// (<c>RoutingPartitionAppender</c>) sits in front and dispatches
+/// stateless-mode topics to the <c>StatelessAgent</c>.
+///
+/// Lives in Broker.Abstractions (namespace kept as
+/// <c>Kuestenlogik.Surgewave.Storage.Disaggregated.Routing</c>) so protocol plugins can
+/// depend on the neutral write seam without referencing the storage engine (#59 b4-tier2).
 /// </summary>
 public interface IPartitionAppender
 {

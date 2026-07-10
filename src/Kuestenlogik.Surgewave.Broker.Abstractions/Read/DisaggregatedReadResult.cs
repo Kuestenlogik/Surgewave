@@ -1,11 +1,15 @@
 namespace Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 
 /// <summary>
-/// What a <see cref="DisaggregatedSegmentReader"/> returns for one
+/// What an <see cref="IDisaggregatedSegmentReader"/> returns for one
 /// fetch call. The bytes are the raw RecordBatch payload from the
 /// stream object that contains <c>StartOffset</c>; the caller is
 /// responsible for slicing/decoding records — this layer is byte-in,
 /// byte-out.
+///
+/// Lives in Broker.Abstractions (namespace kept as
+/// <c>Kuestenlogik.Surgewave.Storage.Disaggregated.Read</c>) so protocol plugins can consume
+/// the neutral read seam without referencing the storage engine (#59 b4-tier2).
 /// </summary>
 /// <param name="LogBytes">The contents of the stream object. Empty when <see cref="HitManifest"/> is false.</param>
 /// <param name="HitManifest">

@@ -8,7 +8,7 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// Broker telemetry using System.Diagnostics.Metrics and ActivitySource (OpenTelemetry compatible).
 /// Separate from logging - this provides structured metrics and distributed tracing.
 /// </summary>
-public sealed class BrokerMetrics : IDisposable, IClusteringMetrics
+public sealed class BrokerMetrics : IDisposable, IClusteringMetrics, IBrokerMetrics
 {
     public const string MeterName = "Kuestenlogik.Surgewave.Broker";
     public const string ActivitySourceName = "Kuestenlogik.Surgewave.Broker";
