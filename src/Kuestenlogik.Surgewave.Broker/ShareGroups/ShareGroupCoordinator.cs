@@ -15,7 +15,7 @@ namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
 /// lives in the <c>ShareGroupApiHandler</c> adapter (#59). The fetched record bytes are passed through
 /// by reference to keep the share-consume path zero-copy.
 /// </summary>
-public sealed class ShareGroupCoordinator : IShareGroupCoordinator
+public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupConfigStore
 {
     private readonly ILogger<ShareGroupCoordinator> logger;
     private readonly LogManager logManager;
