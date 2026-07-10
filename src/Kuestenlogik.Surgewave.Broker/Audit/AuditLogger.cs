@@ -10,7 +10,7 @@ namespace Kuestenlogik.Surgewave.Broker.Audit;
 /// Audit logger that writes audit events to a log file for compliance and monitoring.
 /// Events are also retained in-memory for quick querying.
 /// </summary>
-public sealed class AuditLogger : IAsyncDisposable
+public sealed class AuditLogger : IAsyncDisposable, IAuditLogger
 {
     /// <summary>
     /// Default audit log file name.

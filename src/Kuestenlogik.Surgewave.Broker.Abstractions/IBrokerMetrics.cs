@@ -22,4 +22,8 @@ public interface IBrokerMetrics
 
     /// <summary>Record an error by type.</summary>
     void RecordError(string errorType);
+
+    /// <summary>Record a processed wire request (api key + handling latency) — the Kafka
+    /// connection loop reports this per request once it lives in the plugin (#59 b5).</summary>
+    void RecordRequest(string apiKey, double durationMs);
 }

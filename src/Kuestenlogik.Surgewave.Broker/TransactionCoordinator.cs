@@ -17,7 +17,7 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// are protocol-neutral (b2): the former returns <c>ProduceSequenceStatus</c>, the latter takes
 /// only neutral types; the Kafka Produce handler maps to the wire error code at the boundary.
 /// </summary>
-public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator, IProduceTransactionCoordinator
+public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator, IProduceTransactionCoordinator, ITransactionMarkerSink
 {
     private readonly ProducerStateManager _producerStateManager;
     private readonly TransactionIndex _transactionIndex;
@@ -82,6 +82,21 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// </summary>
     public List<byte[]> FilterForReadUncommitted(List<byte[]> batches)
         => _transactionIndex.FilterForReadUncommitted(batches);
+
+    /// <summary>
+    /// Commits the producer's transaction across the given partitions (inter-broker
+    /// WriteTxnMarkers path). Forwards to the concrete <see cref="TransactionIndex"/> so the
+    /// neutral <see cref="ITransactionMarkerSink"/> keeps that type off the moved handler (#59 b5).
+    /// </summary>
+    public void CommitTransaction(long producerId, IEnumerable<TopicPartition> partitions, long commitOffset)
+        => _transactionIndex.CommitTransaction(producerId, partitions, commitOffset);
+
+    /// <summary>
+    /// Aborts the producer's transaction across the given partitions. Forwards to the concrete
+    /// <see cref="TransactionIndex"/>.
+    /// </summary>
+    public void AbortTransaction(long producerId, IEnumerable<TopicPartition> partitions, long abortOffset)
+        => _transactionIndex.AbortTransaction(producerId, partitions, abortOffset);
 
     /// <summary>
     /// Records a transactional batch being written. Called from produce path.
