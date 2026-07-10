@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net.Sockets;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
@@ -48,7 +49,7 @@ public sealed class BrokerLifecycleEventArgs(BrokerLifecycleState oldState, Brok
 /// This is the client-side component that runs on each broker.
 /// It sends BrokerRegistration and BrokerHeartbeat requests to the controller.
 /// </remarks>
-public sealed partial class BrokerLifecycleManager : IAsyncDisposable
+public sealed partial class BrokerLifecycleManager : IAsyncDisposable, IBrokerLifecycleRpc
 {
     private readonly ClusteringConfig _config;
     private readonly ClusterState _clusterState;
@@ -460,6 +461,77 @@ public sealed partial class BrokerLifecycleManager : IAsyncDisposable
 
         // Read response
         return await ReadHeartbeatResponseAsync(stream, request.ApiVersion, request.CorrelationId, ct);
+    }
+
+    /// <summary>
+    /// Neutral <see cref="IBrokerLifecycleRpc"/> registration entry point (#59 b5): builds the
+    /// Kafka BrokerRegistration request from the neutral <paramref name="input"/>, sends it via
+    /// the internal wire codec, and maps the Kafka response to a protocol-neutral outcome.
+    /// </summary>
+    public async Task<BrokerRegistrationOutcome> RegisterAsync(BrokerRegistrationInput input, CancellationToken ct = default)
+    {
+        var request = new BrokerRegistrationRequest
+        {
+            ApiKey = ApiKey.BrokerRegistration,
+            ApiVersion = 3,
+            CorrelationId = Interlocked.Increment(ref _correlationId),
+            ClientId = $"surgewave-broker-{input.BrokerId}",
+            BrokerId = input.BrokerId,
+            ClusterId = input.ClusterId,
+            IncarnationId = input.IncarnationId,
+            Listeners = input.Listeners
+                .Select(l => new BrokerRegistrationRequest.Listener
+                {
+                    Name = l.Name,
+                    Host = l.Host,
+                    Port = (ushort)l.Port,
+                    SecurityProtocol = l.SecurityProtocol
+                })
+                .ToList(),
+            Features = input.Features
+                .Select(f => new BrokerRegistrationRequest.Feature
+                {
+                    Name = f.Name,
+                    MinSupportedVersion = f.MinSupportedVersion,
+                    MaxSupportedVersion = f.MaxSupportedVersion
+                })
+                .ToList(),
+            Rack = input.Rack,
+            IsMigratingZkBroker = false,
+            LogDirs = [Guid.NewGuid()],
+            PreviousBrokerEpoch = input.PreviousBrokerEpoch
+        };
+
+        var response = await SendRegistrationRequestAsync(request, ct).ConfigureAwait(false);
+        return new BrokerRegistrationOutcome((ClusterRpcStatus)(short)response.ErrorCode, response.BrokerEpoch);
+    }
+
+    /// <summary>
+    /// Neutral <see cref="IBrokerLifecycleRpc"/> heartbeat entry point (#59 b5): builds the Kafka
+    /// BrokerHeartbeat request from the neutral <paramref name="input"/>, sends it via the internal
+    /// wire codec, and maps the Kafka response to a protocol-neutral outcome.
+    /// </summary>
+    public async Task<BrokerHeartbeatOutcome> HeartbeatAsync(BrokerHeartbeatInput input, CancellationToken ct = default)
+    {
+        var request = new BrokerHeartbeatRequest
+        {
+            ApiKey = ApiKey.BrokerHeartbeat,
+            ApiVersion = 1,
+            CorrelationId = Interlocked.Increment(ref _correlationId),
+            ClientId = $"surgewave-broker-{input.BrokerId}",
+            BrokerId = input.BrokerId,
+            BrokerEpoch = input.BrokerEpoch,
+            CurrentMetadataOffset = input.CurrentMetadataOffset,
+            WantFence = input.WantFence,
+            WantShutDown = input.WantShutDown
+        };
+
+        var response = await SendHeartbeatRequestAsync(request, ct).ConfigureAwait(false);
+        return new BrokerHeartbeatOutcome(
+            (ClusterRpcStatus)(short)response.ErrorCode,
+            response.IsFenced,
+            response.IsCaughtUp,
+            response.ShouldShutDown);
     }
 
     private static byte[] SerializeRequest(KafkaRequest request)

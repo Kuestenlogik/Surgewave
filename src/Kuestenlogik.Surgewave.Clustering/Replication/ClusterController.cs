@@ -38,7 +38,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private HeartbeatManager? _heartbeatManager;
     private RaftNode? _raftNode;
     private MetadataUpdateClient? _metadataUpdateClient;
-    private ControllerClient? _controllerClient;
+    private IControllerReplicaRpc? _controllerClient;
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
@@ -116,7 +116,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Set the controller client for sending Controller API requests to brokers.
     /// </summary>
-    public void SetControllerClient(ControllerClient client)
+    public void SetControllerClient(IControllerReplicaRpc client)
     {
         _controllerClient = client;
     }
