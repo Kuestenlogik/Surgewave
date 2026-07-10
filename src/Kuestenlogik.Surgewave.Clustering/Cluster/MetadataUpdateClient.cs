@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using Kuestenlogik.Surgewave.Clustering.Raft;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
+using Kuestenlogik.Surgewave.Clustering.Replication;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Clustering.Cluster;
@@ -119,13 +119,13 @@ public sealed partial class MetadataUpdateClient : IAsyncDisposable
                 var response = await ReadMetadataUpdateResponseAsync(stream, cts.Token);
                 if (response != null)
                 {
-                    if (response.ErrorCode == (short)ErrorCode.None)
+                    if (response.ErrorCode == (short)ClusterRpcStatus.None)
                     {
                         LogUpdateSent(brokerId, request.CommandType, request.MetadataVersion);
                         return true;
                     }
 
-                    LogUpdateRejected(brokerId, (ErrorCode)response.ErrorCode, request.MetadataVersion);
+                    LogUpdateRejected(brokerId, (ClusterRpcStatus)response.ErrorCode, request.MetadataVersion);
                     return false;
                 }
 
@@ -284,7 +284,7 @@ public sealed partial class MetadataUpdateClient : IAsyncDisposable
     private partial void LogUpdateSent(int brokerId, MetadataCommandType commandType, long version);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Broker {BrokerId} rejected metadata update: {ErrorCode} (version={Version})")]
-    private partial void LogUpdateRejected(int brokerId, ErrorCode errorCode, long version);
+    private partial void LogUpdateRejected(int brokerId, ClusterRpcStatus errorCode, long version);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No response from broker {BrokerId} (attempt {Attempt})")]
     private partial void LogUpdateNoResponse(int brokerId, int attempt);
