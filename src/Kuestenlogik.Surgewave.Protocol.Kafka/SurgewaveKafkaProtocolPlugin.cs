@@ -61,7 +61,10 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
     {
         // The broker's static config type (BrokerConfig) is not visible here; surface the neutral
         // scalars the handlers need from IConfiguration / IBrokerConfigView instead.
-        var pipelineDepth = configuration.GetValue<int>("Surgewave:KafkaPipelineDepth", 16);
+        // Default MUST match BrokerConfig.KafkaPipelineDepth (8) — same key, same fallback — so
+        // relocating the wire loop into this plugin (#59 b5) does not silently change the pipeline
+        // depth when the operator leaves the key unset.
+        var pipelineDepth = configuration.GetValue<int>("Surgewave:KafkaPipelineDepth", 8);
 
         // The Telemetry handler wants ClientTelemetryConfig (Broker.Abstractions); expose it as a
         // DI service resolved off the neutral config view is not possible (not on the view), so bind

@@ -116,4 +116,43 @@
     <Message Text="Created Surgewave package: $(_PackagePath)" Importance="high" />
   </Target>
 
+  <!--
+    #59 b6 — dev-mode Kafka plugin discovery.
+    After the b5 atomic flip the broker no longer references Protocol.Kafka, so its DLL no longer
+    free-rides into surgewave-broker's bin via a transitive P2P copy. A dev-mode `dotnet run` of the
+    broker would therefore silently run NATIVE-ONLY (correct for release — publish.ps1 packs the .swpkg —
+    for tests — IntegrationTests reference Protocol.Kafka directly — but a regression for dev-run).
+    This copies the built Kafka plugin (assembly + manifest + deps + its private external deps) into
+    the broker's plugins/ folder via a GLOB over the artifacts output — deliberately NOT a named
+    Protocol.Kafka ProjectReference, which would re-couple the broker and re-trip the #59 Kafka-free
+    grep/deps gate. Ordering caveat: it only copies if Protocol.Kafka has already been built (a full
+    solution build or publish); a bare broker-only build leaves plugins/ empty, which is the correct
+    native-first default. Runtime discovery (BrokerPluginActivator finds SurgewaveKafkaProtocolPlugin)
+    is verified by KafkaGatingTests / a dev `dotnet run`, not at build time.
+  -->
+  <Target Name="CopyKafkaPluginForDevRun"
+          AfterTargets="Build"
+          Condition="'$(MSBuildProjectName)' == 'Kuestenlogik.Surgewave.Broker'">
+    <PropertyGroup>
+      <_KafkaPluginOut>$(ArtifactsPath)bin\Kuestenlogik.Surgewave.Protocol.Kafka\$(Configuration)\</_KafkaPluginOut>
+    </PropertyGroup>
+    <ItemGroup Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll')">
+      <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll" />
+      <_KafkaPluginFiles Include="$(_KafkaPluginOut)plugin.json" Condition="Exists('$(_KafkaPluginOut)plugin.json')" />
+      <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json" Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json')" />
+      <!-- The plugin's private external deps (e.g. Microsoft.IdentityModel.* for OAUTHBEARER) that
+           the broker's own output does not already carry. Kuestenlogik.Surgewave.* shared assemblies
+           are already in the broker bin, so exclude them. -->
+      <_KafkaPluginFiles Include="$(_KafkaPluginOut)*.dll"
+                         Condition="!$([System.String]::Copy('%(Filename)').StartsWith('Kuestenlogik.Surgewave.'))" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_KafkaPluginFiles)"
+          DestinationFolder="$(OutputPath)plugins"
+          SkipUnchangedFiles="true"
+          Condition="'@(_KafkaPluginFiles)' != ''" />
+    <Message Text="#59 b6: staged Kafka plugin into $(OutputPath)plugins for dev-run"
+             Importance="normal"
+             Condition="'@(_KafkaPluginFiles)' != ''" />
+  </Target>
+
 </Project>
