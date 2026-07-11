@@ -48,8 +48,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker" />
-    <InternalsVisibleTo Include="surgewave-broker" />
+    <!-- #59 b6: the broker no longer references Protocol.Kafka at all (the wire loop, handlers
+         and SASL stack moved into this assembly in the b5 flip), so the Broker / surgewave-broker
+         friend grants are dead and removed. Broker.Tests keeps its grant — it exercises this
+         assembly's internals directly (e.g. TransactionMarkerReplicator, ResolveListOffsetTimestamp). -->
     <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker.Tests" />
   </ItemGroup>
 
