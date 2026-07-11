@@ -51,6 +51,7 @@
     <Project Path="src/Kuestenlogik.Surgewave.Runtime/Kuestenlogik.Surgewave.Runtime.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Hosting/Kuestenlogik.Surgewave.Hosting.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Client/Kuestenlogik.Surgewave.Client.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Client.Kafka/Kuestenlogik.Surgewave.Client.Kafka.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.SourceGenerators/Kuestenlogik.Surgewave.SourceGenerators.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Schema.Registry.Client/Kuestenlogik.Surgewave.Schema.Registry.Client.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro/Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro.csproj" />

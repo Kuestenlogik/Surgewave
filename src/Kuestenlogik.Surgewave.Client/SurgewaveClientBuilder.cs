@@ -1,5 +1,5 @@
+using System.Reflection;
 using Kuestenlogik.Surgewave.Client.Abstractions;
-using Kuestenlogik.Surgewave.Client.Kafka;
 using Kuestenlogik.Surgewave.Client.Native;
 using Kuestenlogik.Surgewave.Client.Security;
 using Kuestenlogik.Surgewave.Transport;
@@ -167,12 +167,39 @@ public sealed class SurgewaveClientBuilder
         ISurgewaveClient client = protocol switch
         {
             ProtocolType.SurgewaveNative => CreateNativeClient(),
-            ProtocolType.Kafka => new KafkaClient(_bootstrapServers, _clientId, _ssl, _sasl),
+            ProtocolType.Kafka => CreateKafkaClient(),
             _ => throw new InvalidOperationException($"Unknown protocol: {protocol}")
         };
 
         await client.ConnectAsync(cancellationToken);
         return client;
+    }
+
+    // #59: the Kafka wire client (KafkaClient/KafkaConsumer/KafkaProducer/KafkaTransport)
+    // lives in the optional Kuestenlogik.Surgewave.Client.Kafka assembly so native-only
+    // consumers — the broker, stream/connect apps — never drag the Kafka protocol, and
+    // thus Protocol.Kafka, into their binary. It is resolved lazily by reflection: present
+    // ⇒ works exactly as before; absent ⇒ a clear, actionable error. Client construction
+    // is a cold path, so the one-time reflection cost is irrelevant.
+    private static Func<string, string?, SslOptions?, SaslOptions?, ISurgewaveClient>? _kafkaClientFactory;
+
+    private ISurgewaveClient CreateKafkaClient()
+        => (_kafkaClientFactory ??= ResolveKafkaClientFactory())(_bootstrapServers, _clientId, _ssl, _sasl);
+
+    private static Func<string, string?, SslOptions?, SaslOptions?, ISurgewaveClient> ResolveKafkaClientFactory()
+    {
+        var type = Type.GetType("Kuestenlogik.Surgewave.Client.Kafka.KafkaClient, Kuestenlogik.Surgewave.Client.Kafka")
+            ?? throw new InvalidOperationException(
+                "The Kafka wire protocol requires the 'Kuestenlogik.Surgewave.Client.Kafka' package. " +
+                "Add a reference to it, or select the native protocol with UseSurgewaveProtocol().");
+        var ctor = type.GetConstructor(
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
+            binder: null,
+            [typeof(string), typeof(string), typeof(SslOptions), typeof(SaslOptions)],
+            modifiers: null)
+            ?? throw new InvalidOperationException(
+                "Incompatible 'Kuestenlogik.Surgewave.Client.Kafka': expected KafkaClient(string, string?, SslOptions?, SaslOptions?).");
+        return (bs, cid, ssl, sasl) => (ISurgewaveClient)ctor.Invoke([bs, cid, ssl, sasl]);
     }
 
     private SurgewaveClient CreateNativeClient()

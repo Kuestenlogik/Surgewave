@@ -28,6 +28,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Runtime\Kuestenlogik.Surgewave.Runtime.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <!-- #59: the Kafka wire client is now the optional Client.Kafka assembly. ClientProtocolSelectionTests
+         (ForceKafka_Connects) builds a Kafka-protocol client, which SurgewaveClientBuilder resolves by
+         reflection at runtime — so its assembly must be present in the test bin. -->
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client.Kafka\Kuestenlogik.Surgewave.Client.Kafka.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol\Kuestenlogik.Surgewave.Protocol.csproj" />

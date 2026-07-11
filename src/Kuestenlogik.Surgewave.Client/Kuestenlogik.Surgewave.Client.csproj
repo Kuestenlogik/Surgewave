@@ -7,6 +7,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Client.Tests" />
+    <!-- #59: the Kafka wire client was extracted into Kuestenlogik.Surgewave.Client.Kafka; it
+         still constructs internal core-client types, so it keeps a friend grant. -->
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Client.Kafka" />
   </ItemGroup>
 
   <ItemGroup>
@@ -16,7 +19,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol\Kuestenlogik.Surgewave.Protocol.csproj" />
-    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+    <!-- #59: Protocol.Kafka reference removed. The Kafka wire client moved to
+         Kuestenlogik.Surgewave.Client.Kafka; the core client is native-first and Kafka-free,
+         so native-only consumers (broker, streams, connect) no longer transitively pull it. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
