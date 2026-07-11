@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Kafka wire-protocol client for Surgewave. Optional companion to Kuestenlogik.Surgewave.Client that speaks the Kafka protocol for compatibility with Kafka clusters. Reference this only when you need a Kafka-speaking client; the core client is native-first and stays Protocol.Kafka-free (#59).</Description>
+    <PackageTags>surgewave;kafka;messaging;producer;consumer;client;wire-protocol</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Client.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Native-first core client provides the neutral consumer/producer/security/serialization
+         surface (ConsumerConfig, ProducerOptions, SslOptions, ISurgewaveClient, ...); Core and
+         Transport flow transitively. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <!-- The Kafka wire types (Protocol.Kafka.Requests) this client encodes/decodes. This is the
+         one place on the client side that references Protocol.Kafka — deliberately isolated here
+         so the core client, and every native-only consumer of it, stays Kafka-free. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
+  </ItemGroup>
+
+</Project>
