@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Kuestenlogik.Surgewave.Broker.Security;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Stores SCRAM credentials with pre-computed keys for efficient authentication.

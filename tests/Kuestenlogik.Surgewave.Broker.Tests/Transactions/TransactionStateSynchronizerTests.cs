@@ -5,6 +5,7 @@ using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -52,7 +53,7 @@ public class TransactionStateSynchronizerTests : IAsyncDisposable
             _offsetStore,
             _stateStore,
             _clusterState,
-            _connectionPool,
+            new TransactionMarkerReplicator(_connectionPool, _clusterState, 1, NullLogger<TransactionMarkerReplicator>.Instance),
             localBrokerId: 1,
             NullLoggerFactory.Instance);
     }

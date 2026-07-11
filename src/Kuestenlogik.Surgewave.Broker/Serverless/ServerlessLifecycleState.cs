@@ -2,8 +2,7 @@ namespace Kuestenlogik.Surgewave.Broker.Serverless;
 
 /// <summary>
 /// Lifecycle states for serverless broker instances.
-/// Distinct from <see cref="Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleState"/>
-/// which tracks Raft cluster membership.
+/// Distinct from Clustering's <c>BrokerLifecycleState</c> which tracks Raft cluster membership.
 /// </summary>
 public enum ServerlessLifecycleState
 {

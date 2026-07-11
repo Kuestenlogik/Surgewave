@@ -3,7 +3,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// <summary>
 /// Neutral input for a broker heartbeat RPC (#59 b5). Carries only the values the wire
 /// request is built from; the Kafka-DTO construction stays inside the concrete
-/// <see cref="BrokerLifecycleManager"/>.
+/// <c>BrokerLifecycleManager</c> (in the Kafka plugin, #59 b5).
 /// </summary>
 /// <param name="BrokerId">The heartbeating broker's id.</param>
 /// <param name="BrokerEpoch">The broker epoch assigned during registration.</param>

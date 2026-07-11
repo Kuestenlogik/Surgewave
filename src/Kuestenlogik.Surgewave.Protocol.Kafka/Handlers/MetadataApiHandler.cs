@@ -4,9 +4,10 @@ using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Broker;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 
 /// <summary>
 /// Handler for metadata and cluster discovery APIs: Metadata, ApiVersions, FindCoordinator, DescribeCluster

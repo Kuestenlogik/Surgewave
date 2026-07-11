@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace Kuestenlogik.Surgewave.Broker.Native;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// A stream wrapper that prepends a prefix buffer to the underlying stream.

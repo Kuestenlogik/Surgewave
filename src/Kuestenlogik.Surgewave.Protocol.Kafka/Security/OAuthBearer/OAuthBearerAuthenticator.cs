@@ -1,4 +1,5 @@
 using System.Text;
+using Kuestenlogik.Surgewave.Protocol.Kafka;
 
 namespace Kuestenlogik.Surgewave.Broker.Security.OAuthBearer;
 

@@ -1,5 +1,5 @@
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol;
@@ -114,7 +114,6 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
-        IProtocolHandler protocolHandler = new KafkaProtocolHandler();
 
         // Create SASL authenticator with configured users
         var credentialStore = new CredentialStore();
@@ -148,12 +147,18 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
         {
             dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler, transactionApiHandler, shareGroupApiHandler
         };
-        var dispatcher = new RequestDispatcher(handlers);
 
         _metrics = new BrokerMetrics();
+        var kafkaConnectionHandler = new KafkaConnectionHandler(
+            handlers,
+            config.KafkaPipelineDepth,
+            _metrics,
+            _loggerFactory.CreateLogger<KafkaConnectionHandler>(),
+            _loggerFactory.CreateLogger<RequestDispatcher>());
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
-            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
+            transactionCoordinator, _quotaManager, _metrics, brokerLogger,
+            connectionHandlers: [kafkaConnectionHandler]);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token));

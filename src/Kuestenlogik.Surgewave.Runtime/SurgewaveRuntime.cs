@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Handlers;
 using Kuestenlogik.Surgewave.Broker.Native;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Clustering;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Raft;
@@ -78,6 +78,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private ReplicationServer? _replicationServer;
     private ConnectionPool? _connectionPool;
     private ControllerClient? _controllerClient;
+    private KafkaConnectionHandler? _kafkaConnectionHandler;
     private Task? _clusterTask;
 
     // Raft components (only initialized when UseRaftConsensus = true)
@@ -284,9 +285,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         _transactionCoordinator = transactionCoordinator;
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
-        // Kafka wire protocol handler — built only when EnableKafka (#58);
-        // null means the embedded broker runs native-only.
-        IProtocolHandler? protocolHandler = _options.EnableKafka ? new KafkaProtocolHandler() : null;
 
         _metrics = new BrokerMetrics();
 
@@ -294,10 +292,10 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var dynamicBrokerConfigLogger = _loggerFactory.CreateLogger<DynamicBrokerConfig>();
         var dynamicBrokerConfig = new DynamicBrokerConfig(config, dynamicBrokerConfigLogger);
 
-        // Kafka handler array + dispatcher — built only when EnableKafka (#58).
-        // When disabled the embedded broker is native-only: no handlers, no
-        // dispatcher; SurgewaveBroker then rejects Kafka connections.
-        RequestDispatcher? dispatcher = null;
+        // Kafka handler array + connection handler — built only when EnableKafka (#58).
+        // When disabled the embedded broker is native-only: no handlers, no Kafka connection
+        // handler; SurgewaveBroker then rejects Kafka connections (#59 b5).
+        IConnectionHandler[]? connectionHandlers = null;
         if (_options.EnableKafka)
         {
             // Create request handlers
@@ -330,12 +328,19 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                     new Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor(
                         _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>()))
             ];
-            dispatcher = new RequestDispatcher(handlers);
+            _kafkaConnectionHandler = new KafkaConnectionHandler(
+                handlers,
+                config.KafkaPipelineDepth,
+                _metrics,
+                _loggerFactory.CreateLogger<KafkaConnectionHandler>(),
+                _loggerFactory.CreateLogger<RequestDispatcher>());
+            connectionHandlers = [_kafkaConnectionHandler];
         }
 
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
-            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
+            transactionCoordinator, _quotaManager, _metrics, brokerLogger,
+            connectionHandlers: connectionHandlers);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token), cancellationToken);
@@ -474,7 +479,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         if (_options.EnableKafka)
         {
             var interBrokerApiLogger = _loggerFactory.CreateLogger<InterBrokerApiHandler>();
-            _broker!.AddHandler(new InterBrokerApiHandler(
+            _kafkaConnectionHandler?.AddHandler(new InterBrokerApiHandler(
                 config, _clusterState, _replicaManager, _logManager!, interBrokerApiLogger,
                 _transactionCoordinator, isrUpdateApplier: _clusterController));
         }

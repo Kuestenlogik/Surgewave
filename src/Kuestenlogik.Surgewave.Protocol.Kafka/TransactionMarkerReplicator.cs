@@ -1,18 +1,20 @@
 using System.Buffers.Binary;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Models;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Transactions;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
-/// Replicates transaction markers (commit/abort) to follower brokers.
-/// Uses WriteTxnMarkersRequest to ensure durability before acknowledging to clients.
+/// Replicates transaction markers (commit/abort) to follower brokers (#59 b5 — relocated to
+/// the Kafka plugin). Implements the neutral <see cref="ITransactionMarkerReplicator"/> contract
+/// so the broker's cluster-aware transaction coordinator can drive it without naming this
+/// Kafka-wire type. Uses WriteTxnMarkersRequest to ensure durability before acknowledging.
 /// </summary>
-internal sealed partial class TransactionMarkerReplicator
+internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerReplicator
 {
     private readonly ConnectionPool _connectionPool;
     private readonly ClusterState _clusterState;
@@ -45,22 +47,25 @@ internal sealed partial class TransactionMarkerReplicator
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Result indicating success or failure with details.</returns>
     public async Task<MarkerReplicationResult> ReplicateMarkersAsync(
-        TransactionMetadata txnMetadata,
+        string transactionalId,
+        long producerId,
+        short producerEpoch,
+        IReadOnlyList<TopicPartition> partitions,
         bool commit,
         int coordinatorEpoch,
         CancellationToken cancellationToken)
     {
-        if (txnMetadata.Partitions.Count == 0)
+        if (partitions.Count == 0)
         {
             return MarkerReplicationResult.Success();
         }
 
         // Group partitions by broker that hosts replicas
-        var brokerPartitions = GroupPartitionsByFollowerBroker(txnMetadata.Partitions);
+        var brokerPartitions = GroupPartitionsByFollowerBroker(partitions);
 
         if (brokerPartitions.Count == 0)
         {
-            LogNoFollowersToReplicate(txnMetadata.TransactionalId, txnMetadata.Partitions.Count);
+            LogNoFollowersToReplicate(transactionalId, partitions.Count);
             return MarkerReplicationResult.Success();
         }
 
@@ -72,8 +77,8 @@ internal sealed partial class TransactionMarkerReplicator
             var tasks = brokerPartitions
                 .Select(kvp => SendMarkersWithRetryAsync(
                     kvp.Key,
-                    txnMetadata.ProducerId,
-                    txnMetadata.ProducerEpoch,
+                    producerId,
+                    producerEpoch,
                     commit,
                     coordinatorEpoch,
                     kvp.Value,
@@ -95,19 +100,19 @@ internal sealed partial class TransactionMarkerReplicator
                     result.FailedBrokers[response.BrokerId] = response.Error ?? "Unknown error";
 
                     // Collect partitions that need retry
-                    if (brokerPartitions.TryGetValue(response.BrokerId, out var partitions))
+                    if (brokerPartitions.TryGetValue(response.BrokerId, out var retryPartitions))
                     {
-                        failedBrokers[response.BrokerId] = partitions;
+                        failedBrokers[response.BrokerId] = retryPartitions;
                     }
                 }
             }
 
             // Check if we have enough replicas acknowledged
-            if (MeetsReplicationRequirements(result, txnMetadata.Partitions))
+            if (MeetsReplicationRequirements(result, partitions))
             {
                 result.IsSuccess = true;
                 LogReplicationSucceeded(
-                    txnMetadata.TransactionalId,
+                    transactionalId,
                     commit ? "COMMIT" : "ABORT",
                     result.SuccessfulBrokers.Count);
                 return result;
@@ -120,7 +125,7 @@ internal sealed partial class TransactionMarkerReplicator
                 brokerPartitions = failedBrokers;
 
                 LogRetryingReplication(
-                    txnMetadata.TransactionalId,
+                    transactionalId,
                     retryCount,
                     _options.MaxRetries,
                     failedBrokers.Count);
@@ -135,7 +140,7 @@ internal sealed partial class TransactionMarkerReplicator
 
         result.IsSuccess = false;
         LogReplicationFailed(
-            txnMetadata.TransactionalId,
+            transactionalId,
             commit ? "COMMIT" : "ABORT",
             result.FailedBrokers.Count);
 
@@ -411,18 +416,6 @@ internal sealed class TransactionMarkerReplicatorOptions
     /// Default: 100ms
     /// </summary>
     public int RetryBackoffMs { get; init; } = 100;
-}
-
-/// <summary>
-/// Result of marker replication to all brokers.
-/// </summary>
-internal sealed class MarkerReplicationResult
-{
-    public bool IsSuccess { get; set; }
-    public HashSet<int> SuccessfulBrokers { get; } = [];
-    public Dictionary<int, string> FailedBrokers { get; } = [];
-
-    public static MarkerReplicationResult Success() => new() { IsSuccess = true };
 }
 
 /// <summary>

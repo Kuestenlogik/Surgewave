@@ -18,4 +18,24 @@ public interface IAuditLogger
         bool success = true,
         string? errorMessage = null,
         Dictionary<string, string>? details = null);
+
+    /// <summary>Records an ACL create/delete event (Kafka Security handler, KIP-11).</summary>
+    void LogAclEvent(
+        AuditEventType eventType,
+        string resourceType,
+        string resourceName,
+        string? principal,
+        string? clientAddress,
+        bool success = true,
+        string? errorMessage = null,
+        Dictionary<string, string>? details = null);
+
+    /// <summary>Records a SASL authentication attempt/result (Kafka Security handler).</summary>
+    void LogAuthenticationEvent(
+        AuditEventType eventType,
+        string? principal,
+        string? clientAddress,
+        string? mechanism,
+        bool success = true,
+        string? errorMessage = null);
 }

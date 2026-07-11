@@ -52,6 +52,9 @@ public interface IBrokerConfigView
     bool SaslEnabled { get; }
     IReadOnlyList<string> SaslMechanisms { get; }
 
+    /// <summary>Path to the ACL persistence file, or null when ACL persistence is off (Kafka Security handler).</summary>
+    string? AclFile { get; }
+
     // Flattened Quotas.* reads
     long ProducerQuotaBytesPerSecond { get; }
     long ConsumerQuotaBytesPerSecond { get; }

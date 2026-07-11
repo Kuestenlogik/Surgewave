@@ -20,6 +20,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
+    <!-- #59 b5 ATOMIC FLIP: Broker no longer transitively drags in Protocol.Kafka, so tests
+         that exercise the Kafka handlers/dispatcher take a direct reference. -->
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Quic\Kuestenlogik.Surgewave.Protocol.Quic.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />

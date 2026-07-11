@@ -1,5 +1,5 @@
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
