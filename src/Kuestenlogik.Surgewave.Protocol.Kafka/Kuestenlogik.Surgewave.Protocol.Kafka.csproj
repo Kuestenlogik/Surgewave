@@ -26,6 +26,19 @@
          the concrete broker services. Broker.Abstractions references Core only — the
          one-way triangle Protocol.Kafka -> Broker.Abstractions <- Broker holds. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker.Abstractions\Kuestenlogik.Surgewave.Broker.Abstractions.csproj" />
+    <!-- #59 b5 ATOMIC FLIP: the Clustering<->Protocol.Kafka edge is inverted. The relocated
+         inter-broker/control-plane handlers + ControllerClient/BrokerLifecycleManager reach
+         ClusterState/ClusterController/ReplicaManager/Raft here. Clustering no longer references
+         Protocol.Kafka, so there is no cycle. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
+  </ItemGroup>
+
+  <!-- SASL/OAUTHBEARER (KIP-936) validator moved in with the SASL stack (#59 b5). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <!-- IHttpClientFactory for the OAUTHBEARER JWKS fetch (moved in with the SASL stack). -->
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,6 +1,4 @@
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-
-namespace Kuestenlogik.Surgewave.Broker;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// Represents a pending Kafka protocol request in the Channel pipeline.

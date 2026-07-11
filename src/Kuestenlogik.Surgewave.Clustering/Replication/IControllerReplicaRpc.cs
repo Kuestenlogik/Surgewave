@@ -10,7 +10,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Replication;
 /// changes back to the controller. All three send operations return a bare
 /// <see cref="Task"/>: every caller drives them fire-and-forget (best-effort) and
 /// discards any per-broker response, so no Kafka DTO is exposed here. The concrete
-/// wire implementation lives in <see cref="ControllerClient"/>.
+/// wire implementation lives in <c>ControllerClient</c> (in the Kafka plugin, #59 b5).
 /// </summary>
 public interface IControllerReplicaRpc : IIsrChangeNotifier
 {

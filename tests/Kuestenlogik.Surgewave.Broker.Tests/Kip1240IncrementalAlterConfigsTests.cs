@@ -1,5 +1,5 @@
 using System.Reflection;
-using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Broker.Queue;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Storage;

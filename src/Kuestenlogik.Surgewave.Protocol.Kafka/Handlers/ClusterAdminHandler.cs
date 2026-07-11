@@ -5,7 +5,7 @@ using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 
 /// <summary>
 /// Wire handlers for the controller-driven cluster-admin RPCs:

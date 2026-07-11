@@ -1,4 +1,6 @@
 using Kuestenlogik.Surgewave.Broker.Transactions;
+using Kuestenlogik.Surgewave.Protocol.Kafka;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Core.Models;
@@ -43,7 +45,7 @@ public class TransactionMarkerReplicatorTests : IDisposable
         var txnMetadata = CreateTransactionMetadata("test-txn", partitions: []);
 
         // Act
-        var result = await replicator.ReplicateMarkersAsync(txnMetadata, commit: true, coordinatorEpoch: 1, CancellationToken.None);
+        var result = await replicator.ReplicateMarkersAsync(txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch, [.. txnMetadata.Partitions], commit: true, coordinatorEpoch: 1, CancellationToken.None);
 
         // Assert
         Assert.True(result.IsSuccess);
@@ -64,7 +66,7 @@ public class TransactionMarkerReplicatorTests : IDisposable
         var txnMetadata = CreateTransactionMetadata("test-txn", partitions: [tp]);
 
         // Act
-        var result = await replicator.ReplicateMarkersAsync(txnMetadata, commit: true, coordinatorEpoch: 1, CancellationToken.None);
+        var result = await replicator.ReplicateMarkersAsync(txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch, [.. txnMetadata.Partitions], commit: true, coordinatorEpoch: 1, CancellationToken.None);
 
         // Assert
         Assert.True(result.IsSuccess);
@@ -205,7 +207,7 @@ public class TransactionMarkerReplicatorTests : IDisposable
 
         // Act & Assert - TaskCanceledException inherits from OperationCanceledException
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await replicator.ReplicateMarkersAsync(txnMetadata, commit: true, coordinatorEpoch: 1, cts.Token));
+            await replicator.ReplicateMarkersAsync(txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch, [.. txnMetadata.Partitions], commit: true, coordinatorEpoch: 1, cts.Token));
     }
 
     private TransactionMarkerReplicator CreateReplicator(TransactionMarkerReplicatorOptions? options = null)

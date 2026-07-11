@@ -1,20 +1,21 @@
+using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.Audit;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 
 /// <summary>
 /// Handler for security APIs: SaslHandshake, SaslAuthenticate, DescribeAcls, CreateAcls, DeleteAcls
 /// </summary>
 public sealed class SecurityApiHandler : IKafkaRequestHandler
 {
-    private readonly BrokerConfig _config;
+    private readonly IBrokerConfigView _config;
     private readonly SaslAuthenticator? _saslAuthenticator;
-    private readonly AclAuthorizer? _aclAuthorizer;
-    private readonly AuditLogger? _auditLogger;
+    private readonly IAuthorizer? _aclAuthorizer;
+    private readonly IAuditLogger? _auditLogger;
     private readonly ScramCredentialStore? _scramSha256Store;
     private readonly ScramCredentialStore? _scramSha512Store;
     private readonly ILogger<SecurityApiHandler> _logger;
@@ -35,10 +36,10 @@ public sealed class SecurityApiHandler : IKafkaRequestHandler
     ];
 
     public SecurityApiHandler(
-        BrokerConfig config,
+        IBrokerConfigView config,
         SaslAuthenticator? saslAuthenticator,
-        AclAuthorizer? aclAuthorizer,
-        AuditLogger? auditLogger,
+        IAuthorizer? aclAuthorizer,
+        IAuditLogger? auditLogger,
         ILogger<SecurityApiHandler> logger,
         ScramCredentialStore? scramSha256Store = null,
         ScramCredentialStore? scramSha512Store = null)
@@ -401,9 +402,9 @@ public sealed class SecurityApiHandler : IKafkaRequestHandler
             }
         }
 
-        if (_config.Security.AclFile != null)
+        if (_config.AclFile != null)
         {
-            try { _aclAuthorizer.SaveToFile(_config.Security.AclFile); }
+            try { _aclAuthorizer.SaveToFile(_config.AclFile); }
             catch (Exception ex) { _logger.LogWarning(ex, "Failed to save ACLs to file"); }
         }
 
@@ -472,9 +473,9 @@ public sealed class SecurityApiHandler : IKafkaRequestHandler
             }
         }
 
-        if (_config.Security.AclFile != null)
+        if (_config.AclFile != null)
         {
-            try { _aclAuthorizer.SaveToFile(_config.Security.AclFile); }
+            try { _aclAuthorizer.SaveToFile(_config.AclFile); }
             catch (Exception ex) { _logger.LogWarning(ex, "Failed to save ACLs to file"); }
         }
 

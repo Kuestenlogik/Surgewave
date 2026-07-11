@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using Confluent.Kafka;
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Client.Native;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol;
@@ -86,7 +86,6 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
-        IProtocolHandler protocolHandler = new KafkaProtocolHandler();
 
         _metrics = new BrokerMetrics();
 
@@ -107,11 +106,17 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
             new TransactionApiHandler(transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>()),
             new ShareGroupApiHandler(shareGroupCoordinator, _loggerFactory.CreateLogger<ShareGroupApiHandler>())
         ];
-        var dispatcher = new RequestDispatcher(handlers);
+        var kafkaConnectionHandler = new KafkaConnectionHandler(
+            handlers,
+            config.KafkaPipelineDepth,
+            _metrics,
+            _loggerFactory.CreateLogger<KafkaConnectionHandler>(),
+            _loggerFactory.CreateLogger<RequestDispatcher>());
 
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
-            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
+            transactionCoordinator, _quotaManager, _metrics, brokerLogger,
+            connectionHandlers: [kafkaConnectionHandler]);
 
         _brokerCts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_brokerCts.Token));

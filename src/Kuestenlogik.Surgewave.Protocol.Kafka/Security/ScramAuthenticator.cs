@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
-
-namespace Kuestenlogik.Surgewave.Broker.Security;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 
 /// <summary>
 /// SCRAM (Salted Challenge Response Authentication Mechanism) authenticator

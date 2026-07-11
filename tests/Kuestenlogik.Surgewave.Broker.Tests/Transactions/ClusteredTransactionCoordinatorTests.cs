@@ -52,7 +52,7 @@ public class ClusteredTransactionCoordinatorTests : IAsyncDisposable
             _offsetStore,
             _stateStore,
             _clusterState,
-            _connectionPool,
+            new TransactionMarkerReplicator(_connectionPool, _clusterState, 1, NullLogger<TransactionMarkerReplicator>.Instance),
             localBrokerId: 1,
             NullLoggerFactory.Instance);
     }

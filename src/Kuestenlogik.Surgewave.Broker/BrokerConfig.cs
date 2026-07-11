@@ -542,6 +542,7 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
 
     bool IBrokerConfigView.SaslEnabled => Security.SaslEnabled;
     IReadOnlyList<string> IBrokerConfigView.SaslMechanisms => Security.SaslMechanisms;
+    string? IBrokerConfigView.AclFile => Security.AclFile;
     long IBrokerConfigView.ProducerQuotaBytesPerSecond => Quotas.ProducerBytesPerSecond;
     long IBrokerConfigView.ConsumerQuotaBytesPerSecond => Quotas.ConsumerBytesPerSecond;
     bool IBrokerConfigView.TtlEnabled => Ttl.Enabled;

@@ -27,7 +27,7 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable, IProduce
     private readonly ILogger<ClusteredTransactionCoordinator> _logger;
     private readonly ConcurrentDictionary<string, TransactionMetadata> _transactionsByTxnId = new();
     private readonly TransactionMarkerWriter _markerWriter;
-    private readonly TransactionMarkerReplicator _markerReplicator;
+    private readonly ITransactionMarkerReplicator? _markerReplicator;
     private readonly TransactionStatePersistence _statePersistence;
     private readonly TransactionTimeoutManager _timeoutManager;
     private readonly ClusterState _clusterState;
@@ -41,7 +41,7 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable, IProduce
         OffsetStore offsetStore,
         TransactionStateStore stateStore,
         ClusterState clusterState,
-        ConnectionPool connectionPool,
+        ITransactionMarkerReplicator? markerReplicator,
         int localBrokerId,
         ILoggerFactory loggerFactory)
     {
@@ -53,13 +53,11 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable, IProduce
         _localBrokerId = localBrokerId;
         _logger = loggerFactory.CreateLogger<ClusteredTransactionCoordinator>();
 
-        // Create helper components
+        // Create helper components. The Kafka-wire marker replicator (WriteTxnMarkers codec) lives
+        // in the Kafka plugin and is injected via the neutral ITransactionMarkerReplicator seam
+        // (#59 b5); null when the Kafka plugin is not loaded (markers are still written locally).
         _markerWriter = new TransactionMarkerWriter(logManager, _logger);
-        _markerReplicator = new TransactionMarkerReplicator(
-            connectionPool,
-            clusterState,
-            localBrokerId,
-            loggerFactory.CreateLogger<TransactionMarkerReplicator>());
+        _markerReplicator = markerReplicator;
         _statePersistence = new TransactionStatePersistence(stateStore, producerStateManager, _logger);
 
         // Load persisted transaction state on startup
@@ -183,11 +181,16 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable, IProduce
                 var abortOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, commit: false, cancellationToken);
 
                 // Replicate to followers
-                var replicationResult = await _markerReplicator.ReplicateMarkersAsync(
-                    txnMetadata,
-                    commit: false,
-                    _coordinatorEpoch,
-                    cancellationToken);
+                var replicationResult = _markerReplicator is null
+                    ? MarkerReplicationResult.Success()
+                    : await _markerReplicator.ReplicateMarkersAsync(
+                        txnMetadata.TransactionalId,
+                        txnMetadata.ProducerId,
+                        txnMetadata.ProducerEpoch,
+                        [.. txnMetadata.Partitions],
+                        commit: false,
+                        _coordinatorEpoch,
+                        cancellationToken);
 
                 if (!replicationResult.IsSuccess)
                 {
@@ -413,11 +416,16 @@ public sealed class ClusteredTransactionCoordinator : IAsyncDisposable, IProduce
         var markerOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, request.Committed, cancellationToken);
 
         // Replicate markers to followers (critical for durability)
-        var replicationResult = await _markerReplicator.ReplicateMarkersAsync(
-            txnMetadata,
-            request.Committed,
-            _coordinatorEpoch,
-            cancellationToken);
+        var replicationResult = _markerReplicator is null
+            ? MarkerReplicationResult.Success()
+            : await _markerReplicator.ReplicateMarkersAsync(
+                txnMetadata.TransactionalId,
+                txnMetadata.ProducerId,
+                txnMetadata.ProducerEpoch,
+                [.. txnMetadata.Partitions],
+                request.Committed,
+                _coordinatorEpoch,
+                cancellationToken);
 
         if (!replicationResult.IsSuccess && txnMetadata.Partitions.Count > 0)
         {

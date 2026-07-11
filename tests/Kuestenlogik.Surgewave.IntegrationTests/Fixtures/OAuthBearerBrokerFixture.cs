@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Broker.Security.OAuthBearer;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -286,7 +286,6 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
-        IProtocolHandler protocolHandler = new KafkaProtocolHandler();
 
         // The point of this fixture: wire OAuthBearerAuthenticator into the SASL stack.
         // The HttpClient is held by the validator for JWKS refresh, so it must outlive
@@ -325,12 +324,18 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
         {
             dataApiHandler, metadataApiHandler, topicAdminHandler, configApiHandler, securityApiHandler, consumerGroupApiHandler, transactionApiHandler, shareGroupApiHandler
         };
-        var dispatcher = new RequestDispatcher(handlers);
 
         _metrics = new BrokerMetrics();
+        var kafkaConnectionHandler = new KafkaConnectionHandler(
+            handlers,
+            config.KafkaPipelineDepth,
+            _metrics,
+            _loggerFactory.CreateLogger<KafkaConnectionHandler>(),
+            _loggerFactory.CreateLogger<RequestDispatcher>());
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
-            transactionCoordinator, _quotaManager, protocolHandler, _metrics, dispatcher, brokerLogger);
+            transactionCoordinator, _quotaManager, _metrics, brokerLogger,
+            connectionHandlers: [kafkaConnectionHandler]);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token));

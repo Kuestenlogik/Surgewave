@@ -1,7 +1,6 @@
 using System.Runtime;
 using Kuestenlogik.Bowire;
 using Kuestenlogik.Surgewave.Broker;
-using Kuestenlogik.Surgewave.Broker.Handlers;
 using Kuestenlogik.Surgewave.Broker.Plugins;
 using Kuestenlogik.Surgewave.Broker.Native;
 using Kuestenlogik.Surgewave.Broker.Native.Coordination;
@@ -29,7 +28,6 @@ using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Api.Grpc.Server;
 using Kuestenlogik.Surgewave.Client;
 using Kuestenlogik.Surgewave.Protocol;
-using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Schema.Registry;
 using Kuestenlogik.Surgewave.Schema.Registry.Evolution;
 using Kuestenlogik.Surgewave.Schema.Registry.Handlers;
@@ -499,11 +497,10 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Transport.IPeerTransport>(s
 builder.Services.AddSingleton(sp => new ConnectionPool(
     sp.GetRequiredService<ILogger<ConnectionPool>>(),
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
-builder.Services.AddSingleton(sp => new ControllerClient(
-    sp.GetRequiredService<ConnectionPool>(),
-    sp.GetRequiredService<ClusterState>(),
-    sp.GetRequiredService<ClusteringConfig>(),
-    sp.GetRequiredService<ILogger<ControllerClient>>()));
+// #59 b5: ControllerClient (the inter-broker LeaderAndIsr/UpdateMetadata/StopReplica wire codec)
+// moved into the Kafka plugin, which registers it as IControllerReplicaRpc. ReplicaManager (and,
+// below, ClusterController) consume the neutral seam — null when the Kafka plugin is absent, so a
+// native-only broker skips the inter-broker push (single-broker; native control tracked in #60).
 builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<ILogger<ReplicaManager>>(),
     sp.GetRequiredService<ClusterState>(),
@@ -511,7 +508,7 @@ builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<ClusteringConfig>(),
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>(),
     sp.GetRequiredService<BrokerMetrics>(),
-    sp.GetRequiredService<ControllerClient>()));
+    sp.GetService<IControllerReplicaRpc>()));
 builder.Services.AddSingleton(sp => new ClusterController(
     sp.GetRequiredService<ILogger<ClusterController>>(),
     sp.GetRequiredService<ClusterState>(),
@@ -652,144 +649,73 @@ if (featuresConfig.Ttl.Enabled)
         sp.GetRequiredService<BrokerMetrics>(),
         sp.GetRequiredService<ILogger<TtlIndex>>()));
 
-// Kafka-protocol auth stack in DI (#59 phase 2b). AclAuthorizer is SHARED broker-core
-// (native gRPC + REST consume it too, must resolve with Kafka off); SASL + SCRAM are
-// Kafka-only. Conditional on Security config; the SCRAM holder is always registered.
-builder.Services.AddKafkaSecurityServices(featuresConfig);
+// #59 b5 ATOMIC FLIP: the Kafka request-handler stack, the SASL/SCRAM/OAUTHBEARER services, and
+// the Kafka connection loop moved into the Kafka plugin (SurgewaveKafkaProtocolPlugin.ConfigureServices,
+// activated by ActivateProtocols above when Surgewave:Kafka:Enabled). The host keeps only the SHARED
+// ACL authorizer (native gRPC + REST consume it) and exposes the protocol-neutral service seams the
+// relocated handlers resolve against.
+builder.Services.AddAclAuthorizer(featuresConfig);
 
-// Kafka request handlers in DI (#59 phase 2b). Registered as IKafkaRequestHandler so the
-// dispatcher is built from GetServices<IKafkaRequestHandler>() (below) instead of a
-// hand-built array — the seam that later lets the handler stack move into the Kafka
-// plugin. Each factory is a 1:1 transcription of the former inline array, resolving the
-// (now DI-registered) coordinators/stores/auth. Gated on Kafka:Enabled; RaftApiHandler is
-// appended post-build because raftNode/raftPersistence are post-build locals.
-if (featuresConfig.Kafka.Enabled)
+// Neutral seams (Broker.Abstractions / Coordination) so the relocated Kafka handlers can resolve the
+// broker's concrete services without naming them (#59 b5).
+builder.Services.AddSingleton<IBrokerConfigView>(sp => sp.GetRequiredService<BrokerConfig>());
+builder.Services.AddSingleton<IDynamicBrokerConfig>(sp => sp.GetRequiredService<DynamicBrokerConfig>());
+builder.Services.AddSingleton<IBrokerMetrics>(sp => sp.GetRequiredService<BrokerMetrics>());
+builder.Services.AddSingleton<IQuotaManager>(sp => sp.GetRequiredService<QuotaManager>());
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Quotas.IBandwidthQuota>(sp => sp.GetRequiredService<BandwidthQuotaManager>());
+builder.Services.AddSingleton<IDelegationTokenService>(sp => sp.GetRequiredService<DelegationTokenManager>());
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Audit.IAuditLogger>(sp => sp.GetRequiredService<AuditLogger>());
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Transactions.IProduceTransactionCoordinator>(sp => sp.GetRequiredService<TransactionCoordinator>());
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerSink>(sp => sp.GetRequiredService<TransactionCoordinator>());
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.AutoTuning.IColdStartProfiler>(sp => sp.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()!);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<BrokerConfig>().Telemetry);
+if (featuresConfig.Deduplication.Enabled)
+    builder.Services.AddSingleton<IDeduplicationManager>(sp => sp.GetRequiredService<DeduplicationManager>());
+if (featuresConfig.DelayDelivery.Enabled)
+    builder.Services.AddSingleton<IDelayIndex>(sp => sp.GetRequiredService<DelayIndex>());
+if (featuresConfig.Ttl.Enabled)
+    builder.Services.AddSingleton<ITtlIndex>(sp => sp.GetRequiredService<TtlIndex>());
+
+// KIP-714 telemetry ingestor: preserve the optional topic-sink decorator (Surgewave:Telemetry:
+// TopicSinkEnabled) host-side; the plugin's TelemetryApiHandler resolves the resulting ITelemetryIngestor.
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetryIngestor>(sp =>
 {
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new DataApiHandler(
-        sp.GetRequiredService<BrokerConfig>(),
-        sp.GetRequiredService<LogManager>(),
-        sp.GetRequiredService<TransactionCoordinator>(),
-        sp.GetRequiredService<QuotaManager>(),
-        sp.GetRequiredService<RecordBatchSerializer>(),
-        sp.GetService<AclAuthorizer>(),
-        sp.GetService<DeduplicationManager>(),
-        sp.GetService<DelayIndex>(),
-        sp.GetService<TtlIndex>(),
-        sp.GetRequiredService<BrokerMetrics>(),
-        sp.GetRequiredService<ILogger<DataApiHandler>>(),
-        sp.GetRequiredService<BandwidthQuotaManager>(),
-        sp.GetService<Kuestenlogik.Surgewave.Core.Observability.SurgewaveBrokerObservability>(),
-        coldStartProfiler: sp.GetService<Kuestenlogik.Surgewave.Broker.AutoTuning.ColdStartWorkloadProfiler>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp =>
+    var telemetryConfig = sp.GetRequiredService<BrokerConfig>().Telemetry;
+    Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetryIngestor ingestor =
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>();
+    if (telemetryConfig.Enabled && telemetryConfig.TopicSinkEnabled)
     {
-        // Metadata handler is cluster-aware so the Kafka Metadata it serves reads ISR
-        // from the local ClusterState (reverse-ISR propagation, #69). Setter-wired here.
-        var metadataApiHandler = new MetadataApiHandler(
-            sp.GetRequiredService<BrokerConfig>(),
+        var telemetrySink = new Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink(
             sp.GetRequiredService<LogManager>(),
-            sp.GetRequiredService<ILogger<MetadataApiHandler>>());
-        metadataApiHandler.SetClusterState(sp.GetRequiredService<ClusterState>());
-        metadataApiHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
-        return metadataApiHandler;
-    });
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new TopicAdminHandler(
-        sp.GetRequiredService<BrokerConfig>(),
-        sp.GetRequiredService<LogManager>(),
-        sp.GetRequiredService<QuotaManager>(),
-        sp.GetRequiredService<AuditLogger>(),
-        sp.GetRequiredService<ILogger<TopicAdminHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConfigApiHandler(
-        sp.GetRequiredService<BrokerConfig>(),
-        sp.GetRequiredService<DynamicBrokerConfig>(),
-        sp.GetRequiredService<LogManager>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp =>
-    {
-        var scram = sp.GetRequiredService<ScramStores>();
-        return new SecurityApiHandler(
-            sp.GetRequiredService<BrokerConfig>(),
-            sp.GetService<SaslAuthenticator>(),
-            sp.GetService<AclAuthorizer>(),
-            sp.GetRequiredService<AuditLogger>(),
-            sp.GetRequiredService<ILogger<SecurityApiHandler>>(),
-            scramSha256Store: scram.Sha256,
-            scramSha512Store: scram.Sha512);
-    });
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new InterBrokerApiHandler(
-        sp.GetRequiredService<BrokerConfig>(),
-        sp.GetRequiredService<ClusterState>(),
-        sp.GetRequiredService<ReplicaManager>(),
-        sp.GetRequiredService<LogManager>(),
-        sp.GetRequiredService<ILogger<InterBrokerApiHandler>>(),
-        sp.GetRequiredService<TransactionCoordinator>(),
-        isrUpdateApplier: sp.GetRequiredService<ClusterController>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupApiHandler(
-        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupCoordinator>(),
-        sp.GetRequiredService<ILogger<ConsumerGroupApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ShareGroupApiHandler(
-        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareGroupCoordinator>(),
-        sp.GetRequiredService<ILogger<ShareGroupApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new TransactionApiHandler(
-        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionCoordinator>(),
-        sp.GetRequiredService<ILogger<TransactionApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupV2ApiHandler(
-        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupV2Coordinator>(),
-        sp.GetRequiredService<ILogger<ConsumerGroupV2ApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new StreamsGroupApiHandler(
-        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Streams.IStreamsGroupCoordinator>(),
-        sp.GetRequiredService<ILogger<StreamsGroupApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterAdminHandler(
-        sp.GetRequiredService<ClusterController>(),
-        sp.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>(),
-        sp.GetRequiredService<ClusterState>(),
-        sp.GetRequiredService<ILogger<ClusterAdminHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new QuotaApiHandler(
-        sp.GetRequiredService<QuotaManager>(),
-        sp.GetRequiredService<ILogger<QuotaApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new DelegationTokenApiHandler(
-        sp.GetRequiredService<DelegationTokenManager>(),
-        sp.GetRequiredService<ILogger<DelegationTokenApiHandler>>()));
-
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp =>
-    {
-        // KIP-714 telemetry: base logging ingestor, optionally wrapped with the topic
-        // sink decorator when Surgewave:Telemetry:TopicSinkEnabled (mirrors OTLP to a topic).
-        var telemetryConfig = sp.GetRequiredService<BrokerConfig>().Telemetry;
-        Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetryIngestor ingestor =
-            sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>();
-        if (telemetryConfig.Enabled && telemetryConfig.TopicSinkEnabled)
-        {
-            var telemetrySink = new Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink(
-                sp.GetRequiredService<LogManager>(),
-                sp.GetRequiredService<RecordBatchSerializer>(),
-                telemetryConfig,
-                sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink>>());
-            ingestor = new Kuestenlogik.Surgewave.Broker.Telemetry.TopicForwardingTelemetryIngestor(ingestor, telemetrySink);
-            sp.GetRequiredService<ILogger<TelemetryApiHandler>>().LogInformation(
-                "Telemetry topic sink enabled — mirroring OTLP payloads to {Topic}", telemetryConfig.TopicName);
-        }
-        return new TelemetryApiHandler(
-            sp.GetRequiredService<ILogger<TelemetryApiHandler>>(),
+            sp.GetRequiredService<RecordBatchSerializer>(),
             telemetryConfig,
-            ingestor);
-    });
+            sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.Telemetry.TelemetryTopicSink>>());
+        ingestor = new Kuestenlogik.Surgewave.Broker.Telemetry.TopicForwardingTelemetryIngestor(ingestor, telemetrySink);
+    }
+    return ingestor;
+});
 
-    builder.Services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterMembershipHandler(
-        sp.GetRequiredService<ClusterIdManager>(),
+// Raft components in DI so the plugin's RaftApiHandler can resolve them (#59 b5). Gated on
+// UseRaftConsensus; the post-build init below resolves these SAME singletons to wire SetRaftNode.
+if (featuresConfig.UseRaftConsensus)
+{
+    builder.Services.AddSingleton(sp => new RaftPersistence(
+        sp.GetRequiredService<ILogger<RaftPersistence>>(),
+        sp.GetRequiredService<ClusteringConfig>()));
+    builder.Services.AddSingleton(sp => new RaftTransport(
+        sp.GetRequiredService<ILogger<RaftTransport>>(),
         sp.GetRequiredService<ClusterState>(),
-        sp.GetRequiredService<ILogger<ClusterMembershipHandler>>()));
+        sp.GetRequiredService<ClusteringConfig>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
+    builder.Services.AddSingleton(sp => new MetadataStateMachine(
+        sp.GetRequiredService<ILogger<MetadataStateMachine>>(),
+        sp.GetRequiredService<ClusterState>()));
+    builder.Services.AddSingleton(sp => new RaftNode(
+        sp.GetRequiredService<ILogger<RaftNode>>(),
+        sp.GetRequiredService<ClusteringConfig>(),
+        sp.GetRequiredService<RaftPersistence>(),
+        sp.GetRequiredService<RaftTransport>(),
+        sp.GetRequiredService<MetadataStateMachine>()));
 }
 
 var app = builder.Build();
@@ -833,8 +759,9 @@ var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 // reverse-ISR reports before the cluster starts (#69). This closes the gap
 // where a production broker never pushed LeaderAndIsr at all (only the embedded
 // runtime did), so followers never replicated and the ISR never formed.
-var controllerClient = app.Services.GetRequiredService<ControllerClient>();
-clusterController.SetControllerClient(controllerClient);
+// #59 b5: the controller client is the Kafka plugin's IControllerReplicaRpc; wire it when present.
+if (app.Services.GetService<IControllerReplicaRpc>() is { } controllerReplicaRpc)
+    clusterController.SetControllerClient(controllerReplicaRpc);
 
 // Initialize Raft consensus if enabled
 RaftNode? raftNode = null;
@@ -844,19 +771,11 @@ if (config.UseRaftConsensus)
 {
     logger.LogInformation("Initializing Raft consensus mode...");
 
-    // Create Raft components
-    var raftPersistenceLogger = app.Services.GetRequiredService<ILogger<RaftPersistence>>();
-    raftPersistence = new RaftPersistence(raftPersistenceLogger, clusteringConfig);
-
-    var raftTransportLogger = app.Services.GetRequiredService<ILogger<RaftTransport>>();
-    var peerTransport = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>();
-    raftTransport = new RaftTransport(raftTransportLogger, clusterState, clusteringConfig, peerTransport);
-
-    var stateMachineLogger = app.Services.GetRequiredService<ILogger<MetadataStateMachine>>();
-    var stateMachine = new MetadataStateMachine(stateMachineLogger, clusterState);
-
-    var raftNodeLogger = app.Services.GetRequiredService<ILogger<RaftNode>>();
-    raftNode = new RaftNode(raftNodeLogger, clusteringConfig, raftPersistence, raftTransport, stateMachine);
+    // Resolve the DI-registered Raft singletons (registered pre-build so the Kafka plugin's
+    // RaftApiHandler resolves the SAME RaftNode/RaftPersistence, #59 b5).
+    raftPersistence = app.Services.GetRequiredService<RaftPersistence>();
+    raftTransport = app.Services.GetRequiredService<RaftTransport>();
+    raftNode = app.Services.GetRequiredService<RaftNode>();
 
     // Wire up Raft to replication components
     replicationServer.SetRaftNode(raftNode);
@@ -1133,6 +1052,19 @@ var transactionIndex = app.Services.GetRequiredService<TransactionIndex>();
 var transactionStateStore = app.Services.GetRequiredService<TransactionStateStore>();
 var transactionCoordinator = app.Services.GetRequiredService<TransactionCoordinator>();
 
+// #59 b5: the native gRPC transaction service returns Kafka-numbered txn error codes; map the
+// neutral TxnErrorStatus here rather than reaching into the Kafka plugin's TransactionApiHandler.
+// Values are the standard Kafka error codes (INVALID_PRODUCER_EPOCH=47, INVALID_TXN_STATE=48,
+// UNKNOWN_PRODUCER_ID=59, UNKNOWN_TOPIC_ID=100) — identical to the former ToErrorCode mapping.
+static int TxnStatusToWireCode(Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus status) => status switch
+{
+    Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus.InvalidProducerEpoch => 47,
+    Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus.InvalidTxnState => 48,
+    Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus.UnknownProducerId => 59,
+    Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus.UnknownTopicId => 100,
+    _ => 0,
+};
+
 // Register TransactionServiceImpl with delegates wired to TransactionCoordinator
 TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
     initProducerId: (transactionalId, transactionTimeoutMs, producerId, producerEpoch) =>
@@ -1145,7 +1077,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch
         };
         var response = transactionCoordinator.InitProducerIdAsync(command, CancellationToken.None).GetAwaiter().GetResult();
-        return new InitProducerIdResultDto((int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(response.Status), response.ProducerId, response.ProducerEpoch);
+        return new InitProducerIdResultDto(TxnStatusToWireCode(response.Status), response.ProducerId, response.ProducerEpoch);
     },
     addPartitionsToTxn: (transactionalId, producerId, producerEpoch, partitions) =>
     {
@@ -1161,7 +1093,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
         };
         var response = transactionCoordinator.AddPartitionsToTxn(command);
         var results = response.Topics.SelectMany(t =>
-            t.Partitions.Select(p => (t.Topic, p.Partition, (int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
+            t.Partitions.Select(p => (t.Topic, p.Partition, TxnStatusToWireCode(p.Status)))).ToList();
         return new AddPartitionsToTxnResultDto(results);
     },
     addOffsetsToTxn: (transactionalId, producerId, producerEpoch, groupId) =>
@@ -1174,7 +1106,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             GroupId = groupId
         };
         var response = transactionCoordinator.AddOffsetsToTxn(command);
-        return new AddOffsetsToTxnResultDto((int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(response.Status));
+        return new AddOffsetsToTxnResultDto(TxnStatusToWireCode(response.Status));
     },
     txnOffsetCommit: (transactionalId, groupId, producerId, producerEpoch, generationId, memberId, offsets) =>
     {
@@ -1197,7 +1129,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
         };
         var response = transactionCoordinator.TxnOffsetCommit(command);
         var results = response.Topics.SelectMany(t =>
-            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, (int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(p.Status)))).ToList();
+            t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, TxnStatusToWireCode(p.Status)))).ToList();
         return new TxnOffsetCommitResultDto(results);
     },
     endTxn: (transactionalId, producerId, producerEpoch, commit) =>
@@ -1210,7 +1142,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             Committed = commit
         };
         var response = transactionCoordinator.EndTxnAsync(command, CancellationToken.None).GetAwaiter().GetResult();
-        return new EndTxnResultDto((int)Kuestenlogik.Surgewave.Protocol.Kafka.TransactionApiHandler.ToErrorCode(response.Status));
+        return new EndTxnResultDto(TxnStatusToWireCode(response.Status));
     },
     listTransactions: (statesFilter, producerIdFilter) =>
     {
@@ -1291,10 +1223,6 @@ QuotaServiceImplHolder.Instance = new QuotaServiceImpl(
                 new DateTimeOffset(x.Stats.LastActivity).ToUnixTimeMilliseconds()))
             .ToList();
     });
-
-// Kafka wire protocol handler — built only when Surgewave:Kafka:Enabled (#58);
-// null means the broker runs native-only.
-IProtocolHandler? protocolHandler = config.Kafka.Enabled ? new KafkaProtocolHandler() : null;
 
 // AclAuthorizer (DI, #59 phase 2b) — a SHARED broker-core service resolved here for the
 // native gRPC SecurityServiceImpl delegates + the REST /admin/acls surface below, which
@@ -1439,14 +1367,10 @@ if (config.BrokerDlq.Enabled)
 // raftPersistence are post-build locals (null unless UseRaftConsensus). InterBrokerApiHandler
 // IS in the DI set, so the multi-broker control plane (LeaderAndIsr / AlterPartition) still
 // rides the Kafka wire today; native-only is single-broker until that path is native (#60).
-RequestDispatcher? dispatcher = null;
-if (config.Kafka.Enabled)
-{
-    var kafkaHandlers = app.Services.GetServices<IKafkaRequestHandler>().ToList();
-    kafkaHandlers.Add(new RaftApiHandler(config, raftNode, raftPersistence, clusterState,
-        app.Services.GetRequiredService<ILogger<RaftApiHandler>>()));
-    dispatcher = new RequestDispatcher(kafkaHandlers);
-}
+// #59 b5 ATOMIC FLIP: the Kafka dispatcher + wire loop live in the plugin's KafkaConnectionHandler
+// (registered as IConnectionHandler when Surgewave:Kafka:Enabled). RaftApiHandler is a DI-registered
+// IKafkaRequestHandler resolving the pre-registered RaftNode/RaftPersistence, so no post-build hot-add.
+var kafkaConnectionHandlers = app.Services.GetServices<IConnectionHandler>();
 
 // Get PluginDiscovery for connector plugins (available even if Connect is disabled)
 var pluginDiscoveryForBroker = app.Services.GetService<PluginDiscovery>();
@@ -1479,7 +1403,7 @@ var lagCalculator = new Kuestenlogik.Surgewave.Core.Monitoring.DefaultLagCalcula
     new OffsetStoreProvider(offsetStore, GetGroupInfosForLag),
     new LogManagerWatermarkProvider(logManager));
 
-var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, nativeGroupCoordinator, transactionCoordinator, quotaManager, protocolHandler, metrics, dispatcher, brokerLogger, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator);
+var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, nativeGroupCoordinator, transactionCoordinator, quotaManager, metrics, brokerLogger, connectionHandlers: kafkaConnectionHandlers, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator);
 
 // Publish the broker as the Surgewave stream handler so alternative transports
 // (QUIC, shared memory, ...) can pump connections into the shared pipeline.

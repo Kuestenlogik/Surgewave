@@ -3,9 +3,10 @@ using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Raft;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Broker;
 using Microsoft.Extensions.Logging;
 
-namespace Kuestenlogik.Surgewave.Broker.Handlers;
+namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 
 /// <summary>
 /// Handler for Raft consensus APIs: Vote, BeginQuorumEpoch, EndQuorumEpoch, DescribeQuorum, FetchSnapshot.
