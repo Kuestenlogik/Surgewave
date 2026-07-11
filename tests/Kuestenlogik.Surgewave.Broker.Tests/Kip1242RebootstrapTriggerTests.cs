@@ -77,7 +77,11 @@ public sealed class Kip1242RebootstrapTriggerTests : IDisposable
 
     private object? ResolveCtorArg(Type t)
     {
-        if (t == typeof(BrokerConfig)) return _config;
+        // The handler ctor takes the neutral IBrokerConfigView (which BrokerConfig
+        // implements, #59 b4-tier2), not BrokerConfig directly. IsInstanceOfType covers
+        // both the concrete type and that interface, so the reflection fallback survives
+        // the ctor drift instead of silently passing null (which NRE'd at _config.ClusterId).
+        if (t.IsInstanceOfType(_config)) return _config;
         if (t == typeof(LogManager)) return _logManager;
         if (t.IsValueType) return Activator.CreateInstance(t);
         // NullLogger trick for ILogger<T>
