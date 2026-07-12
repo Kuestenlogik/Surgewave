@@ -115,6 +115,7 @@
     <Project Path="tests/Kuestenlogik.Surgewave.Protocol.WebSocket.Tests/Kuestenlogik.Surgewave.Protocol.WebSocket.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Protocol.Amqp.Tests/Kuestenlogik.Surgewave.Protocol.Amqp.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Broker.Tests/Kuestenlogik.Surgewave.Broker.Tests.csproj" />
+    <Project Path="tests/Kuestenlogik.Surgewave.Broker.BootTests/Kuestenlogik.Surgewave.Broker.BootTests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Client.Tests/Kuestenlogik.Surgewave.Client.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.SourceGenerators.Tests/Kuestenlogik.Surgewave.SourceGenerators.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Clustering.Tests/Kuestenlogik.Surgewave.Clustering.Tests.csproj" />
