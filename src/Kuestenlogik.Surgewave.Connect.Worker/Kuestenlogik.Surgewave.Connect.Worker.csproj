@@ -41,6 +41,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect\Kuestenlogik.Surgewave.Connect.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <!-- #59: the standalone Connect worker builds a Kafka-wire client (UseKafkaProtocol),
+         resolved from Client.Kafka by reflection at runtime — reference it so the dll is
+         present in this worker's bin. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client.Kafka\Kuestenlogik.Surgewave.Client.Kafka.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.Grpc\Kuestenlogik.Surgewave.Api.Grpc.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Api.Grpc.Server\Kuestenlogik.Surgewave.Api.Grpc.Server.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting\Kuestenlogik.Surgewave.Plugins.Packaging.Hosting.csproj" />
