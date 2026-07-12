@@ -16,6 +16,14 @@ public sealed class BrokerMetrics : IDisposable, IClusteringMetrics, IBrokerMetr
     private readonly Meter _meter;
     private readonly ActivitySource _activitySource;
 
+    /// <summary>
+    /// The underlying meter instance, exposed for tests only. A <see cref="MeterListener"/> that
+    /// filters by <see cref="MeterName"/> alone also captures instruments from other
+    /// <see cref="BrokerMetrics"/> instances created by tests running in parallel (they all share
+    /// the meter name), so tests must scope to this exact instance to avoid a contamination race.
+    /// </summary>
+    internal Meter Meter => _meter;
+
     // === Connection Metrics ===
     private readonly Counter<long> _connectionsTotal;
     private readonly UpDownCounter<int> _activeConnections;
