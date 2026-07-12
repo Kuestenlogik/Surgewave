@@ -14,4 +14,13 @@ public enum ClusterRpcStatus : short
     StaleControllerEpoch = 11,
     UnsupportedVersion = 35,
     StaleBrokerEpoch = 77,
+
+    // #60: additional fencing/epoch status the native inter-broker control plane needs
+    // (LeaderAndIsr / AlterPartition / registration). Values stay pinned to the matching Kafka
+    // ErrorCode members so native and Kafka-wire peers interpret them identically during a
+    // mixed-version rolling upgrade.
+    ReplicaNotAvailable = 9,
+    NotController = 41,
+    FencedLeaderEpoch = 74,
+    UnknownTopicId = 100,
 }

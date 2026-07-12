@@ -187,6 +187,27 @@ public enum SurgewaveOpCode : ushort
     ObjListObjects = 0x1404,
     ObjGetObjectInfo = 0x1405,
 
+    // #60 — inter-broker control plane (0x15xx): native inter-broker RPC so a broker without the
+    // Protocol.Kafka plugin can cluster. Definitions only until the native inter-broker server (Inc4)
+    // and clients (Inc5-7) are wired; nothing reads these yet.
+    InterBrokerLeaderAndIsr = 0x1500,
+    InterBrokerUpdateMetadata = 0x1501,
+    InterBrokerStopReplica = 0x1502,
+    InterBrokerAlterPartition = 0x1503,
+    InterBrokerRegistration = 0x1504,
+    InterBrokerHeartbeat = 0x1505,
+    InterBrokerControlledShutdown = 0x1506,
+    InterBrokerWriteTxnMarkers = 0x1507,
+    InterBrokerReplicaFetch = 0x1508,
+
+    // #60 — inter-broker Raft/KRaft consensus (0x16xx). The real consensus already rides a
+    // hand-rolled framing on the ReplicationPort (Family B); these opcodes are for unifying it
+    // onto the SRWV frame later (Inc8, optional).
+    RaftRequestVote = 0x1600,
+    RaftPreVote = 0x1601,
+    RaftAppendEntries = 0x1602,
+    RaftMetadataUpdatePush = 0x1603,
+
     // Error response (0xFFxx)
     Error = 0xFF00,
 }
