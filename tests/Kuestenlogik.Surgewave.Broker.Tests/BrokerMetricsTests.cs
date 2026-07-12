@@ -26,7 +26,11 @@ public class BrokerMetricsTests : IDisposable
         _meterListener = new MeterListener();
         _meterListener.InstrumentPublished = (instrument, listener) =>
         {
-            if (instrument.Meter.Name == BrokerMetrics.MeterName)
+            // Scope to THIS test's BrokerMetrics instance only. Filtering by meter name alone
+            // captures instruments from other BrokerMetrics instances created by tests running in
+            // parallel (they share the meter name), which non-deterministically leaks extra
+            // measurements into _recordedMetrics and made ActiveConnections_TracksUpAndDown flaky.
+            if (ReferenceEquals(instrument.Meter, _metrics.Meter))
             {
                 listener.EnableMeasurementEvents(instrument);
             }
