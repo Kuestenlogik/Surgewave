@@ -85,10 +85,14 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
         var pipelineMetrics = new PipelineMetricsCollector();
         var workerServices = new ConnectWorkerServices { MetricsCollector = pipelineMetrics };
 
-        // Local Surgewave client (loopback to the broker's own Kafka port)
+        // Local loopback client to the broker's own listener. Uses the native Surgewave
+        // protocol (same socket, magic-byte dispatched alongside the Kafka wire) so the
+        // broker does not depend on the Kafka wire *client* (Client.Kafka) and its binary
+        // stays Protocol.Kafka-free (#59). A loopback to the co-located broker never needs
+        // the Kafka wire; native is also the faster path.
         var localClient = await SurgewaveClient
             .Create($"localhost:{config.Port}")
-            .UseKafkaProtocol()
+            .UseSurgewaveProtocol()
             .BuildAsync();
         await localClient.ConnectAsync();
 

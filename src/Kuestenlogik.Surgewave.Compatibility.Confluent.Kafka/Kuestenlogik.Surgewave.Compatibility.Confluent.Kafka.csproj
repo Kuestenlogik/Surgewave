@@ -9,6 +9,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+    <!-- #59: the Confluent-compat producer/consumer/admin builders build Kafka-wire clients
+         (ProtocolType.Kafka), which SurgewaveClientBuilder resolves from Client.Kafka by
+         reflection — so that assembly must be present in this shim's bin. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Client.Kafka\Kuestenlogik.Surgewave.Client.Kafka.csproj" />
   </ItemGroup>
 
 </Project>
