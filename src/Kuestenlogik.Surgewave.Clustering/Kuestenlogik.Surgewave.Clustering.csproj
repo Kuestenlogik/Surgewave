@@ -18,6 +18,10 @@
          the Kafka codecs (ControllerClient/BrokerLifecycleManager) moved into Protocol.Kafka,
          which now references Clustering (edge inverted). -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
+    <!-- #60 Inc2: the native inter-broker payloads reuse the SRWV reader/writer, opcodes and
+         ISerializablePayload contract from Protocol.Native. That assembly is a leaf (no edge back to
+         Clustering/Core), so this is a safe downward reference with no cycle. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
   </ItemGroup>
 
 </Project>
