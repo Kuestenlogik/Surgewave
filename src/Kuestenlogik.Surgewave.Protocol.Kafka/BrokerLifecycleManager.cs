@@ -343,7 +343,15 @@ public sealed partial class BrokerLifecycleManager : IAsyncDisposable, IBrokerLi
 
         var features = new List<BrokerRegistrationRequest.Feature>
         {
-            new() { Name = "metadata.version", MinSupportedVersion = 1, MaxSupportedVersion = 20 }
+            new() { Name = "metadata.version", MinSupportedVersion = 1, MaxSupportedVersion = 20 },
+            // #60 Inc3 — advertise this broker's inter-broker protocol range so the controller can
+            // finalize the cluster level. Min is KafkaWire so an old controller can always negotiate down.
+            new()
+            {
+                Name = InterBrokerProtocolFeature.FeatureName,
+                MinSupportedVersion = InterBrokerProtocolFeature.KafkaWire,
+                MaxSupportedVersion = InterBrokerProtocolFeature.LocalMaxSupported
+            }
         };
 
         return new BrokerRegistrationRequest

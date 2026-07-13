@@ -112,6 +112,19 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
         var port = primaryListener?.Port ?? 9092;
         var rack = request.Rack;
 
+        // #60 Inc3 — resolve the inter-broker protocol level this broker advertised. The MaxSupportedVersion
+        // of the inter.broker.protocol feature is the highest level it can speak; an absent feature (an older
+        // broker) reads as KafkaWire, keeping the finalized cluster level pinned to the Kafka wire.
+        var interBrokerProtocol = InterBrokerProtocolFeature.KafkaWire;
+        foreach (var feature in request.Features)
+        {
+            if (string.Equals(feature.Name, InterBrokerProtocolFeature.FeatureName, StringComparison.Ordinal))
+            {
+                interBrokerProtocol = feature.MaxSupportedVersion;
+                break;
+            }
+        }
+
         // Create registration info
         var registration = new BrokerRegistrationInfo
         {
@@ -148,13 +161,15 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
             BrokerId = request.BrokerId,
             Host = host,
             Port = (int)port,
-            Rack = rack
+            Rack = rack,
+            InterBrokerProtocol = interBrokerProtocol
         };
         _clusterState.AddBroker(brokerNode);
 
         _logger.LogInformation(
-            "Broker {BrokerId} registered successfully at {Host}:{Port} (fenced=true, epoch={Epoch})",
-            request.BrokerId, host, port, brokerEpoch);
+            "Broker {BrokerId} registered successfully at {Host}:{Port} (fenced=true, epoch={Epoch}, " +
+            "interBrokerProtocol={InterBrokerProtocol}, finalizedInterBrokerProtocol={FinalizedInterBrokerProtocol})",
+            request.BrokerId, host, port, brokerEpoch, interBrokerProtocol, _clusterState.FinalizedInterBrokerProtocol);
 
         return new BrokerRegistrationResponse
         {

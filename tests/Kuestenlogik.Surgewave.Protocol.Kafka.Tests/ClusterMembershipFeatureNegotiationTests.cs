@@ -1,0 +1,107 @@
+using Kuestenlogik.Surgewave.Clustering;
+using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Testing;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Kuestenlogik.Surgewave.Protocol.Kafka.Tests;
+
+/// <summary>
+/// #60 Inc3 — controller-side coverage: a broker's advertised inter.broker.protocol feature is stored on
+/// <see cref="BrokerNode.InterBrokerProtocol"/> and the cluster-wide finalized level (the MIN across brokers)
+/// reflects it. An older broker that omits the feature keeps the whole cluster pinned to the Kafka wire.
+/// </summary>
+[Trait("Category", TestCategories.Unit)]
+public sealed class ClusterMembershipFeatureNegotiationTests
+{
+    private static readonly RequestContext Ctx =
+        new() { ConnectionState = new ConnectionState("ibp-test"), ClientId = "broker" };
+
+    private static (ClusterMembershipHandler handler, ClusterState state) NewController()
+    {
+        var config = new ClusteringConfig();
+        var clusterIdManager = new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance);
+        var state = new ClusterState();
+        var handler = new ClusterMembershipHandler(clusterIdManager, state, NullLogger<ClusterMembershipHandler>.Instance);
+        return (handler, state);
+    }
+
+    private static BrokerRegistrationRequest.Feature InterBrokerProtocol(short max) => new()
+    {
+        Name = InterBrokerProtocolFeature.FeatureName,
+        MinSupportedVersion = InterBrokerProtocolFeature.KafkaWire,
+        MaxSupportedVersion = max
+    };
+
+    private static BrokerRegistrationRequest Registration(int brokerId, params BrokerRegistrationRequest.Feature[] features) => new()
+    {
+        ApiKey = ApiKey.BrokerRegistration,
+        ApiVersion = 3,
+        CorrelationId = 1,
+        ClientId = $"broker-{brokerId}",
+        BrokerId = brokerId,
+        ClusterId = "", // empty → ValidateClusterId short-circuits to true, keeps the test hermetic (no disk I/O)
+        IncarnationId = Guid.NewGuid(),
+        Listeners =
+        [
+            new BrokerRegistrationRequest.Listener { Name = "PLAINTEXT", Host = "h", Port = (ushort)(9092 + brokerId), SecurityProtocol = 0 },
+        ],
+        Features = [.. features],
+        Rack = null,
+    };
+
+    private static async Task<BrokerRegistrationResponse> Register(ClusterMembershipHandler handler, BrokerRegistrationRequest req)
+        => (BrokerRegistrationResponse)await handler.HandleAsync(req, Ctx, CancellationToken.None);
+
+    [Fact]
+    public async Task Register_NativeBroker_StoresNativeLevelAndFinalizesNative()
+    {
+        var (handler, state) = NewController();
+
+        var resp = await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
+
+        Assert.Equal(ErrorCode.None, resp.ErrorCode);
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.GetBroker(1)!.InterBrokerProtocol);
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
+    }
+
+    [Fact]
+    public async Task Register_OlderBrokerWithoutFeature_StoresKafkaWire()
+    {
+        var (handler, state) = NewController();
+
+        await Register(handler, Registration(1)); // no inter.broker.protocol feature advertised
+
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.GetBroker(1)!.InterBrokerProtocol);
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.FinalizedInterBrokerProtocol);
+    }
+
+    [Fact]
+    public async Task Register_MixedNativeAndOlder_FinalizesKafkaWire()
+    {
+        var (handler, state) = NewController();
+
+        await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
+        await Register(handler, Registration(2)); // older broker, no feature
+
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.GetBroker(1)!.InterBrokerProtocol);
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.GetBroker(2)!.InterBrokerProtocol);
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.FinalizedInterBrokerProtocol);
+    }
+
+    [Fact]
+    public async Task Reregistration_WithUpgradedFeature_UpdatesStoredLevel()
+    {
+        var (handler, state) = NewController();
+
+        // First join as an older broker (no feature), then re-register advertising native (a rolling upgrade).
+        await Register(handler, Registration(1));
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.GetBroker(1)!.InterBrokerProtocol);
+
+        await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.GetBroker(1)!.InterBrokerProtocol);
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
+    }
+}
