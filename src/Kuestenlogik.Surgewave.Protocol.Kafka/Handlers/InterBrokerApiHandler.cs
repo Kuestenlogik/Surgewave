@@ -59,7 +59,7 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         {
             LeaderAndIsrRequest leaderAndIsrRequest => await HandleLeaderAndIsrAsync(leaderAndIsrRequest, cancellationToken),
             StopReplicaRequest stopReplicaRequest => await HandleStopReplicaAsync(stopReplicaRequest, cancellationToken),
-            UpdateMetadataRequest updateMetadataRequest => HandleUpdateMetadata(updateMetadataRequest),
+            UpdateMetadataRequest updateMetadataRequest => await HandleUpdateMetadataAsync(updateMetadataRequest, cancellationToken),
             ControlledShutdownRequest controlledShutdownRequest => HandleControlledShutdown(controlledShutdownRequest),
             WriteTxnMarkersRequest writeTxnMarkersRequest => await HandleWriteTxnMarkersAsync(writeTxnMarkersRequest, cancellationToken),
             AlterPartitionRequest alterPartitionRequest => await HandleAlterPartitionAsync(alterPartitionRequest, cancellationToken),
@@ -71,10 +71,14 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
     {
         LogLeaderAndIsrReceived(request.ControllerId, request.ControllerEpoch, request.TopicStates.Count);
 
+        // Hold the shared controller-push gate across fence-through-apply so a Kafka-wire push cannot
+        // interleave with a concurrent Kafka or native push during a rolling upgrade (#60 Inc6a).
+        using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
+
         // Validate controller epoch - reject stale requests. The fence is the shared atomic
         // ClusterState.TryAdvanceControllerEpoch (#60 Inc5): the native inter-broker applier fences
-        // through the same method, so a stale Kafka-wire push cannot regress an epoch the native
-        // wire already advanced (and vice versa) during a rolling upgrade.
+        // through the same ClusterState (version-ordered there), so a stale Kafka-wire push cannot
+        // regress an epoch the native wire already advanced (and vice versa) during a rolling upgrade.
         if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
         {
             LogStaleControllerEpoch("LeaderAndIsr", request.ControllerEpoch, _clusterState.ControllerEpoch);
@@ -116,16 +120,22 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 
                 try
                 {
-                    // Update partition state in cluster state
-                    _clusterState.UpdatePartitionState(tp, state =>
+                    // Per-partition ordering, shared with the native wire (#60 Inc6a): apply only when
+                    // this entry's leader epoch is not older than the stored one, so a delayed/
+                    // reordered same-controller-epoch push cannot regress a partition; then skip the
+                    // BecomeLeader/Follower transition so it never runs on a stale epoch.
+                    if (!_clusterState.TryApplyControllerPartitionState(
+                            tp, partitionState.Leader, partitionState.LeaderEpoch, partitionState.Replicas, partitionState.Isr))
                     {
-                        state.LeaderBrokerId = partitionState.Leader;
-                        state.LeaderEpoch = partitionState.LeaderEpoch;
-                        state.Replicas.Clear();
-                        state.Replicas.AddRange(partitionState.Replicas);
-                        state.Isr.Clear();
-                        state.Isr.AddRange(partitionState.Isr);
-                    });
+                        LogStalePartition("LeaderAndIsr", topicName, partitionState.PartitionIndex, partitionState.LeaderEpoch);
+                        partitionErrors.Add(new LeaderAndIsrResponse.LeaderAndIsrPartitionError
+                        {
+                            TopicName = topicName,
+                            PartitionIndex = partitionState.PartitionIndex,
+                            ErrorCode = ErrorCode.None
+                        });
+                        continue;
+                    }
 
                     // Determine if this broker is the leader or follower
                     if (partitionState.Leader == _config.BrokerId)
@@ -262,6 +272,9 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 
     private async Task<StopReplicaResponse> HandleStopReplicaAsync(StopReplicaRequest request, CancellationToken ct)
     {
+        // Same shared push gate as LeaderAndIsr/native (#60 Inc6a).
+        using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
+
         LogStopReplicaReceived(request.ControllerId, request.ControllerEpoch, request.DeletePartitions);
 
         // Validate controller epoch via the shared fence (see HandleLeaderAndIsrAsync, #60 Inc5).
@@ -336,6 +349,20 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
             var tp = new TopicPartition { Topic = topic, Partition = partition };
             var errorCode = ErrorCode.None;
 
+            // Per-partition ordering, shared with the native wire (#60 Inc6a): a delayed same-epoch
+            // stop must not delete a partition that was re-assigned at a higher leader epoch.
+            if (!_clusterState.ShouldStopReplica(tp, leaderEpoch))
+            {
+                LogStaleStopReplica(topic, partition, leaderEpoch);
+                partitionErrors.Add(new StopReplicaResponse.StopReplicaPartitionError
+                {
+                    TopicName = topic,
+                    PartitionIndex = partition,
+                    ErrorCode = ErrorCode.None
+                });
+                continue;
+            }
+
             try
             {
                 // Stop replication for this partition
@@ -376,10 +403,13 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         };
     }
 
-    private UpdateMetadataResponse HandleUpdateMetadata(UpdateMetadataRequest request)
+    private async Task<UpdateMetadataResponse> HandleUpdateMetadataAsync(UpdateMetadataRequest request, CancellationToken ct)
     {
         LogUpdateMetadataReceived(request.ControllerId, request.ControllerEpoch,
             request.LiveBrokers?.Count ?? 0, request.TopicStates?.Count ?? 0);
+
+        // Same shared push gate as LeaderAndIsr/native (#60 Inc6a).
+        using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
 
         // Validate controller epoch via the shared fence (see HandleLeaderAndIsrAsync, #60 Inc5).
         if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
@@ -418,15 +448,10 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                 {
                     var tp = new TopicPartition { Topic = topicName, Partition = partitionState.PartitionIndex };
 
-                    _clusterState.UpdatePartitionState(tp, state =>
-                    {
-                        state.LeaderBrokerId = partitionState.Leader;
-                        state.LeaderEpoch = partitionState.LeaderEpoch;
-                        state.Replicas.Clear();
-                        state.Replicas.AddRange(partitionState.Replicas);
-                        state.Isr.Clear();
-                        state.Isr.AddRange(partitionState.Isr);
-                    });
+                    // Per-partition ordering shared with the native wire (#60 Inc6a).
+                    if (!_clusterState.TryApplyControllerPartitionState(
+                            tp, partitionState.Leader, partitionState.LeaderEpoch, partitionState.Replicas, partitionState.Isr))
+                        LogStalePartition("UpdateMetadata", topicName, partitionState.PartitionIndex, partitionState.LeaderEpoch);
                 }
             }
         }
@@ -442,15 +467,9 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                     Partition = partitionState.PartitionIndex
                 };
 
-                _clusterState.UpdatePartitionState(tp, state =>
-                {
-                    state.LeaderBrokerId = partitionState.Leader;
-                    state.LeaderEpoch = partitionState.LeaderEpoch;
-                    state.Replicas.Clear();
-                    state.Replicas.AddRange(partitionState.Replicas);
-                    state.Isr.Clear();
-                    state.Isr.AddRange(partitionState.Isr);
-                });
+                if (!_clusterState.TryApplyControllerPartitionState(
+                        tp, partitionState.Leader, partitionState.LeaderEpoch, partitionState.Replicas, partitionState.Isr))
+                    LogStalePartition("UpdateMetadata", tp.Topic, partitionState.PartitionIndex, partitionState.LeaderEpoch);
             }
         }
 
@@ -770,6 +789,12 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting stale {ApiName} request: epoch {RequestEpoch} < current {CurrentEpoch}")]
     private partial void LogStaleControllerEpoch(string apiName, int requestEpoch, int currentEpoch);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping stale {ApiName} entry for {Topic}-{Partition}: leader epoch {LeaderEpoch} older than stored")]
+    private partial void LogStalePartition(string apiName, string topic, int partition, int leaderEpoch);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Skipping stale StopReplica for {Topic}-{Partition}: leader epoch {LeaderEpoch} older than the current re-assignment")]
+    private partial void LogStaleStopReplica(string topic, int partition, int leaderEpoch);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Became leader for {Topic}-{Partition} epoch {LeaderEpoch}")]
     private partial void LogBecameLeader(string topic, int partition, int leaderEpoch);

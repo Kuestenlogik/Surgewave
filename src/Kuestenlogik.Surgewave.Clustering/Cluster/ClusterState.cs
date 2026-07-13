@@ -14,6 +14,17 @@ public sealed class ClusterState
     private readonly ConcurrentDictionary<TopicPartition, PartitionState> _partitionStates = new();
     private readonly object _stateLock = new();
 
+    // #60 Inc6a — serializes all writes to _brokers so a read-modify-write (registration merge,
+    // level convergence) cannot lose a concurrent update. A dedicated lock (not _stateLock) so broker
+    // membership churn never contends with the per-partition state path. Reads stay lock-free on the
+    // ConcurrentDictionary. Control-plane only — never taken on the produce/fetch hot path.
+    private readonly object _brokerLock = new();
+
+    // #60 Inc6a — serializes a whole controller-push fence-through-apply span across BOTH inter-broker
+    // wires. SemaphoreSlim (not a Monitor) so the applier may await BecomeLeader/FollowerAsync inside
+    // the critical section without holding a sync lock over I/O. Control-plane only.
+    private readonly SemaphoreSlim _controllerPushGate = new(1, 1);
+
     /// <summary>
     /// Current controller broker ID.
     /// </summary>
@@ -47,6 +58,49 @@ public sealed class ClusterState
     }
 
     /// <summary>
+    /// #60 Inc6a — apply a controller-owned partition state (leader / leader-epoch / replicas / ISR)
+    /// only when its <paramref name="leaderEpoch"/> is not older than the stored one, atomically under
+    /// <c>_stateLock</c>. This is the per-partition ordering fence: a delayed/reordered push carrying
+    /// an older leader epoch is skipped (returns <c>false</c>), while an unrelated partition arriving
+    /// with any epoch still applies — so disjoint partial pushes never fence each other out. Local
+    /// watermarks/log offsets stay follower-owned and are untouched.
+    /// </summary>
+    public bool TryApplyControllerPartitionState(
+        TopicPartition tp, int leaderId, int leaderEpoch, IReadOnlyList<int> replicas, IReadOnlyList<int> isr)
+    {
+        lock (_stateLock)
+        {
+            var state = GetOrCreatePartitionState(tp);
+            if (leaderEpoch < state.LeaderEpoch)
+                return false;
+
+            state.LeaderBrokerId = leaderId;
+            state.LeaderEpoch = leaderEpoch;
+            state.Replicas.Clear();
+            state.Replicas.AddRange(replicas);
+            state.Isr.Clear();
+            state.Isr.AddRange(isr);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// #60 Inc6a — whether a StopReplica carrying <paramref name="leaderEpoch"/> should be honored for
+    /// <paramref name="tp"/>: rejected when the stored partition has a strictly higher leader epoch (a
+    /// newer re-assignment supersedes a delayed stop). A leader epoch of <c>-1</c> (v0-2 wire, no
+    /// epoch) is always honored, matching the Kafka-wire StopReplica handler.
+    /// </summary>
+    public bool ShouldStopReplica(TopicPartition tp, int leaderEpoch)
+    {
+        lock (_stateLock)
+        {
+            if (leaderEpoch < 0)
+                return true;
+            return !_partitionStates.TryGetValue(tp, out var state) || leaderEpoch >= state.LeaderEpoch;
+        }
+    }
+
+    /// <summary>
     /// Election-time controller assumption: atomically increment the epoch and take the controller
     /// id, returning the new epoch. Shares <c>_stateLock</c> with
     /// <see cref="TryAdvanceControllerEpoch"/> so a controller push racing the election cannot
@@ -61,6 +115,28 @@ public sealed class ClusterState
             ControllerId = controllerId;
             return ControllerEpoch;
         }
+    }
+
+    /// <summary>
+    /// #60 Inc6a — acquire the exclusive controller-push scope. Both the native and Kafka-wire
+    /// inter-broker handlers wrap their whole fence-through-apply span in this scope so two pushes
+    /// that both pass the epoch fence cannot interleave their per-partition writes. Dispose the
+    /// returned scope (preferably with <c>await using</c>) to release it.
+    /// </summary>
+    public async ValueTask<IDisposable> AcquireControllerPushScopeAsync(CancellationToken ct = default)
+    {
+        await _controllerPushGate.WaitAsync(ct).ConfigureAwait(false);
+        return new ControllerPushScope(_controllerPushGate);
+    }
+
+    private sealed class ControllerPushScope(SemaphoreSlim gate) : IDisposable
+    {
+        // The scope RELEASES the gate on dispose; it does NOT own or dispose the semaphore (ClusterState
+        // does), so CA2213 (dispose the IDisposable field) does not apply.
+#pragma warning disable CA2213
+        private SemaphoreSlim? _gate = gate;
+#pragma warning restore CA2213
+        public void Dispose() => Interlocked.Exchange(ref _gate, null)?.Release();
     }
 
     /// <summary>
@@ -135,7 +211,41 @@ public sealed class ClusterState
 
     public void AddBroker(BrokerNode broker)
     {
-        _brokers[broker.BrokerId] = broker;
+        lock (_brokerLock)
+            _brokers[broker.BrokerId] = broker;
+    }
+
+    /// <summary>
+    /// Atomically add-or-update a broker: adds <paramref name="ifAbsent"/> when the broker is unknown,
+    /// otherwise applies <paramref name="mutate"/> to the current node — the read-modify-write runs
+    /// under <c>_brokerLock</c>, which every broker mutator holds, so a concurrent registration or
+    /// convergence cannot lose an update. Use instead of <see cref="GetBroker"/> + <see cref="AddBroker"/>
+    /// for registration merges and level convergence (#60 Inc6a). Returns the stored node.
+    /// <para>
+    /// A CAS on the ConcurrentDictionary would be wrong here: <see cref="BrokerNode"/>'s equality is
+    /// BrokerId-only (so it can be a dictionary key), which makes <c>TryUpdate</c>'s value comparison
+    /// always match and defeats the compare-and-swap — hence the explicit lock.
+    /// </para>
+    /// </summary>
+    public BrokerNode UpdateBroker(int brokerId, BrokerNode ifAbsent, Func<BrokerNode, BrokerNode> mutate)
+        => UpdateBroker(brokerId, ifAbsent, mutate, out _);
+
+    /// <summary>
+    /// As <see cref="UpdateBroker(int,BrokerNode,Func{BrokerNode,BrokerNode})"/>, additionally
+    /// reporting via <paramref name="inserted"/> whether the broker was newly added (true) or an
+    /// existing node was mutated (false) — evaluated INSIDE the lock so callers can log accurately
+    /// without a separate racy pre-read.
+    /// </summary>
+    public BrokerNode UpdateBroker(int brokerId, BrokerNode ifAbsent, Func<BrokerNode, BrokerNode> mutate, out bool inserted)
+    {
+        lock (_brokerLock)
+        {
+            var present = _brokers.TryGetValue(brokerId, out var current);
+            inserted = !present;
+            var next = present ? mutate(current!) : ifAbsent;
+            _brokers[brokerId] = next;
+            return next;
+        }
     }
 
     /// <summary>
@@ -143,18 +253,20 @@ public sealed class ClusterState
     /// </summary>
     public void RegisterBroker(int brokerId, string host, int port, string? rack = null)
     {
-        _brokers[brokerId] = new BrokerNode
-        {
-            BrokerId = brokerId,
-            Host = host,
-            Port = port,
-            Rack = rack
-        };
+        lock (_brokerLock)
+            _brokers[brokerId] = new BrokerNode
+            {
+                BrokerId = brokerId,
+                Host = host,
+                Port = port,
+                Rack = rack
+            };
     }
 
     public void RemoveBroker(int brokerId)
     {
-        _brokers.TryRemove(brokerId, out _);
+        lock (_brokerLock)
+            _brokers.TryRemove(brokerId, out _);
     }
 
     public BrokerNode? GetBroker(int brokerId)
@@ -437,7 +549,10 @@ public sealed class ClusterState
     {
         lock (_stateLock)
         {
-            _brokers.Clear();
+            // Nesting order is always _stateLock -> _brokerLock (no mutator takes _brokerLock then
+            // _stateLock), so this cannot deadlock the broker-write path.
+            lock (_brokerLock)
+                _brokers.Clear();
             _topics.Clear();
             _partitionStates.Clear();
             ControllerId = -1;

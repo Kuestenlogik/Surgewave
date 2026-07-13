@@ -26,6 +26,13 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 /// <see cref="LiveBrokerSpec.InterBrokerProtocol"/> level, so finalized-level views converge on
 /// non-controller brokers.
 /// </para>
+/// <para>
+/// Delayed/reordered same-epoch frames are handled per PARTITION, not per push: each entry carries
+/// its <see cref="PartitionState.LeaderEpoch"/>, and the receiver applies a partition only when the
+/// incoming leader epoch is not older than the stored one (Inc6a). This orders partition content
+/// correctly while letting disjoint partial pushes through — a coarse per-push version would instead
+/// drop an unrelated partition's update that happened to arrive with a lower number.
+/// </para>
 /// </summary>
 public readonly record struct PartitionStatesPayload(
     int ControllerId,
@@ -121,7 +128,7 @@ public readonly record struct PartitionStatesPayload(
 
     public int EstimateSize()
     {
-        var size = 4 + 4 + 4 + 4;
+        var size = 4 + 4 + 4 + 4; // controllerId + epoch + brokerCount + entryCount
         foreach (var b in LiveBrokers)
             size += 4 + (2 + b.Host.Length * 3) + 4 + 4 + 2 + (2 + (b.Rack?.Length ?? 0) * 3);
         foreach (var (tp, state) in Entries)

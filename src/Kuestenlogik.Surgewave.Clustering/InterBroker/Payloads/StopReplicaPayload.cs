@@ -11,6 +11,8 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 /// a delete flag. <see cref="ControllerId"/>/<see cref="ControllerEpoch"/> let the receiver fence a
 /// stale push from a demoted controller (mirroring the Kafka-wire StopReplica handler); the target
 /// <see cref="BrokerId"/> lets it refuse a misrouted stop — vital because a stop can delete data.
+/// Each partition carries its <c>LeaderEpoch</c> so a delayed StopReplica cannot delete a partition
+/// that was re-assigned at a higher epoch after the stop was sent (Inc6a per-partition guard).
 /// </summary>
 public readonly record struct StopReplicaPayload(
     int ControllerId,
@@ -73,7 +75,7 @@ public readonly record struct StopReplicaPayload(
 
     public int EstimateSize()
     {
-        var size = 4 + 4 + 4 + 4;
+        var size = 4 + 4 + 4 + 4; // controllerId + epoch + brokerId + count
         foreach (var (tp, _, _) in Partitions)
             size += InterBrokerWire.SizeOf(tp) + 4 + 1;
         return size;
