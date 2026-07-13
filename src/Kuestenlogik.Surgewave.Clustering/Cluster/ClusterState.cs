@@ -52,6 +52,39 @@ public sealed class ClusterState
     public IReadOnlyDictionary<int, BrokerNode> Brokers => _brokers;
 
     /// <summary>
+    /// #60 Inc3 — the cluster-wide finalized inter-broker protocol level: the MIN of every registered
+    /// broker's advertised <see cref="BrokerNode.InterBrokerProtocol"/> (a broker that never advertised
+    /// the feature reads as <see cref="InterBrokerProtocolFeature.KafkaWire"/>). Returns
+    /// <see cref="InterBrokerProtocolFeature.KafkaWire"/> for an empty cluster.
+    /// <para>
+    /// This is the safety anchor: the cluster only rises to a higher level once EVERY live or fenced
+    /// broker supports it, so a single older peer pins the whole cluster to the Kafka wire. Exposed for
+    /// observability — nothing selects transport on it yet (that lands in a later increment).
+    /// </para>
+    /// </summary>
+    public short FinalizedInterBrokerProtocol
+    {
+        get
+        {
+            var finalized = short.MaxValue;
+            var any = false;
+
+            // Iterate the concurrent map directly via its lock-free enumerator — NOT _brokers.Values,
+            // whose getter locks every bucket and copies all values into a fresh List on each access.
+            // This is an observability getter, so a moving view of the map is fine; no LINQ, no O(N) copy.
+            foreach (var kvp in _brokers)
+            {
+                any = true;
+                var level = kvp.Value.InterBrokerProtocol;
+                if (level < finalized)
+                    finalized = level;
+            }
+
+            return any ? finalized : InterBrokerProtocolFeature.KafkaWire;
+        }
+    }
+
+    /// <summary>
     /// All topics.
     /// </summary>
     public IReadOnlyDictionary<string, TopicMetadata> Topics => _topics;

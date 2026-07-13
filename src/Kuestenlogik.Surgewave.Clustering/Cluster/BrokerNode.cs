@@ -11,6 +11,15 @@ public sealed record BrokerNode
     public string? Rack { get; init; }
 
     /// <summary>
+    /// #60 Inc3 — the inter-broker protocol level this broker advertised at registration:
+    /// <see cref="InterBrokerProtocolFeature.KafkaWire"/> (0) or <see cref="InterBrokerProtocolFeature.Native"/> (1).
+    /// A broker that never advertised the feature (an older build) reads as
+    /// <see cref="InterBrokerProtocolFeature.KafkaWire"/>. The cluster-wide finalized level is the MIN of
+    /// this across all brokers — see <see cref="ClusterState.FinalizedInterBrokerProtocol"/>.
+    /// </summary>
+    public short InterBrokerProtocol { get; init; } = InterBrokerProtocolFeature.KafkaWire;
+
+    /// <summary>
     /// Endpoint for inter-broker communication.
     /// Defaults to Port + 1000 if not explicitly set.
     /// </summary>
