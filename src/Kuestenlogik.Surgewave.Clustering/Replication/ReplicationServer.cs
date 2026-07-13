@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.InterBroker;
 using Kuestenlogik.Surgewave.Clustering.Raft;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -31,6 +32,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     private HeartbeatManager? _heartbeatManager;
     private RaftNode? _raftNode;
     private MetadataStateMachine? _metadataStateMachine;
+    private NativeInterBrokerServer? _nativeInterBrokerServer;
 
     private IPeerListener? _listener;
     private CancellationTokenSource? _cts;
@@ -74,6 +76,17 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     public void SetMetadataStateMachine(MetadataStateMachine stateMachine)
     {
         _metadataStateMachine = stateMachine;
+    }
+
+    /// <summary>
+    /// Set the native inter-broker server (#60 Inc4). When set, frames whose opcode is in the native
+    /// SRWV band (<see cref="NativeInterBrokerServer.IsNativeOpcode"/>) are handed off to it instead of
+    /// the Family-B replication parser. Legacy peers never emit native opcodes, so the fetch/Raft path
+    /// is unchanged.
+    /// </summary>
+    public void SetNativeInterBrokerServer(NativeInterBrokerServer nativeInterBrokerServer)
+    {
+        _nativeInterBrokerServer = nativeInterBrokerServer;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -190,9 +203,21 @@ public sealed partial class ReplicationServer : IAsyncDisposable
             {
                 var stream = lease.Stream;
 
-                var request = await ReadRequestAsync(stream, ct);
-                if (request == null) return false;
+                var body = await ReadBodyAsync(stream, ct);
+                if (body == null) return false;
 
+                // #60 Inc4 — multiplex the native SRWV inter-broker band onto the shared ReplicationPort.
+                // Family-B frames (Fetch=1, Heartbeat=100, Raft=101/102/104) all sit below the native
+                // band, so this peek leaves the hot fetch/Raft path untouched; only frames a native peer
+                // emits — which no legacy peer ever sends — take the native branch.
+                if (_nativeInterBrokerServer is not null && body.Length >= 2 &&
+                    NativeInterBrokerServer.IsNativeOpcode(BinaryPrimitives.ReadUInt16BigEndian(body)))
+                {
+                    await _nativeInterBrokerServer.HandleBodyAsync(stream, body, ct);
+                    return true;
+                }
+
+                var request = ParseRequest(body);
                 var response = await ProcessRequestAsync(request, ct);
                 await WriteResponseAsync(stream, response, ct);
                 return true;
@@ -209,7 +234,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         }
     }
 
-    private async Task<ReplicationRequest?> ReadRequestAsync(Stream stream, CancellationToken ct)
+    private static async Task<byte[]?> ReadBodyAsync(Stream stream, CancellationToken ct)
     {
         // Read size
         var sizeBuffer = new byte[4];
@@ -225,7 +250,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         var body = new byte[size];
         await stream.ReadExactlyAsync(body, ct);
 
-        return ParseRequest(body);
+        return body;
     }
 
     private ReplicationRequest ParseRequest(byte[] data)
