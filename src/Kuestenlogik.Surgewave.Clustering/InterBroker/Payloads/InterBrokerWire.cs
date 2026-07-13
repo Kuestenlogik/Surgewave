@@ -50,6 +50,11 @@ internal static class InterBrokerWire
     public static List<int> ReadIntList(ref SurgewavePayloadReader r)
     {
         var n = r.ReadInt32();
+        // Reject a bogus/hostile count before pre-allocating: each element is a 4-byte int, so the count
+        // can never exceed the remaining bytes / 4 (#60 Inc4 puts this decoder on the wire).
+        if (n < 0 || n > r.Remaining / sizeof(int))
+            throw new InvalidDataException($"Corrupt inter-broker payload: int-list count {n} exceeds {r.Remaining} remaining bytes");
+
         var list = new List<int>(n);
         for (var i = 0; i < n; i++) list.Add(r.ReadInt32());
         return list;

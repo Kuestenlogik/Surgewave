@@ -15,9 +15,18 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 public readonly record struct PartitionStatesPayload(IReadOnlyList<(TopicPartition Tp, PartitionState State)> Entries)
     : ISerializablePayload<PartitionStatesPayload>
 {
+    // Conservative lower bound on the bytes one entry occupies (a leading TopicPartition alone is a
+    // 2-byte string length + a 4-byte partition; the full entry with its PartitionState is larger). Used
+    // to reject a bogus/hostile count before pre-allocating — the native receive server (#60 Inc4) is the
+    // first path that feeds this decoder untrusted network bytes.
+    private const int MinEntryBytes = 6;
+
     public static PartitionStatesPayload Read(ref SurgewavePayloadReader reader)
     {
         var count = reader.ReadInt32();
+        if (count < 0 || count > reader.Remaining / MinEntryBytes)
+            throw new InvalidDataException($"Corrupt PartitionStates payload: entry count {count} exceeds {reader.Remaining} remaining bytes");
+
         var entries = new List<(TopicPartition, PartitionState)>(count);
         for (var i = 0; i < count; i++)
         {

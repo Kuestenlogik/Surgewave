@@ -5,6 +5,7 @@ using Kuestenlogik.Surgewave.Broker.Native;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Clustering;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.InterBroker;
 using Kuestenlogik.Surgewave.Clustering.Raft;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -460,6 +461,15 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);
         _replicationServer.SetHeartbeatManager(_heartbeatManager);
+
+        // #60 Inc4 — wire the native SRWV inter-broker receive server onto the ReplicationServer's
+        // shared port. It applies decoded native control-plane frames (currently UpdateMetadata) to
+        // cluster state with no Kafka-wire dependency. Wired unconditionally (native clustering must
+        // not depend on the Kafka plugin); it stays dormant until native peers emit frames in the
+        // native opcode band (Inc5+), so legacy fetch/Raft traffic is unaffected.
+        var nativeInterBrokerLogger = _loggerFactory.CreateLogger<NativeInterBrokerServer>();
+        _replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
+            nativeInterBrokerLogger, new ClusterStateInterBrokerService(_clusterState)));
 
         // Wire up the controller client so the controller can push LeaderAndIsr
         // to remote brokers when topology changes (topic create, reelection).
