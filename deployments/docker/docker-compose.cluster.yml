@@ -34,7 +34,7 @@ services:
       - Surgewave__ReplicationPort=10092
       - Surgewave__UseRaftConsensus=true
       - Surgewave__RaftDataDirectory=/app/data/raft
-      - Surgewave__ClusterNodes=1:surgewave-1:10092,2:surgewave-2:10092,3:surgewave-3:10092
+      - Surgewave__ClusterNodes=1:surgewave-1:9092:10092,2:surgewave-2:9092:10092,3:surgewave-3:9092:10092
       - Surgewave__DataDirectory=/app/data
       - Surgewave__AutoCreateTopics=true
       - Surgewave__DefaultNumPartitions=3
@@ -71,7 +71,7 @@ services:
       - Surgewave__ReplicationPort=10092
       - Surgewave__UseRaftConsensus=true
       - Surgewave__RaftDataDirectory=/app/data/raft
-      - Surgewave__ClusterNodes=1:surgewave-1:10092,2:surgewave-2:10092,3:surgewave-3:10092
+      - Surgewave__ClusterNodes=1:surgewave-1:9092:10092,2:surgewave-2:9092:10092,3:surgewave-3:9092:10092
       - Surgewave__DataDirectory=/app/data
       - Surgewave__AutoCreateTopics=true
       - Surgewave__DefaultNumPartitions=3
@@ -111,7 +111,7 @@ services:
       - Surgewave__ReplicationPort=10092
       - Surgewave__UseRaftConsensus=true
       - Surgewave__RaftDataDirectory=/app/data/raft
-      - Surgewave__ClusterNodes=1:surgewave-1:10092,2:surgewave-2:10092,3:surgewave-3:10092
+      - Surgewave__ClusterNodes=1:surgewave-1:9092:10092,2:surgewave-2:9092:10092,3:surgewave-3:9092:10092
       - Surgewave__DataDirectory=/app/data
       - Surgewave__AutoCreateTopics=true
       - Surgewave__DefaultNumPartitions=3
