@@ -148,7 +148,7 @@ public class NativeInterBrokerServerTests
 
         // Hostile payload: valid controller id/epoch, then int32 broker count = 0x40000000 with no
         // entries following. The decoder must reject it (bounds guard) before pre-allocating,
-        // degrading to a clean Error frame.
+        // degrading to a clean Error frame. Layout: controllerId(4) epoch(4) brokerCount(4).
         byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0x40, 0x00, 0x00, 0x00];
         var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, bogus, CancellationToken.None);
 
@@ -163,7 +163,8 @@ public class NativeInterBrokerServerTests
         var fx = NewServer();
 
         // Hostile payload: valid controller id/epoch, zero brokers, then int32 entry count =
-        // 0x40000000 with no entries following (~17 GB pre-allocation without the bounds guard).
+        // 0x40000000 with no entries following (~17 GB pre-allocation without the guard).
+        // Layout: controllerId(4) epoch(4) brokerCount=0(4) entryCount(4).
         byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x00];
         var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, bogus, CancellationToken.None);
 
@@ -203,6 +204,47 @@ public class NativeInterBrokerServerTests
         Assert.Equal("cfg-host", known!.Host);
         Assert.Equal(12345, known.ReplicationPort);
         Assert.Equal((short)1, known.InterBrokerProtocol);
+    }
+
+    [Fact]
+    public async Task UpdateMetadata_DelayedLowerLeaderEpoch_IsSkippedPerPartitionWithoutRegressing()
+    {
+        var fx = NewServer();
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
+
+        // Fresh push: same controller epoch, partition at leader epoch 9, leader 4.
+        var (_, s1) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(tp, leader: 4, leaderEpoch: 9, replicas: [4], isr: [4], controllerEpoch: 3));
+        Assert.Equal(ClusterRpcStatus.None, s1);
+
+        // Delayed/reordered push: SAME controller epoch but an OLDER partition leader epoch (2) and a
+        // stale leader — the push is accepted at the controller level, but the partition entry is
+        // skipped by the per-partition guard, so the fresh leader is not regressed.
+        var (_, s2) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(tp, leader: 1, leaderEpoch: 2, replicas: [1], isr: [1], controllerEpoch: 3));
+        Assert.Equal(ClusterRpcStatus.None, s2); // push accepted; the stale entry is silently skipped
+
+        var applied = fx.State.GetPartitionState(tp);
+        Assert.Equal(4, applied!.LeaderBrokerId); // still the fresh push's leader
+        Assert.Equal(9, applied.LeaderEpoch);
+    }
+
+    [Fact]
+    public async Task UpdateMetadata_DisjointPartitions_BothApply()
+    {
+        // The regression guard: two same-epoch pushes for DIFFERENT partitions must both apply — a
+        // coarse per-push version fence would have dropped the second.
+        var fx = NewServer();
+        var a = new TopicPartition { Topic = "orders", Partition = 0 };
+        var b = new TopicPartition { Topic = "orders", Partition = 1 };
+
+        await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(a, leader: 4, leaderEpoch: 9, replicas: [4], isr: [4], controllerEpoch: 3));
+        await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(b, leader: 5, leaderEpoch: 2, replicas: [5], isr: [5], controllerEpoch: 3));
+
+        Assert.Equal(4, fx.State.GetPartitionState(a)!.LeaderBrokerId);
+        Assert.Equal(5, fx.State.GetPartitionState(b)!.LeaderBrokerId); // NOT dropped despite lower epoch
     }
 
     // ── LeaderAndIsr ─────────────────────────────────────────────────────────
@@ -285,9 +327,9 @@ public class NativeInterBrokerServerTests
     {
         var fx = NewServer();
 
-        // Hostile payload: valid controller id/epoch/broker id, then int32 partition count =
-        // 0x40000000 with no entries following — must hit the bounds guard, not the allocator.
-        byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x00];
+        // Hostile payload: valid controllerId(4) epoch(4) brokerId(4), then int32 partition count =
+        // 0x40000000 with no entries following — must hit the bounds guard.
+        byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 3, 0x40, 0x00, 0x00, 0x00];
         var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerStopReplica, bogus, CancellationToken.None);
 
         var (opcode, status) = DecodeStatusFrame(response);

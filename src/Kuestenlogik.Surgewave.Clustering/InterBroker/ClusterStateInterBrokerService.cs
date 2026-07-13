@@ -12,19 +12,19 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// of the Kafka-wire <c>InterBrokerApiHandler</c> — without any Protocol.Kafka dependency.
 /// </summary>
 /// <remarks>
-/// <b>Controller-epoch fencing (Inc5).</b> Every controller push (UpdateMetadata / LeaderAndIsr /
-/// StopReplica) carries the sender's ControllerId/ControllerEpoch and is fenced via the atomic
-/// <see cref="ClusterState.TryAdvanceControllerEpoch"/>: an older epoch is rejected with
-/// <see cref="ClusterRpcStatus.StaleControllerEpoch"/> before anything is applied, so a delayed push
-/// from a demoted controller cannot regress partition metadata during failover. The Kafka-wire
-/// <c>InterBrokerApiHandler</c> fences through the SAME method, so pushes interleaved over both
-/// wires during a rolling upgrade share one fence and cannot slip past each other.
-/// <para>
-/// Known limit (parity with the Kafka-wire handler, revisit with Inc6): the fence is atomic but
-/// fence-then-apply is not one critical section — two pushes that BOTH pass the fence (equal
-/// epochs, or new-then-delayed interleaving) can interleave their per-partition applications.
-/// Partition-level staleness is bounded by the leader epoch carried per entry.
-/// </para>
+/// <b>Controller-push ordering (Inc5/Inc6a).</b> Every controller push (UpdateMetadata / LeaderAndIsr /
+/// StopReplica) is applied under the shared <see cref="ClusterState.AcquireControllerPushScopeAsync">
+/// push gate</see>, which the Kafka-wire <c>InterBrokerApiHandler</c> also holds, so native and Kafka
+/// pushes during a rolling upgrade share one critical section and never interleave their per-partition
+/// writes. Ordering is layered: (1) the <b>controller-epoch fence</b>
+/// (<see cref="ClusterState.TryAdvanceControllerEpoch"/>) rejects a push from a demoted controller
+/// (older epoch); (2) the <b>per-partition leader-epoch guard</b>
+/// (<see cref="ClusterState.TryApplyControllerPartitionState"/> / <see cref="ClusterState.ShouldStopReplica"/>)
+/// skips a delayed/reordered entry whose leader epoch is older than the stored one, while UNRELATED
+/// partitions in the same push still apply — so disjoint partial pushes never fence each other out
+/// (a coarse per-push version would wrongly drop them). Both guards run through the same
+/// <see cref="ClusterState"/> primitives on the Kafka-wire <c>InterBrokerApiHandler</c> too, so the
+/// ordering is symmetric across both wires during a rolling upgrade.
 /// </remarks>
 public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerService
 {
@@ -51,35 +51,35 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _isrUpdateApplier = isrUpdateApplier;
     }
 
-    public ValueTask<ClusterRpcStatus> ApplyUpdateMetadataAsync(PartitionStatesPayload payload, CancellationToken ct = default)
+    public async ValueTask<ClusterRpcStatus> ApplyUpdateMetadataAsync(PartitionStatesPayload payload, CancellationToken ct = default)
     {
-        var fence = FenceAndAdvanceControllerEpoch("UpdateMetadata", payload.ControllerId, payload.ControllerEpoch);
+        // Hold the push gate across the whole fence-through-apply span so two pushes that both pass
+        // the epoch fence cannot interleave their per-partition writes (#60 Inc6a).
+        using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
+
+        var fence = FenceControllerEpoch("UpdateMetadata", payload.ControllerId, payload.ControllerEpoch);
         if (fence != ClusterRpcStatus.None)
-            return ValueTask.FromResult(fence);
+            return fence;
 
         ApplyLiveBrokers(payload.LiveBrokers);
 
         foreach (var (tp, state) in payload.Entries)
         {
-            // Apply only the topology fields the controller owns (leader/epoch/replicas/ISR); local
-            // watermarks/log offsets stay follower-owned, exactly as the Kafka-wire UpdateMetadata does.
-            _clusterState.UpdatePartitionState(tp, s =>
-            {
-                s.LeaderBrokerId = state.LeaderBrokerId;
-                s.LeaderEpoch = state.LeaderEpoch;
-                s.Replicas.Clear();
-                s.Replicas.AddRange(state.Replicas);
-                s.Isr.Clear();
-                s.Isr.AddRange(state.Isr);
-            });
+            // Apply the controller-owned topology fields, but only when this entry's leader epoch is
+            // not older than the stored one — a delayed/reordered push for this partition is skipped
+            // while unrelated partitions still apply (Inc6a per-partition ordering).
+            if (!_clusterState.TryApplyControllerPartitionState(tp, state.LeaderBrokerId, state.LeaderEpoch, state.Replicas, state.Isr))
+                LogStalePartition("UpdateMetadata", tp.Topic, tp.Partition, state.LeaderEpoch);
         }
 
-        return ValueTask.FromResult(ClusterRpcStatus.None);
+        return ClusterRpcStatus.None;
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyLeaderAndIsrAsync(PartitionStatesPayload payload, CancellationToken ct = default)
     {
-        var fence = FenceAndAdvanceControllerEpoch("LeaderAndIsr", payload.ControllerId, payload.ControllerEpoch);
+        using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
+
+        var fence = FenceControllerEpoch("LeaderAndIsr", payload.ControllerId, payload.ControllerEpoch);
         if (fence != ClusterRpcStatus.None)
             return fence;
 
@@ -91,15 +91,15 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         {
             try
             {
-                _clusterState.UpdatePartitionState(tp, s =>
+                // Per-partition ordering: skip a delayed/reordered entry whose leader epoch is older
+                // than the stored one, but keep applying the rest (Inc6a) — the state write and the
+                // BecomeLeader/Follower transition below must agree on the same epoch, so both are
+                // gated together.
+                if (!_clusterState.TryApplyControllerPartitionState(tp, state.LeaderBrokerId, state.LeaderEpoch, state.Replicas, state.Isr))
                 {
-                    s.LeaderBrokerId = state.LeaderBrokerId;
-                    s.LeaderEpoch = state.LeaderEpoch;
-                    s.Replicas.Clear();
-                    s.Replicas.AddRange(state.Replicas);
-                    s.Isr.Clear();
-                    s.Isr.AddRange(state.Isr);
-                });
+                    LogStalePartition("LeaderAndIsr", tp.Topic, tp.Partition, state.LeaderEpoch);
+                    continue;
+                }
 
                 if (state.LeaderBrokerId == _localBrokerId)
                 {
@@ -132,7 +132,9 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
     public async ValueTask<ClusterRpcStatus> ApplyStopReplicaAsync(StopReplicaPayload payload, CancellationToken ct = default)
     {
-        var fence = FenceAndAdvanceControllerEpoch("StopReplica", payload.ControllerId, payload.ControllerEpoch);
+        using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
+
+        var fence = FenceControllerEpoch("StopReplica", payload.ControllerId, payload.ControllerEpoch);
         if (fence != ClusterRpcStatus.None)
             return fence;
 
@@ -144,10 +146,18 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
             return ClusterRpcStatus.ReplicaNotAvailable;
         }
 
-        foreach (var (tp, _, deletePartition) in payload.Partitions)
+        foreach (var (tp, leaderEpoch, deletePartition) in payload.Partitions)
         {
             try
             {
+                // Per-partition ordering: a delayed stop for an epoch older than a newer re-assignment
+                // must not delete the re-created partition (Inc6a).
+                if (!_clusterState.ShouldStopReplica(tp, leaderEpoch))
+                {
+                    LogStalePartition("StopReplica", tp.Topic, tp.Partition, leaderEpoch);
+                    continue;
+                }
+
                 _replicaManager.StopReplica(tp);
 
                 if (deletePartition)
@@ -200,14 +210,15 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     /// (re-)registration could regress it.
     /// </summary>
     /// <remarks>
-    /// <b>Inc6 gate — level convergence needs ordering.</b> The snapshot carries no version: a
-    /// delayed native push (same controller epoch — the fence accepts equals) can re-raise a level
-    /// the truth has since dropped, and the Kafka-wire handlers never converge levels DOWN for
-    /// already-known brokers, so a downgrade only propagates while the controller stays put. Both
-    /// are harmless while nothing can finalize to native without registration (dead until Inc6),
-    /// but BEFORE native registration goes live this must carry a metadata version (ignore older
-    /// views) and the Kafka-wire path must converge levels too. The GetBroker→AddBroker
-    /// read-modify-write here should then also move to a CAS-style ClusterState.UpdateBroker.
+    /// <b>Level convergence (Inc6a).</b> The whole apply runs under the push gate, and the
+    /// endpoint/level write goes through the atomic
+    /// <see cref="ClusterState.UpdateBroker(int,BrokerNode,System.Func{BrokerNode,BrokerNode},out bool)"/>
+    /// so a concurrent registration writing the same broker's real port is never clobbered by a stale
+    /// read (the #69 wrong-port failure).
+    /// <para>Still open (Inc7+): the Kafka-wire handlers converge levels UP only, never DOWN for an
+    /// already-known broker, so a rolling DOWNGRADE propagates to non-controllers only while the
+    /// controller stays put — a mixed-version accuracy edge, not a safety hole (the controller's own
+    /// registration-authoritative view drives the gate, and native receive is unconditional).</para>
     /// </remarks>
     private void ApplyLiveBrokers(IReadOnlyList<LiveBrokerSpec> liveBrokers)
     {
@@ -216,29 +227,38 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
             if (b.BrokerId == _localBrokerId)
                 continue;
 
-            var known = _clusterState.GetBroker(b.BrokerId);
-            if (known is null)
+            var ifAbsent = new BrokerNode
             {
-                _clusterState.AddBroker(new BrokerNode
-                {
-                    BrokerId = b.BrokerId,
-                    Host = b.Host,
-                    Port = b.Port,
-                    Rack = b.Rack,
-                    ReplicationPort = b.ReplicationPort,
-                    InterBrokerProtocol = b.InterBrokerProtocol,
-                });
+                BrokerId = b.BrokerId,
+                Host = b.Host,
+                Port = b.Port,
+                Rack = b.Rack,
+                ReplicationPort = b.ReplicationPort,
+                InterBrokerProtocol = b.InterBrokerProtocol,
+            };
+
+            // Atomic add-or-converge: register an unknown broker with its full identity, or converge
+            // ONLY the protocol level of a known broker (keeping its possibly-better discovered
+            // endpoint), without a lost-update window against a concurrent registration. The
+            // inserted flag is decided inside the lock, so the log is accurate under contention.
+            _clusterState.UpdateBroker(
+                b.BrokerId,
+                ifAbsent,
+                known => known.InterBrokerProtocol == b.InterBrokerProtocol
+                    ? known
+                    : known with { InterBrokerProtocol = b.InterBrokerProtocol },
+                out var inserted);
+
+            if (inserted)
                 LogBrokerLearned(b.BrokerId, b.Host, b.Port, b.ReplicationPort);
-            }
-            else if (known.InterBrokerProtocol != b.InterBrokerProtocol)
-            {
-                _clusterState.AddBroker(known with { InterBrokerProtocol = b.InterBrokerProtocol });
-            }
         }
     }
 
-    private ClusterRpcStatus FenceAndAdvanceControllerEpoch(string opName, int controllerId, int controllerEpoch)
+    private ClusterRpcStatus FenceControllerEpoch(string opName, int controllerId, int controllerEpoch)
     {
+        // Controller-level fence, evaluated inside the held push gate: a push from a demoted controller
+        // (older epoch) is rejected outright. Per-partition ordering within an accepted epoch is
+        // handled by the leader-epoch guard in the apply loop (#60 Inc5/Inc6a).
         if (!_clusterState.TryAdvanceControllerEpoch(controllerId, controllerEpoch))
         {
             LogStaleControllerEpoch(opName, controllerEpoch, _clusterState.ControllerEpoch);
@@ -250,6 +270,9 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting stale native {OpName} push: controller epoch {RequestEpoch} < current {CurrentEpoch}")]
     private partial void LogStaleControllerEpoch(string opName, int requestEpoch, int currentEpoch);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping stale native {OpName} entry for {Topic}-{Partition}: leader epoch {LeaderEpoch} older than stored")]
+    private partial void LogStalePartition(string opName, string topic, int partition, int leaderEpoch);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refusing native StopReplica addressed to broker {TargetBrokerId} (this is broker {LocalBrokerId})")]
     private partial void LogMisroutedStopReplica(int targetBrokerId, int localBrokerId);

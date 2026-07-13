@@ -112,4 +112,87 @@ public sealed class CrossWireFenceTests
         Assert.Equal(7, state.ControllerEpoch);
         Assert.Equal(5, state.ControllerId);
     }
+
+    // ── #60 Inc6a: per-partition leader-epoch guard is symmetric on the Kafka wire ─────────────
+
+    [Fact]
+    public async Task KafkaWireStopReplica_StaleLeaderEpoch_DoesNotDeleteReassignedPartition()
+    {
+        var (handler, state) = NewHandler();
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
+        // The partition was re-assigned at leader epoch 6.
+        state.TryApplyControllerPartitionState(tp, leaderId: 0, leaderEpoch: 6, replicas: [0], isr: [0]);
+
+        // A delayed StopReplica(delete) at the OLDER epoch 5 must be refused, not delete the data.
+        var request = new StopReplicaRequest
+        {
+            ApiKey = ApiKey.StopReplica,
+            ApiVersion = 3,
+            CorrelationId = 1,
+            ClientId = "controller",
+            ControllerId = 1,
+            ControllerEpoch = 0,
+            BrokerEpoch = -1,
+            DeletePartitions = true,
+            TopicStates =
+            [
+                new StopReplicaRequest.StopReplicaTopicState
+                {
+                    TopicName = tp.Topic,
+                    PartitionStates = [new StopReplicaRequest.StopReplicaPartitionState { PartitionIndex = 0, LeaderEpoch = 5, DeletePartition = true }],
+                },
+            ],
+        };
+
+        var response = (StopReplicaResponse)await handler.HandleAsync(request, Ctx, CancellationToken.None);
+
+        Assert.Equal(ErrorCode.None, response.ErrorCode);
+        // The re-assigned partition state must survive — the stale stop was skipped.
+        Assert.NotNull(state.GetPartitionState(tp));
+        Assert.Equal(6, state.GetPartitionState(tp)!.LeaderEpoch);
+    }
+
+    [Fact]
+    public async Task KafkaWireLeaderAndIsr_StaleLeaderEpoch_DoesNotRegressPartition()
+    {
+        var (handler, state) = NewHandler();
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
+        state.TryApplyControllerPartitionState(tp, leaderId: 4, leaderEpoch: 9, replicas: [4], isr: [4]);
+
+        var request = new LeaderAndIsrRequest
+        {
+            ApiKey = ApiKey.LeaderAndIsr,
+            ApiVersion = 4,
+            CorrelationId = 1,
+            ClientId = "controller",
+            ControllerId = 1,
+            ControllerEpoch = 0,
+            BrokerEpoch = -1,
+            Type = 0,
+            TopicStates =
+            [
+                new LeaderAndIsrRequest.LeaderAndIsrTopicState
+                {
+                    TopicName = tp.Topic,
+                    TopicId = Guid.NewGuid(),
+                    PartitionStates =
+                    [
+                        new LeaderAndIsrRequest.LeaderAndIsrPartitionState
+                        {
+                            PartitionIndex = 0, ControllerEpoch = 0, Leader = 1, LeaderEpoch = 2,
+                            Isr = [1], PartitionEpoch = 2, Replicas = [1], AddingReplicas = [], RemovingReplicas = [], IsNew = false,
+                        },
+                    ],
+                },
+            ],
+            LiveLeaders = [],
+        };
+
+        var response = (LeaderAndIsrResponse)await handler.HandleAsync(request, Ctx, CancellationToken.None);
+
+        Assert.Equal(ErrorCode.None, response.ErrorCode);
+        // Stale leader epoch 2 < stored 9 — the fresh leader 4 must not be regressed.
+        Assert.Equal(4, state.GetPartitionState(tp)!.LeaderBrokerId);
+        Assert.Equal(9, state.GetPartitionState(tp)!.LeaderEpoch);
+    }
 }
