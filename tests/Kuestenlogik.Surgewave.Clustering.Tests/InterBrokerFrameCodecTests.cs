@@ -18,7 +18,7 @@ public class InterBrokerFrameCodecTests
     private static PartitionStatesPayload SamplePartitionStates()
     {
         var tp = new TopicPartition { Topic = "orders", Partition = 0 };
-        return new PartitionStatesPayload(
+        return new PartitionStatesPayload(ControllerId: 1, ControllerEpoch: 3, LiveBrokers: [],
         [
             (tp, new PartitionState { TopicPartition = tp, LeaderBrokerId = 1, LeaderEpoch = 5, Replicas = [1, 2, 3], Isr = [1, 2] }),
         ]);

@@ -4,7 +4,9 @@ using Kuestenlogik.Surgewave.Clustering.InterBroker;
 using Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Native;
+using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Transport.Tcp;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -12,17 +14,61 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Clustering.Tests;
 
 /// <summary>
-/// #60 Inc4 — coverage for the native inter-broker receive server: decode → dispatch → encode for the
-/// real UpdateMetadata op (applied to <see cref="ClusterState"/>), the error shape for opcodes that are
-/// in-band but not yet wired, and an end-to-end round trip over a real TCP loopback stream.
+/// #60 Inc4/Inc5 — coverage for the native inter-broker receive server: decode → dispatch → encode
+/// for the wired controller-plane ops (LeaderAndIsr / UpdateMetadata / StopReplica / AlterPartition),
+/// the controller-epoch fence, the error shape for opcodes that are in-band but not yet wired, and an
+/// end-to-end round trip over a real TCP loopback stream.
 /// </summary>
 public class NativeInterBrokerServerTests
 {
-    private static NativeInterBrokerServer NewServer(ClusterState clusterState)
-        => new(NullLogger<NativeInterBrokerServer>.Instance, new ClusterStateInterBrokerService(clusterState));
+    private sealed record ServerFixture(
+        NativeInterBrokerServer Server,
+        ClusterState State,
+        ReplicaManager Replicas,
+        StubIsrApplier IsrApplier);
 
-    private static PartitionStatesPayload UpdateMetadata(TopicPartition tp, int leader, int leaderEpoch, List<int> replicas, List<int> isr)
-        => new([(tp, new PartitionState { TopicPartition = tp, LeaderBrokerId = leader, LeaderEpoch = leaderEpoch, Replicas = replicas, Isr = isr })]);
+    private static ServerFixture NewServer(int localBrokerId = 0)
+    {
+        var state = new ClusterState();
+        var config = new ClusteringConfig
+        {
+            BrokerId = localBrokerId,
+            Host = "localhost",
+            Port = 9092 + localBrokerId,
+            RebalanceCheckIntervalSeconds = 5,
+        };
+        var logs = new LogManager(
+            Path.Combine(Path.GetTempPath(), $"surgewave-test-{Guid.NewGuid():N}"),
+            new MemoryLogSegmentFactory());
+        var replicas = new ReplicaManager(
+            NullLogger<ReplicaManager>.Instance, state, logs, config, new TcpPeerTransport());
+        var isrApplier = new StubIsrApplier();
+        var service = new ClusterStateInterBrokerService(
+            NullLogger<ClusterStateInterBrokerService>.Instance,
+            state, replicas, logs, localBrokerId, isrApplier);
+        var server = new NativeInterBrokerServer(NullLogger<NativeInterBrokerServer>.Instance, service);
+        return new(server, state, replicas, isrApplier);
+    }
+
+    internal sealed class StubIsrApplier : IIsrUpdateApplier
+    {
+        public bool IsController { get; set; }
+        public PartitionState? Result { get; set; }
+        public (TopicPartition Tp, int LeaderId, int LeaderEpoch, IReadOnlyList<int> NewIsr)? LastApply { get; private set; }
+
+        public Task<PartitionState?> ApplyIsrUpdateAsync(
+            TopicPartition tp, int leaderId, int leaderEpoch, IReadOnlyList<int> newIsr, CancellationToken ct = default)
+        {
+            LastApply = (tp, leaderId, leaderEpoch, newIsr);
+            return Task.FromResult(Result);
+        }
+    }
+
+    private static PartitionStatesPayload PartitionStates(
+        TopicPartition tp, int leader, int leaderEpoch, List<int> replicas, List<int> isr,
+        int controllerId = 1, int controllerEpoch = 0, IReadOnlyList<LiveBrokerSpec>? liveBrokers = null)
+        => new(controllerId, controllerEpoch, liveBrokers ?? [],
+            [(tp, new PartitionState { TopicPartition = tp, LeaderBrokerId = leader, LeaderEpoch = leaderEpoch, Replicas = replicas, Isr = isr })]);
 
     private static (SurgewaveOpCode Opcode, ClusterRpcStatus Status) DecodeStatusFrame(byte[] frame)
     {
@@ -32,21 +78,30 @@ public class NativeInterBrokerServerTests
         return (opcode, InterBrokerStatusPayload.Read(ref reader).Status);
     }
 
-    [Fact]
-    public async Task ProcessAsync_UpdateMetadata_AppliesToClusterStateAndAcks()
+    private static async ValueTask<(SurgewaveOpCode Opcode, ClusterRpcStatus Status)> ProcessAsync<TPayload>(
+        NativeInterBrokerServer server, SurgewaveOpCode opcode, TPayload payload)
+        where TPayload : Protocol.Native.Serialization.ISerializablePayload<TPayload>
     {
-        var clusterState = new ClusterState();
-        var server = NewServer(clusterState);
+        var bytes = InterBrokerFrameCodec.EncodePayload(payload);
+        var response = await server.ProcessAsync(opcode, bytes, CancellationToken.None);
+        return DecodeStatusFrame(response);
+    }
+
+    // ── UpdateMetadata ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateMetadata_AppliesToClusterStateAndAcks()
+    {
+        var fx = NewServer();
         var tp = new TopicPartition { Topic = "orders", Partition = 2 };
 
-        var payload = InterBrokerFrameCodec.EncodePayload(UpdateMetadata(tp, leader: 4, leaderEpoch: 9, replicas: [4, 5, 6], isr: [4, 5]));
-        var response = await server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, payload, CancellationToken.None);
+        var (opcode, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(tp, leader: 4, leaderEpoch: 9, replicas: [4, 5, 6], isr: [4, 5]));
 
-        var (opcode, status) = DecodeStatusFrame(response);
         Assert.Equal(SurgewaveOpCode.InterBrokerUpdateMetadata, opcode);
         Assert.Equal(ClusterRpcStatus.None, status);
 
-        var applied = clusterState.GetPartitionState(tp);
+        var applied = fx.State.GetPartitionState(tp);
         Assert.NotNull(applied);
         Assert.Equal(4, applied!.LeaderBrokerId);
         Assert.Equal(9, applied.LeaderEpoch);
@@ -55,27 +110,47 @@ public class NativeInterBrokerServerTests
     }
 
     [Fact]
-    public async Task ProcessAsync_InBandButUnwiredOpcode_RepliesErrorUnsupportedVersion()
+    public async Task UpdateMetadata_AdvancesControllerIdAndEpoch()
     {
-        var server = NewServer(new ClusterState());
+        var fx = NewServer();
+        var tp = new TopicPartition { Topic = "t", Partition = 0 };
 
-        // StopReplica is in the native band but has no handler yet (Inc7).
-        var response = await server.ProcessAsync(SurgewaveOpCode.InterBrokerStopReplica, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
+        await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(tp, 1, 1, [1], [1], controllerId: 7, controllerEpoch: 12));
 
-        var (opcode, status) = DecodeStatusFrame(response);
-        Assert.Equal(SurgewaveOpCode.Error, opcode);
-        Assert.Equal(ClusterRpcStatus.UnsupportedVersion, status);
+        Assert.Equal(7, fx.State.ControllerId);
+        Assert.Equal(12, fx.State.ControllerEpoch);
     }
 
     [Fact]
-    public async Task ProcessAsync_UpdateMetadataWithBogusCount_RejectsCleanlyWithoutHugeAllocation()
+    public async Task UpdateMetadata_StaleControllerEpoch_RejectsWithoutApplying()
     {
-        var server = NewServer(new ClusterState());
+        var fx = NewServer();
+        fx.State.ControllerEpoch = 5;
+        fx.State.ControllerId = 9;
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
 
-        // Hostile payload: int32 entry count = 0x40000000 with no entries following. The decoder must
-        // reject it (bounds guard) before pre-allocating ~17 GB, degrading to a clean Error frame.
-        byte[] bogus = [0x40, 0x00, 0x00, 0x00];
-        var response = await server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, bogus, CancellationToken.None);
+        // A delayed push from a demoted controller (epoch 4 < current 5) must not regress metadata.
+        var (opcode, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerUpdateMetadata,
+            PartitionStates(tp, leader: 4, leaderEpoch: 9, replicas: [4], isr: [4], controllerId: 4, controllerEpoch: 4));
+
+        Assert.Equal(SurgewaveOpCode.InterBrokerUpdateMetadata, opcode);
+        Assert.Equal(ClusterRpcStatus.StaleControllerEpoch, status);
+        Assert.Null(fx.State.GetPartitionState(tp)); // nothing applied
+        Assert.Equal(5, fx.State.ControllerEpoch);   // epoch not regressed
+        Assert.Equal(9, fx.State.ControllerId);
+    }
+
+    [Fact]
+    public async Task UpdateMetadata_WithBogusBrokerCount_RejectsCleanlyWithoutHugeAllocation()
+    {
+        var fx = NewServer();
+
+        // Hostile payload: valid controller id/epoch, then int32 broker count = 0x40000000 with no
+        // entries following. The decoder must reject it (bounds guard) before pre-allocating,
+        // degrading to a clean Error frame.
+        byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0x40, 0x00, 0x00, 0x00];
+        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, bogus, CancellationToken.None);
 
         var (opcode, status) = DecodeStatusFrame(response);
         Assert.Equal(SurgewaveOpCode.Error, opcode);
@@ -83,12 +158,210 @@ public class NativeInterBrokerServerTests
     }
 
     [Fact]
-    public async Task ProcessAsync_UpdateMetadataWithoutService_RepliesNotController()
+    public async Task UpdateMetadata_WithBogusEntryCount_RejectsCleanlyWithoutHugeAllocation()
+    {
+        var fx = NewServer();
+
+        // Hostile payload: valid controller id/epoch, zero brokers, then int32 entry count =
+        // 0x40000000 with no entries following (~17 GB pre-allocation without the bounds guard).
+        byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x00];
+        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, bogus, CancellationToken.None);
+
+        var (opcode, status) = DecodeStatusFrame(response);
+        Assert.Equal(SurgewaveOpCode.Error, opcode);
+        Assert.Equal(ClusterRpcStatus.Unknown, status);
+    }
+
+    [Fact]
+    public async Task LeaderAndIsr_WithLiveBrokers_LearnsUnknownBrokerAndConvergesKnownLevel()
+    {
+        var fx = NewServer(localBrokerId: 3);
+        // Broker 5 is already known from config discovery — its endpoint must NOT be clobbered,
+        // but its advertised protocol level must converge.
+        fx.State.AddBroker(new BrokerNode { BrokerId = 5, Host = "cfg-host", Port = 9097, ReplicationPort = 12345 });
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
+
+        var (_, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerLeaderAndIsr,
+            PartitionStates(tp, leader: 9, leaderEpoch: 1, replicas: [9, 3], isr: [9], liveBrokers:
+            [
+                new LiveBrokerSpec(BrokerId: 9, Host: "10.0.0.9", Port: 9092, ReplicationPort: 10999, InterBrokerProtocol: 1, Rack: null),
+                new LiveBrokerSpec(BrokerId: 5, Host: "push-host", Port: 1, ReplicationPort: 2, InterBrokerProtocol: 1, Rack: null),
+            ]));
+
+        Assert.Equal(ClusterRpcStatus.None, status);
+
+        // Unknown leader 9 was learned with its full inter-broker identity — the follower can fetch.
+        var learned = fx.State.GetBroker(9);
+        Assert.NotNull(learned);
+        Assert.Equal("10.0.0.9", learned!.Host);
+        Assert.Equal(10999, learned.ReplicationPort);
+        Assert.Equal((short)1, learned.InterBrokerProtocol);
+
+        // Known broker 5 kept its discovered endpoint but converged its level.
+        var known = fx.State.GetBroker(5);
+        Assert.NotNull(known);
+        Assert.Equal("cfg-host", known!.Host);
+        Assert.Equal(12345, known.ReplicationPort);
+        Assert.Equal((short)1, known.InterBrokerProtocol);
+    }
+
+    // ── LeaderAndIsr ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LeaderAndIsr_LocalBrokerIsLeader_BecomesLeader()
+    {
+        var fx = NewServer(localBrokerId: 3);
+        var tp = new TopicPartition { Topic = "orders", Partition = 1 };
+
+        var (opcode, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerLeaderAndIsr,
+            PartitionStates(tp, leader: 3, leaderEpoch: 2, replicas: [3, 1], isr: [3]));
+
+        Assert.Equal(SurgewaveOpCode.InterBrokerLeaderAndIsr, opcode);
+        Assert.Equal(ClusterRpcStatus.None, status);
+        Assert.True(fx.Replicas.IsLeader(tp));
+
+        var applied = fx.State.GetPartitionState(tp);
+        Assert.NotNull(applied);
+        Assert.Equal(3, applied!.LeaderBrokerId);
+        Assert.Equal(2, applied.LeaderEpoch);
+    }
+
+    [Fact]
+    public async Task LeaderAndIsr_StaleControllerEpoch_RejectsWithoutTransition()
+    {
+        var fx = NewServer(localBrokerId: 3);
+        fx.State.ControllerEpoch = 10;
+        var tp = new TopicPartition { Topic = "orders", Partition = 1 };
+
+        var (_, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerLeaderAndIsr,
+            PartitionStates(tp, leader: 3, leaderEpoch: 2, replicas: [3, 1], isr: [3], controllerEpoch: 9));
+
+        Assert.Equal(ClusterRpcStatus.StaleControllerEpoch, status);
+        Assert.False(fx.Replicas.IsLeader(tp));
+        Assert.Null(fx.State.GetPartitionState(tp));
+    }
+
+    // ── StopReplica ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task StopReplica_DeleteOnTargetBroker_RemovesPartitionState()
+    {
+        var fx = NewServer(localBrokerId: 3);
+        var tp = new TopicPartition { Topic = "orders", Partition = 1 };
+
+        await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerLeaderAndIsr,
+            PartitionStates(tp, leader: 3, leaderEpoch: 2, replicas: [3], isr: [3]));
+        Assert.True(fx.Replicas.IsLeader(tp));
+
+        var (opcode, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerStopReplica,
+            new StopReplicaPayload(ControllerId: 1, ControllerEpoch: 0, BrokerId: 3, [(tp, 2, true)]));
+
+        Assert.Equal(SurgewaveOpCode.InterBrokerStopReplica, opcode);
+        Assert.Equal(ClusterRpcStatus.None, status);
+        Assert.False(fx.Replicas.IsLeader(tp));
+        Assert.Null(fx.State.GetPartitionState(tp));
+    }
+
+    [Fact]
+    public async Task StopReplica_AddressedToOtherBroker_RefusedWithoutStopping()
+    {
+        var fx = NewServer(localBrokerId: 3);
+        var tp = new TopicPartition { Topic = "orders", Partition = 1 };
+
+        await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerLeaderAndIsr,
+            PartitionStates(tp, leader: 3, leaderEpoch: 2, replicas: [3], isr: [3]));
+
+        // A stop can delete data, so a frame addressed to broker 4 must be refused by broker 3.
+        var (_, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerStopReplica,
+            new StopReplicaPayload(ControllerId: 1, ControllerEpoch: 0, BrokerId: 4, [(tp, 2, true)]));
+
+        Assert.Equal(ClusterRpcStatus.ReplicaNotAvailable, status);
+        Assert.True(fx.Replicas.IsLeader(tp));
+        Assert.NotNull(fx.State.GetPartitionState(tp));
+    }
+
+    [Fact]
+    public async Task StopReplica_WithBogusCount_RejectsCleanlyWithoutHugeAllocation()
+    {
+        var fx = NewServer();
+
+        // Hostile payload: valid controller id/epoch/broker id, then int32 partition count =
+        // 0x40000000 with no entries following — must hit the bounds guard, not the allocator.
+        byte[] bogus = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x00];
+        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerStopReplica, bogus, CancellationToken.None);
+
+        var (opcode, status) = DecodeStatusFrame(response);
+        Assert.Equal(SurgewaveOpCode.Error, opcode);
+        Assert.Equal(ClusterRpcStatus.Unknown, status);
+    }
+
+    // ── AlterPartition (reverse ISR, #69) ────────────────────────────────────
+
+    [Fact]
+    public async Task AlterPartition_AsController_AppliesViaIsrApplier()
+    {
+        var fx = NewServer();
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
+        fx.IsrApplier.IsController = true;
+        fx.IsrApplier.Result = new PartitionState { TopicPartition = tp, LeaderBrokerId = 2, LeaderEpoch = 6, Isr = [2, 1] };
+
+        var (opcode, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerAlterPartition,
+            new AlterPartitionPayload(LeaderId: 2, LeaderEpoch: 6, tp, NewIsr: [2, 1]));
+
+        Assert.Equal(SurgewaveOpCode.InterBrokerAlterPartition, opcode);
+        Assert.Equal(ClusterRpcStatus.None, status);
+        Assert.Equal((tp, 2, 6), (fx.IsrApplier.LastApply!.Value.Tp, fx.IsrApplier.LastApply.Value.LeaderId, fx.IsrApplier.LastApply.Value.LeaderEpoch));
+        Assert.Equal([2, 1], fx.IsrApplier.LastApply.Value.NewIsr);
+    }
+
+    [Fact]
+    public async Task AlterPartition_NotController_RepliesNotController()
+    {
+        var fx = NewServer();
+        fx.IsrApplier.IsController = false;
+
+        var (_, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerAlterPartition,
+            new AlterPartitionPayload(1, 1, new TopicPartition { Topic = "t", Partition = 0 }, [1]));
+
+        Assert.Equal(ClusterRpcStatus.NotController, status);
+        Assert.Null(fx.IsrApplier.LastApply);
+    }
+
+    [Fact]
+    public async Task AlterPartition_UnknownPartition_RepliesUnknownTopicOrPartition()
+    {
+        var fx = NewServer();
+        fx.IsrApplier.IsController = true;
+        fx.IsrApplier.Result = null; // controller doesn't track this partition
+
+        var (_, status) = await ProcessAsync(fx.Server, SurgewaveOpCode.InterBrokerAlterPartition,
+            new AlterPartitionPayload(1, 1, new TopicPartition { Topic = "ghost", Partition = 0 }, [1]));
+
+        Assert.Equal(ClusterRpcStatus.UnknownTopicOrPartition, status);
+    }
+
+    // ── Dispatch edges ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task InBandButUnwiredOpcode_RepliesErrorUnsupportedVersion()
+    {
+        var fx = NewServer();
+
+        // Registration is in the native band but has no handler yet (Inc6).
+        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerRegistration, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
+
+        var (opcode, status) = DecodeStatusFrame(response);
+        Assert.Equal(SurgewaveOpCode.Error, opcode);
+        Assert.Equal(ClusterRpcStatus.UnsupportedVersion, status);
+    }
+
+    [Fact]
+    public async Task WiredOpcodeWithoutService_RepliesNotController()
     {
         var server = new NativeInterBrokerServer(NullLogger<NativeInterBrokerServer>.Instance, service: null);
 
         var payload = InterBrokerFrameCodec.EncodePayload(
-            UpdateMetadata(new TopicPartition { Topic = "t", Partition = 0 }, 1, 1, [1], [1]));
+            PartitionStates(new TopicPartition { Topic = "t", Partition = 0 }, 1, 1, [1], [1]));
         var response = await server.ProcessAsync(SurgewaveOpCode.InterBrokerUpdateMetadata, payload, CancellationToken.None);
 
         var (opcode, status) = DecodeStatusFrame(response);
@@ -96,11 +369,12 @@ public class NativeInterBrokerServerTests
         Assert.Equal(ClusterRpcStatus.NotController, status);
     }
 
+    // ── End-to-end loopback ──────────────────────────────────────────────────
+
     [Fact]
     public async Task Loopback_UpdateMetadataOverTcp_AppliesAndAcks()
     {
-        var clusterState = new ClusterState();
-        var server = NewServer(clusterState);
+        var fx = NewServer();
 
         var transport = new TcpPeerTransport();
         await using var listener = transport.CreateListener(new IPEndPoint(IPAddress.Loopback, 0));
@@ -117,13 +391,13 @@ public class NativeInterBrokerServerTests
         var serverTask = Task.Run(async () =>
         {
             await using var lease = await serverConn.AcceptInboundStreamAsync(cts.Token);
-            await server.HandleSingleAsync(lease.Stream, cts.Token);
+            await fx.Server.HandleSingleAsync(lease.Stream, cts.Token);
         }, cts.Token);
 
         // Client side: write the request frame, then read the response frame.
         var tp = new TopicPartition { Topic = "orders", Partition = 7 };
         var frame = InterBrokerFrameCodec.EncodeFrame(
-            SurgewaveOpCode.InterBrokerUpdateMetadata, UpdateMetadata(tp, leader: 3, leaderEpoch: 11, replicas: [3, 1], isr: [3]));
+            SurgewaveOpCode.InterBrokerUpdateMetadata, PartitionStates(tp, leader: 3, leaderEpoch: 11, replicas: [3, 1], isr: [3]));
 
         await using var clientLease = await clientConn.AcquireStreamAsync(cts.Token);
         await clientLease.Stream.WriteAsync(frame, cts.Token);
@@ -137,7 +411,7 @@ public class NativeInterBrokerServerTests
         var reader = new SurgewavePayloadReader(response.Value.Payload.Span);
         Assert.Equal(ClusterRpcStatus.None, InterBrokerStatusPayload.Read(ref reader).Status);
 
-        var applied = clusterState.GetPartitionState(tp);
+        var applied = fx.State.GetPartitionState(tp);
         Assert.NotNull(applied);
         Assert.Equal(3, applied!.LeaderBrokerId);
         Assert.Equal(11, applied.LeaderEpoch);

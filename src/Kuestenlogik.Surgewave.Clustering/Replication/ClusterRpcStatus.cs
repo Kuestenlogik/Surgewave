@@ -23,4 +23,8 @@ public enum ClusterRpcStatus : short
     NotController = 41,
     FencedLeaderEpoch = 74,
     UnknownTopicId = 100,
+
+    // #60 Inc5: the native AlterPartition receive path needs to distinguish "controller doesn't
+    // track this partition" from a plain failure. Pinned to Kafka ErrorCode.UnknownTopicOrPartition.
+    UnknownTopicOrPartition = 3,
 }

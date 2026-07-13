@@ -106,8 +106,13 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
                 request.BrokerId, brokerEpoch);
         }
 
-        // Extract primary listener for ClusterState
-        var primaryListener = request.Listeners.FirstOrDefault();
+        // Extract the client listener for ClusterState — explicitly skipping the REPLICATION
+        // listener, which advertises the inter-broker port, not the client port (#60 Inc5).
+        var primaryListener = request.Listeners.FirstOrDefault(
+                l => !string.Equals(l.Name, "REPLICATION", StringComparison.OrdinalIgnoreCase))
+            ?? request.Listeners.FirstOrDefault();
+        var replicationListener = request.Listeners.FirstOrDefault(
+            l => string.Equals(l.Name, "REPLICATION", StringComparison.OrdinalIgnoreCase));
         var host = primaryListener?.Host ?? "localhost";
         var port = primaryListener?.Port ?? 9092;
         var rack = request.Rack;
@@ -155,15 +160,37 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 
         _registrations[request.BrokerId] = registration;
 
-        // Update cluster state
-        var brokerNode = new BrokerNode
-        {
-            BrokerId = request.BrokerId,
-            Host = host,
-            Port = (int)port,
-            Rack = rack,
-            InterBrokerProtocol = interBrokerProtocol
-        };
+        // Update cluster state. The ReplicationPort is load-bearing (#60 Inc5): the native
+        // inter-broker client dials it for control-plane pushes once the cluster finalizes to the
+        // native protocol — and registration is exactly the event that raises the finalized level.
+        // Resolve it from the advertised REPLICATION listener; if the broker didn't advertise one,
+        // keep a previously EXPLICITLY discovered value (e.g. from cluster-node config, #69). A
+        // previously derived default is NOT carried forward — it must re-derive from the NEW client
+        // port, or a broker that moved ports would pin a stale computed guess.
+        var existingNode = _clusterState.GetBroker(request.BrokerId);
+        int? explicitReplicationPort = replicationListener is not null
+            ? replicationListener.Port
+            : existingNode is { HasExplicitReplicationPort: true }
+                ? existingNode.ReplicationPort
+                : null;
+        var brokerNode = explicitReplicationPort is { } replicationPort
+            ? new BrokerNode
+            {
+                BrokerId = request.BrokerId,
+                Host = host,
+                Port = (int)port,
+                Rack = rack,
+                InterBrokerProtocol = interBrokerProtocol,
+                ReplicationPort = replicationPort,
+            }
+            : new BrokerNode
+            {
+                BrokerId = request.BrokerId,
+                Host = host,
+                Port = (int)port,
+                Rack = rack,
+                InterBrokerProtocol = interBrokerProtocol,
+            };
         _clusterState.AddBroker(brokerNode);
 
         _logger.LogInformation(

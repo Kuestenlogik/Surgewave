@@ -10,6 +10,7 @@ using Kuestenlogik.Surgewave.Broker.Startup;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Queue;
 using Kuestenlogik.Surgewave.Clustering;
+using Kuestenlogik.Surgewave.Clustering.InterBroker;
 using Kuestenlogik.Surgewave.Clustering.Raft;
 using Kuestenlogik.Surgewave.Clustering.GeoReplication;
 using Kuestenlogik.Surgewave.Clustering.Replication;
@@ -497,10 +498,22 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Transport.IPeerTransport>(s
 builder.Services.AddSingleton(sp => new ConnectionPool(
     sp.GetRequiredService<ILogger<ConnectionPool>>(),
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
-// #59 b5: ControllerClient (the inter-broker LeaderAndIsr/UpdateMetadata/StopReplica wire codec)
-// moved into the Kafka plugin, which registers it as IControllerReplicaRpc. ReplicaManager (and,
-// below, ClusterController) consume the neutral seam — null when the Kafka plugin is absent, so a
-// native-only broker skips the inter-broker push (single-broker; native control tracked in #60).
+// #60 Inc5: the unkeyed IControllerReplicaRpc is the finalized-level gate — it routes control-plane
+// pushes to the native SRWV client once the whole cluster advertises the native inter-broker
+// protocol, and falls back to the Kafka plugin's wire client (registered KEYED under
+// GatedControllerReplicaRpc.WireFallbackServiceKey) until then. A broker without the Kafka plugin
+// has no fallback: pushes are dropped while the cluster is pinned to the Kafka wire (plugin-free
+// join completes with native registration, Inc6).
+builder.Services.AddSingleton(sp => new NativeControllerClient(
+    sp.GetRequiredService<ConnectionPool>(),
+    sp.GetRequiredService<ClusterState>(),
+    sp.GetRequiredService<ClusteringConfig>(),
+    sp.GetRequiredService<ILogger<NativeControllerClient>>()));
+builder.Services.AddSingleton<IControllerReplicaRpc>(sp => new GatedControllerReplicaRpc(
+    sp.GetRequiredService<ClusterState>(),
+    sp.GetRequiredService<NativeControllerClient>(),
+    sp.GetKeyedService<IControllerReplicaRpc>(GatedControllerReplicaRpc.WireFallbackServiceKey),
+    sp.GetRequiredService<ILogger<GatedControllerReplicaRpc>>()));
 builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<ILogger<ReplicaManager>>(),
     sp.GetRequiredService<ClusterState>(),
@@ -759,9 +772,22 @@ var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 // reverse-ISR reports before the cluster starts (#69). This closes the gap
 // where a production broker never pushed LeaderAndIsr at all (only the embedded
 // runtime did), so followers never replicated and the ISR never formed.
-// #59 b5: the controller client is the Kafka plugin's IControllerReplicaRpc; wire it when present.
+// #60 Inc5: the unkeyed IControllerReplicaRpc is the finalized-level gate (native SRWV client with
+// the Kafka plugin's wire client as fallback while the cluster is pinned to the Kafka wire).
 if (app.Services.GetService<IControllerReplicaRpc>() is { } controllerReplicaRpc)
     clusterController.SetControllerClient(controllerReplicaRpc);
+
+// #60 Inc5 — wire the native SRWV inter-broker receive server onto the ReplicationServer's shared
+// port (the embedded runtime has done this since Inc4; the production host must too, or native
+// control-plane frames from peers would be answered with garbage by the legacy decode path).
+// Unconditional: native clustering must not depend on the Kafka plugin. Legacy fetch/Raft frames
+// sit below the native opcode band, so the hot path is untouched.
+replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
+    app.Services.GetRequiredService<ILogger<NativeInterBrokerServer>>(),
+    new ClusterStateInterBrokerService(
+        app.Services.GetRequiredService<ILogger<ClusterStateInterBrokerService>>(),
+        clusterState, replicaManager, app.Services.GetRequiredService<LogManager>(),
+        clusteringConfig.BrokerId, isrUpdateApplier: clusterController)));
 
 // Initialize Raft consensus if enabled
 RaftNode? raftNode = null;

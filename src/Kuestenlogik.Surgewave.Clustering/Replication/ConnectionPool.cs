@@ -50,22 +50,32 @@ public sealed partial class ConnectionPool : IDisposable
 
         var endpoint = $"{host}:{port}";
 
-        // Get or create queue and semaphore for this endpoint
+        // Get or create queue and semaphore for this endpoint. Explicit maxCount so an accounting
+        // bug over-releasing a permit surfaces as SemaphoreFullException (logged) instead of
+        // silently growing the pool bound (the one-arg ctor allows int.MaxValue releases).
         var queue = _pools.GetOrAdd(endpoint, _ => new ConcurrentQueue<PooledConnection>());
-        var semaphore = _semaphores.GetOrAdd(endpoint, _ => new SemaphoreSlim(_maxConnectionsPerBroker));
+        var semaphore = _semaphores.GetOrAdd(endpoint, _ => new SemaphoreSlim(_maxConnectionsPerBroker, _maxConnectionsPerBroker));
 
         // Try to get an existing connection
         while (queue.TryDequeue(out var connection))
         {
             if (connection.IsAlive && !connection.IsExpired(_idleTimeout))
             {
-                connection.MarkUsed();
+                // Re-arm the lease: without resetting the returned flag, the SECOND Return()/
+                // Discard() of a reused connection would silently no-op — the connection would
+                // neither re-pool nor release its permit (one leaked permit + socket per reuse
+                // cycle until the endpoint's semaphore is exhausted).
+                connection.PrepareForReuse();
                 LogConnectionReused(endpoint);
                 return connection;
             }
 
-            // Connection is dead or expired, dispose it
+            // Connection is dead or expired: dispose it AND release its creation permit — the
+            // semaphore counts live connections, so skipping the release here would leak one permit
+            // per dead pooled connection (e.g. after a peer restart) until every GetConnectionAsync
+            // for the endpoint blocks on an exhausted semaphore.
             connection.Dispose();
+            ReleaseSemaphore(endpoint);
         }
 
         // Need to create a new connection
@@ -125,6 +135,10 @@ public sealed partial class ConnectionPool : IDisposable
             {
                 // Semaphore already at max count - can happen during cleanup races
                 LogSemaphoreReleaseSkipped(endpoint);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Pool disposal raced this release — nothing left to account for.
             }
         }
     }
@@ -207,7 +221,10 @@ public sealed class PooledConnection : IDisposable
     private readonly ConnectionPool _pool;
     private DateTime _lastUsed;
     private bool _disposed;
-    private bool _returned;
+
+    // 0 = leased out (Return/Discard pending), 1 = returned or discarded. Interlocked so a
+    // concurrent double-Return/Discard cannot both pass the guard and double-release the permit.
+    private int _returned;
 
     public string Endpoint { get; }
     public Stream Stream => _connection.Stream;
@@ -226,6 +243,17 @@ public sealed class PooledConnection : IDisposable
         _lastUsed = DateTime.UtcNow;
     }
 
+    /// <summary>
+    /// Re-arm this connection as it is handed back out of the pool: refresh the idle timestamp and
+    /// reset the returned flag so the NEXT Return()/Discard() is honored again. Without this reset a
+    /// reused connection's second Return/Discard would silently no-op (permit + socket leak).
+    /// </summary>
+    internal void PrepareForReuse()
+    {
+        _lastUsed = DateTime.UtcNow;
+        Volatile.Write(ref _returned, 0);
+    }
+
     internal bool IsExpired(TimeSpan idleTimeout)
     {
         return DateTime.UtcNow - _lastUsed > idleTimeout;
@@ -237,8 +265,21 @@ public sealed class PooledConnection : IDisposable
     /// </summary>
     public void Return()
     {
-        if (_returned || _disposed) return;
-        _returned = true;
+        if (_disposed || Interlocked.Exchange(ref _returned, 1) == 1) return;
+        _pool.ReturnConnection(this);
+    }
+
+    /// <summary>
+    /// Discard this connection instead of returning it: close it and release its pool permit.
+    /// Use after a failed or incomplete exchange (timeout mid-read, protocol mismatch) — the
+    /// connection may still be "alive" at the transport level but carry a late response in its
+    /// buffer, so handing it back to the pool would poison the next request/response pairing.
+    /// </summary>
+    public void Discard()
+    {
+        if (Interlocked.Exchange(ref _returned, 1) == 1) return;
+        Dispose();
+        // Now !IsAlive, so the pool's dead-connection branch disposes (no-op) and releases the permit.
         _pool.ReturnConnection(this);
     }
 

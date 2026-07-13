@@ -1,21 +1,23 @@
 using Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Protocol.Native;
+using Kuestenlogik.Surgewave.Protocol.Native.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 
 /// <summary>
-/// #60 Inc4 — the native SRWV inter-broker receive server. Decodes a native frame
+/// #60 Inc4/Inc5 — the native SRWV inter-broker receive server. Decodes a native frame
 /// (<see cref="InterBrokerFrameCodec"/>), dispatches by opcode to the neutral
 /// <see cref="INativeInterBrokerService"/>, and writes the response frame. It shares the broker's
 /// ReplicationPort with the Family-B replication/Raft traffic: the <see cref="ReplicationServer"/>
 /// hands off any frame whose opcode is in the native band (see <see cref="IsNativeOpcode"/>), so the
 /// hot fetch/Raft path is unchanged and old peers — which never emit native opcodes — are unaffected.
 /// <para>
-/// Only <see cref="SurgewaveOpCode.InterBrokerUpdateMetadata"/> is wired to real logic in this
-/// increment; every other native opcode is answered with an <see cref="SurgewaveOpCode.Error"/> frame
-/// carrying <see cref="ClusterRpcStatus.UnsupportedVersion"/> until its handler lands (Inc5–7).
+/// The controller-plane ops (LeaderAndIsr / UpdateMetadata / StopReplica / AlterPartition) are wired
+/// to real logic; the remaining native opcodes (registration/heartbeat, txn markers) are answered
+/// with an <see cref="SurgewaveOpCode.Error"/> frame carrying
+/// <see cref="ClusterRpcStatus.UnsupportedVersion"/> until their handlers land (Inc6/Inc7).
 /// </para>
 /// </summary>
 public sealed partial class NativeInterBrokerServer
@@ -48,8 +50,21 @@ public sealed partial class NativeInterBrokerServer
     {
         switch (opcode)
         {
+            case SurgewaveOpCode.InterBrokerLeaderAndIsr:
+                return await HandleAsync<PartitionStatesPayload>(
+                    opcode, payload, static (s, p, ct) => s.ApplyLeaderAndIsrAsync(p, ct), ct).ConfigureAwait(false);
+
             case SurgewaveOpCode.InterBrokerUpdateMetadata:
-                return await HandleUpdateMetadataAsync(payload, ct).ConfigureAwait(false);
+                return await HandleAsync<PartitionStatesPayload>(
+                    opcode, payload, static (s, p, ct) => s.ApplyUpdateMetadataAsync(p, ct), ct).ConfigureAwait(false);
+
+            case SurgewaveOpCode.InterBrokerStopReplica:
+                return await HandleAsync<StopReplicaPayload>(
+                    opcode, payload, static (s, p, ct) => s.ApplyStopReplicaAsync(p, ct), ct).ConfigureAwait(false);
+
+            case SurgewaveOpCode.InterBrokerAlterPartition:
+                return await HandleAsync<AlterPartitionPayload>(
+                    opcode, payload, static (s, p, ct) => s.ApplyIsrChangeAsync(p, ct), ct).ConfigureAwait(false);
 
             default:
                 LogUnsupportedOpcode(opcode);
@@ -85,29 +100,36 @@ public sealed partial class NativeInterBrokerServer
         return true;
     }
 
-    private async ValueTask<byte[]> HandleUpdateMetadataAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    /// <summary>
+    /// The shared decode → apply → encode shape of every wired op: deserialize
+    /// <typeparamref name="TPayload"/>, route it to the service, echo the request opcode with the
+    /// resulting status — degrading to an <see cref="SurgewaveOpCode.Error"/> frame when no service is
+    /// wired (this broker is not an applier) or the payload fails to decode.
+    /// </summary>
+    private async ValueTask<byte[]> HandleAsync<TPayload>(
+        SurgewaveOpCode opcode,
+        ReadOnlyMemory<byte> payload,
+        Func<INativeInterBrokerService, TPayload, CancellationToken, ValueTask<ClusterRpcStatus>> apply,
+        CancellationToken ct)
+        where TPayload : ISerializablePayload<TPayload>
     {
         if (_service is null)
-        {
-            // No service wired (e.g. this broker is not acting as the applier) — signal not-controller.
             return ErrorFrame(ClusterRpcStatus.NotController);
-        }
 
-        PartitionStatesPayload request;
+        TPayload request;
         try
         {
             var reader = new SurgewavePayloadReader(payload.Span);
-            request = PartitionStatesPayload.Read(ref reader);
+            request = TPayload.Read(ref reader);
         }
         catch (Exception ex)
         {
-            LogDecodeError(SurgewaveOpCode.InterBrokerUpdateMetadata, ex);
+            LogDecodeError(opcode, ex);
             return ErrorFrame(ClusterRpcStatus.Unknown);
         }
 
-        var status = await _service.ApplyUpdateMetadataAsync(request, ct).ConfigureAwait(false);
-        return InterBrokerFrameCodec.EncodeFrame(
-            SurgewaveOpCode.InterBrokerUpdateMetadata, new InterBrokerStatusPayload(status));
+        var status = await apply(_service, request, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(opcode, new InterBrokerStatusPayload(status));
     }
 
     private static byte[] ErrorFrame(ClusterRpcStatus status)

@@ -25,9 +25,6 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
     private readonly IIsrUpdateApplier? _isrUpdateApplier;
     private readonly ILogger<InterBrokerApiHandler> _logger;
 
-    // Track the current controller epoch to reject stale requests
-    private int _currentControllerEpoch;
-
     public IEnumerable<ApiKey> SupportedApiKeys =>
     [
         ApiKey.LeaderAndIsr,
@@ -74,10 +71,13 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
     {
         LogLeaderAndIsrReceived(request.ControllerId, request.ControllerEpoch, request.TopicStates.Count);
 
-        // Validate controller epoch - reject stale requests
-        if (request.ControllerEpoch < _currentControllerEpoch)
+        // Validate controller epoch - reject stale requests. The fence is the shared atomic
+        // ClusterState.TryAdvanceControllerEpoch (#60 Inc5): the native inter-broker applier fences
+        // through the same method, so a stale Kafka-wire push cannot regress an epoch the native
+        // wire already advanced (and vice versa) during a rolling upgrade.
+        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
         {
-            LogStaleControllerEpoch("LeaderAndIsr", request.ControllerEpoch, _currentControllerEpoch);
+            LogStaleControllerEpoch("LeaderAndIsr", request.ControllerEpoch, _clusterState.ControllerEpoch);
             return new LeaderAndIsrResponse
             {
                 CorrelationId = request.CorrelationId,
@@ -86,11 +86,6 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                 PartitionErrors = []
             };
         }
-
-        // Update controller epoch
-        _currentControllerEpoch = request.ControllerEpoch;
-        _clusterState.ControllerEpoch = request.ControllerEpoch;
-        _clusterState.ControllerId = request.ControllerId;
 
         // Update broker list from LiveLeaders — but only for brokers we don't
         // already know. A broker discovered from cluster-node config carries
@@ -269,10 +264,10 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
     {
         LogStopReplicaReceived(request.ControllerId, request.ControllerEpoch, request.DeletePartitions);
 
-        // Validate controller epoch
-        if (request.ControllerEpoch < _currentControllerEpoch)
+        // Validate controller epoch via the shared fence (see HandleLeaderAndIsrAsync, #60 Inc5).
+        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
         {
-            LogStaleControllerEpoch("StopReplica", request.ControllerEpoch, _currentControllerEpoch);
+            LogStaleControllerEpoch("StopReplica", request.ControllerEpoch, _clusterState.ControllerEpoch);
             return new StopReplicaResponse
             {
                 CorrelationId = request.CorrelationId,
@@ -282,7 +277,6 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
             };
         }
 
-        _currentControllerEpoch = request.ControllerEpoch;
         var partitionErrors = new List<StopReplicaResponse.StopReplicaPartitionError>();
 
         // Collect all partitions to stop from various request formats
@@ -387,10 +381,10 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         LogUpdateMetadataReceived(request.ControllerId, request.ControllerEpoch,
             request.LiveBrokers?.Count ?? 0, request.TopicStates?.Count ?? 0);
 
-        // Validate controller epoch
-        if (request.ControllerEpoch < _currentControllerEpoch)
+        // Validate controller epoch via the shared fence (see HandleLeaderAndIsrAsync, #60 Inc5).
+        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
         {
-            LogStaleControllerEpoch("UpdateMetadata", request.ControllerEpoch, _currentControllerEpoch);
+            LogStaleControllerEpoch("UpdateMetadata", request.ControllerEpoch, _clusterState.ControllerEpoch);
             return new UpdateMetadataResponse
             {
                 CorrelationId = request.CorrelationId,
@@ -398,10 +392,6 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                 ErrorCode = ErrorCode.StaleControllerEpoch
             };
         }
-
-        _currentControllerEpoch = request.ControllerEpoch;
-        _clusterState.ControllerEpoch = request.ControllerEpoch;
-        _clusterState.ControllerId = request.ControllerId;
 
         // Update broker endpoints (v1+)
         if (request.LiveBrokers != null)
