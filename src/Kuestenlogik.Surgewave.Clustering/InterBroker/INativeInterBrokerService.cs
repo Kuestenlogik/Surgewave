@@ -57,4 +57,12 @@ public interface INativeInterBrokerService
     /// this broker is not the controller.
     /// </summary>
     ValueTask<BrokerHeartbeatOutcome> HeartbeatAsync(BrokerHeartbeatInput input, CancellationToken ct = default);
+
+    /// <summary>
+    /// Apply a replicated transaction commit/abort marker to the leader's partition logs (#60 Inc7):
+    /// append a control batch for each partition this broker leads and record it in the transaction
+    /// index. Returns <see cref="ClusterRpcStatus.NotLeaderForPartition"/> if this broker does not lead
+    /// a targeted partition (mirrors the Kafka-wire WriteTxnMarkers handler).
+    /// </summary>
+    ValueTask<ClusterRpcStatus> ApplyWriteTxnMarkersAsync(WriteTxnMarkersRequestPayload payload, CancellationToken ct = default);
 }

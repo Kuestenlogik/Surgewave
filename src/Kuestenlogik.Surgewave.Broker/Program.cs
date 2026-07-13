@@ -518,6 +518,18 @@ builder.Services.AddSingleton<IControllerReplicaRpc>(sp => new GatedControllerRe
     sp.GetRequiredService<NativeControllerClient>(),
     sp.GetKeyedService<IControllerReplicaRpc>(GatedControllerReplicaRpc.WireFallbackServiceKey),
     sp.GetRequiredService<ILogger<GatedControllerReplicaRpc>>()));
+// #60 Inc7: transaction-marker replication follows the same gate — native SRWV once the cluster is
+// finalized to native, else the Kafka plugin's wire replicator (registered KEYED as the fallback).
+builder.Services.AddSingleton(sp => new NativeTransactionMarkerReplicator(
+    sp.GetRequiredService<ConnectionPool>(),
+    sp.GetRequiredService<ClusterState>(),
+    sp.GetRequiredService<ClusteringConfig>().BrokerId,
+    sp.GetRequiredService<ILogger<NativeTransactionMarkerReplicator>>()));
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerReplicator>(sp => new GatedTransactionMarkerReplicator(
+    sp.GetRequiredService<ClusterState>(),
+    sp.GetRequiredService<NativeTransactionMarkerReplicator>(),
+    sp.GetKeyedService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerReplicator>(GatedTransactionMarkerReplicator.WireFallbackServiceKey),
+    sp.GetRequiredService<ILogger<GatedTransactionMarkerReplicator>>()));
 builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<ILogger<ReplicaManager>>(),
     sp.GetRequiredService<ClusterState>(),
@@ -793,7 +805,8 @@ replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
     new ClusterStateInterBrokerService(
         app.Services.GetRequiredService<ILogger<ClusterStateInterBrokerService>>(),
         clusterState, replicaManager, app.Services.GetRequiredService<LogManager>(),
-        clusteringConfig.BrokerId, isrUpdateApplier: clusterController, membership: membershipService)));
+        clusteringConfig.BrokerId, isrUpdateApplier: clusterController, membership: membershipService,
+        markerSink: app.Services.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerSink>())));
 
 // #60 Inc6b — the native broker-lifecycle loop: a plugin-free broker registers with the controller
 // over the ReplicationPort and heartbeats, so it JOINS the cluster. No-ops on the controller/seed

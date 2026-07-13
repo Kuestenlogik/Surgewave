@@ -495,7 +495,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             new ClusterStateInterBrokerService(
                 _loggerFactory.CreateLogger<ClusterStateInterBrokerService>(),
                 _clusterState, _replicaManager, _logManager!, clusteringConfig.BrokerId,
-                isrUpdateApplier: _clusterController, membership: membershipService)));
+                isrUpdateApplier: _clusterController, membership: membershipService,
+                markerSink: _transactionCoordinator))); // #60 Inc7: apply native WriteTxnMarkers to the txn index
 
         // #60 Inc6b — the native broker-lifecycle loop: registers this broker with the controller over
         // the ReplicationPort and heartbeats, so a plugin-free broker JOINS. It no-ops on the

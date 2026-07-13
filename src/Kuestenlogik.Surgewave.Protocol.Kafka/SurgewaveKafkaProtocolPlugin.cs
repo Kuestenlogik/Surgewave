@@ -205,11 +205,16 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
                 sp.GetRequiredService<ClusteringConfig>(),
                 sp.GetRequiredService<ILogger<ControllerClient>>()));
 
-        services.AddSingleton<ITransactionMarkerReplicator>(sp => new TransactionMarkerReplicator(
-            sp.GetRequiredService<ConnectionPool>(),
-            sp.GetRequiredService<ClusterState>(),
-            sp.GetRequiredService<IBrokerConfigView>().BrokerId,
-            sp.GetRequiredService<ILogger<TransactionMarkerReplicator>>()));
+        // #60 Inc7: registered KEYED — the unkeyed ITransactionMarkerReplicator is the host's
+        // GatedTransactionMarkerReplicator, which picks this wire replicator up as its Kafka-wire
+        // fallback while the cluster is not yet finalized to the native inter-broker protocol.
+        services.AddKeyedSingleton<ITransactionMarkerReplicator>(
+            GatedTransactionMarkerReplicator.WireFallbackServiceKey,
+            (sp, _) => new TransactionMarkerReplicator(
+                sp.GetRequiredService<ConnectionPool>(),
+                sp.GetRequiredService<ClusterState>(),
+                sp.GetRequiredService<IBrokerConfigView>().BrokerId,
+                sp.GetRequiredService<ILogger<TransactionMarkerReplicator>>()));
 
         // ── The connection handler that owns the Kafka wire loop ─────────────────
         services.AddSingleton<IConnectionHandler>(sp => new KafkaConnectionHandler(

@@ -37,7 +37,7 @@ internal sealed class TransactionMarkerWriter
         {
             try
             {
-                var markerBatch = ControlBatchFactory.CreateControlBatch(
+                var markerBatch = Kuestenlogik.Surgewave.Core.Storage.ControlBatchBuilder.BuildTransactionMarker(
                     txnMetadata.ProducerId,
                     txnMetadata.ProducerEpoch,
                     controlRecordType);

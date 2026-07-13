@@ -22,6 +22,11 @@
          ISerializablePayload contract from Protocol.Native. That assembly is a leaf (no edge back to
          Clustering/Core), so this is a safe downward reference with no cycle. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Native\Kuestenlogik.Surgewave.Protocol.Native.csproj" />
+    <!-- #60 Inc7: the native transaction-marker replicator implements the neutral
+         ITransactionMarkerReplicator/Sink seams (mirroring how NativeControllerClient implements the
+         in-Clustering IControllerReplicaRpc). Coordination references only Core, so this downward
+         edge introduces no cycle and stays Kafka-free. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Coordination\Kuestenlogik.Surgewave.Coordination.csproj" />
   </ItemGroup>
 
 </Project>
