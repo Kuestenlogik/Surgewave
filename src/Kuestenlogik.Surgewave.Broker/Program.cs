@@ -373,6 +373,10 @@ builder.Services.AddSingleton<ClusterState>();
 // wären ein Race auf dieselbe Datei.
 builder.Services.AddSingleton<ClusterIdManager>();
 
+// #60 Inc6b — the shared cluster-membership authority (broker registration epochs + fencing),
+// driven by the native inter-broker receive server and the native lifecycle loop.
+builder.Services.AddSingleton<ClusterMembershipService>();
+
 // Broker-side observability — a single channel-multiplexer that
 // lets in-process consumers (Bowire's surgewave://embedded tap is the
 // reference one) subscribe to pipeline events. Registered once as
@@ -777,17 +781,32 @@ var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 if (app.Services.GetService<IControllerReplicaRpc>() is { } controllerReplicaRpc)
     clusterController.SetControllerClient(controllerReplicaRpc);
 
-// #60 Inc5 — wire the native SRWV inter-broker receive server onto the ReplicationServer's shared
-// port (the embedded runtime has done this since Inc4; the production host must too, or native
-// control-plane frames from peers would be answered with garbage by the legacy decode path).
+// #60 Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the ReplicationServer's
+// shared port (the embedded runtime has done this since Inc4; the production host must too, or native
+// control-plane frames from peers would be answered with garbage by the legacy decode path). It also
+// routes native registration/heartbeat through the shared membership authority (Inc6b).
 // Unconditional: native clustering must not depend on the Kafka plugin. Legacy fetch/Raft frames
 // sit below the native opcode band, so the hot path is untouched.
+var membershipService = app.Services.GetRequiredService<ClusterMembershipService>();
 replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
     app.Services.GetRequiredService<ILogger<NativeInterBrokerServer>>(),
     new ClusterStateInterBrokerService(
         app.Services.GetRequiredService<ILogger<ClusterStateInterBrokerService>>(),
         clusterState, replicaManager, app.Services.GetRequiredService<LogManager>(),
-        clusteringConfig.BrokerId, isrUpdateApplier: clusterController)));
+        clusteringConfig.BrokerId, isrUpdateApplier: clusterController, membership: membershipService)));
+
+// #60 Inc6b — the native broker-lifecycle loop: a plugin-free broker registers with the controller
+// over the ReplicationPort and heartbeats, so it JOINS the cluster. No-ops on the controller/seed
+// and when standalone.
+// Disposed via the ApplicationStopping registration below (not in this scope), so CA2000 doesn't apply.
+#pragma warning disable CA2000
+var lifecycleLoop = new BrokerLifecycleLoop(
+    new NativeBrokerLifecycleClient(
+        app.Services.GetRequiredService<ConnectionPool>(), clusterState, clusteringConfig,
+        app.Services.GetRequiredService<ILogger<NativeBrokerLifecycleClient>>()),
+    clusteringConfig,
+    app.Services.GetRequiredService<ILogger<BrokerLifecycleLoop>>());
+#pragma warning restore CA2000
 
 // Initialize Raft consensus if enabled
 RaftNode? raftNode = null;
@@ -1460,6 +1479,11 @@ if (activatedFeatures.Contains("Surgewave.Api.GraphQL"))
 await clusterController.StartAsync(CancellationToken.None);
 await replicaManager.StartAsync(CancellationToken.None);
 await replicationServer.StartAsync(CancellationToken.None);
+
+// #60 Inc6b — start the native lifecycle loop (registers with the controller + heartbeats). Stopped
+// on ApplicationStopping so it no longer heartbeats over the connection pool during teardown.
+await lifecycleLoop.StartAsync(app.Lifetime.ApplicationStopping);
+app.Lifetime.ApplicationStopping.Register(() => lifecycleLoop.DisposeAsync().AsTask().GetAwaiter().GetResult());
 
 logger.LogInformation("Replication components started (Controller: {IsController})", clusterController.IsController);
 

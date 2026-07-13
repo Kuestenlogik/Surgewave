@@ -80,6 +80,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private ConnectionPool? _connectionPool;
     private ControllerClient? _controllerClient;
     private KafkaConnectionHandler? _kafkaConnectionHandler;
+    private Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop? _lifecycleLoop;
     private Task? _clusterTask;
 
     // Raft components (only initialized when UseRaftConsensus = true)
@@ -475,18 +476,35 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _clusterController.SetHeartbeatManager(_heartbeatManager);
         _replicationServer.SetHeartbeatManager(_heartbeatManager);
 
-        // #60 Inc4/Inc5 — wire the native SRWV inter-broker receive server onto the
+        // #60 Inc6b — the shared, protocol-neutral cluster-membership authority (broker registration
+        // epochs + fencing). Wired unconditionally so a plugin-free broker owns it too.
+        var clusterIdManager = new ClusterIdManager(
+            clusteringConfig, _loggerFactory.CreateLogger<ClusterIdManager>());
+        var membershipService = new ClusterMembershipService(
+            clusterIdManager, _clusterState, _loggerFactory.CreateLogger<ClusterMembershipService>());
+
+        // #60 Inc4/Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the
         // ReplicationServer's shared port. It applies decoded native control-plane frames
-        // (LeaderAndIsr / UpdateMetadata / StopReplica / AlterPartition) to local broker/cluster
-        // state with no Kafka-wire dependency. Wired unconditionally (native clustering must not
-        // depend on the Kafka plugin); legacy fetch/Raft traffic is unaffected by the multiplex.
+        // (LeaderAndIsr / UpdateMetadata / StopReplica / AlterPartition) and handles native
+        // registration/heartbeat via the membership authority — with no Kafka-wire dependency. Wired
+        // unconditionally (native clustering must not depend on the Kafka plugin); legacy fetch/Raft
+        // traffic is unaffected by the multiplex.
         var nativeInterBrokerLogger = _loggerFactory.CreateLogger<NativeInterBrokerServer>();
         _replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
             nativeInterBrokerLogger,
             new ClusterStateInterBrokerService(
                 _loggerFactory.CreateLogger<ClusterStateInterBrokerService>(),
                 _clusterState, _replicaManager, _logManager!, clusteringConfig.BrokerId,
-                isrUpdateApplier: _clusterController)));
+                isrUpdateApplier: _clusterController, membership: membershipService)));
+
+        // #60 Inc6b — the native broker-lifecycle loop: registers this broker with the controller over
+        // the ReplicationPort and heartbeats, so a plugin-free broker JOINS. It no-ops on the
+        // controller/seed itself (the client refuses to dial self) and when standalone.
+        var lifecycleClient = new NativeBrokerLifecycleClient(
+            _connectionPool, _clusterState, clusteringConfig,
+            _loggerFactory.CreateLogger<NativeBrokerLifecycleClient>());
+        _lifecycleLoop = new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop(
+            lifecycleClient, clusteringConfig, _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop>());
 
         // Wire up the controller client (gated native/Kafka-wire, Inc5) so the controller can push
         // LeaderAndIsr to remote brokers when topology changes (topic create, reelection).
@@ -555,6 +573,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
         // Wait for replication server to be ready
         await WaitForReplicationServerReadyAsync(cancellationToken);
+
+        // #60 Inc6b — start the native lifecycle loop once our replication server is up. It idles on
+        // the controller/seed and when standalone; on a joining broker it registers with the
+        // controller (retrying until reachable) and heartbeats.
+        if (_lifecycleLoop is not null)
+            await _lifecycleLoop.StartAsync(_cts!.Token);
     }
 
     private async Task WaitForReplicationServerReadyAsync(CancellationToken cancellationToken, int maxRetries = 50)
@@ -712,6 +736,10 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 // Startup may have failed. Swallow to avoid confusing cleanup failures.
             }
         }
+
+        // #60 Inc6b — stop the lifecycle loop first so it no longer heartbeats over the pool.
+        if (_lifecycleLoop != null)
+            await _lifecycleLoop.DisposeAsync();
 
         // Dispose Raft components first
         if (_raftNode != null)

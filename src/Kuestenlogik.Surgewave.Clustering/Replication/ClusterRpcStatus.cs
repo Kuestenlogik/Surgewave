@@ -27,4 +27,9 @@ public enum ClusterRpcStatus : short
     // #60 Inc5: the native AlterPartition receive path needs to distinguish "controller doesn't
     // track this partition" from a plain failure. Pinned to Kafka ErrorCode.UnknownTopicOrPartition.
     UnknownTopicOrPartition = 3,
+
+    // #60 Inc6b: the native BrokerRegistration/BrokerHeartbeat receive path. Pinned to the matching
+    // Kafka ErrorCode members so native and Kafka-wire membership peers interpret them identically.
+    BrokerNotAvailable = 8,
+    ClusterAuthorizationFailed = 31,
 }

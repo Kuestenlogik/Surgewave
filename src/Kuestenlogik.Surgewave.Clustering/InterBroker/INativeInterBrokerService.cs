@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 
@@ -43,4 +44,17 @@ public interface INativeInterBrokerService
     /// <see cref="ClusterRpcStatus.NotController"/> when this broker is not the controller.
     /// </summary>
     ValueTask<ClusterRpcStatus> ApplyIsrChangeAsync(AlterPartitionPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Register a broker with the cluster-membership authority (#60 Inc6b) — the native counterpart of
+    /// the Kafka-wire BrokerRegistration. Returns <see cref="ClusterRpcStatus.NotController"/> when this
+    /// broker is not the controller, so the caller retries against the real controller.
+    /// </summary>
+    ValueTask<BrokerRegistrationOutcome> RegisterBrokerAsync(BrokerRegistrationInput input, CancellationToken ct = default);
+
+    /// <summary>
+    /// Process a broker heartbeat (#60 Inc6b). Returns <see cref="ClusterRpcStatus.NotController"/> when
+    /// this broker is not the controller.
+    /// </summary>
+    ValueTask<BrokerHeartbeatOutcome> HeartbeatAsync(BrokerHeartbeatInput input, CancellationToken ct = default);
 }

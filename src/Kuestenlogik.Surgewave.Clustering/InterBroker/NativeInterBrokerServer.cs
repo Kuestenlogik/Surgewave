@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Protocol.Native;
@@ -66,10 +67,62 @@ public sealed partial class NativeInterBrokerServer
                 return await HandleAsync<AlterPartitionPayload>(
                     opcode, payload, static (s, p, ct) => s.ApplyIsrChangeAsync(p, ct), ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerRegistration:
+                return await HandleRegistrationAsync(payload, ct).ConfigureAwait(false);
+
+            case SurgewaveOpCode.InterBrokerHeartbeat:
+                return await HandleHeartbeatAsync(payload, ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);
         }
+    }
+
+    // Registration/heartbeat (#60 Inc6b) return richer response payloads than the bare status frame,
+    // so they can't ride the generic status-returning HandleAsync path.
+    private async ValueTask<byte[]> HandleRegistrationAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        if (_service is null)
+            return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerRegistration,
+                new BrokerRegistrationResponsePayload(new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1)));
+
+        BrokerRegistrationRequestPayload request;
+        try
+        {
+            var reader = new SurgewavePayloadReader(payload.Span);
+            request = BrokerRegistrationRequestPayload.Read(ref reader);
+        }
+        catch (Exception ex)
+        {
+            LogDecodeError(SurgewaveOpCode.InterBrokerRegistration, ex);
+            return ErrorFrame(ClusterRpcStatus.Unknown);
+        }
+
+        var outcome = await _service.RegisterBrokerAsync(request.Input, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerRegistration, new BrokerRegistrationResponsePayload(outcome));
+    }
+
+    private async ValueTask<byte[]> HandleHeartbeatAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        if (_service is null)
+            return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerHeartbeat,
+                new BrokerHeartbeatResponsePayload(new BrokerHeartbeatOutcome(ClusterRpcStatus.NotController, true, false, false)));
+
+        BrokerHeartbeatRequestPayload request;
+        try
+        {
+            var reader = new SurgewavePayloadReader(payload.Span);
+            request = BrokerHeartbeatRequestPayload.Read(ref reader);
+        }
+        catch (Exception ex)
+        {
+            LogDecodeError(SurgewaveOpCode.InterBrokerHeartbeat, ex);
+            return ErrorFrame(ClusterRpcStatus.Unknown);
+        }
+
+        var outcome = await _service.HeartbeatAsync(request.Input, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerHeartbeat, new BrokerHeartbeatResponsePayload(outcome));
     }
 
     /// <summary>

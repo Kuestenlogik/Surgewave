@@ -389,8 +389,8 @@ public class NativeInterBrokerServerTests
     {
         var fx = NewServer();
 
-        // Registration is in the native band but has no handler yet (Inc6).
-        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerRegistration, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
+        // ControlledShutdown is in the native band but has no handler yet (Inc7).
+        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerControlledShutdown, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
 
         var (opcode, status) = DecodeStatusFrame(response);
         Assert.Equal(SurgewaveOpCode.Error, opcode);

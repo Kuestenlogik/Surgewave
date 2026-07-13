@@ -34,6 +34,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly LogManager _logManager;
     private readonly int _localBrokerId;
     private readonly IIsrUpdateApplier? _isrUpdateApplier;
+    private readonly ClusterMembershipService? _membership;
 
     public ClusterStateInterBrokerService(
         ILogger<ClusterStateInterBrokerService> logger,
@@ -41,7 +42,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         ReplicaManager replicaManager,
         LogManager logManager,
         int localBrokerId,
-        IIsrUpdateApplier? isrUpdateApplier = null)
+        IIsrUpdateApplier? isrUpdateApplier = null,
+        ClusterMembershipService? membership = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -49,6 +51,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _logManager = logManager;
         _localBrokerId = localBrokerId;
         _isrUpdateApplier = isrUpdateApplier;
+        _membership = membership;
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyUpdateMetadataAsync(PartitionStatesPayload payload, CancellationToken ct = default)
@@ -196,6 +199,26 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         LogIsrChangeApplied(payload.Tp.Topic, payload.Tp.Partition, payload.LeaderId, payload.LeaderEpoch);
         return ClusterRpcStatus.None;
     }
+
+    public ValueTask<BrokerRegistrationOutcome> RegisterBrokerAsync(BrokerRegistrationInput input, CancellationToken ct = default)
+    {
+        // Only the controller owns the membership epoch/registration store; a non-controller returns
+        // NotController so the joining broker retries against the real controller (#60 Inc6b).
+        if (_membership is null || !IsController)
+            return ValueTask.FromResult(new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1));
+
+        return ValueTask.FromResult(_membership.Register(input));
+    }
+
+    public ValueTask<BrokerHeartbeatOutcome> HeartbeatAsync(BrokerHeartbeatInput input, CancellationToken ct = default)
+    {
+        if (_membership is null || !IsController)
+            return ValueTask.FromResult(new BrokerHeartbeatOutcome(ClusterRpcStatus.NotController, IsFenced: true, IsCaughtUp: false, ShouldShutDown: false));
+
+        return ValueTask.FromResult(_membership.Heartbeat(input));
+    }
+
+    private bool IsController => _isrUpdateApplier?.IsController ?? (_clusterState.ControllerId == _localBrokerId);
 
     /// <summary>
     /// Learn broker endpoints from a controller push (#69 / Inc5). Unknown brokers are registered
