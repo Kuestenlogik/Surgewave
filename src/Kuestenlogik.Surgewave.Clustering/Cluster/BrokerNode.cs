@@ -30,6 +30,13 @@ public sealed record BrokerNode
     }
     private readonly int? _replicationPort;
 
+    /// <summary>
+    /// Whether <see cref="ReplicationPort"/> was explicitly set (discovered/advertised) rather than
+    /// derived from the client port. Lets a re-registration merge distinguish a real discovered
+    /// port worth preserving from a computed guess that must re-derive from the NEW client port.
+    /// </summary>
+    public bool HasExplicitReplicationPort => _replicationPort.HasValue;
+
     public string Endpoint => $"{Host}:{Port}";
     public string ReplicationEndpoint => $"{Host}:{ReplicationPort}";
 

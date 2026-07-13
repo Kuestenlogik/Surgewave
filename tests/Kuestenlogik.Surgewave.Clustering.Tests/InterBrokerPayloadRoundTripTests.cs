@@ -110,8 +110,17 @@ public class InterBrokerPayloadRoundTripTests
             LogStartOffset = 10,
         };
 
-        var result = RoundTrip(new PartitionStatesPayload([(tp, state)]));
+        var liveBrokers = new List<LiveBrokerSpec>
+        {
+            new(BrokerId: 1, Host: "10.0.0.1", Port: 9092, ReplicationPort: 10092, InterBrokerProtocol: 1, Rack: "rack-a"),
+            new(BrokerId: 2, Host: "10.0.0.2", Port: 9094, ReplicationPort: 9093, InterBrokerProtocol: 0, Rack: null),
+        };
 
+        var result = RoundTrip(new PartitionStatesPayload(ControllerId: 1, ControllerEpoch: 42, liveBrokers, [(tp, state)]));
+
+        Assert.Equal(1, result.ControllerId);
+        Assert.Equal(42, result.ControllerEpoch);
+        Assert.Equal(liveBrokers, result.LiveBrokers);
         Assert.Single(result.Entries);
         var (rTp, rState) = result.Entries[0];
         Assert.Equal(tp, rTp);
@@ -129,14 +138,15 @@ public class InterBrokerPayloadRoundTripTests
     [Fact]
     public void PartitionStates_RoundTrips_Empty()
     {
-        var result = RoundTrip(new PartitionStatesPayload([]));
+        var result = RoundTrip(new PartitionStatesPayload(ControllerId: 0, ControllerEpoch: 0, [], []));
+        Assert.Empty(result.LiveBrokers);
         Assert.Empty(result.Entries);
     }
 
     [Fact]
     public void StopReplica_RoundTrips()
     {
-        var payload = new StopReplicaPayload(5,
+        var payload = new StopReplicaPayload(ControllerId: 2, ControllerEpoch: 17, BrokerId: 5,
         [
             (new TopicPartition { Topic = "t1", Partition = 0 }, 4, true),
             (new TopicPartition { Topic = "t2", Partition = 9 }, 0, false),
@@ -144,8 +154,24 @@ public class InterBrokerPayloadRoundTripTests
 
         var result = RoundTrip(payload);
 
+        Assert.Equal(2, result.ControllerId);
+        Assert.Equal(17, result.ControllerEpoch);
         Assert.Equal(5, result.BrokerId);
         Assert.Equal(payload.Partitions, result.Partitions);
+    }
+
+    [Fact]
+    public void AlterPartition_RoundTrips()
+    {
+        var payload = new AlterPartitionPayload(
+            LeaderId: 3, LeaderEpoch: 8, new TopicPartition { Topic = "orders", Partition = 4 }, NewIsr: [3, 1, 2]);
+
+        var result = RoundTrip(payload);
+
+        Assert.Equal(3, result.LeaderId);
+        Assert.Equal(8, result.LeaderEpoch);
+        Assert.Equal(payload.Tp, result.Tp);
+        Assert.Equal([3, 1, 2], result.NewIsr);
     }
 
     [Fact]

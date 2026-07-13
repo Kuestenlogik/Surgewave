@@ -396,13 +396,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // Create cluster state
         _clusterState = new ClusterState();
 
-        // Register this broker with actual replication port
+        // Register this broker with actual replication port. Self-advertise the highest
+        // inter-broker protocol level this build speaks (#60 Inc5) — the finalized level is the MIN
+        // over all nodes including the local one.
         _clusterState.AddBroker(new BrokerNode
         {
             BrokerId = _options.BrokerId,
             Host = _options.Host,
             Port = _actualPort,
-            ReplicationPort = _actualReplicationPort
+            ReplicationPort = _actualReplicationPort,
+            InterBrokerProtocol = InterBrokerProtocolFeature.LocalMaxSupported
         });
         _clusterState.LocalBrokerId = _options.BrokerId;
 
@@ -432,6 +435,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _connectionPool = new ConnectionPool(connectionPoolLogger, peerTransport);
         _controllerClient = new ControllerClient(_connectionPool, _clusterState, clusteringConfig, controllerClientLogger);
 
+        // #60 Inc5 — native controller client + the finalized-level gate. Control-plane pushes go
+        // native (SRWV frames to the ReplicationPort) once EVERY registered broker advertises the
+        // native inter-broker protocol; until then they stay on the Kafka-wire ControllerClient.
+        var nativeControllerClient = new NativeControllerClient(
+            _connectionPool, _clusterState, clusteringConfig,
+            _loggerFactory.CreateLogger<NativeControllerClient>());
+        var controllerRpc = new GatedControllerReplicaRpc(
+            _clusterState, nativeControllerClient, kafkaWireFallback: _controllerClient,
+            _loggerFactory.CreateLogger<GatedControllerReplicaRpc>());
+
         // Create replica manager, wiring the notifier so a leader reports ISR
         // growth back to the controller.
         _replicaManager = new ReplicaManager(
@@ -440,7 +453,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _logManager!,
             clusteringConfig,
             peerTransport,
-            isrChangeNotifier: _controllerClient);
+            isrChangeNotifier: controllerRpc);
 
         // Create replication server
         _replicationServer = new ReplicationServer(
@@ -462,20 +475,24 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _clusterController.SetHeartbeatManager(_heartbeatManager);
         _replicationServer.SetHeartbeatManager(_heartbeatManager);
 
-        // #60 Inc4 — wire the native SRWV inter-broker receive server onto the ReplicationServer's
-        // shared port. It applies decoded native control-plane frames (currently UpdateMetadata) to
-        // cluster state with no Kafka-wire dependency. Wired unconditionally (native clustering must
-        // not depend on the Kafka plugin); it stays dormant until native peers emit frames in the
-        // native opcode band (Inc5+), so legacy fetch/Raft traffic is unaffected.
+        // #60 Inc4/Inc5 — wire the native SRWV inter-broker receive server onto the
+        // ReplicationServer's shared port. It applies decoded native control-plane frames
+        // (LeaderAndIsr / UpdateMetadata / StopReplica / AlterPartition) to local broker/cluster
+        // state with no Kafka-wire dependency. Wired unconditionally (native clustering must not
+        // depend on the Kafka plugin); legacy fetch/Raft traffic is unaffected by the multiplex.
         var nativeInterBrokerLogger = _loggerFactory.CreateLogger<NativeInterBrokerServer>();
         _replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
-            nativeInterBrokerLogger, new ClusterStateInterBrokerService(_clusterState)));
+            nativeInterBrokerLogger,
+            new ClusterStateInterBrokerService(
+                _loggerFactory.CreateLogger<ClusterStateInterBrokerService>(),
+                _clusterState, _replicaManager, _logManager!, clusteringConfig.BrokerId,
+                isrUpdateApplier: _clusterController)));
 
-        // Wire up the controller client so the controller can push LeaderAndIsr
-        // to remote brokers when topology changes (topic create, reelection).
+        // Wire up the controller client (gated native/Kafka-wire, Inc5) so the controller can push
+        // LeaderAndIsr to remote brokers when topology changes (topic create, reelection).
         // Without this the controller updates only its own local state and
         // followers never learn to fetch, so the ISR never grows past {leader}.
-        _clusterController.SetControllerClient(_controllerClient);
+        _clusterController.SetControllerClient(controllerRpc);
 
         // Register the inter-broker API handler now that the cluster components
         // exist. It handles LeaderAndIsr / StopReplica / UpdateMetadata pushed

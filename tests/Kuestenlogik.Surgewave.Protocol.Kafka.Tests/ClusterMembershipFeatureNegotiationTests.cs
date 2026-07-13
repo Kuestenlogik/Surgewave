@@ -35,7 +35,10 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         MaxSupportedVersion = max
     };
 
-    private static BrokerRegistrationRequest Registration(int brokerId, params BrokerRegistrationRequest.Feature[] features) => new()
+    private static BrokerRegistrationRequest Registration(int brokerId, params BrokerRegistrationRequest.Feature[] features)
+        => Registration(brokerId, replicationPort: null, features);
+
+    private static BrokerRegistrationRequest Registration(int brokerId, ushort? replicationPort, params BrokerRegistrationRequest.Feature[] features) => new()
     {
         ApiKey = ApiKey.BrokerRegistration,
         ApiVersion = 3,
@@ -47,6 +50,9 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         Listeners =
         [
             new BrokerRegistrationRequest.Listener { Name = "PLAINTEXT", Host = "h", Port = (ushort)(9092 + brokerId), SecurityProtocol = 0 },
+            .. replicationPort is { } rp
+                ? new[] { new BrokerRegistrationRequest.Listener { Name = "REPLICATION", Host = "h", Port = rp, SecurityProtocol = 0 } }
+                : Array.Empty<BrokerRegistrationRequest.Listener>(),
         ],
         Features = [.. features],
         Rack = null,
@@ -103,5 +109,35 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
         Assert.Equal(InterBrokerProtocolFeature.Native, state.GetBroker(1)!.InterBrokerProtocol);
         Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
+    }
+
+    // ── #60 Inc5: the ReplicationPort resolution the native controller client depends on ────────
+
+    [Fact]
+    public async Task Register_WithReplicationListener_StoresRealReplicationPortAndClientPort()
+    {
+        var (handler, state) = NewController();
+
+        await Register(handler, Registration(1, replicationPort: 10999, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
+
+        var node = state.GetBroker(1)!;
+        // Host/Port must come from the CLIENT listener, the replication port from the REPLICATION
+        // listener — FirstOrDefault would conflate the two depending on listener order.
+        Assert.Equal(9093, node.Port);
+        Assert.Equal(10999, node.ReplicationPort);
+    }
+
+    [Fact]
+    public async Task Register_WithoutReplicationListener_KeepsPreviouslyDiscoveredReplicationPort()
+    {
+        var (handler, state) = NewController();
+
+        // The node was discovered from cluster-node config with its real replication port (#69);
+        // a registration without a REPLICATION listener must not clobber it back to port + 1000.
+        state.AddBroker(new BrokerNode { BrokerId = 1, Host = "h", Port = 9093, ReplicationPort = 12345 });
+
+        await Register(handler, Registration(1));
+
+        Assert.Equal(12345, state.GetBroker(1)!.ReplicationPort);
     }
 }

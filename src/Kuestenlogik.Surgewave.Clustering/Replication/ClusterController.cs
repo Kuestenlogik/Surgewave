@@ -146,13 +146,23 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        // Register this broker in cluster state
+        // Register this broker in cluster state. Merge with a pre-registered node instead of
+        // clobbering it — the embedded runtime registers the local broker with its ACTUAL bound
+        // (possibly ephemeral) ports before the controller starts, and rebuilding from config would
+        // reset them. The node self-advertises the highest inter-broker protocol level this build
+        // speaks (#60 Inc5): the finalized level is the MIN over ALL nodes including this one, so a
+        // local node left at the KafkaWire default would pin the whole cluster forever.
+        var existingLocal = _clusterState.GetBroker(_config.BrokerId);
         var localBroker = new BrokerNode
         {
             BrokerId = _config.BrokerId,
-            Host = _config.Host,
-            Port = _config.Port,
-            Rack = _config.Rack
+            Host = existingLocal?.Host ?? _config.Host,
+            Port = existingLocal?.Port ?? _config.Port,
+            Rack = existingLocal?.Rack ?? _config.Rack,
+            ReplicationPort = existingLocal is { HasExplicitReplicationPort: true }
+                ? existingLocal.ReplicationPort
+                : _config.ReplicationPort > 0 ? _config.ReplicationPort : _config.Port + 1000,
+            InterBrokerProtocol = InterBrokerProtocolFeature.LocalMaxSupported
         };
         _clusterState.AddBroker(localBroker);
         _clusterState.LocalBrokerId = _config.BrokerId;
@@ -199,11 +209,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
                 if (isLeader && !wasLeader)
                 {
-                    // Became Raft leader = became controller
+                    // Became Raft leader = became controller (locked bump, shares the push fence).
                     _isController = true;
-                    _clusterState.ControllerId = _config.BrokerId;
-                    _clusterState.ControllerEpoch++;
-                    LogBecameRaftLeader(_config.BrokerId, _clusterState.ControllerEpoch);
+                    var epoch = _clusterState.BecomeController(_config.BrokerId);
+                    LogBecameRaftLeader(_config.BrokerId, epoch);
 
                     // Register this broker via Raft
                     _ = RegisterBrokerViaRaftAsync(_config.BrokerId, _config.Host, _config.Port, _config.Rack, ct);
@@ -362,6 +371,14 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             var parts = node.Trim().Split(':');
             if (parts.Length >= 3 && int.TryParse(parts[0], out var brokerId) && int.TryParse(parts[2], out var port))
             {
+                // Never re-add the LOCAL broker from the cluster-nodes list (configs routinely list
+                // all brokers including self): StartAsync just registered it with its authoritative
+                // ports and self-advertised inter-broker protocol level, and the overwriting
+                // AddBroker here would reset both — pinning the finalized level to KafkaWire
+                // forever (#60 Inc5).
+                if (brokerId == _config.BrokerId)
+                    continue;
+
                 // Optional 4th part: replication port (defaults to port + 1000 if not specified)
                 int? replicationPort = null;
                 if (parts.Length >= 4 && int.TryParse(parts[3], out var replPort))
@@ -389,9 +406,8 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         if (_config.BrokerId == lowestBrokerId)
         {
             _isController = true;
-            _clusterState.ControllerId = _config.BrokerId;
-            _clusterState.ControllerEpoch++;
-            LogBecameController(_config.BrokerId, _clusterState.ControllerEpoch);
+            var epoch = _clusterState.BecomeController(_config.BrokerId);
+            LogBecameController(_config.BrokerId, epoch);
         }
         else
         {

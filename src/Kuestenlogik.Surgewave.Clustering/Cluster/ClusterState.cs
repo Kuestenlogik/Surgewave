@@ -25,6 +25,45 @@ public sealed class ClusterState
     public int ControllerEpoch { get; set; }
 
     /// <summary>
+    /// #60 Inc5 — atomically fence-and-advance the controller identity from a controller push.
+    /// Returns <c>false</c> (and changes nothing) when <paramref name="controllerEpoch"/> is older
+    /// than the current <see cref="ControllerEpoch"/> — the push comes from a demoted controller and
+    /// must not be applied. This is the SINGLE fence source for both the Kafka-wire inter-broker
+    /// handler and the native applier: with one shared, lock-guarded check, pushes interleaved over
+    /// both wires during a rolling upgrade cannot regress the epoch past each other (a per-handler
+    /// epoch field could be behind the shared state and let a stale push through).
+    /// </summary>
+    public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch)
+    {
+        lock (_stateLock)
+        {
+            if (controllerEpoch < ControllerEpoch)
+                return false;
+
+            ControllerEpoch = controllerEpoch;
+            ControllerId = controllerId;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Election-time controller assumption: atomically increment the epoch and take the controller
+    /// id, returning the new epoch. Shares <c>_stateLock</c> with
+    /// <see cref="TryAdvanceControllerEpoch"/> so a controller push racing the election cannot
+    /// interleave the non-atomic read-increment-write (a lost increment or a demoted ControllerId
+    /// paired with the fresh epoch).
+    /// </summary>
+    public int BecomeController(int controllerId)
+    {
+        lock (_stateLock)
+        {
+            ControllerEpoch++;
+            ControllerId = controllerId;
+            return ControllerEpoch;
+        }
+    }
+
+    /// <summary>
     /// This broker's ID.
     /// </summary>
     public int LocalBrokerId { get; set; }
@@ -303,6 +342,32 @@ public sealed class ClusterState
             }
 
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Deep-copy a partition state under <c>_stateLock</c> so a concurrent ISR/replica mutation
+    /// cannot tear the copied lists (mirrors <see cref="GetIsrSnapshot"/>). Used by the native
+    /// controller client before its two-pass frame encode (#60 Inc5): the source lists are the live
+    /// shared ones, and a plain <c>[.. list]</c> copy racing a Clear+AddRange can throw or observe a
+    /// partial list.
+    /// </summary>
+    public PartitionState CopyPartitionStateLocked(PartitionState state)
+    {
+        lock (_stateLock)
+        {
+            return new PartitionState
+            {
+                TopicPartition = state.TopicPartition,
+                LeaderBrokerId = state.LeaderBrokerId,
+                LeaderEpoch = state.LeaderEpoch,
+                Replicas = [.. state.Replicas],
+                Isr = [.. state.Isr],
+                OfflineReplicas = [.. state.OfflineReplicas],
+                MinInSyncReplicas = state.MinInSyncReplicas,
+                HighWatermark = state.HighWatermark,
+                LogStartOffset = state.LogStartOffset,
+            };
         }
     }
 

@@ -11,6 +11,7 @@ using Kuestenlogik.Surgewave.Broker.Security.OAuthBearer;
 using Kuestenlogik.Surgewave.Broker.Telemetry;
 using Kuestenlogik.Surgewave.Clustering;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.InterBroker;
 using Kuestenlogik.Surgewave.Clustering.Raft;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
@@ -193,11 +194,16 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             sp.GetRequiredService<ILogger<RaftApiHandler>>()));
 
         // ── Inter-broker wire codecs (relocated with the plugin, #59 b5) ─────────
-        services.AddSingleton<IControllerReplicaRpc>(sp => new ControllerClient(
-            sp.GetRequiredService<ConnectionPool>(),
-            sp.GetRequiredService<ClusterState>(),
-            sp.GetRequiredService<ClusteringConfig>(),
-            sp.GetRequiredService<ILogger<ControllerClient>>()));
+        // #60 Inc5: registered KEYED — the unkeyed IControllerReplicaRpc is now the host's
+        // GatedControllerReplicaRpc, which picks this wire client up as its Kafka-wire fallback
+        // while the cluster is not yet finalized to the native inter-broker protocol.
+        services.AddKeyedSingleton<IControllerReplicaRpc>(
+            GatedControllerReplicaRpc.WireFallbackServiceKey,
+            (sp, _) => new ControllerClient(
+                sp.GetRequiredService<ConnectionPool>(),
+                sp.GetRequiredService<ClusterState>(),
+                sp.GetRequiredService<ClusteringConfig>(),
+                sp.GetRequiredService<ILogger<ControllerClient>>()));
 
         services.AddSingleton<ITransactionMarkerReplicator>(sp => new TransactionMarkerReplicator(
             sp.GetRequiredService<ConnectionPool>(),

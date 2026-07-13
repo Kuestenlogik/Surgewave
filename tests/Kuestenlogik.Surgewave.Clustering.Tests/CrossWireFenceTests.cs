@@ -1,0 +1,115 @@
+using Kuestenlogik.Surgewave.Broker;
+using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.Replication;
+using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Protocol.Kafka;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
+using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Kuestenlogik.Surgewave.Storage.Engine.Memory;
+using Kuestenlogik.Surgewave.Testing;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Kuestenlogik.Surgewave.Clustering.Tests;
+
+/// <summary>
+/// #60 Inc5 — the SHARED controller-epoch fence, exercised through the Kafka-wire
+/// <see cref="InterBrokerApiHandler"/>. The regression this locks in: the pre-Inc5 handler fenced on
+/// a PRIVATE _currentControllerEpoch field, so an epoch the NATIVE wire had already advanced on the
+/// shared <see cref="ClusterState"/> was invisible to it, and a stale Kafka-wire push could regress
+/// partition metadata during a mixed-wire rolling upgrade. Both wires now fence through
+/// <see cref="ClusterState.TryAdvanceControllerEpoch"/>.
+/// </summary>
+[Trait("Category", TestCategories.Integration)]
+public sealed class CrossWireFenceTests
+{
+    private static (InterBrokerApiHandler Handler, ClusterState State) NewHandler(int brokerId = 0)
+    {
+        var config = new BrokerConfig { BrokerId = brokerId };
+        var state = new ClusterState();
+        var logs = new LogManager(
+            Path.Combine(Path.GetTempPath(), $"surgewave-test-{Guid.NewGuid():N}"),
+            new MemoryLogSegmentFactory());
+        var replicas = new ReplicaManager(
+            NullLogger<ReplicaManager>.Instance, state, logs, new ClusteringConfig { BrokerId = brokerId },
+            new Kuestenlogik.Surgewave.Transport.Tcp.TcpPeerTransport());
+        var handler = new InterBrokerApiHandler(
+            config, state, replicas, logs, NullLogger<InterBrokerApiHandler>.Instance);
+        return (handler, state);
+    }
+
+    private static readonly RequestContext Ctx =
+        new() { ConnectionState = new ConnectionState("fence-test"), ClientId = "controller" };
+
+    [Fact]
+    public async Task KafkaWireUpdateMetadata_StaleAgainstNativelyAdvancedEpoch_IsRejected()
+    {
+        var (handler, state) = NewHandler();
+
+        // Simulate a native-wire advance: the shared ClusterState epoch is now 6, controller 9.
+        Assert.True(state.TryAdvanceControllerEpoch(controllerId: 9, controllerEpoch: 6));
+
+        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
+        var request = new UpdateMetadataRequest
+        {
+            ApiKey = ApiKey.UpdateMetadata,
+            ApiVersion = 6,
+            CorrelationId = 1,
+            ClientId = "controller",
+            ControllerId = 4,
+            ControllerEpoch = 5, // stale: a demoted controller, older than the native-advanced 6
+            BrokerEpoch = -1,
+            TopicStates =
+            [
+                new UpdateMetadataRequest.UpdateMetadataTopicState
+                {
+                    TopicName = tp.Topic,
+                    PartitionStates =
+                    [
+                        new UpdateMetadataRequest.UpdateMetadataPartitionState
+                        {
+                            PartitionIndex = tp.Partition, ControllerEpoch = 5, Leader = 4,
+                            LeaderEpoch = 3, Isr = [4], Replicas = [4], OfflineReplicas = [], ZkVersion = 0,
+                        },
+                    ],
+                },
+            ],
+            LiveBrokers = [],
+        };
+
+        var response = (UpdateMetadataResponse)await handler.HandleAsync(request, Ctx, CancellationToken.None);
+
+        Assert.Equal(ErrorCode.StaleControllerEpoch, response.ErrorCode);
+        // Nothing applied and the shared epoch/id did NOT regress to the stale controller's view.
+        Assert.Null(state.GetPartitionState(tp));
+        Assert.Equal(6, state.ControllerEpoch);
+        Assert.Equal(9, state.ControllerId);
+    }
+
+    [Fact]
+    public async Task KafkaWireUpdateMetadata_FresherEpoch_AdvancesSharedState()
+    {
+        var (handler, state) = NewHandler();
+        state.TryAdvanceControllerEpoch(controllerId: 1, controllerEpoch: 2);
+
+        var request = new UpdateMetadataRequest
+        {
+            ApiKey = ApiKey.UpdateMetadata,
+            ApiVersion = 6,
+            CorrelationId = 2,
+            ClientId = "controller",
+            ControllerId = 5,
+            ControllerEpoch = 7, // fresher — must advance the shared state the native wire also reads
+            BrokerEpoch = -1,
+            TopicStates = [],
+            LiveBrokers = [],
+        };
+
+        var response = (UpdateMetadataResponse)await handler.HandleAsync(request, Ctx, CancellationToken.None);
+
+        Assert.Equal(ErrorCode.None, response.ErrorCode);
+        Assert.Equal(7, state.ControllerEpoch);
+        Assert.Equal(5, state.ControllerId);
+    }
+}
