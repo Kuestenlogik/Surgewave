@@ -73,6 +73,9 @@ public sealed partial class NativeInterBrokerServer
             case SurgewaveOpCode.InterBrokerHeartbeat:
                 return await HandleHeartbeatAsync(payload, ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerWriteTxnMarkers:
+                return await HandleWriteTxnMarkersAsync(payload, ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);
@@ -123,6 +126,30 @@ public sealed partial class NativeInterBrokerServer
 
         var outcome = await _service.HeartbeatAsync(request.Input, ct).ConfigureAwait(false);
         return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerHeartbeat, new BrokerHeartbeatResponsePayload(outcome));
+    }
+
+    // #60 Inc7 — WriteTxnMarkers has a dedicated WriteTxnMarkersResponsePayload (rather than the
+    // generic status frame) so one response type owns the 0x1507 wire on both sides.
+    private async ValueTask<byte[]> HandleWriteTxnMarkersAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        if (_service is null)
+            return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerWriteTxnMarkers,
+                new WriteTxnMarkersResponsePayload(ClusterRpcStatus.NotController));
+
+        WriteTxnMarkersRequestPayload request;
+        try
+        {
+            var reader = new SurgewavePayloadReader(payload.Span);
+            request = WriteTxnMarkersRequestPayload.Read(ref reader);
+        }
+        catch (Exception ex)
+        {
+            LogDecodeError(SurgewaveOpCode.InterBrokerWriteTxnMarkers, ex);
+            return ErrorFrame(ClusterRpcStatus.Unknown);
+        }
+
+        var status = await _service.ApplyWriteTxnMarkersAsync(request, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerWriteTxnMarkers, new WriteTxnMarkersResponsePayload(status));
     }
 
     /// <summary>

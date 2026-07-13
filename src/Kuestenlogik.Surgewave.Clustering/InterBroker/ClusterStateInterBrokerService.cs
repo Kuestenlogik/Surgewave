@@ -1,6 +1,8 @@
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 using Kuestenlogik.Surgewave.Clustering.Replication;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
+using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -35,6 +37,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly int _localBrokerId;
     private readonly IIsrUpdateApplier? _isrUpdateApplier;
     private readonly ClusterMembershipService? _membership;
+    private readonly ITransactionMarkerSink? _markerSink;
 
     public ClusterStateInterBrokerService(
         ILogger<ClusterStateInterBrokerService> logger,
@@ -43,7 +46,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         LogManager logManager,
         int localBrokerId,
         IIsrUpdateApplier? isrUpdateApplier = null,
-        ClusterMembershipService? membership = null)
+        ClusterMembershipService? membership = null,
+        ITransactionMarkerSink? markerSink = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -52,6 +56,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _localBrokerId = localBrokerId;
         _isrUpdateApplier = isrUpdateApplier;
         _membership = membership;
+        _markerSink = markerSink;
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyUpdateMetadataAsync(PartitionStatesPayload payload, CancellationToken ct = default)
@@ -218,6 +223,54 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         return ValueTask.FromResult(_membership.Heartbeat(input));
     }
 
+    public async ValueTask<ClusterRpcStatus> ApplyWriteTxnMarkersAsync(WriteTxnMarkersRequestPayload payload, CancellationToken ct = default)
+    {
+        // The sender groups by leader, so every partition here should be led by this broker. Verify
+        // leadership for ALL of them BEFORE writing any, so a stale-routed frame (topology moved
+        // between grouping and apply) is rejected atomically — no partition gets a marker while
+        // another is rejected, which would leave a partial write the sender might re-send.
+        foreach (var tp in payload.Partitions)
+        {
+            var state = _clusterState.GetPartitionState(tp);
+            if (state is null || state.LeaderBrokerId != _localBrokerId)
+            {
+                LogTxnMarkerNotLeader(tp.Topic, tp.Partition);
+                return ClusterRpcStatus.NotLeaderForPartition;
+            }
+        }
+
+        var controlType = payload.Commit
+            ? KafkaConstants.ControlRecordType.Commit
+            : KafkaConstants.ControlRecordType.Abort;
+
+        // Best-effort per-partition write: an I/O error on partition k leaves 0..k-1 applied and
+        // returns Unknown (multi-log append can't be made atomic). The native replicator is
+        // single-shot (no retry), so a partial apply is never re-sent and no marker is double-written;
+        // the marker sink's LSO recalculation is idempotent per producer/partition.
+        foreach (var tp in payload.Partitions)
+        {
+            try
+            {
+                var markerBatch = ControlBatchBuilder.BuildTransactionMarker(payload.ProducerId, payload.ProducerEpoch, controlType);
+                var offset = await _logManager.AppendBatchAsync(tp, markerBatch, ct).ConfigureAwait(false);
+
+                if (payload.Commit)
+                    _markerSink?.CommitTransaction(payload.ProducerId, [tp], offset);
+                else
+                    _markerSink?.AbortTransaction(payload.ProducerId, [tp], offset);
+
+                LogTxnMarkerWritten(tp.Topic, tp.Partition, payload.ProducerId, payload.Commit ? "COMMIT" : "ABORT", offset);
+            }
+            catch (Exception ex)
+            {
+                LogTxnMarkerError(tp.Topic, tp.Partition, ex);
+                return ClusterRpcStatus.Unknown;
+            }
+        }
+
+        return ClusterRpcStatus.None;
+    }
+
     private bool IsController => _isrUpdateApplier?.IsController ?? (_clusterState.ControllerId == _localBrokerId);
 
     /// <summary>
@@ -323,4 +376,13 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Learned broker {BrokerId} at {Host}:{Port} (replication port {ReplicationPort}) from native controller push")]
     private partial void LogBrokerLearned(int brokerId, string host, int port, int replicationPort);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Not leader for {Topic}-{Partition}, refusing native WriteTxnMarkers")]
+    private partial void LogTxnMarkerNotLeader(string topic, int partition);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Wrote native {MarkerType} marker for {Topic}-{Partition}, ProducerId={ProducerId}, Offset={Offset}")]
+    private partial void LogTxnMarkerWritten(string topic, int partition, long producerId, string markerType, long offset);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error writing native transaction marker for {Topic}-{Partition}")]
+    private partial void LogTxnMarkerError(string topic, int partition, Exception ex);
 }
