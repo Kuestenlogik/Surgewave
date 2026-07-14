@@ -46,7 +46,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
 - [#58](https://github.com/Kuestenlogik/Surgewave/issues/58) **Kafka decoupling stage 1: SurgewaveKafkaProtocolPlugin with Surgewave:Kafka:Enabled config gate** 
 - [#59](https://github.com/Kuestenlogik/Surgewave/issues/59) **Kafka decoupling stage 2: move wire pipeline + handler stack into the plugin assembly; neutral coordinator contracts** 
-- [#60](https://github.com/Kuestenlogik/Surgewave/issues/60) **Kafka decoupling stage 3: inter-broker/KRaft traffic off the Kafka wire (Clustering)** 
 - [#61](https://github.com/Kuestenlogik/Surgewave/issues/61) **Kafka decoupling stage 4: ship Protocol.Kafka as a real plugins/ artefact + final benchmark sign-off** 
 - [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
 - [#63](https://github.com/Kuestenlogik/Surgewave/issues/63) **Embedded Bowire host: share Kuestenlogik.Surgewave ALC prefix + register SDK services in DI** 
