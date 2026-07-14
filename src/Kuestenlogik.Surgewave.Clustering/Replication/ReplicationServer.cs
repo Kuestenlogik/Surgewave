@@ -559,15 +559,13 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
     private static byte[] SerializeMetadataUpdateResponse(int correlationId, MetadataUpdateResponse response)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.BrokerId));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.ErrorCode));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.MetadataVersion));
-
-        return ms.ToArray();
+        var frame = NewFrame(18, out var o);
+        var span = frame.AsSpan();
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.BrokerId);
+        BinaryPrimitives.WriteInt16BigEndian(span[(o + 8)..], response.ErrorCode);
+        BinaryPrimitives.WriteInt64BigEndian(span[(o + 10)..], response.MetadataVersion);
+        return frame;
     }
 
     private async Task<byte[]> HandleRequestVoteAsync(ReplicationRequest request, CancellationToken ct)
@@ -605,39 +603,33 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
     private static byte[] SerializePreVoteResponse(int correlationId, PreVoteResponse response)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.Term));
-        writer.Write((byte)(response.VoteGranted ? 1 : 0));
-
-        return ms.ToArray();
+        var frame = NewFrame(9, out var o);
+        var span = frame.AsSpan();
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.Term);
+        frame[o + 8] = (byte)(response.VoteGranted ? 1 : 0);
+        return frame;
     }
 
     private static byte[] SerializeRequestVoteResponse(int correlationId, RequestVoteResponse response)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.Term));
-        writer.Write((byte)(response.VoteGranted ? 1 : 0));
-
-        return ms.ToArray();
+        var frame = NewFrame(9, out var o);
+        var span = frame.AsSpan();
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.Term);
+        frame[o + 8] = (byte)(response.VoteGranted ? 1 : 0);
+        return frame;
     }
 
     private static byte[] SerializeAppendEntriesResponse(int correlationId, AppendEntriesResponse response)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.Term));
-        writer.Write((byte)(response.Success ? 1 : 0));
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.MatchIndex));
-
-        return ms.ToArray();
+        var frame = NewFrame(17, out var o);
+        var span = frame.AsSpan();
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.Term);
+        frame[o + 8] = (byte)(response.Success ? 1 : 0);
+        BinaryPrimitives.WriteInt64BigEndian(span[(o + 9)..], response.MatchIndex);
+        return frame;
     }
 
     private byte[] HandleHeartbeat(ReplicationRequest request)
@@ -653,142 +645,151 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
     private static byte[] SerializeHeartbeatResponse(int correlationId, HeartbeatResponse response)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        // Correlation ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-
-        // Broker ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.BrokerId));
-
-        // Broker Epoch
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.BrokerEpoch));
-
-        // Timestamp
-        writer.Write(BinaryPrimitives.ReverseEndianness(response.Timestamp));
-
-        // Is Controller
-        writer.Write((byte)(response.IsController ? 1 : 0));
-
-        return ms.ToArray();
+        var frame = NewFrame(21, out var o);
+        var span = frame.AsSpan();
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.BrokerId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 8)..], response.BrokerEpoch);
+        BinaryPrimitives.WriteInt64BigEndian(span[(o + 12)..], response.Timestamp);
+        frame[o + 20] = (byte)(response.IsController ? 1 : 0);
+        return frame;
     }
+
+    /// <summary>
+    /// Per-partition fetch result gathered in pass 1 of <see cref="HandleFetchAsync"/> so the exact
+    /// response size is known before serializing. <see cref="Batches"/> is <c>null</c> for an error
+    /// partition (which serializes with zero-length records).
+    /// </summary>
+    private readonly record struct FetchPartitionResult(
+        int Partition,
+        ClusterRpcStatus Status,
+        long HighWatermark,
+        long LogStartOffset,
+        List<byte[]>? Batches,
+        int BatchBytes);
+
+    /// <summary>Fixed serialized size of one fetch partition response, excluding the record batches.</summary>
+    private const int FetchPartitionFixedBytes = 4 + 2 + 8 + 8 + 8 + 4 + 4 + 4;
 
     private async Task<byte[]> HandleFetchAsync(ReplicationRequest request, CancellationToken ct)
     {
         var fetchRequest = request.FetchRequest!;
         var replicaId = fetchRequest.ReplicaId;
 
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        // Correlation ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(request.CorrelationId));
-
-        // Throttle time
-        writer.Write(BinaryPrimitives.ReverseEndianness(0));
-
-        // Error code
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)0));
-
-        // Session ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(0));
-
-        // Topics
-        writer.Write(BinaryPrimitives.ReverseEndianness(fetchRequest.Topics.Count));
+        // Pass 1 — read the requested batches and pre-compute the exact response size, so pass 2 can
+        // serialize into a single right-sized frame: no MemoryStream growth chain, no ToArray copy,
+        // and each record batch is copied exactly once (into the frame the transport writes).
+        var bodySize = 4 + 4 + 2 + 4 + 4; // correlation id + throttle + error code + session id + topic count
+        var topics = new List<(byte[] Name, List<FetchPartitionResult> Partitions)>(fetchRequest.Topics.Count);
 
         foreach (var topicData in fetchRequest.Topics)
         {
-            // Topic name
-            var topicBytes = System.Text.Encoding.UTF8.GetBytes(topicData.Topic);
-            writer.Write(BinaryPrimitives.ReverseEndianness((short)topicBytes.Length));
-            writer.Write(topicBytes);
-
-            // Partitions
-            writer.Write(BinaryPrimitives.ReverseEndianness(topicData.Partitions.Count));
+            var name = System.Text.Encoding.UTF8.GetBytes(topicData.Topic);
+            bodySize += 2 + name.Length + 4; // name length + name + partition count
+            var partitions = new List<FetchPartitionResult>(topicData.Partitions.Count);
 
             foreach (var partitionData in topicData.Partitions)
             {
                 var tp = new TopicPartition { Topic = topicData.Topic, Partition = partitionData.Partition };
 
-                // Check if we're the leader
                 if (!_replicaManager.IsLeader(tp))
                 {
-                    WritePartitionError(writer, partitionData.Partition, ClusterRpcStatus.NotLeaderForPartition);
+                    partitions.Add(new FetchPartitionResult(
+                        partitionData.Partition, ClusterRpcStatus.NotLeaderForPartition, 0L, 0L, null, 0));
+                    bodySize += FetchPartitionFixedBytes;
                     continue;
                 }
 
-                // Get batches from log
                 var batches = await _logManager.ReadBatchesAsync(
                     tp, partitionData.FetchOffset, partitionData.PartitionMaxBytes, ct);
 
                 // Update follower position for ISR tracking
                 _replicaManager.UpdateFollowerFetchPosition(tp, replicaId, partitionData.FetchOffset);
 
-                // Get high watermark
                 var hw = _replicaManager.GetHighWatermark(tp);
                 var log = _logManager.GetOrCreateLog(tp);
-                var logStartOffset = log.LogStartOffset;
 
-                // Write partition response
-                writer.Write(BinaryPrimitives.ReverseEndianness(partitionData.Partition));
-                writer.Write(BinaryPrimitives.ReverseEndianness((short)ClusterRpcStatus.None));
-                writer.Write(BinaryPrimitives.ReverseEndianness(hw));
-                writer.Write(BinaryPrimitives.ReverseEndianness(-1L)); // Last stable offset
-                writer.Write(BinaryPrimitives.ReverseEndianness(logStartOffset));
-
-                // Aborted transactions
-                writer.Write(BinaryPrimitives.ReverseEndianness(0));
-
-                // Preferred read replica
-                writer.Write(BinaryPrimitives.ReverseEndianness(-1));
-
-                // Record batches
-                var totalSize = batches.Sum(b => b.Length);
-                writer.Write(BinaryPrimitives.ReverseEndianness(totalSize));
+                var batchBytes = 0;
                 foreach (var batch in batches)
+                    batchBytes += batch.Length;
+
+                partitions.Add(new FetchPartitionResult(
+                    partitionData.Partition, ClusterRpcStatus.None, hw, log.LogStartOffset, batches, batchBytes));
+                bodySize += FetchPartitionFixedBytes + batchBytes;
+            }
+
+            topics.Add((name, partitions));
+        }
+
+        // Pass 2 — serialize into the exact-size frame.
+        var frame = NewFrame(bodySize, out var o);
+        var span = frame.AsSpan();
+
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], request.CorrelationId); o += 4;
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], 0); o += 4;            // throttle time
+        BinaryPrimitives.WriteInt16BigEndian(span[o..], 0); o += 2;            // error code
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], 0); o += 4;            // session id
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], topics.Count); o += 4;
+
+        foreach (var (name, partitions) in topics)
+        {
+            BinaryPrimitives.WriteInt16BigEndian(span[o..], (short)name.Length); o += 2;
+            name.CopyTo(span[o..]); o += name.Length;
+            BinaryPrimitives.WriteInt32BigEndian(span[o..], partitions.Count); o += 4;
+
+            foreach (var p in partitions)
+            {
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], p.Partition); o += 4;
+                BinaryPrimitives.WriteInt16BigEndian(span[o..], (short)p.Status); o += 2;
+                BinaryPrimitives.WriteInt64BigEndian(span[o..], p.HighWatermark); o += 8;
+                BinaryPrimitives.WriteInt64BigEndian(span[o..], -1L); o += 8;  // last stable offset
+                BinaryPrimitives.WriteInt64BigEndian(span[o..], p.LogStartOffset); o += 8;
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], 0); o += 4;    // aborted transactions
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], -1); o += 4;   // preferred read replica
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], p.BatchBytes); o += 4;
+
+                if (p.Batches is null)
+                    continue;
+                foreach (var batch in p.Batches)
                 {
-                    writer.Write(batch);
+                    batch.CopyTo(span[o..]);
+                    o += batch.Length;
                 }
             }
         }
 
-        return ms.ToArray();
+        return frame;
     }
 
-    private void WritePartitionError(BinaryWriter writer, int partition, ClusterRpcStatus errorCode)
+    private static byte[] BuildErrorResponse(int correlationId, ClusterRpcStatus errorCode)
     {
-        writer.Write(BinaryPrimitives.ReverseEndianness(partition));
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)errorCode));
-        writer.Write(BinaryPrimitives.ReverseEndianness(0L)); // High watermark
-        writer.Write(BinaryPrimitives.ReverseEndianness(-1L)); // Last stable offset
-        writer.Write(BinaryPrimitives.ReverseEndianness(0L)); // Log start offset
-        writer.Write(BinaryPrimitives.ReverseEndianness(0)); // Aborted transactions
-        writer.Write(BinaryPrimitives.ReverseEndianness(-1)); // Preferred read replica
-        writer.Write(BinaryPrimitives.ReverseEndianness(0)); // Records length
+        var frame = NewFrame(18, out var o);
+        var span = frame.AsSpan();
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], 0);              // throttle time
+        BinaryPrimitives.WriteInt16BigEndian(span[(o + 8)..], (short)errorCode);
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 10)..], 0);             // session id
+        BinaryPrimitives.WriteInt32BigEndian(span[(o + 14)..], 0);             // topics count
+        return frame;
     }
 
-    private byte[] BuildErrorResponse(int correlationId, ClusterRpcStatus errorCode)
+    /// <summary>
+    /// Allocate a response frame — <c>[int32 size][body]</c> — with the size prefix already filled in,
+    /// so <see cref="WriteResponseAsync"/> hands the complete frame to the transport in one write
+    /// (instead of a separate 4-byte prefix write per response). <paramref name="offset"/> points at
+    /// the body start; every response builder in this class returns such a frame.
+    /// </summary>
+    private static byte[] NewFrame(int bodySize, out int offset)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-        writer.Write(BinaryPrimitives.ReverseEndianness(0)); // Throttle time
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)errorCode));
-        writer.Write(BinaryPrimitives.ReverseEndianness(0)); // Session ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(0)); // Topics count
-
-        return ms.ToArray();
+        var frame = new byte[4 + bodySize];
+        BinaryPrimitives.WriteInt32BigEndian(frame, bodySize);
+        offset = 4;
+        return frame;
     }
 
-    private async Task WriteResponseAsync(Stream stream, byte[] response, CancellationToken ct)
+    private static async Task WriteResponseAsync(Stream stream, byte[] frame, CancellationToken ct)
     {
-        var sizeBuffer = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(sizeBuffer, response.Length);
-
-        await stream.WriteAsync(sizeBuffer, ct);
-        await stream.WriteAsync(response, ct);
+        await stream.WriteAsync(frame, ct);
         await stream.FlushAsync(ct);
     }
 
