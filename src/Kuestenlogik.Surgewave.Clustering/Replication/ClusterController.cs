@@ -390,8 +390,13 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     ? new BrokerNode { BrokerId = brokerId, Host = parts[1], Port = port, ReplicationPort = replicationPort.Value }
                     : new BrokerNode { BrokerId = brokerId, Host = parts[1], Port = port };
 
-                _clusterState.AddBroker(broker);
-                LogDiscoveredBroker(brokerId, parts[1], port);
+                // Insert-only (#72 Inc3): a peer that REGISTERED before config discovery ran carries
+                // its advertised inter-broker protocol level and real replication port — the config
+                // entry (level always KafkaWire, port possibly a derived guess) must seed unknown
+                // peers, never clobber a registered one back down (startup-ordering race).
+                _clusterState.UpdateBroker(brokerId, ifAbsent: broker, mutate: known => known, out var inserted);
+                if (inserted)
+                    LogDiscoveredBroker(brokerId, parts[1], port);
             }
         }
 
