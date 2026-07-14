@@ -77,4 +77,40 @@ public class ClusterControllerLocalNodeTests
 
         Assert.Equal(InterBrokerProtocolFeature.LocalMaxSupported, state.FinalizedInterBrokerProtocol);
     }
+
+    [Fact]
+    public async Task StartAsync_PeerRegisteredBeforeConfigDiscovery_KeepsLevelAndReplicationPort()
+    {
+        var config = new ClusteringConfig
+        {
+            BrokerId = 0,
+            Host = "localhost",
+            Port = 9092,
+            ReplicationPort = 10092,
+            RebalanceCheckIntervalSeconds = 5,
+            // The config lists peer 1 with a 3-part entry (replication port would be DERIVED as
+            // 9094 + 1000 — a guess).
+            ClusterNodes = "0:localhost:9092,1:localhost:9094",
+        };
+        var (controller, state) = NewController(config);
+
+        // #72 Inc3 — startup-ordering race: peer 1 REGISTERED (native level, real replication port)
+        // before this broker's config discovery ran. Discovery must be insert-only — the old
+        // AddBroker overwrite reset the peer to KafkaWire/derived-port, dropping the finalized
+        // level and re-introducing the #69 wrong-fetch-port failure.
+        state.AddBroker(new BrokerNode
+        {
+            BrokerId = 1, Host = "peer-real", Port = 9095, ReplicationPort = 12345,
+            InterBrokerProtocol = InterBrokerProtocolFeature.Native,
+        });
+
+        await controller.StartAsync(CancellationToken.None);
+
+        var peer = state.GetBroker(1);
+        Assert.NotNull(peer);
+        Assert.Equal(InterBrokerProtocolFeature.Native, peer!.InterBrokerProtocol);
+        Assert.Equal("peer-real", peer.Host);
+        Assert.Equal(12345, peer.ReplicationPort);
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
+    }
 }
