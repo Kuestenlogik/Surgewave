@@ -179,9 +179,11 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             sp.GetRequiredService<ClientTelemetryConfig>(),
             sp.GetRequiredService<ITelemetryIngestor>()));
 
+        // #72 Inc2 — the handler is a pure wire codec over the host's ClusterMembershipService
+        // singleton (registered in the broker host BEFORE plugin activation): one registration
+        // authority for both the Kafka and the native wire.
         services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterMembershipHandler(
-            sp.GetRequiredService<ClusterIdManager>(),
-            sp.GetRequiredService<ClusterState>(),
+            sp.GetRequiredService<ClusterMembershipService>(),
             sp.GetRequiredService<ILogger<ClusterMembershipHandler>>()));
 
         // RaftApiHandler: RaftNode / RaftPersistence are optional (registered only under

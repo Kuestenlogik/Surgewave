@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Clustering;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Kuestenlogik.Surgewave.Testing;
@@ -19,13 +20,17 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     private static readonly RequestContext Ctx =
         new() { ConnectionState = new ConnectionState("ibp-test"), ClientId = "broker" };
 
-    private static (ClusterMembershipHandler handler, ClusterState state) NewController()
+    private static (ClusterMembershipHandler handler, ClusterState state, ClusterMembershipService membership) NewController()
     {
+        // #72 Inc2 — the handler is a pure wire codec over the neutral ClusterMembershipService,
+        // the same authority the native join path uses; the fixture exposes the service so tests
+        // can prove cross-wire coherence (one store, one epoch counter).
         var config = new ClusteringConfig();
         var clusterIdManager = new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance);
         var state = new ClusterState();
-        var handler = new ClusterMembershipHandler(clusterIdManager, state, NullLogger<ClusterMembershipHandler>.Instance);
-        return (handler, state);
+        var membership = new ClusterMembershipService(clusterIdManager, state, NullLogger<ClusterMembershipService>.Instance);
+        var handler = new ClusterMembershipHandler(membership, NullLogger<ClusterMembershipHandler>.Instance);
+        return (handler, state, membership);
     }
 
     private static BrokerRegistrationRequest.Feature InterBrokerProtocol(short max) => new()
@@ -64,7 +69,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Register_NativeBroker_StoresNativeLevelAndFinalizesNative()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         var resp = await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
 
@@ -76,7 +81,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Register_OlderBrokerWithoutFeature_StoresKafkaWire()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         await Register(handler, Registration(1)); // no inter.broker.protocol feature advertised
 
@@ -87,7 +92,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Register_MixedNativeAndOlder_FinalizesKafkaWire()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
         await Register(handler, Registration(2)); // older broker, no feature
@@ -100,7 +105,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Reregistration_WithUpgradedFeature_UpdatesStoredLevel()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         // First join as an older broker (no feature), then re-register advertising native (a rolling upgrade).
         await Register(handler, Registration(1));
@@ -114,7 +119,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Reregistration_WithDowngradedFeature_UpdatesStoredLevel()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         // #72 Inc1 — down twin of the upgrade test: a broker re-registers WITHOUT the feature (a
         // rolling downgrade to an older build). The registration authority must converge the stored
@@ -133,7 +138,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Register_WithReplicationListener_StoresRealReplicationPortAndClientPort()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         await Register(handler, Registration(1, replicationPort: 10999, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
 
@@ -147,7 +152,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
     [Fact]
     public async Task Register_WithoutReplicationListener_KeepsPreviouslyDiscoveredReplicationPort()
     {
-        var (handler, state) = NewController();
+        var (handler, state, _) = NewController();
 
         // The node was discovered from cluster-node config with its real replication port (#69);
         // a registration without a REPLICATION listener must not clobber it back to port + 1000.
@@ -156,5 +161,58 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         await Register(handler, Registration(1));
 
         Assert.Equal(12345, state.GetBroker(1)!.ReplicationPort);
+    }
+
+    // ── #72 Inc2: one registration authority across both wires ──────────────────────────────────
+
+    [Fact]
+    public async Task KafkaRegistration_ThenNativeHeartbeat_AcceptsTheSameEpoch()
+    {
+        var (handler, _, membership) = NewController();
+
+        // Register over the KAFKA wire and heartbeat against the NEUTRAL authority (the native
+        // path's target) with the epoch from the Kafka response. With the pre-unification duplicate
+        // stores this failed (BrokerNotAvailable — two counters, two stores); with one authority the
+        // heartbeat must be accepted and unfence the caught-up broker.
+        var response = await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
+        Assert.Equal(ErrorCode.None, response.ErrorCode);
+
+        var outcome = membership.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: 1, BrokerEpoch: response.BrokerEpoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+
+        Assert.Equal(ClusterRpcStatus.None, outcome.Status);
+        Assert.False(outcome.IsFenced);
+        Assert.True(outcome.IsCaughtUp);
+    }
+
+    [Fact]
+    public async Task KafkaHeartbeat_WithNativeRegistrationEpoch_AcceptsTheSameEpoch()
+    {
+        var (handler, _, membership) = NewController();
+
+        // The mirror direction: register against the NEUTRAL authority (as the native join path
+        // does) and heartbeat over the KAFKA wire with that epoch.
+        var outcome = membership.Register(new BrokerRegistrationInput(
+            BrokerId: 2, ClusterId: "", IncarnationId: Guid.NewGuid(),
+            Listeners: [new ListenerSpec("PLAINTEXT", "h", 9094, 0)],
+            Features: [], Rack: null, PreviousBrokerEpoch: -1));
+        Assert.Equal(ClusterRpcStatus.None, outcome.Status);
+
+        var response = (BrokerHeartbeatResponse)await handler.HandleAsync(new BrokerHeartbeatRequest
+        {
+            ApiKey = ApiKey.BrokerHeartbeat,
+            ApiVersion = 1,
+            CorrelationId = 7,
+            ClientId = "broker-2",
+            BrokerId = 2,
+            BrokerEpoch = outcome.BrokerEpoch,
+            CurrentMetadataOffset = 0,
+            WantFence = false,
+            WantShutDown = false,
+        }, Ctx, CancellationToken.None);
+
+        Assert.Equal(ErrorCode.None, response.ErrorCode);
+        Assert.False(response.IsFenced);
+        Assert.True(response.IsCaughtUp);
     }
 }
