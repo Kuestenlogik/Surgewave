@@ -19,7 +19,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Tests;
 /// a PRIVATE _currentControllerEpoch field, so an epoch the NATIVE wire had already advanced on the
 /// shared <see cref="ClusterState"/> was invisible to it, and a stale Kafka-wire push could regress
 /// partition metadata during a mixed-wire rolling upgrade. Both wires now fence through
-/// <see cref="ClusterState.TryAdvanceControllerEpoch"/>.
+/// <see cref="ClusterState.TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/>.
 /// </summary>
 [Trait("Category", TestCategories.Integration)]
 public sealed class CrossWireFenceTests

@@ -79,7 +79,11 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         // ClusterState.TryAdvanceControllerEpoch (#60 Inc5): the native inter-broker applier fences
         // through the same ClusterState (version-ordered there), so a stale Kafka-wire push cannot
         // regress an epoch the native wire already advanced (and vice versa) during a rolling upgrade.
-        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
+        // #72 Inc1 — the fence and the Kafka-wire cap update are ONE atomic operation: a fence-passing
+        // push from a remote controller proves the controller finalized to the Kafka wire and caps the
+        // local finalized level (rolling-downgrade convergence). A self-delivered push passes null.
+        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch,
+                request.ControllerId != _config.BrokerId ? ControllerPushWire.KafkaWire : null))
         {
             LogStaleControllerEpoch("LeaderAndIsr", request.ControllerEpoch, _clusterState.ControllerEpoch);
             return new LeaderAndIsrResponse
@@ -94,16 +98,21 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         // Update broker list from LiveLeaders — but only for brokers we don't
         // already know. A broker discovered from cluster-node config carries
         // its real replication port; LeaderAndIsr's LiveLeaders only advertises
-        // the client host/port, so RegisterBroker would rebuild the node with
-        // the default ReplicationPort (Port + 1000) and clobber the discovered
-        // value. The follower's fetcher would then dial the wrong port and
-        // never catch up, so the ISR would never form (#69).
+        // the client host/port, so a rebuild would reset the node to the default
+        // ReplicationPort (Port + 1000) and clobber the discovered value. The
+        // follower's fetcher would then dial the wrong port and never catch up,
+        // so the ISR would never form (#69). Insert-only, atomically (#72 Inc1:
+        // UpdateBroker instead of the racy GetBroker+RegisterBroker pre-read);
+        // the local node stays owned by startup self-advertisement.
         foreach (var broker in request.LiveLeaders)
         {
-            if (_clusterState.GetBroker(broker.BrokerId) is null)
-            {
-                _clusterState.RegisterBroker(broker.BrokerId, broker.Host, broker.Port);
-            }
+            if (broker.BrokerId == _config.BrokerId)
+                continue;
+
+            _clusterState.UpdateBroker(
+                broker.BrokerId,
+                ifAbsent: new BrokerNode { BrokerId = broker.BrokerId, Host = broker.Host, Port = broker.Port },
+                mutate: known => known);
         }
 
         var partitionErrors = new List<LeaderAndIsrResponse.LeaderAndIsrPartitionError>();
@@ -277,8 +286,9 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 
         LogStopReplicaReceived(request.ControllerId, request.ControllerEpoch, request.DeletePartitions);
 
-        // Validate controller epoch via the shared fence (see HandleLeaderAndIsrAsync, #60 Inc5).
-        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
+        // Shared fence + atomic Kafka-wire cap (see HandleLeaderAndIsrAsync, #60 Inc5 / #72 Inc1).
+        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch,
+                request.ControllerId != _config.BrokerId ? ControllerPushWire.KafkaWire : null))
         {
             LogStaleControllerEpoch("StopReplica", request.ControllerEpoch, _clusterState.ControllerEpoch);
             return new StopReplicaResponse
@@ -411,8 +421,9 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
         // Same shared push gate as LeaderAndIsr/native (#60 Inc6a).
         using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
 
-        // Validate controller epoch via the shared fence (see HandleLeaderAndIsrAsync, #60 Inc5).
-        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch))
+        // Shared fence + atomic Kafka-wire cap (see HandleLeaderAndIsrAsync, #60 Inc5 / #72 Inc1).
+        if (!_clusterState.TryAdvanceControllerEpoch(request.ControllerId, request.ControllerEpoch,
+                request.ControllerId != _config.BrokerId ? ControllerPushWire.KafkaWire : null))
         {
             LogStaleControllerEpoch("UpdateMetadata", request.ControllerEpoch, _clusterState.ControllerEpoch);
             return new UpdateMetadataResponse
@@ -423,17 +434,29 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
             };
         }
 
-        // Update broker endpoints (v1+)
+        // Update broker endpoints (v1+) — MERGE, never rebuild (#72 Inc1): the previous unconditional
+        // RegisterBroker re-created every listed node, resetting its advertised inter.broker.protocol
+        // level to KafkaWire and clobbering an explicitly discovered ReplicationPort (#69-class) —
+        // permanently for the RECEIVER'S OWN node, whose self-advertisement runs only at startup. The
+        // Kafka UpdateMetadata wire carries no per-broker level, so a known broker's level is left
+        // untouched (down-convergence is handled structurally via the fence's Kafka-wire cap above);
+        // endpoint fields converge, and a derived ReplicationPort re-derives from the new client port.
         if (request.LiveBrokers != null)
         {
             foreach (var broker in request.LiveBrokers)
             {
+                if (broker.Id == _config.BrokerId)
+                    continue; // the local node is owned by startup self-advertisement
+
                 // Use first endpoint or fall back to legacy host/port
                 var endpoint = broker.Endpoints?.FirstOrDefault();
                 var host = endpoint?.Host ?? broker.V0Host ?? "localhost";
                 var port = endpoint?.Port ?? broker.V0Port;
 
-                _clusterState.RegisterBroker(broker.Id, host, port, broker.Rack);
+                _clusterState.UpdateBroker(
+                    broker.Id,
+                    ifAbsent: new BrokerNode { BrokerId = broker.Id, Host = host, Port = port, Rack = broker.Rack },
+                    mutate: known => known with { Host = host, Port = port, Rack = broker.Rack });
             }
         }
 

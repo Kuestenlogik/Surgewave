@@ -45,6 +45,19 @@ public sealed class ClusterState
     /// epoch field could be behind the shared state and let a stale push through).
     /// </summary>
     public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch)
+        => TryAdvanceControllerEpoch(controllerId, controllerEpoch, observedWire: null);
+
+    /// <summary>
+    /// As <see cref="TryAdvanceControllerEpoch(int,int)"/>, additionally recording the WIRE the push
+    /// arrived on when it passes the fence — atomically, in the same lock scope (#72 Inc1). A
+    /// Kafka-wire push caps <see cref="FinalizedInterBrokerProtocol"/> at KafkaWire; a native push
+    /// clears a STRICTLY older cap (see the cap field for the tie rule). Pass <c>null</c> for a
+    /// self-delivered push: it proves nothing about a remote controller's wire and must never cap
+    /// the local gate. Fence and cap share one <c>_stateLock</c> scope with
+    /// <see cref="BecomeController"/> and <see cref="Clear"/>, so an election's cap reset can never
+    /// interleave between a push's fence and its cap write.
+    /// </summary>
+    public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch, ControllerPushWire? observedWire)
     {
         lock (_stateLock)
         {
@@ -53,6 +66,18 @@ public sealed class ClusterState
 
             ControllerEpoch = controllerEpoch;
             ControllerId = controllerId;
+
+            if (observedWire is ControllerPushWire.KafkaWire)
+            {
+                Volatile.Write(ref _controllerWireCap, PackCap(controllerEpoch));
+            }
+            else if (observedWire is ControllerPushWire.Native)
+            {
+                var cap = Volatile.Read(ref _controllerWireCap);
+                if ((cap & CapFlag) != 0 && controllerEpoch > CapEpoch(cap))
+                    Volatile.Write(ref _controllerWireCap, 0L);
+            }
+
             return true;
         }
     }
@@ -103,9 +128,9 @@ public sealed class ClusterState
     /// <summary>
     /// Election-time controller assumption: atomically increment the epoch and take the controller
     /// id, returning the new epoch. Shares <c>_stateLock</c> with
-    /// <see cref="TryAdvanceControllerEpoch"/> so a controller push racing the election cannot
-    /// interleave the non-atomic read-increment-write (a lost increment or a demoted ControllerId
-    /// paired with the fresh epoch).
+    /// <see cref="TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/> so a controller push
+    /// racing the election cannot interleave the non-atomic read-increment-write (a lost increment
+    /// or a demoted ControllerId paired with the fresh epoch).
     /// </summary>
     public int BecomeController(int controllerId)
     {
@@ -113,6 +138,14 @@ public sealed class ClusterState
         {
             ControllerEpoch++;
             ControllerId = controllerId;
+
+            // #72 Inc1 — the Kafka-wire cap models the wire of a REMOTE controller; it is meaningless
+            // (and, uncleaned, an absorbing state: a capped controller pins its own transport gate,
+            // re-caps every receiver with each Kafka-wire push, and never receives the native push
+            // that could clear it — no broker could ever re-finalize to Native) the moment THIS
+            // broker takes controllership, whose own map is registration-authoritative.
+            Volatile.Write(ref _controllerWireCap, 0L);
+
             return ControllerEpoch;
         }
     }
@@ -169,12 +202,14 @@ public sealed class ClusterState
     /// <summary>
     /// #60 Inc3 — the cluster-wide finalized inter-broker protocol level: the MIN of every registered
     /// broker's advertised <see cref="BrokerNode.InterBrokerProtocol"/> (a broker that never advertised
-    /// the feature reads as <see cref="InterBrokerProtocolFeature.KafkaWire"/>). Returns
+    /// the feature reads as <see cref="InterBrokerProtocolFeature.KafkaWire"/>), capped by the
+    /// controller-wire cap (see the cap field below and
+    /// <see cref="TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/>). Returns
     /// <see cref="InterBrokerProtocolFeature.KafkaWire"/> for an empty cluster.
     /// <para>
     /// This is the safety anchor: the cluster only rises to a higher level once EVERY live or fenced
-    /// broker supports it, so a single older peer pins the whole cluster to the Kafka wire. Exposed for
-    /// observability — nothing selects transport on it yet (that lands in a later increment).
+    /// broker supports it, so a single older peer pins the whole cluster to the Kafka wire. The
+    /// transport gates (GatedControllerReplicaRpc, GatedTransactionMarkerReplicator) re-read it per send.
     /// </para>
     /// </summary>
     public short FinalizedInterBrokerProtocol
@@ -195,9 +230,46 @@ public sealed class ClusterState
                     finalized = level;
             }
 
-            return any ? finalized : InterBrokerProtocolFeature.KafkaWire;
+            if (!any)
+                return InterBrokerProtocolFeature.KafkaWire;
+
+            // #72 Inc1 — a live Kafka-wire cap pins the level to the Kafka wire (lock-free,
+            // alloc-free; see the cap field below for the cap/clear protocol).
+            var cap = Volatile.Read(ref _controllerWireCap);
+            return (cap & CapFlag) != 0 ? InterBrokerProtocolFeature.KafkaWire : finalized;
         }
     }
+
+    // #72 Inc1 — the Kafka-wire controller cap, packed into one atomically-readable long:
+    // bit 0 = capped flag, upper bits = the controller epoch of the push that set the cap.
+    // 0 = uncapped. All writers hold _stateLock (the fence overload, BecomeController, Clear);
+    // FinalizedInterBrokerProtocol reads it lock-free.
+    //
+    // WHY: the Kafka UpdateMetadata/LeaderAndIsr DTOs carry no per-broker protocol level, so during
+    // a rolling DOWNGRADE a non-controller's broker map would stay pinned at Native forever (only
+    // the controller sees the downgraded re-registration). A fence-passing Kafka-wire push proves
+    // the controller — whose map IS registration-authoritative — finalized to the Kafka wire, so it
+    // caps the local finalized level.
+    //
+    // TIE RULE: a native push clears the cap only for a STRICTLY newer controller epoch. The fence
+    // makes fence-passing epochs monotone, so the only wire ambiguity is between same-epoch frames
+    // (no per-push ordering exists across the two connections), and there the cap must win — a
+    // wrongly-kept cap degrades to the Kafka wire every capped broker speaks (only the Kafka-wire
+    // handler can cap, so a plugin-free broker is never capped), while a wrongly-cleared cap would
+    // send native frames at a downgraded peer that cannot decode them. Errors are downward-only.
+    //
+    // The strictly-newer epoch a clear needs is guaranteed to appear: elections bump via
+    // BecomeController, and the controller bumps itself when its finalized level rises to Native
+    // (ClusterStateInterBrokerService.RegisterBrokerAsync), so an upgrade re-converges within the
+    // reign that completed it. Known residual window: an election that lands exactly ON the cap's
+    // epoch (a newly elected controller that missed the capping push entirely — non-durable local
+    // epoch counter, #72 Inc4 tightens this) keeps followers on the Kafka wire until the following
+    // election; degraded, never incorrect.
+    private long _controllerWireCap;
+    private const long CapFlag = 1L;
+
+    private static long PackCap(int controllerEpoch) => ((long)controllerEpoch << 1) | CapFlag;
+    private static int CapEpoch(long cap) => (int)(cap >> 1);
 
     /// <summary>
     /// All topics.
@@ -557,6 +629,7 @@ public sealed class ClusterState
             _partitionStates.Clear();
             ControllerId = -1;
             ControllerEpoch = 0;
+            Volatile.Write(ref _controllerWireCap, 0L); // #72 Inc1 — no stale cap across a reset/restore
         }
     }
 
