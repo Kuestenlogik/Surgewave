@@ -6,7 +6,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Tests;
 /// <summary>
 /// #60 Inc5 — the SHARED controller-epoch fence. Both the Kafka-wire InterBrokerApiHandler and the
 /// native ClusterStateInterBrokerService fence controller pushes through
-/// <see cref="ClusterState.TryAdvanceControllerEpoch"/>, so a stale push on either wire is rejected
+/// <see cref="ClusterState.TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/>, so a stale push on either wire is rejected
 /// against the epoch the OTHER wire may already have advanced (the pre-Inc5 Kafka handler fenced on
 /// a private field and could regress a natively-advanced epoch during split-brain failover).
 /// </summary>

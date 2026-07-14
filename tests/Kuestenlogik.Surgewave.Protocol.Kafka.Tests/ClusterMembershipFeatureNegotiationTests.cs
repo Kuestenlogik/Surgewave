@@ -111,6 +111,23 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
     }
 
+    [Fact]
+    public async Task Reregistration_WithDowngradedFeature_UpdatesStoredLevel()
+    {
+        var (handler, state) = NewController();
+
+        // #72 Inc1 — down twin of the upgrade test: a broker re-registers WITHOUT the feature (a
+        // rolling downgrade to an older build). The registration authority must converge the stored
+        // level DOWN, or the finalized MIN would keep selecting the native wire against a peer that
+        // no longer speaks it.
+        await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
+        Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
+
+        await Register(handler, Registration(1));
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.GetBroker(1)!.InterBrokerProtocol);
+        Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.FinalizedInterBrokerProtocol);
+    }
+
     // ── #60 Inc5: the ReplicationPort resolution the native controller client depends on ────────
 
     [Fact]

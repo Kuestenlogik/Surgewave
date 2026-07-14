@@ -19,8 +19,8 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// push gate</see>, which the Kafka-wire <c>InterBrokerApiHandler</c> also holds, so native and Kafka
 /// pushes during a rolling upgrade share one critical section and never interleave their per-partition
 /// writes. Ordering is layered: (1) the <b>controller-epoch fence</b>
-/// (<see cref="ClusterState.TryAdvanceControllerEpoch"/>) rejects a push from a demoted controller
-/// (older epoch); (2) the <b>per-partition leader-epoch guard</b>
+/// (<see cref="ClusterState.TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/>) rejects a
+/// push from a demoted controller (older epoch); (2) the <b>per-partition leader-epoch guard</b>
 /// (<see cref="ClusterState.TryApplyControllerPartitionState"/> / <see cref="ClusterState.ShouldStopReplica"/>)
 /// skips a delayed/reordered entry whose leader epoch is older than the stored one, while UNRELATED
 /// partitions in the same push still apply — so disjoint partial pushes never fence each other out
@@ -212,7 +212,25 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         if (_membership is null || !IsController)
             return ValueTask.FromResult(new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1));
 
-        return ValueTask.FromResult(_membership.Register(input));
+        var finalizedBefore = _clusterState.FinalizedInterBrokerProtocol;
+        var outcome = _membership.Register(input);
+
+        // #72 Inc1 — deterministic upgrade re-convergence: when this registration raises the
+        // controller's finalized level to Native (the last downgraded/old peer just re-registered
+        // native), bump the controller epoch. Nothing else in a rolling upgrade produces a new epoch
+        // at the gate flip, and receivers capped by this reign's earlier Kafka-wire pushes only clear
+        // on a native push with a STRICTLY newer epoch (the cap's tie rule) — without the bump they
+        // would stay on the fallback wire until some unrelated election. The bump is monotone and
+        // benign: both push clients stamp payloads with the live ClusterState.ControllerEpoch.
+        if (outcome.Status == ClusterRpcStatus.None
+            && finalizedBefore < InterBrokerProtocolFeature.Native
+            && _clusterState.FinalizedInterBrokerProtocol >= InterBrokerProtocolFeature.Native)
+        {
+            var epoch = _clusterState.BecomeController(_localBrokerId);
+            LogFinalizedRoseEpochBumped(epoch);
+        }
+
+        return ValueTask.FromResult(outcome);
     }
 
     public ValueTask<BrokerHeartbeatOutcome> HeartbeatAsync(BrokerHeartbeatInput input, CancellationToken ct = default)
@@ -291,10 +309,15 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     /// <see cref="ClusterState.UpdateBroker(int,BrokerNode,System.Func{BrokerNode,BrokerNode},out bool)"/>
     /// so a concurrent registration writing the same broker's real port is never clobbered by a stale
     /// read (the #69 wrong-port failure).
-    /// <para>Still open (Inc7+): the Kafka-wire handlers converge levels UP only, never DOWN for an
-    /// already-known broker, so a rolling DOWNGRADE propagates to non-controllers only while the
-    /// controller stays put — a mixed-version accuracy edge, not a safety hole (the controller's own
-    /// registration-authoritative view drives the gate, and native receive is unconditional).</para>
+    /// <para>Downgrade convergence (#72 Inc1): the Kafka UpdateMetadata/LeaderAndIsr DTOs carry no
+    /// per-broker level, so a rolling DOWNGRADE cannot converge through the broker map on
+    /// non-controllers. It converges on the first fence-passing Kafka-wire controller push instead,
+    /// which caps <see cref="ClusterState.FinalizedInterBrokerProtocol"/> via
+    /// <see cref="ClusterState.TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/> (native appliers clear a strictly older
+    /// cap). Still open (#72 follow-up): pushes are event-driven only (topic create / election / ISR
+    /// apply — there is no periodic UpdateMetadata), so a broker that receives NO push after the
+    /// downgrade keeps its stale-high level and its native sends to downgraded peers fail until one
+    /// arrives; a per-call transport fallback on native send failure would close that window.</para>
     /// </remarks>
     private void ApplyLiveBrokers(IReadOnlyList<LiveBrokerSpec> liveBrokers)
     {
@@ -334,8 +357,11 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     {
         // Controller-level fence, evaluated inside the held push gate: a push from a demoted controller
         // (older epoch) is rejected outright. Per-partition ordering within an accepted epoch is
-        // handled by the leader-epoch guard in the apply loop (#60 Inc5/Inc6a).
-        if (!_clusterState.TryAdvanceControllerEpoch(controllerId, controllerEpoch))
+        // handled by the leader-epoch guard in the apply loop (#60 Inc5/Inc6a). The fence atomically
+        // records the NATIVE wire (#72 Inc1): a fence-passing remote native push clears a strictly
+        // older Kafka-wire cap on the finalized level. A self-delivered push records nothing.
+        if (!_clusterState.TryAdvanceControllerEpoch(controllerId, controllerEpoch,
+                controllerId != _localBrokerId ? ControllerPushWire.Native : null))
         {
             LogStaleControllerEpoch(opName, controllerEpoch, _clusterState.ControllerEpoch);
             return ClusterRpcStatus.StaleControllerEpoch;
@@ -343,6 +369,9 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
         return ClusterRpcStatus.None;
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Finalized inter-broker protocol rose to Native — bumped controller epoch to {Epoch} so capped receivers re-converge on the next push (#72 Inc1)")]
+    private partial void LogFinalizedRoseEpochBumped(int epoch);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting stale native {OpName} push: controller epoch {RequestEpoch} < current {CurrentEpoch}")]
     private partial void LogStaleControllerEpoch(string opName, int requestEpoch, int currentEpoch);
