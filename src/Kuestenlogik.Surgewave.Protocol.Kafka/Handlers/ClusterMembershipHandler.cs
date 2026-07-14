@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 using Microsoft.Extensions.Logging;
@@ -7,26 +7,28 @@ using Microsoft.Extensions.Logging;
 namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 
 /// <summary>
-/// Handler for Raft cluster membership APIs: BrokerRegistration, BrokerHeartbeat.
-/// This handler runs on the controller and manages broker registrations.
+/// Kafka-wire codec for the cluster-membership APIs (BrokerRegistration 62, BrokerHeartbeat 63).
+/// <para>
+/// #72 Inc2 — a pure wire adapter over the neutral <see cref="ClusterMembershipService"/>, the SAME
+/// registration authority the native SRWV join path uses: ONE epoch counter and ONE store, so a
+/// broker registered over either wire can heartbeat over the other without epoch flapping or
+/// divergent fencing state (previously this handler kept its own duplicate store and counter).
+/// What stays here: DTO decode/encode, correlation/version echo, the
+/// <see cref="ClusterRpcStatus"/>→<see cref="ErrorCode"/> cast (the enum values are pinned to
+/// Kafka's error codes, so the cast IS the translation), and the Kafka-only OfflineLogDirs warning
+/// (log-only; not part of the neutral membership contract).
+/// </para>
+/// <para>
+/// Deliberately NOT gated on IsController: the Kafka-wire path registers on any broker, matching
+/// its pre-unification behavior for rolling upgrades — adding the gate is a separate decision
+/// tracked in #72. (The native path gates in <c>ClusterStateInterBrokerService</c>, which also owns
+/// the finalized-level gate-flip epoch bump.)
+/// </para>
 /// </summary>
 public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 {
-    private readonly ClusterIdManager _clusterIdManager;
-    private readonly ClusterState _clusterState;
+    private readonly ClusterMembershipService _membership;
     private readonly ILogger<ClusterMembershipHandler> _logger;
-
-    /// <summary>
-    /// Tracks registered brokers with their metadata.
-    /// Key: BrokerId, Value: Registration info
-    /// </summary>
-    private readonly ConcurrentDictionary<int, BrokerRegistrationInfo> _registrations = new();
-
-    /// <summary>
-    /// Next broker epoch to assign.
-    /// </summary>
-    private long _nextBrokerEpoch = 1;
-    private readonly Lock _epochLock = new();
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
     [
@@ -35,12 +37,10 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
     ];
 
     public ClusterMembershipHandler(
-        ClusterIdManager clusterIdManager,
-        ClusterState clusterState,
+        ClusterMembershipService membership,
         ILogger<ClusterMembershipHandler> logger)
     {
-        _clusterIdManager = clusterIdManager;
-        _clusterState = clusterState;
+        _membership = membership;
         _logger = logger;
     }
 
@@ -56,321 +56,52 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 
     private BrokerRegistrationResponse HandleBrokerRegistration(BrokerRegistrationRequest request)
     {
-        _logger.LogInformation(
-            "Broker registration request from BrokerId={BrokerId} ClusterId={ClusterId} IncarnationId={IncarnationId}",
-            request.BrokerId, request.ClusterId, request.IncarnationId);
-
-        // Validate cluster ID matches
-        if (!_clusterIdManager.ValidateClusterId(request.ClusterId))
-        {
-            _logger.LogWarning(
-                "Rejecting broker registration: cluster ID mismatch. Expected={Expected}, Got={Got}",
-                _clusterIdManager.GetClusterId(), request.ClusterId);
-
-            return new BrokerRegistrationResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.ClusterAuthorizationFailed,
-                BrokerEpoch = -1
-            };
-        }
-
-        // Check if this is a new registration or re-registration
-        long brokerEpoch;
-        if (_registrations.TryGetValue(request.BrokerId, out var existingReg))
-        {
-            // Same incarnation ID = broker reconnecting without restart
-            if (existingReg.IncarnationId == request.IncarnationId)
-            {
-                brokerEpoch = existingReg.BrokerEpoch;
-                _logger.LogDebug(
-                    "Broker {BrokerId} reconnecting with same incarnation, keeping epoch {Epoch}",
-                    request.BrokerId, brokerEpoch);
-            }
-            else
-            {
-                // New incarnation = broker restarted, assign new epoch
-                brokerEpoch = AssignNewEpoch();
-                _logger.LogInformation(
-                    "Broker {BrokerId} restarted (new incarnation), assigning new epoch {Epoch}",
-                    request.BrokerId, brokerEpoch);
-            }
-        }
-        else
-        {
-            // First registration for this broker ID
-            brokerEpoch = AssignNewEpoch();
-            _logger.LogInformation(
-                "New broker {BrokerId} registration, assigning epoch {Epoch}",
-                request.BrokerId, brokerEpoch);
-        }
-
-        // Extract the client listener for ClusterState — explicitly skipping the REPLICATION
-        // listener, which advertises the inter-broker port, not the client port (#60 Inc5).
-        var primaryListener = request.Listeners.FirstOrDefault(
-                l => !string.Equals(l.Name, "REPLICATION", StringComparison.OrdinalIgnoreCase))
-            ?? request.Listeners.FirstOrDefault();
-        var replicationListener = request.Listeners.FirstOrDefault(
-            l => string.Equals(l.Name, "REPLICATION", StringComparison.OrdinalIgnoreCase));
-        var host = primaryListener?.Host ?? "localhost";
-        var port = primaryListener?.Port ?? 9092;
-        var rack = request.Rack;
-
-        // #60 Inc3 — resolve the inter-broker protocol level this broker advertised. The MaxSupportedVersion
-        // of the inter.broker.protocol feature is the highest level it can speak; an absent feature (an older
-        // broker) reads as KafkaWire, keeping the finalized cluster level pinned to the Kafka wire.
-        var interBrokerProtocol = InterBrokerProtocolFeature.KafkaWire;
-        foreach (var feature in request.Features)
-        {
-            if (string.Equals(feature.Name, InterBrokerProtocolFeature.FeatureName, StringComparison.Ordinal))
-            {
-                interBrokerProtocol = feature.MaxSupportedVersion;
-                break;
-            }
-        }
-
-        // Create registration info
-        var registration = new BrokerRegistrationInfo
-        {
-            BrokerId = request.BrokerId,
-            ClusterId = request.ClusterId,
-            IncarnationId = request.IncarnationId,
-            BrokerEpoch = brokerEpoch,
-            Listeners = request.Listeners.Select(l => new ListenerInfo
-            {
-                Name = l.Name,
-                Host = l.Host,
-                Port = l.Port,
-                SecurityProtocol = l.SecurityProtocol
-            }).ToList(),
-            Features = request.Features.Select(f => new FeatureInfo
-            {
-                Name = f.Name,
-                MinVersion = f.MinSupportedVersion,
-                MaxVersion = f.MaxSupportedVersion
-            }).ToList(),
-            Rack = rack,
-            LogDirs = request.LogDirs,
-            IsFenced = true, // Start fenced until caught up
-            RegisteredAt = DateTimeOffset.UtcNow,
-            LastHeartbeat = DateTimeOffset.UtcNow,
-            CurrentMetadataOffset = -1
-        };
-
-        _registrations[request.BrokerId] = registration;
-
-        // Update cluster state atomically (#60 Inc6a UpdateBroker — no lost-update / clobber against a
-        // concurrent native registration or level convergence). The ReplicationPort is load-bearing
-        // (#60 Inc5): resolve it from the advertised REPLICATION listener; if the broker didn't
-        // advertise one, keep a previously EXPLICITLY discovered value (from cluster-node config, #69).
-        // A previously DERIVED default is not carried forward — it must re-derive from the new client
-        // port, or a broker that moved ports would pin a stale computed guess.
-        var advertisedReplicationPort = replicationListener?.Port;
-        BrokerNode BuildNode(int? existingReplicationPort)
-        {
-            var replicationPort = advertisedReplicationPort ?? existingReplicationPort;
-            return replicationPort is { } rp
-                ? new BrokerNode { BrokerId = request.BrokerId, Host = host, Port = (int)port, Rack = rack, InterBrokerProtocol = interBrokerProtocol, ReplicationPort = rp }
-                : new BrokerNode { BrokerId = request.BrokerId, Host = host, Port = (int)port, Rack = rack, InterBrokerProtocol = interBrokerProtocol };
-        }
-        _clusterState.UpdateBroker(
-            request.BrokerId,
-            BuildNode(existingReplicationPort: null),
-            known => BuildNode(known.HasExplicitReplicationPort ? known.ReplicationPort : null));
-
-        _logger.LogInformation(
-            "Broker {BrokerId} registered successfully at {Host}:{Port} (fenced=true, epoch={Epoch}, " +
-            "interBrokerProtocol={InterBrokerProtocol}, finalizedInterBrokerProtocol={FinalizedInterBrokerProtocol})",
-            request.BrokerId, host, port, brokerEpoch, interBrokerProtocol, _clusterState.FinalizedInterBrokerProtocol);
+        var outcome = _membership.Register(new BrokerRegistrationInput(
+            BrokerId: request.BrokerId,
+            ClusterId: request.ClusterId,
+            IncarnationId: request.IncarnationId,
+            Listeners: [.. request.Listeners.Select(l => new ListenerSpec(l.Name, l.Host, l.Port, l.SecurityProtocol))],
+            Features: [.. request.Features.Select(f => new FeatureSpec(f.Name, f.MinSupportedVersion, f.MaxSupportedVersion))],
+            Rack: request.Rack,
+            PreviousBrokerEpoch: request.PreviousBrokerEpoch));
 
         return new BrokerRegistrationResponse
         {
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            BrokerEpoch = brokerEpoch
+            ErrorCode = (ErrorCode)(short)outcome.Status,
+            BrokerEpoch = outcome.BrokerEpoch
         };
     }
 
     private BrokerHeartbeatResponse HandleBrokerHeartbeat(BrokerHeartbeatRequest request)
     {
-        _logger.LogDebug(
-            "Heartbeat from BrokerId={BrokerId} Epoch={BrokerEpoch} MetadataOffset={MetadataOffset} WantFence={WantFence} WantShutdown={WantShutdown}",
-            request.BrokerId, request.BrokerEpoch, request.CurrentMetadataOffset, request.WantFence, request.WantShutDown);
+        var outcome = _membership.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: request.BrokerId,
+            BrokerEpoch: request.BrokerEpoch,
+            CurrentMetadataOffset: request.CurrentMetadataOffset,
+            WantFence: request.WantFence,
+            WantShutDown: request.WantShutDown));
 
-        // Find broker registration
-        if (!_registrations.TryGetValue(request.BrokerId, out var registration))
-        {
-            _logger.LogWarning("Heartbeat from unregistered broker {BrokerId}", request.BrokerId);
-            return new BrokerHeartbeatResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.BrokerNotAvailable,
-                IsFenced = true,
-                IsCaughtUp = false,
-                ShouldShutDown = false
-            };
-        }
-
-        // Validate epoch
-        if (request.BrokerEpoch != registration.BrokerEpoch)
-        {
-            _logger.LogWarning(
-                "Heartbeat from broker {BrokerId} with stale epoch {RequestEpoch} (expected {ExpectedEpoch})",
-                request.BrokerId, request.BrokerEpoch, registration.BrokerEpoch);
-            return new BrokerHeartbeatResponse
-            {
-                CorrelationId = request.CorrelationId,
-                ApiVersion = request.ApiVersion,
-                ErrorCode = ErrorCode.StaleBrokerEpoch,
-                IsFenced = true,
-                IsCaughtUp = false,
-                ShouldShutDown = false
-            };
-        }
-
-        // Update heartbeat tracking
-        registration.LastHeartbeat = DateTimeOffset.UtcNow;
-        registration.CurrentMetadataOffset = request.CurrentMetadataOffset;
-
-        // Handle offline log dirs
-        if (request.OfflineLogDirs.Count > 0)
+        // Kafka-only field: log-dir health is not part of the neutral membership contract and is
+        // log-only today — it stays a handler-side concern rather than widening the neutral record.
+        // Logged only for an ACCEPTED heartbeat, matching the pre-unification handler (a rejected
+        // unknown/stale-epoch heartbeat never reached this warning).
+        if (outcome.Status == ClusterRpcStatus.None && request.OfflineLogDirs.Count > 0)
         {
             _logger.LogWarning(
                 "Broker {BrokerId} reported {Count} offline log directories",
                 request.BrokerId, request.OfflineLogDirs.Count);
-            registration.OfflineLogDirs = request.OfflineLogDirs;
-        }
-
-        // Determine broker state
-        var isCaughtUp = IsBrokerCaughtUp(registration);
-        var isFenced = registration.IsFenced;
-        var shouldShutDown = false;
-
-        // Handle fence/unfence requests
-        if (request.WantFence && !isFenced)
-        {
-            _logger.LogInformation("Broker {BrokerId} requested to be fenced", request.BrokerId);
-            registration.IsFenced = true;
-            isFenced = true;
-        }
-        else if (!request.WantFence && isFenced && isCaughtUp)
-        {
-            // Unfence broker if it's caught up
-            _logger.LogInformation(
-                "Unfencing broker {BrokerId} (caught up at metadata offset {Offset})",
-                request.BrokerId, request.CurrentMetadataOffset);
-            registration.IsFenced = false;
-            isFenced = false;
-        }
-
-        // Handle shutdown request
-        if (request.WantShutDown)
-        {
-            _logger.LogInformation("Broker {BrokerId} requested controlled shutdown", request.BrokerId);
-            registration.InControlledShutdown = true;
-
-            // For now, allow immediate shutdown (in a full implementation,
-            // we would first move partitions away from this broker)
-            shouldShutDown = true;
         }
 
         return new BrokerHeartbeatResponse
         {
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            IsCaughtUp = isCaughtUp,
-            IsFenced = isFenced,
-            ShouldShutDown = shouldShutDown
+            ErrorCode = (ErrorCode)(short)outcome.Status,
+            IsCaughtUp = outcome.IsCaughtUp,
+            IsFenced = outcome.IsFenced,
+            ShouldShutDown = outcome.ShouldShutDown
         };
     }
-
-    private long AssignNewEpoch()
-    {
-        lock (_epochLock)
-        {
-            return _nextBrokerEpoch++;
-        }
-    }
-
-    private bool IsBrokerCaughtUp(BrokerRegistrationInfo registration)
-    {
-        // In a full implementation, we'd compare against the controller's metadata log offset
-        // For now, consider caught up after first heartbeat with non-negative offset
-        return registration.CurrentMetadataOffset >= 0;
-    }
-
-    /// <summary>
-    /// Gets all registered brokers.
-    /// </summary>
-    public IEnumerable<BrokerRegistrationInfo> RegisteredBrokers => _registrations.Values;
-
-    /// <summary>
-    /// Get registration info for a specific broker.
-    /// </summary>
-    public BrokerRegistrationInfo? GetBrokerRegistration(int brokerId)
-    {
-        return _registrations.TryGetValue(brokerId, out var reg) ? reg : null;
-    }
-
-    /// <summary>
-    /// Check if a broker is currently fenced.
-    /// </summary>
-    public bool IsBrokerFenced(int brokerId)
-    {
-        return !_registrations.TryGetValue(brokerId, out var reg) || reg.IsFenced;
-    }
-}
-
-/// <summary>
-/// Tracks registration information for a broker.
-/// </summary>
-public sealed class BrokerRegistrationInfo
-{
-    public required int BrokerId { get; init; }
-    public required string ClusterId { get; init; }
-    public required Guid IncarnationId { get; init; }
-    public required long BrokerEpoch { get; init; }
-    public required List<ListenerInfo> Listeners { get; init; }
-    public required List<FeatureInfo> Features { get; init; }
-    public string? Rack { get; init; }
-    public List<Guid> LogDirs { get; init; } = [];
-    public List<Guid> OfflineLogDirs { get; set; } = [];
-    public bool IsFenced { get; set; } = true;
-    public bool InControlledShutdown { get; set; }
-    public required DateTimeOffset RegisteredAt { get; init; }
-    public DateTimeOffset LastHeartbeat { get; set; }
-    public long CurrentMetadataOffset { get; set; } = -1;
-}
-
-public sealed class ListenerInfo
-{
-    public required string Name { get; init; }
-    public required string Host { get; init; }
-    public required ushort Port { get; init; }
-    public required short SecurityProtocol { get; init; }
-}
-
-public sealed class FeatureInfo
-{
-    public required string Name { get; init; }
-    public required short MinVersion { get; init; }
-    public required short MaxVersion { get; init; }
-}
-
-/// <summary>
-/// Error code for stale broker epoch (not in base Kafka protocol but needed for KRaft).
-/// </summary>
-file static class KRaftErrorCodes
-{
-    public const short StaleBrokerEpoch = 77;
-}
-
-// Extension to add the error code
-file static class ErrorCodeExtensions
-{
-    public static ErrorCode StaleBrokerEpoch => (ErrorCode)KRaftErrorCodes.StaleBrokerEpoch;
 }

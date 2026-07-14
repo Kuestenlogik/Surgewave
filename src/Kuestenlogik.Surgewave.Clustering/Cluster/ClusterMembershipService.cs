@@ -16,10 +16,16 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// <see cref="BrokerHeartbeatInput"/> records; the wire codecs stay in their respective handlers.
 /// </para>
 /// <para>
-/// The legacy Kafka-wire <c>ClusterMembershipHandler</c> keeps its OWN separate store for external
-/// Kafka admin clients (ApiKey 62/63); it is NOT unified with this service yet. Since a broker
-/// registers over exactly one wire per build (native for plugin-free, and no internal Kafka sender
-/// exists), the two stores never both own the same broker id in practice — unification is deferred.
+/// #72 Inc2 — this service is the SINGLE registration authority for BOTH wires: the Kafka-wire
+/// <c>ClusterMembershipHandler</c> (ApiKey 62/63) is a pure codec delegating here, so a broker
+/// registered over either wire heartbeats coherently over the other (one epoch counter, one store).
+/// Note the asymmetry the unification creates: the native RPC path is controller-gated (and owns
+/// the finalized-level gate-flip epoch bump, see <c>ClusterStateInterBrokerService</c>), while the
+/// Kafka path is deliberately un-gated for rolling-upgrade parity — so ANY broker answering
+/// ApiKey 62 writes this store, and an external client reaching the controller's Kafka port can
+/// re-mint a natively-registered broker's epoch (fence/re-register churn; bounded today because
+/// epochs gate only the self-healing heartbeat loop). Gate/authz for the Kafka path is a tracked
+/// #72 follow-up and MUST land before fencing/epochs gate real traffic.
 /// </para>
 /// <para>
 /// <b>Known limit (Inc7+):</b> broker epochs are NOT failover-durable — the counter and store live in
