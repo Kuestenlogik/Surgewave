@@ -506,6 +506,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 isrUpdateApplier: _clusterController, membership: membershipService,
                 markerSink: _transactionCoordinator))); // #60 Inc7: apply native WriteTxnMarkers to the txn index
 
+        // #72 Inc7 — wire best-effort marker replication into the LIVE coordinator over the same native
+        // transport (gated by the finalized inter-broker level; no Kafka-wire fallback in the embedded
+        // runtime). EndTxn now replicates commit/abort markers to the follower leaders, best-effort.
+        var nativeMarkerReplicator = new NativeTransactionMarkerReplicator(
+            _connectionPool, _clusterState, clusteringConfig.BrokerId,
+            _loggerFactory.CreateLogger<NativeTransactionMarkerReplicator>());
+        _transactionCoordinator!.SetMarkerReplicator(new GatedTransactionMarkerReplicator(
+            _clusterState, nativeMarkerReplicator, kafkaWireFallback: null,
+            _loggerFactory.CreateLogger<GatedTransactionMarkerReplicator>()));
+
         // #60 Inc6b — the native broker-lifecycle loop: registers this broker with the controller over
         // the ReplicationPort and heartbeats, so a plugin-free broker JOINS. It no-ops on the
         // controller/seed itself (the client refuses to dial self) and when standalone.

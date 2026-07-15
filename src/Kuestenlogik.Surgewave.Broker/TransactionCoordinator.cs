@@ -29,6 +29,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     private readonly TransactionStatePersistence _statePersistence;
     private readonly TransactionTimeoutManager _timeoutManager;
 
+    // #72 Inc7 — best-effort inter-broker marker replication (merged from the now-deleted
+    // ClusteredTransactionCoordinator). Set once during startup wiring, before the coordinator serves
+    // requests; null → markers are written locally only (single broker / no cluster transport),
+    // preserving the prior behavior.
+    private ITransactionMarkerReplicator? _markerReplicator;
+    private int _coordinatorEpoch;
+
     public TransactionCoordinator(
         ProducerStateManager producerStateManager,
         LogManager logManager,
@@ -61,6 +68,59 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     public async ValueTask DisposeAsync()
     {
         await _timeoutManager.DisposeAsync();
+    }
+
+    /// <summary>
+    /// #72 Inc7 — the coordinator epoch used to fence stale WriteTxnMarkers on the inter-broker wire.
+    /// Set by the controller wiring; defaults to 0.
+    /// </summary>
+    public int CoordinatorEpoch
+    {
+        get => _coordinatorEpoch;
+        set => _coordinatorEpoch = value;
+    }
+
+    /// <summary>
+    /// #72 Inc7 — wire the best-effort inter-broker marker replicator (the gated native / Kafka-wire
+    /// transport). Called once during startup before the coordinator serves requests; a null replicator
+    /// keeps markers local-only.
+    /// </summary>
+    public void SetMarkerReplicator(ITransactionMarkerReplicator? markerReplicator)
+        => _markerReplicator = markerReplicator;
+
+    /// <summary>
+    /// #72 Inc7 — replicate the just-written commit/abort markers to follower brokers, best-effort
+    /// (merged from the deleted ClusteredTransactionCoordinator). EndTxn latency now depends on the
+    /// remote transport, but a replication failure does NOT fail the transaction: the markers are
+    /// already durable in the local log. No-op when no replicator is wired or there are no partitions.
+    /// </summary>
+    private async Task ReplicateMarkersBestEffortAsync(TransactionMetadata txnMetadata, bool commit, CancellationToken ct)
+    {
+        if (_markerReplicator is null || txnMetadata.Partitions.Count == 0)
+            return;
+
+        try
+        {
+            var result = await _markerReplicator.ReplicateMarkersAsync(
+                txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch,
+                [.. txnMetadata.Partitions], commit, _coordinatorEpoch, ct);
+
+            if (!result.IsSuccess)
+            {
+                _logger.LogWarning(
+                    "Transaction {TransactionalId}: marker replication incomplete (succeeded {SuccessCount}, failed {FailedCount}) — proceeding best-effort, markers are durable locally",
+                    txnMetadata.TransactionalId, result.SuccessfulBrokers.Count, result.FailedBrokers.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Truly best-effort: the local markers are already durable, so a replication fault — a
+            // transport throw, or even a cancelled replication — must NEVER fail a commit. Swallow and
+            // log; the follower marker is reconciled by normal fetch replication / re-drive on restart.
+            _logger.LogWarning(ex,
+                "Transaction {TransactionalId}: marker replication threw — proceeding best-effort, markers are durable locally",
+                txnMetadata.TransactionalId);
+        }
     }
 
     /// <summary>
@@ -209,6 +269,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
                 var abortOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, commit: false, cancellationToken);
                 _transactionIndex.AbortTransaction(txnMetadata.ProducerId, txnMetadata.Partitions, abortOffset);
+
+                // #72 Inc7 — replicate the fencing abort markers best-effort before the partitions are cleared.
+                await ReplicateMarkersBestEffortAsync(txnMetadata, commit: false, cancellationToken);
             }
 
             // Bump epoch and reset state
@@ -439,6 +502,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
         // Write transaction markers
         var markerOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, request.Committed, cancellationToken);
+
+        // #72 Inc7 — replicate the markers to follower brokers (best-effort). EndTxn latency now depends
+        // on the remote transport, but a replication failure does not fail the commit (markers are
+        // durable locally). No-op for a single broker (no remote leaders) or when no transport is wired.
+        await ReplicateMarkersBestEffortAsync(txnMetadata, request.Committed, cancellationToken);
 
         // Update TransactionIndex and commit/discard offsets
         if (request.Committed)
