@@ -34,5 +34,34 @@ public sealed class MarkerReplicationResult
     public HashSet<int> SuccessfulBrokers { get; } = [];
     public Dictionary<int, string> FailedBrokers { get; } = [];
 
+    /// <summary>
+    /// #72 Inc6 — per-partition outcome for every involved partition, so a partition that was
+    /// SKIPPED (no elected leader, or unknown to cluster state) is VISIBLE instead of silently
+    /// dropped or folded into a blanket success. Observability only — this does not gate
+    /// <see cref="IsSuccess"/> (acting on it is a later, sign-off-gated increment).
+    /// </summary>
+    public Dictionary<TopicPartition, MarkerPartitionOutcome> PartitionOutcomes { get; } = [];
+
     public static MarkerReplicationResult Success() => new() { IsSuccess = true };
+}
+
+/// <summary>
+/// #72 Inc6 — the outcome of transaction-marker replication for a single involved partition.
+/// </summary>
+public enum MarkerPartitionOutcome
+{
+    /// <summary>The marker was dispatched to the partition's remote target (leader or followers).</summary>
+    Replicated,
+
+    /// <summary>This broker leads the partition; the marker was written locally by the coordinator.</summary>
+    LocalLeader,
+
+    /// <summary>Skipped: the partition has no elected leader (LeaderBrokerId &lt; 0).</summary>
+    SkippedNoLeader,
+
+    /// <summary>Skipped: the partition is unknown to cluster state (no PartitionState).</summary>
+    SkippedUnknownPartition,
+
+    /// <summary>The remote target for this partition rejected the marker or failed.</summary>
+    Failed,
 }
