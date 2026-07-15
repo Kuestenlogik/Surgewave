@@ -6,6 +6,12 @@ For what's already shipped, see [GitHub Releases](https://github.com/Kuestenlogi
 
 Field conventions live in [`docs/contributing/project-board.md`](docs/contributing/project-board.md).
 
+## In progress
+
+### Later
+
+- [#72](https://github.com/Kuestenlogik/Surgewave/issues/72) **Clustering follow-ups from #60: durable broker epochs, membership unification, marker-consumer activation** 
+
 ## Next up
 
 ### v0.4 — Production hardening & trustworthy admin
@@ -52,8 +58,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
-- [#72](https://github.com/Kuestenlogik/Surgewave/issues/72) **Clustering follow-ups from #60: durable broker epochs, membership unification, marker-consumer activation** 
 
 ---
 
-*Generated 2026-07-14 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-07-15 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
