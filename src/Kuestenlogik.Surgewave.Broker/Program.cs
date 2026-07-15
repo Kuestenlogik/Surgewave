@@ -628,13 +628,20 @@ builder.Services.AddSingleton(sp => new TransactionIndex());
 builder.Services.AddSingleton(sp => new TransactionStateStore(
     sp.GetRequiredService<BrokerConfig>().DataDirectory,
     sp.GetRequiredService<ILogger<TransactionStateStore>>()));
-builder.Services.AddSingleton(sp => new TransactionCoordinator(
-    sp.GetRequiredService<ProducerStateManager>(),
-    sp.GetRequiredService<LogManager>(),
-    sp.GetRequiredService<TransactionIndex>(),
-    sp.GetRequiredService<OffsetStore>(),
-    sp.GetRequiredService<TransactionStateStore>(),
-    sp.GetRequiredService<ILogger<TransactionCoordinator>>()));
+builder.Services.AddSingleton(sp =>
+{
+    var coordinator = new TransactionCoordinator(
+        sp.GetRequiredService<ProducerStateManager>(),
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<TransactionIndex>(),
+        sp.GetRequiredService<OffsetStore>(),
+        sp.GetRequiredService<TransactionStateStore>(),
+        sp.GetRequiredService<ILogger<TransactionCoordinator>>());
+    // #72 Inc7 — wire the gated (native / Kafka-wire) marker replicator so EndTxn replicates markers
+    // to follower brokers best-effort. The gate is the host's unkeyed ITransactionMarkerReplicator.
+    coordinator.SetMarkerReplicator(sp.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerReplicator>());
+    return coordinator;
+});
 // Neutral contract (#59) resolves to the same singleton so the Kafka adapter (TransactionApiHandler)
 // depends only on Coordination, not the broker-internal coordinator type.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionCoordinator>(
