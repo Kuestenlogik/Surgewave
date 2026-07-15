@@ -523,19 +523,16 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
         var req = request.MetadataUpdateRequest;
 
-        // Validate controller epoch - reject stale updates
-        if (req.ControllerEpoch < _clusterState.ControllerEpoch)
+        // Validate + advance atomically through the shared fence (#72 Inc4): the previous unlocked
+        // check-then-write could interleave two racing frames and regress the epoch, which the
+        // composed broker-epoch mint would amplify. No wire is noted — this legacy ApiKey-103
+        // channel is neither the Kafka client wire nor the SRWV band (and is currently unreachable:
+        // nothing wires SetMetadataStateMachine).
+        if (!_clusterState.TryAdvanceControllerEpoch(req.ControllerId, req.ControllerEpoch))
         {
             LogStaleMetadataUpdate(req.ControllerId, req.ControllerEpoch, _clusterState.ControllerEpoch);
             return SerializeMetadataUpdateResponse(request.CorrelationId,
                 new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.StaleControllerEpoch, _clusterState.MetadataVersion));
-        }
-
-        // Update controller epoch if newer
-        if (req.ControllerEpoch > _clusterState.ControllerEpoch)
-        {
-            _clusterState.ControllerEpoch = req.ControllerEpoch;
-            _clusterState.ControllerId = req.ControllerId;
         }
 
         // Apply the metadata command using the state machine

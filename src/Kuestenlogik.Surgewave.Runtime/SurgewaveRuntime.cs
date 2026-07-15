@@ -472,6 +472,14 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _replicaManager,
             clusteringConfig);
 
+        // #72 Inc4 — controller-epoch high-water: prime from the node-local persisted floor and
+        // persist every strict advance, so a restarted broker elects (and mints composed broker
+        // epochs) strictly above every reign it already observed. Wired before StartAsync elects.
+        var controllerEpochStore = new ControllerEpochStore(
+            clusteringConfig.DataDirectory, _loggerFactory.CreateLogger<ControllerEpochStore>());
+        _clusterState.PrimeControllerEpochFloor(controllerEpochStore.Load());
+        _clusterState.OnControllerEpochAdvanced = controllerEpochStore.Save;
+
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);
         _replicationServer.SetHeartbeatManager(_heartbeatManager);

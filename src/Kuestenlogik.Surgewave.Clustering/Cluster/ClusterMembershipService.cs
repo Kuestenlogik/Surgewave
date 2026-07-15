@@ -28,12 +28,17 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// #72 follow-up and MUST land before fencing/epochs gate real traffic.
 /// </para>
 /// <para>
-/// <b>Known limit (Inc7+):</b> broker epochs are NOT failover-durable — the counter and store live in
-/// the current controller's memory, so a new controller after failover restarts the counter and a
-/// re-registering broker can receive a LOWER epoch than before. This is safe today because the broker
-/// epoch is consumed only by the heartbeat-validation loop (which self-heals via re-registration),
-/// NOT by partition/leader-epoch fencing; it must be sourced from a replicated/durable monotonic
-/// value (e.g. the metadata-log offset, as KRaft does) before broker epochs gate any real traffic.
+/// <b>Epoch scheme (#72 Inc4):</b> epochs are composed — <c>(controller epoch &lt;&lt; 32) | per-reign
+/// counter</c>, where the reign epoch folds strictly upward at the mint site (immune to downward
+/// wobbles of the shared state) and the hosts persist a node-local high-water
+/// (<see cref="ControllerEpochStore"/>, primed at boot) — so a controller mints strictly above every
+/// reign its process has ever observed, including across its own restarts; the old restart-at-1
+/// counter handed re-registering brokers LOWER epochs. Honest scope: node-local and best-effort — a
+/// crash can lose the last persisted advance, and a quiet-reign failover onto a broker that never
+/// observed a push of the reign epoch can still elect at (not above) that epoch; both are bounded by
+/// exact-equality fencing plus fresh incarnations, and closed for real in Raft mode by #72 Inc5
+/// (epoch = committed registration log index, KRaft parity). Broker epochs are still consumed only
+/// by the self-healing heartbeat loop, NOT by partition/leader-epoch fencing.
 /// </para>
 /// </summary>
 public sealed partial class ClusterMembershipService
@@ -45,7 +50,11 @@ public sealed partial class ClusterMembershipService
     private readonly ILogger<ClusterMembershipService> _logger;
 
     private readonly ConcurrentDictionary<int, BrokerRegistrationRecord> _registrations = new();
-    private long _nextBrokerEpoch = 1;
+
+    // #72 Inc4 — composed-mint state (see Register): per-reign counter, reset when the controller
+    // epoch observed at mint time moves. Both guarded by _epochLock.
+    private int _lastMintControllerEpoch = -1;
+    private long _perReignCounter = 1;
     private readonly Lock _epochLock = new();
 
     public ClusterMembershipService(
@@ -82,7 +91,25 @@ public sealed partial class ClusterMembershipService
             }
             else
             {
-                brokerEpoch = _nextBrokerEpoch++; // new broker or a restart (new incarnation)
+                // #72 Inc4 — composed mint: (controller epoch << 32) | per-reign counter. Composed
+                // epochs are monotone over every reign THIS PROCESS has observed: the reign epoch
+                // used for composition only ever rises (strictly-greater fold below, immune to a
+                // downward wobble of the shared state such as a snapshot restore), and the hosts
+                // persist a node-local high-water (ControllerEpochStore) primed at boot, so a
+                // RESTARTED controller elects and mints strictly above its previous reigns too. The
+                // epoch is an opaque int64 on both wires and fencing stays exact-equality — no wire
+                // change, rolling-upgrade safe. Residual (documented in the class remarks): a
+                // quiet-reign failover onto a broker that never observed a push of the reign epoch;
+                // Raft mode closes that in #72 Inc5. (The counter cannot realistically overflow
+                // 32 bits within one reign — that would take 4 billion registrations.)
+                var controllerEpoch = _clusterState.ControllerEpoch;
+                if (controllerEpoch > _lastMintControllerEpoch)
+                {
+                    _lastMintControllerEpoch = controllerEpoch;
+                    _perReignCounter = 1;
+                }
+
+                brokerEpoch = ((long)_lastMintControllerEpoch << 32) | (uint)_perReignCounter++;
                 LogNewEpoch(input.BrokerId, brokerEpoch);
             }
 
