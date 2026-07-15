@@ -59,11 +59,13 @@ public sealed class ClusterState
     /// </summary>
     public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch, ControllerPushWire? observedWire)
     {
+        bool advanced;
         lock (_stateLock)
         {
             if (controllerEpoch < ControllerEpoch)
                 return false;
 
+            advanced = controllerEpoch > ControllerEpoch;
             ControllerEpoch = controllerEpoch;
             ControllerId = controllerId;
 
@@ -77,8 +79,34 @@ public sealed class ClusterState
                 if ((cap & CapFlag) != 0 && controllerEpoch > CapEpoch(cap))
                     Volatile.Write(ref _controllerWireCap, 0L);
             }
+        }
 
-            return true;
+        // Persist the high-water OUTSIDE the lock (#72 Inc4): file I/O must not serialize state
+        // readers, and a missed write only shrinks the restart floor (best-effort by contract).
+        if (advanced)
+            OnControllerEpochAdvanced?.Invoke(controllerEpoch);
+        return true;
+    }
+
+    /// <summary>
+    /// #72 Inc4 — invoked OUTSIDE the state lock after every STRICT controller-epoch advance
+    /// (elections via <see cref="BecomeController"/> and fence-passing pushes). The hosts wire the
+    /// node-local <c>ControllerEpochStore</c> here so a restart primes above every observed reign.
+    /// </summary>
+    public Action<int>? OnControllerEpochAdvanced { get; set; }
+
+    /// <summary>
+    /// #72 Inc4 — raise the controller epoch to a persisted floor at boot, WITHOUT claiming
+    /// controllership or touching the controller id / Kafka-wire cap. A restarted broker primes from
+    /// its high-water file before any election, so <see cref="BecomeController"/> mints strictly
+    /// above every reign this node ever observed.
+    /// </summary>
+    public void PrimeControllerEpochFloor(int epoch)
+    {
+        lock (_stateLock)
+        {
+            if (epoch > ControllerEpoch)
+                ControllerEpoch = epoch;
         }
     }
 
@@ -134,10 +162,12 @@ public sealed class ClusterState
     /// </summary>
     public int BecomeController(int controllerId)
     {
+        int newEpoch;
         lock (_stateLock)
         {
             ControllerEpoch++;
             ControllerId = controllerId;
+            newEpoch = ControllerEpoch;
 
             // #72 Inc1 — the Kafka-wire cap models the wire of a REMOTE controller; it is meaningless
             // (and, uncleaned, an absorbing state: a capped controller pins its own transport gate,
@@ -145,9 +175,10 @@ public sealed class ClusterState
             // that could clear it — no broker could ever re-finalize to Native) the moment THIS
             // broker takes controllership, whose own map is registration-authoritative.
             Volatile.Write(ref _controllerWireCap, 0L);
-
-            return ControllerEpoch;
         }
+
+        OnControllerEpochAdvanced?.Invoke(newEpoch); // #72 Inc4 — high-water persist, outside the lock
+        return newEpoch;
     }
 
     /// <summary>

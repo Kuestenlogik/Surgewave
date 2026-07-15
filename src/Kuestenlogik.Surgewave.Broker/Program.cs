@@ -793,6 +793,15 @@ var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 if (app.Services.GetService<IControllerReplicaRpc>() is { } controllerReplicaRpc)
     clusterController.SetControllerClient(controllerReplicaRpc);
 
+// #72 Inc4 — controller-epoch high-water: prime the epoch from the node-local persisted floor so a
+// RESTARTED broker elects (and mints composed broker epochs) strictly above every reign it already
+// observed, and persist every strict advance (elections and fence-passing pushes). Wired BEFORE the
+// controller starts; best-effort node-local durability (Raft mode gets true durability in #72 Inc5).
+var controllerEpochStore = new ControllerEpochStore(
+    clusteringConfig.DataDirectory, app.Services.GetRequiredService<ILogger<ControllerEpochStore>>());
+clusterState.PrimeControllerEpochFloor(controllerEpochStore.Load());
+clusterState.OnControllerEpochAdvanced = controllerEpochStore.Save;
+
 // #60 Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the ReplicationServer's
 // shared port (the embedded runtime has done this since Inc4; the production host must too, or native
 // control-plane frames from peers would be answered with garbage by the legacy decode path). It also
