@@ -36,6 +36,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     private ITransactionMarkerReplicator? _markerReplicator;
     private int _coordinatorEpoch;
 
+    // #72 Inc8 — bounded, partition-scoped retry of the best-effort marker replication.
+    private const int MarkerReplicationMaxAttempts = 3;
+    private static readonly TimeSpan MarkerReplicationRetryBackoff = TimeSpan.FromMilliseconds(50);
+
     public TransactionCoordinator(
         ProducerStateManager producerStateManager,
         LogManager logManager,
@@ -89,38 +93,100 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         => _markerReplicator = markerReplicator;
 
     /// <summary>
-    /// #72 Inc7 — replicate the just-written commit/abort markers to follower brokers, best-effort
-    /// (merged from the deleted ClusteredTransactionCoordinator). EndTxn latency now depends on the
-    /// remote transport, but a replication failure does NOT fail the transaction: the markers are
-    /// already durable in the local log. No-op when no replicator is wired or there are no partitions.
+    /// #72 Inc7/Inc8 — replicate the just-written commit/abort markers to follower brokers, best-effort
+    /// (merged from the deleted ClusteredTransactionCoordinator), with a bounded retry of ONLY the
+    /// not-yet-acked partitions (#72 Inc8). EndTxn latency now depends on the remote transport, but the
+    /// replication NEVER fails the transaction — the markers are already durable in the local log, so a
+    /// failed result, a transport throw, a cancelled replication, or exhausting the retries are all
+    /// swallowed and logged. No-op when no replicator is wired or there are no partitions.
+    /// <para>
+    /// The retry is partition-scoped because the receive side does NOT dedup markers: re-sending a
+    /// partition whose marker was already applied would double-write it, so only partitions the transport
+    /// did not confirm (per the Inc6 per-partition outcomes) are retried. The happy path (all acked on the
+    /// first attempt) adds no latency; the retry only engages on an actual replication shortfall and is
+    /// bounded so EndTxn latency stays capped.
+    /// </para>
     /// </summary>
     private async Task ReplicateMarkersBestEffortAsync(TransactionMetadata txnMetadata, bool commit, CancellationToken ct)
     {
         if (_markerReplicator is null || txnMetadata.Partitions.Count == 0)
             return;
 
-        try
+        IReadOnlyList<TopicPartition> pending = [.. txnMetadata.Partitions];
+        for (var attempt = 1; ; attempt++)
         {
-            var result = await _markerReplicator.ReplicateMarkersAsync(
-                txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch,
-                [.. txnMetadata.Partitions], commit, _coordinatorEpoch, ct);
+            MarkerReplicationResult result;
+            try
+            {
+                result = await _markerReplicator.ReplicateMarkersAsync(
+                    txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch,
+                    pending, commit, _coordinatorEpoch, ct);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort: the local markers are already durable, so a transport throw or a cancelled
+                // replication must NEVER fail a commit. Swallow and log.
+                _logger.LogWarning(ex,
+                    "Transaction {TransactionalId}: marker replication threw on attempt {Attempt} — proceeding best-effort, markers are durable locally",
+                    txnMetadata.TransactionalId, attempt);
+                return;
+            }
 
-            if (!result.IsSuccess)
+            var stillPending = NotAcked(result, pending);
+            if (stillPending.Count == 0)
+            {
+                // A coarse transport (e.g. the Kafka wire) may report incomplete without a per-partition
+                // failure target; surface it, but there is nothing dedup-safe to retry.
+                if (!result.IsSuccess)
+                    _logger.LogWarning(
+                        "Transaction {TransactionalId}: marker replication reported incomplete with no per-partition retry target — proceeding best-effort, markers are durable locally",
+                        txnMetadata.TransactionalId);
+                return;
+            }
+
+            if (attempt >= MarkerReplicationMaxAttempts)
             {
                 _logger.LogWarning(
-                    "Transaction {TransactionalId}: marker replication incomplete (succeeded {SuccessCount}, failed {FailedCount}) — proceeding best-effort, markers are durable locally",
-                    txnMetadata.TransactionalId, result.SuccessfulBrokers.Count, result.FailedBrokers.Count);
+                    "Transaction {TransactionalId}: {Count} partition(s) still unreplicated after {Attempts} attempt(s) — proceeding best-effort, markers are durable locally",
+                    txnMetadata.TransactionalId, stillPending.Count, attempt);
+                return;
+            }
+
+            pending = stillPending;
+            try
+            {
+                await Task.Delay(MarkerReplicationRetryBackoff, ct);
+            }
+            catch (Exception)
+            {
+                return; // cancelled during backoff — best-effort
             }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// #72 Inc8 — the partitions a retry may re-send: ONLY those the transport EXPLICITLY reported as not
+    /// applied (<see cref="MarkerPartitionOutcome.Failed"/> / <see cref="MarkerPartitionOutcome.SkippedNoLeader"/>
+    /// / <see cref="MarkerPartitionOutcome.SkippedUnknownPartition"/>). A partition marked
+    /// <see cref="MarkerPartitionOutcome.Replicated"/> or <see cref="MarkerPartitionOutcome.LocalLeader"/> —
+    /// or ABSENT from the outcomes (e.g. a trivial <c>Success()</c> with no per-partition detail) — is
+    /// treated as acked and never re-sent, so the receive side (which does not dedup) never double-writes a
+    /// marker the transport did not report as failed.
+    /// </summary>
+    private static List<TopicPartition> NotAcked(MarkerReplicationResult result, IReadOnlyList<TopicPartition> attempted)
+    {
+        var notAcked = new List<TopicPartition>();
+        foreach (var tp in attempted)
         {
-            // Truly best-effort: the local markers are already durable, so a replication fault — a
-            // transport throw, or even a cancelled replication — must NEVER fail a commit. Swallow and
-            // log; the follower marker is reconciled by normal fetch replication / re-drive on restart.
-            _logger.LogWarning(ex,
-                "Transaction {TransactionalId}: marker replication threw — proceeding best-effort, markers are durable locally",
-                txnMetadata.TransactionalId);
+            if (result.PartitionOutcomes.TryGetValue(tp, out var outcome)
+                && outcome is MarkerPartitionOutcome.Failed
+                    or MarkerPartitionOutcome.SkippedNoLeader
+                    or MarkerPartitionOutcome.SkippedUnknownPartition)
+            {
+                notAcked.Add(tp);
+            }
         }
+        return notAcked;
     }
 
     /// <summary>
