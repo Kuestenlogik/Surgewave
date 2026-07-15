@@ -57,25 +57,67 @@ public sealed partial class NativeTransactionMarkerReplicator : ITransactionMark
         int coordinatorEpoch,
         CancellationToken cancellationToken)
     {
-        if (partitions.Count == 0)
-            return MarkerReplicationResult.Success();
-
-        // Group the involved partitions by their LEADER broker (excluding self — the coordinator wrote
-        // its own-led markers locally already). The leader appends the marker to its log; followers
-        // receive it via normal fetch replication, so sending only to leaders avoids both wasted sends
-        // and the double-write a direct follower append would cause. (See the class summary for how
-        // this deliberately differs from the Kafka-wire send-to-all-replicas fan-out.)
-        var leaderPartitions = GroupByLeader(partitions);
-        if (leaderPartitions.Count == 0)
-            return MarkerReplicationResult.Success();
-
         var result = new MarkerReplicationResult();
-        var tasks = leaderPartitions.Select(kvp => SendMarkersAsync(
+        if (partitions.Count == 0)
+        {
+            result.IsSuccess = true;
+            return result;
+        }
+
+        // Classify EVERY involved partition so a no-leader / unknown skip is visible in the result
+        // (#72 Inc6), and group the remote-led ones by leader for sending. The leader appends the
+        // marker to its log; followers receive it via normal fetch replication, so sending only to
+        // leaders avoids both wasted sends and the double-write a direct follower append would cause.
+        // (See the class summary for how this deliberately differs from the Kafka send-to-all fan-out.)
+        var byLeader = new Dictionary<int, List<TopicPartition>>();
+        foreach (var tp in partitions)
+        {
+            var state = _clusterState.GetPartitionState(tp);
+            if (state is null)
+            {
+                result.PartitionOutcomes[tp] = MarkerPartitionOutcome.SkippedUnknownPartition;
+                continue;
+            }
+            var leader = state.LeaderBrokerId;
+            if (leader < 0)
+            {
+                result.PartitionOutcomes[tp] = MarkerPartitionOutcome.SkippedNoLeader;
+                continue;
+            }
+            if (leader == _localBrokerId) // the coordinator wrote its own-led markers locally already
+            {
+                result.PartitionOutcomes[tp] = MarkerPartitionOutcome.LocalLeader;
+                continue;
+            }
+            if (!byLeader.TryGetValue(leader, out var list))
+            {
+                list = [];
+                byLeader[leader] = list;
+            }
+            list.Add(tp);
+        }
+
+        // Log-only min.insync.replicas assessment, shared verbatim with the Kafka-wire replicator.
+        AssessMinIsr(transactionalId, partitions);
+
+        if (byLeader.Count == 0)
+        {
+            // Nothing to send remotely (all local-led or skipped). Preserve the prior success contract;
+            // the per-partition outcomes above make any skip visible to the coordinator (Inc7).
+            result.IsSuccess = true;
+            return result;
+        }
+
+        var tasks = byLeader.Select(kvp => SendMarkersAsync(
             kvp.Key, transactionalId, producerId, producerEpoch, kvp.Value, commit, coordinatorEpoch, cancellationToken));
         var outcomes = await Task.WhenAll(tasks).ConfigureAwait(false);
 
         foreach (var (brokerId, ok, error) in outcomes)
         {
+            var partitionOutcome = ok ? MarkerPartitionOutcome.Replicated : MarkerPartitionOutcome.Failed;
+            foreach (var tp in byLeader[brokerId])
+                result.PartitionOutcomes[tp] = partitionOutcome;
+
             if (ok)
                 result.SuccessfulBrokers.Add(brokerId);
             else
@@ -83,7 +125,7 @@ public sealed partial class NativeTransactionMarkerReplicator : ITransactionMark
         }
 
         // Match the Kafka-wire replicator's requirement: succeed once at least one follower acked (or
-        // there were no failures). A full min.insync.replicas gate is a later refinement (shared TODO).
+        // there were no failures). A full min.insync.replicas GATE is a later, sign-off-gated increment.
         result.IsSuccess = result.SuccessfulBrokers.Count > 0 || result.FailedBrokers.Count == 0;
         if (result.IsSuccess)
             LogReplicated(transactionalId, commit ? "COMMIT" : "ABORT", result.SuccessfulBrokers.Count);
@@ -92,25 +134,21 @@ public sealed partial class NativeTransactionMarkerReplicator : ITransactionMark
         return result;
     }
 
-    private Dictionary<int, List<TopicPartition>> GroupByLeader(IReadOnlyList<TopicPartition> partitions)
+    // #72 Inc6 — log-only: report the involved partitions that are under min.insync.replicas, using the
+    // one shared assessment so the native and Kafka-wire transports log an identical view.
+    private void AssessMinIsr(string transactionalId, IReadOnlyList<TopicPartition> partitions)
     {
-        var byLeader = new Dictionary<int, List<TopicPartition>>();
+        var triples = new List<(TopicPartition, int, int)>(partitions.Count);
         foreach (var tp in partitions)
         {
             var state = _clusterState.GetPartitionState(tp);
-            if (state is null)
-                continue;
-            var leader = state.LeaderBrokerId;
-            if (leader < 0 || leader == _localBrokerId) // unknown, or self (written locally already)
-                continue;
-            if (!byLeader.TryGetValue(leader, out var list))
-            {
-                list = [];
-                byLeader[leader] = list;
-            }
-            list.Add(tp);
+            if (state is not null)
+                triples.Add((tp, state.Isr.Count, state.MinInSyncReplicas));
         }
-        return byLeader;
+
+        var under = MarkerReplicationAssessment.UnderMinIsr(triples);
+        if (under.Count > 0)
+            LogUnderMinIsr(transactionalId, under.Count, string.Join(", ", under.Select(tp => $"{tp.Topic}-{tp.Partition}")));
     }
 
     private async Task<(int BrokerId, bool Ok, string? Error)> SendMarkersAsync(
@@ -181,6 +219,9 @@ public sealed partial class NativeTransactionMarkerReplicator : ITransactionMark
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Transaction {TransactionalId}: {MarkerType} markers replicated natively to {BrokerCount} brokers")]
     private partial void LogReplicated(string transactionalId, string markerType, int brokerCount);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Transaction {TransactionalId}: {Count} involved partition(s) below min.insync.replicas when writing markers: {Partitions}")]
+    private partial void LogUnderMinIsr(string transactionalId, int count, string partitions);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Transaction {TransactionalId}: failed to replicate {MarkerType} markers natively to {FailedCount} brokers")]
     private partial void LogReplicationFailed(string transactionalId, string markerType, int failedCount);

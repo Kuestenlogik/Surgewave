@@ -55,21 +55,27 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
         int coordinatorEpoch,
         CancellationToken cancellationToken)
     {
+        var result = new MarkerReplicationResult();
         if (partitions.Count == 0)
         {
-            return MarkerReplicationResult.Success();
+            result.IsSuccess = true;
+            return result;
         }
 
-        // Group partitions by broker that hosts replicas
-        var brokerPartitions = GroupPartitionsByFollowerBroker(partitions);
+        // Group partitions by follower broker, recording each partition's outcome (#72 Inc6): a
+        // partition unknown to cluster state is a VISIBLE skip rather than a silent drop.
+        var brokerPartitions = GroupPartitionsByFollowerBroker(partitions, result);
+
+        // Log-only min.insync.replicas assessment, shared verbatim with the native replicator.
+        AssessMinIsr(transactionalId, partitions);
 
         if (brokerPartitions.Count == 0)
         {
             LogNoFollowersToReplicate(transactionalId, partitions.Count);
-            return MarkerReplicationResult.Success();
+            result.IsSuccess = true;
+            return result;
         }
 
-        var result = new MarkerReplicationResult();
         var retryCount = 0;
 
         while (retryCount <= _options.MaxRetries)
@@ -152,14 +158,20 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
     /// Excludes the local broker (leader).
     /// </summary>
     private Dictionary<int, List<PartitionTopicPair>> GroupPartitionsByFollowerBroker(
-        IEnumerable<TopicPartition> partitions)
+        IEnumerable<TopicPartition> partitions, MarkerReplicationResult result)
     {
         var brokerPartitions = new Dictionary<int, List<PartitionTopicPair>>();
 
         foreach (var tp in partitions)
         {
             var state = _clusterState.GetPartitionState(tp);
-            if (state == null) continue;
+            if (state == null)
+            {
+                result.PartitionOutcomes[tp] = MarkerPartitionOutcome.SkippedUnknownPartition;
+                continue;
+            }
+
+            result.PartitionOutcomes[tp] = MarkerPartitionOutcome.Replicated; // dispatched to its followers
 
             // Get all replicas except the local broker
             foreach (var replicaId in state.Replicas)
@@ -177,6 +189,23 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
         }
 
         return brokerPartitions;
+    }
+
+    // #72 Inc6 — log-only: report the involved partitions under min.insync.replicas via the one shared
+    // assessment, so the Kafka-wire and native transports log an identical view.
+    private void AssessMinIsr(string transactionalId, IReadOnlyList<TopicPartition> partitions)
+    {
+        var triples = new List<(TopicPartition, int, int)>(partitions.Count);
+        foreach (var tp in partitions)
+        {
+            var state = _clusterState.GetPartitionState(tp);
+            if (state is not null)
+                triples.Add((tp, state.Isr.Count, state.MinInSyncReplicas));
+        }
+
+        var under = MarkerReplicationAssessment.UnderMinIsr(triples);
+        if (under.Count > 0)
+            LogUnderMinIsr(transactionalId, under.Count, string.Join(", ", under.Select(tp => $"{tp.Topic}-{tp.Partition}")));
     }
 
     /// <summary>
@@ -371,6 +400,9 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "No follower brokers to replicate markers for transaction {TransactionalId} ({PartitionCount} partitions)")]
     private partial void LogNoFollowersToReplicate(string transactionalId, int partitionCount);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Transaction {TransactionalId}: {Count} involved partition(s) below min.insync.replicas when writing markers: {Partitions}")]
+    private partial void LogUnderMinIsr(string transactionalId, int count, string partitions);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Broker {BrokerId} not found in cluster state")]
     private partial void LogBrokerNotFound(int brokerId);
