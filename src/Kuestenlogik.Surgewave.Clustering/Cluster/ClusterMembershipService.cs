@@ -153,6 +153,49 @@ public sealed partial class ClusterMembershipService
         return new BrokerRegistrationOutcome(ClusterRpcStatus.None, brokerEpoch);
     }
 
+    /// <summary>
+    /// #72 Inc5 — apply a Raft-REPLICATED broker registration on log commit/replay. The
+    /// <paramref name="epoch"/> is the committed log index: durable, replicated and strictly monotone
+    /// across failover and restarts (KRaft parity), so Raft mode does not use the node-local composed
+    /// mint. Idempotent: replaying the same incarnation keeps the recorded epoch; a re-registration
+    /// (new incarnation, committed at a higher index) advances to it. Merges into cluster state via
+    /// <c>ClusterState.UpdateBroker</c> — never an AddBroker-clobber — preserving a previously
+    /// discovered replication port when this entry advertised none.
+    /// </summary>
+    public void ApplyReplicatedRegistration(
+        int brokerId, Guid incarnationId, long epoch, string host, int port, string? rack,
+        short interBrokerProtocol, int? replicationPort)
+    {
+        long recordedEpoch;
+        lock (_epochLock)
+        {
+            var existing = _registrations.TryGetValue(brokerId, out var r) ? r : null;
+            // Same incarnation = an idempotent re-apply of the same committed entry: keep the recorded
+            // epoch AND fence state (a duplicate apply must not disturb a caught-up broker). A new
+            // incarnation = a re-registration committed at a higher index: adopt that index as the
+            // epoch and start fenced (a re-registering broker is not yet caught up).
+            var sameIncarnation = existing is not null && existing.IncarnationId == incarnationId;
+            recordedEpoch = sameIncarnation ? existing!.BrokerEpoch : epoch;
+
+            _registrations[brokerId] = new BrokerRegistrationRecord
+            {
+                BrokerId = brokerId,
+                IncarnationId = incarnationId,
+                BrokerEpoch = recordedEpoch,
+                IsFenced = sameIncarnation ? existing!.IsFenced : true,
+            };
+        }
+
+        _clusterState.UpdateBroker(
+            brokerId,
+            NewBrokerNode(brokerId, host, port, rack, interBrokerProtocol, replicationPort, existingReplicationPort: null),
+            known => NewBrokerNode(
+                brokerId, host, port, rack, interBrokerProtocol, replicationPort,
+                existingReplicationPort: known.HasExplicitReplicationPort ? known.ReplicationPort : null));
+
+        LogReplicatedRegistration(brokerId, recordedEpoch, host, port, interBrokerProtocol);
+    }
+
     /// <summary>Process a broker heartbeat, returning the fence/caught-up/shutdown state.</summary>
     public BrokerHeartbeatOutcome Heartbeat(BrokerHeartbeatInput input)
     {
@@ -231,6 +274,9 @@ public sealed partial class ClusterMembershipService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Broker {BrokerId} registered at {Host}:{Port} (epoch={Epoch}, interBrokerProtocol={InterBrokerProtocol}, finalized={Finalized})")]
     private partial void LogRegistered(int brokerId, string host, int port, long epoch, short interBrokerProtocol, short finalized);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker registration: BrokerId={BrokerId} epoch={Epoch} at {Host}:{Port} (level={Level})")]
+    private partial void LogReplicatedRegistration(int brokerId, long epoch, string host, int port, short level);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Heartbeat from unregistered broker {BrokerId}")]
     private partial void LogUnregisteredHeartbeat(int brokerId);

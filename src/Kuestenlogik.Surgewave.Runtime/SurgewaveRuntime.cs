@@ -555,7 +555,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
             _raftPersistence = new RaftPersistence(raftPersistenceLogger, clusteringConfig);
             _raftTransport = new RaftTransport(raftTransportLogger, _clusterState, clusteringConfig, peerTransport);
-            _metadataStateMachine = new MetadataStateMachine(metadataStateMachineLogger, _clusterState);
+            _metadataStateMachine = new MetadataStateMachine(metadataStateMachineLogger, _clusterState, membershipService);
 
             _raftNode = new RaftNode(
                 raftNodeLogger,
