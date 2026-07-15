@@ -738,7 +738,8 @@ if (featuresConfig.UseRaftConsensus)
         sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
     builder.Services.AddSingleton(sp => new MetadataStateMachine(
         sp.GetRequiredService<ILogger<MetadataStateMachine>>(),
-        sp.GetRequiredService<ClusterState>()));
+        sp.GetRequiredService<ClusterState>(),
+        sp.GetRequiredService<ClusterMembershipService>()));
     builder.Services.AddSingleton(sp => new RaftNode(
         sp.GetRequiredService<ILogger<RaftNode>>(),
         sp.GetRequiredService<ClusteringConfig>(),

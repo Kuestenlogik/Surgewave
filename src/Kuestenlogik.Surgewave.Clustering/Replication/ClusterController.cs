@@ -45,6 +45,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private Task? _raftLeaderWatchTask;
     private bool _isController;
 
+    // #72 Inc5 — process-stable incarnation for THIS broker's Raft self-registration; a restart gets
+    // a fresh incarnation and thus a fresh (higher) committed-index epoch on re-registration.
+    private readonly Guid _raftSelfIncarnation = Guid.NewGuid();
+
     // Auto-rebalancing components (set externally when available)
     private ClusterBalancer? _clusterBalancer;
     private PartitionReassignmentManager? _reassignmentManager;
@@ -214,8 +218,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     var epoch = _clusterState.BecomeController(_config.BrokerId);
                     LogBecameRaftLeader(_config.BrokerId, epoch);
 
-                    // Register this broker via Raft
-                    _ = RegisterBrokerViaRaftAsync(_config.BrokerId, _config.Host, _config.Port, _config.Rack, ct);
+                    // Register this broker via Raft (carry incarnation + level + replication port so
+                    // the committed entry rebuilds the membership store faithfully; #72 Inc5).
+                    _ = RegisterBrokerViaRaftAsync(
+                        _config.BrokerId, _config.Host, _config.Port, _config.Rack,
+                        _raftSelfIncarnation, InterBrokerProtocolFeature.LocalMaxSupported, _config.ReplicationPort, ct);
 
                     // Start controller loop
                     _controllerTask = Task.Run(() => ControllerLoopAsync(ct), ct);
@@ -703,14 +710,20 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Register a broker via Raft consensus.
     /// </summary>
-    public async Task<bool> RegisterBrokerViaRaftAsync(int brokerId, string host, int port, string? rack, CancellationToken ct)
+    public async Task<bool> RegisterBrokerViaRaftAsync(
+        int brokerId, string host, int port, string? rack,
+        Guid incarnationId, short interBrokerProtocol, int replicationPort, CancellationToken ct)
     {
         if (_raftNode == null || !_raftNode.IsLeader)
         {
             return false;
         }
 
-        var command = new BrokerRegisteredCommand(brokerId, host, port, rack);
+        // #72 Inc5 — carry incarnation + level + replication port so the committed entry rebuilds the
+        // membership store faithfully on replay; the broker epoch is the committed log index (assigned
+        // in MetadataStateMachine.ApplyBrokerRegistered), not carried in the command.
+        var command = new BrokerRegisteredCommand(
+            brokerId, host, port, rack, incarnationId, interBrokerProtocol, replicationPort);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.BrokerRegisteredCommand);
 
         var index = await _raftNode.ProposeAsync(MetadataCommandType.BrokerRegistered, data, ct);

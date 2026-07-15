@@ -13,13 +13,16 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
 {
     private readonly ILogger<MetadataStateMachine> _logger;
     private readonly ClusterState _clusterState;
+    private readonly ClusterMembershipService _membership;
 
     public MetadataStateMachine(
         ILogger<MetadataStateMachine> logger,
-        ClusterState clusterState)
+        ClusterState clusterState,
+        ClusterMembershipService membership)
     {
         _logger = logger;
         _clusterState = clusterState;
+        _membership = membership;
     }
 
     public void Apply(RaftLogEntry entry)
@@ -33,7 +36,7 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
                     break;
 
                 case MetadataCommandType.BrokerRegistered:
-                    ApplyBrokerRegistered(entry.Data);
+                    ApplyBrokerRegistered(entry);
                     break;
 
                 case MetadataCommandType.BrokerRemoved:
@@ -133,20 +136,19 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         return Task.CompletedTask;
     }
 
-    private void ApplyBrokerRegistered(byte[] data)
+    private void ApplyBrokerRegistered(RaftLogEntry entry)
     {
-        var cmd = JsonSerializer.Deserialize(data, ClusteringJsonContext.Default.BrokerRegisteredCommand);
+        var cmd = JsonSerializer.Deserialize(entry.Data, ClusteringJsonContext.Default.BrokerRegisteredCommand);
         if (cmd == null) return;
 
-        var broker = new BrokerNode
-        {
-            BrokerId = cmd.BrokerId,
-            Host = cmd.Host,
-            Port = cmd.Port,
-            Rack = cmd.Rack
-        };
+        // #72 Inc5 — in Raft mode the broker epoch is the committed log INDEX: durable, replicated and
+        // strictly monotone across failover (KRaft parity), so no node-local composed mint is needed.
+        // Rebuild the membership store on replay through the shared authority (UpdateBroker-merge, never
+        // an AddBroker-clobber that would drop a discovered replication port). Idempotent on re-apply.
+        _membership.ApplyReplicatedRegistration(
+            cmd.BrokerId, cmd.IncarnationId, epoch: entry.Index, cmd.Host, cmd.Port, cmd.Rack,
+            cmd.InterBrokerProtocol, cmd.ReplicationPort == 0 ? null : cmd.ReplicationPort);
 
-        _clusterState.AddBroker(broker);
         LogBrokerRegistered(cmd.BrokerId, cmd.Host, cmd.Port);
     }
 
@@ -267,9 +269,15 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
 #region Metadata Commands
 
 /// <summary>
-/// Command to register a new broker.
+/// Command to register a new broker. #72 Inc5 appended <c>IncarnationId</c>, <c>InterBrokerProtocol</c>
+/// and <c>ReplicationPort</c> (all with defaults) so the raft-log.bin FRAME is unchanged and pre-Inc5
+/// entries still deserialize — an older entry replays with IncarnationId=empty, level=0 (Kafka wire)
+/// and ReplicationPort=0 (derive from the client port). The broker epoch is NOT carried here; it is
+/// the committed log index at apply time.
 /// </summary>
-public sealed record BrokerRegisteredCommand(int BrokerId, string Host, int Port, string? Rack);
+public sealed record BrokerRegisteredCommand(
+    int BrokerId, string Host, int Port, string? Rack,
+    Guid IncarnationId = default, short InterBrokerProtocol = 0, int ReplicationPort = 0);
 
 /// <summary>
 /// Command to remove a broker.
