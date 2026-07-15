@@ -6,12 +6,6 @@ For what's already shipped, see [GitHub Releases](https://github.com/Kuestenlogi
 
 Field conventions live in [`docs/contributing/project-board.md`](docs/contributing/project-board.md).
 
-## In progress
-
-### Later
-
-- [#72](https://github.com/Kuestenlogik/Surgewave/issues/72) **Clustering follow-ups from #60: durable broker epochs, membership unification, marker-consumer activation** 
-
 ## Next up
 
 ### v0.4 — Production hardening & trustworthy admin
