@@ -46,33 +46,21 @@ jobs:
         run: dotnet build --no-restore -c Release
 
       - name: Run tests with coverage
-        # -m:1: Test-Assemblies SERIELL (wie ci.yml/release.yml). Ohne das laufen
-        # die Testhosts parallel und die Coverlet-Instrumentierung der von vielen
-        # Test-Projekten geteilten Grossassemblies (Core, Clustering,
-        # Protocol.Kafka) kollidiert — die gemergten Reports zeigten fuer genau
-        # diese Assemblies 0 % trotz gruener 400+-Test-Suiten.
+        # -m:1: Test-Assemblies SERIELL, konsistent mit ci.yml/release.yml.
+        # Hinweis: Die 0%-Coverage von Core/Clustering/Protocol.Kafka lag NICHT an
+        # Parallelitaet, sondern an Coverlets CecilAssemblyResolutionException beim
+        # Lesen der [LoggerMessage]-Attribute — gefixt via PreserveCompilationContext
+        # fuer Testprojekte in Directory.Build.targets. Bei erneuten 0%-Assemblies:
+        # --diag:artifacts/coverage/diag/vstest.log anhaengen und die
+        # vstest.datacollector.*-Logs pruefen (Coverlet loggt Instrumentierungs-
+        # Fehler NUR dorthin, nie auf die Konsole).
         run: |
           dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -m:1 \
             --collect:"XPlat Code Coverage" \
             --results-directory artifacts/coverage/raw \
             --settings coverlet.runsettings \
             --filter "FullyQualifiedName!~IntegrationTests" \
-            --diag:artifacts/coverage/diag/vstest.log \
             --verbosity minimal
-
-      # Diagnose-Artefakt: Rohdaten + Collector-Logs. Auf Linux liefern
-      # Core/Clustering/Protocol.Kafka 0 % (lokal auf Windows nicht) — die
-      # Coverlet-Instrumentierungswarnungen landen NUR im Datacollector-Log,
-      # nie in der Konsole. Bleibt drin, bis die Ursache fixiert ist.
-      - name: Upload raw coverage + collector diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-raw-diag
-          path: |
-            artifacts/coverage/raw/**/coverage.cobertura.xml
-            artifacts/coverage/diag/**
-          retention-days: 3
 
       - name: Generate coverage report
         uses: danielpalme/ReportGenerator-GitHub-Action@5
