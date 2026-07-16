@@ -18,6 +18,11 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
 - [#54](https://github.com/Kuestenlogik/Surgewave/issues/54) **Vulnerable transitives shipped by 0.3.0 packages: Microsoft.OpenApi 2.0.0 (fix available) + SQLitePCLRaw.lib.e_sqlite3 2.1.11 (no upstream fix yet)** 
+- [#73](https://github.com/Kuestenlogik/Surgewave/issues/73) **bug(protocol): span-hash string intern caches return the wrong string on 32-bit collision — produce can route to the wrong topic** 
+- [#74](https://github.com/Kuestenlogik/Surgewave/issues/74) **bug(broker): pooled decompression buffer leaked on every compressed batch on the native fetch/stream path** 
+- [#75](https://github.com/Kuestenlogik/Surgewave/issues/75) **bug(storage): owning ArrayPool buffer leaked (LOH) on every trimmed pooled read in FileStorageEngine** 
+- [#76](https://github.com/Kuestenlogik/Surgewave/issues/76) **bug(storage): flush policy never reaches the disk — FlushAsync flushes a FileStream buffer that RandomAccess writes bypass** 
+- [#77](https://github.com/Kuestenlogik/Surgewave/issues/77) **bug(clustering): ReplicationServer misparses a short read of the 4-byte size prefix and desyncs the connection** 
 
 ### v0.5 — AI-friendly broker
 
@@ -52,11 +57,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
-- [#73](https://github.com/Kuestenlogik/Surgewave/issues/73) **bug(protocol): span-hash string intern caches return the wrong string on 32-bit collision — produce can route to the wrong topic** 
-- [#74](https://github.com/Kuestenlogik/Surgewave/issues/74) **bug(broker): pooled decompression buffer leaked on every compressed batch on the native fetch/stream path** 
-- [#75](https://github.com/Kuestenlogik/Surgewave/issues/75) **bug(storage): owning ArrayPool buffer leaked (LOH) on every trimmed pooled read in FileStorageEngine** 
-- [#76](https://github.com/Kuestenlogik/Surgewave/issues/76) **bug(storage): flush policy never reaches the disk — FlushAsync flushes a FileStream buffer that RandomAccess writes bypass** 
-- [#77](https://github.com/Kuestenlogik/Surgewave/issues/77) **bug(clustering): ReplicationServer misparses a short read of the 4-byte size prefix and desyncs the connection** 
 
 ---
 
