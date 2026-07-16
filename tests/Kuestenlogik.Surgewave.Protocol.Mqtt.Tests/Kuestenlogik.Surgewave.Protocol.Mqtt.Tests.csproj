@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Mqtt\Kuestenlogik.Surgewave.Protocol.Mqtt.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
   </ItemGroup>
 
 </Project>

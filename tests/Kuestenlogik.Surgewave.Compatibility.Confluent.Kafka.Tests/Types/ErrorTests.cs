@@ -29,6 +29,13 @@ public class ErrorTests
     }
 
     [Fact]
+    public void Constructor_WithoutReason_UsesCodeNameAsReason()
+    {
+        var error = new Error(ErrorCode.Local_TimedOut);
+        Assert.Equal("Local_TimedOut", error.Reason);
+    }
+
+    [Fact]
     public void Constructor_WithFatal_SetsFatal()
     {
         var error = new Error(ErrorCode.Local_Fatal, "Fatal error", true);
