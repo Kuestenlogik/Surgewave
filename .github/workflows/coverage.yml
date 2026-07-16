@@ -46,8 +46,13 @@ jobs:
         run: dotnet build --no-restore -c Release
 
       - name: Run tests with coverage
+        # -m:1: Test-Assemblies SERIELL (wie ci.yml/release.yml). Ohne das laufen
+        # die Testhosts parallel und die Coverlet-Instrumentierung der von vielen
+        # Test-Projekten geteilten Grossassemblies (Core, Clustering,
+        # Protocol.Kafka) kollidiert — die gemergten Reports zeigten fuer genau
+        # diese Assemblies 0 % trotz gruener 400+-Test-Suiten.
         run: |
-          dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build \
+          dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -m:1 \
             --collect:"XPlat Code Coverage" \
             --results-directory artifacts/coverage/raw \
             --settings coverlet.runsettings \
