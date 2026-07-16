@@ -55,6 +55,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#73](https://github.com/Kuestenlogik/Surgewave/issues/73) **bug(protocol): span-hash string intern caches return the wrong string on 32-bit collision — produce can route to the wrong topic** 
 - [#74](https://github.com/Kuestenlogik/Surgewave/issues/74) **bug(broker): pooled decompression buffer leaked on every compressed batch on the native fetch/stream path** 
 - [#75](https://github.com/Kuestenlogik/Surgewave/issues/75) **bug(storage): owning ArrayPool buffer leaked (LOH) on every trimmed pooled read in FileStorageEngine** 
+- [#76](https://github.com/Kuestenlogik/Surgewave/issues/76) **bug(storage): flush policy never reaches the disk — FlushAsync flushes a FileStream buffer that RandomAccess writes bypass** 
+- [#77](https://github.com/Kuestenlogik/Surgewave/issues/77) **bug(clustering): ReplicationServer misparses a short read of the 4-byte size prefix and desyncs the connection** 
 
 ---
 
