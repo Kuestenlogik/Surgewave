@@ -218,10 +218,11 @@ public sealed partial class MetadataUpdateClient : IAsyncDisposable
     {
         try
         {
-            // Read size
+            // Read the 4-byte size prefix EXACTLY — a single ReadAsync may legally return 1-3
+            // bytes, and parsing a torn prefix desyncs the connection (#77).
             var sizeBuffer = new byte[4];
-            var read = await stream.ReadAsync(sizeBuffer, ct);
-            if (read == 0)
+            var read = await stream.ReadAtLeastAsync(sizeBuffer, 4, throwOnEndOfStream: false, ct);
+            if (read < 4)
                 return null;
 
             var size = BinaryPrimitives.ReadInt32BigEndian(sizeBuffer);

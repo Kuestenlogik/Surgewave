@@ -236,10 +236,13 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
     private static async Task<byte[]?> ReadBodyAsync(Stream stream, CancellationToken ct)
     {
-        // Read size
+        // Read the 4-byte size prefix EXACTLY: a single ReadAsync may legally return 1-3 bytes
+        // (TCP gives no alignment guarantee), and parsing a torn prefix yields a garbage size that
+        // desyncs every subsequent RPC on the connection (#77). read == 0 is a clean close between
+        // frames; 1-3 bytes is a peer death mid-prefix — both end this stream.
         var sizeBuffer = new byte[4];
-        var read = await stream.ReadAsync(sizeBuffer, ct);
-        if (read == 0)
+        var read = await stream.ReadAtLeastAsync(sizeBuffer, 4, throwOnEndOfStream: false, ct);
+        if (read < 4)
             return null;
 
         var size = BinaryPrimitives.ReadInt32BigEndian(sizeBuffer);
