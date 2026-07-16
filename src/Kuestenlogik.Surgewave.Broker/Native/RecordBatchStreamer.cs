@@ -1,3 +1,4 @@
+using System.Buffers;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Util;
 
@@ -58,15 +59,16 @@ internal static class RecordBatchStreamer
 
         var compressedRecordsSpan = span.Slice(pos, recordsSize);
 
-        // Decompress if needed - use pooled decompression to avoid intermediate allocation
+        // Decompress if needed - use pooled decompression to avoid intermediate allocation.
+        // DecompressPooled's contract: if IsPooled, the CALLER must return the buffer to the pool —
+        // the streamed records are fully copied into the writer below, so the buffer's lifetime ends
+        // when this method returns (#74: this rent used to leak on every compressed batch).
         ReadOnlySpan<byte> recordsSpan;
-        byte[]? decompressedBuffer = null;
-        int decompressedLength = 0;
+        byte[]? pooledBuffer = null;
         if (compressionType != KafkaConstants.Compression.None)
         {
-            var (buffer, length, _) = CompressionCodec.DecompressPooled(compressedRecordsSpan, compressionType);
-            decompressedBuffer = buffer;
-            decompressedLength = length;
+            var (buffer, length, isPooled) = CompressionCodec.DecompressPooled(compressedRecordsSpan, compressionType);
+            pooledBuffer = isPooled ? buffer : null;
             recordsSpan = buffer.AsSpan(0, length);
         }
         else
@@ -74,6 +76,27 @@ internal static class RecordBatchStreamer
             recordsSpan = compressedRecordsSpan;
         }
 
+        try
+        {
+            return StreamParsedRecords(recordsSpan, writer, recordCount, baseOffset, baseTimestamp);
+        }
+        finally
+        {
+            if (pooledBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(pooledBuffer);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Streams the (already decompressed) records section to the writer, skipping headers. Split out
+    /// of <see cref="StreamRecordsToWriter"/> so the pooled decompression buffer can be returned in a
+    /// finally around the parse loop (#74).
+    /// </summary>
+    private static int StreamParsedRecords(
+        ReadOnlySpan<byte> recordsSpan, BigEndianWriter writer, int recordCount, long baseOffset, long baseTimestamp)
+    {
         var recordsPos = 0;
 
         // Stream records directly to writer without creating Message objects
