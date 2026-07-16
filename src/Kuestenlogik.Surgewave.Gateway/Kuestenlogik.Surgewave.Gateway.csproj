@@ -25,7 +25,8 @@
     <!-- OpenTelemetry -->
     <PackageReference Include="OpenTelemetry" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
-    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
+    <!-- VersionOverride statt zentralem Pin — siehe Kommentar in Directory.Packages.props (NU5104). -->
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" VersionOverride="1.15.3-beta.1" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
   </ItemGroup>
