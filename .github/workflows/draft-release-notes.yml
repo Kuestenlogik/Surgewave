@@ -1,26 +1,22 @@
-# Draft a release-notes block for the next release and open a PR.
+# Draft the editorial release-notes body for the next release and open a PR.
 #
-# Why a workflow? Without it, the Highlights body of a GitHub Release
-# gets written by hand after the tag pushes — easy to forget, and the
-# release ships with a bare placeholder until someone notices. This
-# workflow pre-fills RELEASE_NOTES.md with the closed-issues list +
-# the cleaned commit log so the curated body is ~80 % done before
-# you touch it. You review the PR, polish the wording, merge, then
-# tag the version to trigger the release pipeline. release.yml gates
-# on the block being present so an un-drafted tag fails fast.
+# Bowire-Konzept (docs/release-notes/): die kuratierte Prosa der NAECHSTEN
+# Version lebt in docs/release-notes/upcoming.md (Front-matter: title +
+# version). release.yml gated auf dieses File (mind. eine ###-Section) und
+# nutzt es als GitHub-Release-Body; RELEASE_NOTES.md ist nur noch ein
+# generierter Mirror (scripts/ci/generate-release-notes.mjs).
 #
-# Trigger: workflow_dispatch only. Pass a version like `1.8.1` or
-# `2.0.0-rc.1`. The workflow:
-#   1. Resolves the matching milestone (matches on `vX.Y[.Z]`
-#      prefix), extracts the theme tail from the milestone title.
-#   2. Lists closed issues in the milestone and groups by Track →
-#      Area → Kind so the Highlights section drafts itself.
-#   3. Tails the commit log since the previous tag, captures
-#      `fix:` / `refactor:` / `perf:` / `ci:` / `chore:` lines for
-#      the Maintenance section.
-#   4. Inserts the block at the top of RELEASE_NOTES.md (after the
-#      preamble + first `---` separator).
-#   5. Opens a PR. You merge, then tag.
+# Dieser Workflow fuellt upcoming.md ~80 % vor: Theme aus dem Milestone-
+# Titel, Highlights aus den geschlossenen Milestone-Issues (gebuckelt nach
+# area/kind), Maintenance aus dem Commit-Log seit dem letzten Tag. Die
+# Bullets sind ABSICHTLICH keine ###-Sections — das Release-Gate erzwingt
+# so die Kuratierung (Bullets zu ###-Prosa umschreiben), bevor ein Tag
+# shippen kann. Review den PR, poliere, merge, dann tagge.
+#
+# Schutz: ein upcoming.md, das bereits kuratierte ###-Sections traegt,
+# wird NICHT ueberschrieben — der Workflow bricht dann mit Hinweis ab.
+#
+# Trigger: workflow_dispatch mit einer Version wie `0.5.0` (mit oder ohne v).
 
 name: Draft release notes
 
@@ -28,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to draft notes for (e.g. 1.8.1 or 2.0.0). With or without leading v.'
+        description: 'Version to draft notes for (e.g. 0.5.0). With or without leading v.'
         required: true
 
 permissions:
@@ -48,6 +44,18 @@ jobs:
         with:
           token: ${{ secrets.SURGEWAVE_DISPATCH_TOKEN }}
           fetch-depth: 0
+
+      - name: Guard — refuse to overwrite curated content
+        run: |
+          set -euo pipefail
+          if [ -f docs/release-notes/upcoming.md ]; then
+            BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' docs/release-notes/upcoming.md)
+            SECTION_COUNT=$(echo "$BODY" | grep -cE '^### ' || true)
+            if [ "${SECTION_COUNT:-0}" -gt 0 ]; then
+              echo "::error::docs/release-notes/upcoming.md traegt bereits ${SECTION_COUNT} kuratierte ###-Section(s) — dieser Workflow ueberschreibt keine Kuratierung. Manuell editieren."
+              exit 1
+            fi
+          fi
 
       - name: Resolve milestone + theme
         id: ms
@@ -86,8 +94,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Resolved: version=$VERSION milestone='$MS_TITLE' theme='$THEME'"
 
-      - name: Generate draft block
-        id: draft
+      - name: Generate upcoming.md draft
         env:
           GH_TOKEN: ${{ secrets.SURGEWAVE_DISPATCH_TOKEN }}
           VERSION: ${{ steps.ms.outputs.version }}
@@ -95,26 +102,19 @@ jobs:
           THEME: ${{ steps.ms.outputs.theme }}
         run: |
           set -euo pipefail
-          DATE=$(date -u +%Y-%m-%d)
-          # Previous tag matching v* on the same major-line. Falls back to
-          # the most recent v* tag of any minor if no same-major exists.
           PREV_TAG=$(git tag --sort=-version:refname --list 'v*' | head -n 1)
           if [ -z "$PREV_TAG" ]; then PREV_TAG=$(git rev-list --max-parents=0 HEAD); fi
           echo "Previous tag: $PREV_TAG"
 
-          # ---- Highlights from closed milestone issues ----
+          # ---- Highlights aus geschlossenen Milestone-Issues ----
           HIGHLIGHTS=""
           if [ -n "$MS_TITLE" ]; then
-            # Fetch closed issues in the milestone. JSON output keeps the
-            # label list intact so we can group by track / area / kind.
             ISSUES_JSON=$(gh issue list --milestone "$MS_TITLE" --state closed \
               --limit 100 --json number,title,labels)
-            # Use jq to bucket: track > area > "misc". For each bucket,
-            # emit `**<bucket>**` heading + `- #N title` lines.
             HIGHLIGHTS=$(echo "$ISSUES_JSON" | jq -r '
               def bucket(labels):
-                ( labels | map(select(.name | startswith("track:")) | .name | sub("track:"; ""))[0]
-                  // labels | map(select(.name | startswith("area:")) | .name | sub("area:"; ""))[0]
+                ( (labels | map(select(.name | startswith("area:")) | .name | sub("area:"; ""))[0])
+                  // (labels | map(select(.name | startswith("kind:")) | .name | sub("kind:"; ""))[0])
                   // "misc" );
               [ .[] | { bucket: bucket(.labels), entry: "- #\(.number) \(.title)" } ]
               | group_by(.bucket)
@@ -125,12 +125,7 @@ jobs:
             ')
           fi
 
-          # ---- Maintenance from commit log ----
-          # Capture commit subjects matching the conventional-commit
-          # types that signal "boring" work — fix/refactor/perf/test/
-          # ci/build/chore. feat: subjects already surface in Highlights
-          # via the linked issues; we skip them here to avoid double-
-          # listing. Cap at 30 lines so a long cycle stays readable.
+          # ---- Maintenance aus dem Commit-Log ----
           MAINT=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges \
             | grep -E "^(fix|refactor|perf|test|ci|build|chore|docs)(\(.+\))?:" \
             | grep -vE "^chore\(roadmap\):|^chore: bump floor" \
@@ -138,56 +133,51 @@ jobs:
             | sed 's/^/- /' \
             || true)
 
-          # ---- Assemble the block ----
+          # ---- upcoming.md schreiben ----
+          mkdir -p docs/release-notes
           {
-            echo "## v${VERSION} — ${DATE}"
-            echo ""
+            echo "---"
             if [ -n "$THEME" ]; then
-              echo "_${THEME}_"
-              echo ""
+              echo "title: ${THEME}"
+            else
+              echo "title: <fill in before the tag — matches the milestone theme>"
             fi
+            echo "version: ${VERSION}"
+            echo "---"
+            echo ""
+            echo "<One-sentence frame for what ${VERSION} is about — replace before tagging.>"
+            echo ""
+            echo "## Highlights"
+            echo ""
+            echo "<!-- Kuratierung erforderlich: die Bullets unten zu ###-Sections mit"
+            echo "     2-4 Saetzen Prosa umschreiben — das Release-Gate verlangt"
+            echo "     mindestens eine ###-Section. Muster: ### <headline> (#issue) -->"
+            echo ""
             if [ -n "$HIGHLIGHTS" ]; then
-              echo "## Highlights"
-              echo ""
               echo "$HIGHLIGHTS"
             else
-              echo "## Highlights"
-              echo ""
-              echo "_No closed issues in milestone — replace this with the prose summary._"
+              echo "_No closed issues in the milestone yet._"
               echo ""
             fi
             if [ -n "$MAINT" ]; then
-              echo "## Maintenance"
+              echo "## Fixes"
+              echo ""
+              echo "<!-- Aus dem Commit-Log; gruppieren + auf das Nennenswerte kuerzen. -->"
               echo ""
               echo "$MAINT"
               echo ""
             fi
-            echo "---"
+            echo "## Breaking changes"
             echo ""
-          } > .draft-block.md
-          echo "----- drafted block -----"
-          cat .draft-block.md
+            echo "<!-- Only when real — with the migration path. -->"
+            echo ""
+            echo "## Acknowledgements"
+            echo ""
+            echo "<!-- Optional. -->"
+          } > docs/release-notes/upcoming.md
+          echo "----- drafted upcoming.md -----"
+          cat docs/release-notes/upcoming.md
           echo "----- end -----"
-
-      - name: Insert into RELEASE_NOTES.md
-        run: |
-          set -euo pipefail
-          # The file's preamble ends at the first `---` separator. We
-          # insert the draft just after that line so the newest block
-          # is always at the top of the curated section.
-          HEADER_END=$(grep -n '^---$' RELEASE_NOTES.md | head -n 1 | cut -d: -f1)
-          if [ -z "$HEADER_END" ]; then
-            echo "::error::RELEASE_NOTES.md has no '---' separator after the preamble — refusing to insert."
-            exit 1
-          fi
-          {
-            head -n "$HEADER_END" RELEASE_NOTES.md
-            echo ""
-            cat .draft-block.md
-            tail -n +$((HEADER_END + 1)) RELEASE_NOTES.md
-          } > RELEASE_NOTES.md.new
-          mv RELEASE_NOTES.md.new RELEASE_NOTES.md
-          rm -f .draft-block.md
 
       - name: Open PR
         env:
@@ -199,46 +189,36 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # Reuse the branch on rerun so the diff updates in place
-          # rather than creating churn / orphan branches.
+          # Branch auf Rerun wiederverwenden statt Orphan-Branches zu erzeugen.
           if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
             git fetch origin "$BRANCH"
             git checkout -B "$BRANCH" "origin/$BRANCH"
-            # Carry forward the just-generated RELEASE_NOTES.md (it's
-            # still in the working tree after the previous step).
-            git checkout main -- RELEASE_NOTES.md 2>/dev/null || true
+            git checkout main -- docs/release-notes/upcoming.md 2>/dev/null || true
           else
             git checkout -b "$BRANCH"
           fi
 
-          if git diff --quiet RELEASE_NOTES.md; then
-            echo "::notice::RELEASE_NOTES.md unchanged — block for v${VERSION} likely already drafted."
+          if git ls-files --error-unmatch docs/release-notes/upcoming.md > /dev/null 2>&1 && git diff --quiet docs/release-notes/upcoming.md; then
+            echo "::notice::upcoming.md unchanged — draft for v${VERSION} likely already committed."
             exit 0
           fi
-          git add RELEASE_NOTES.md
+          git add docs/release-notes/upcoming.md
           git commit -m "chore: draft release notes for v${VERSION}"
           git push -u origin "$BRANCH" --force-with-lease
 
           if ! gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' | grep -q .; then
-            # Body via heredoc → file → --body-file. Inlining a
-            # multi-line markdown string into --body "..." breaks YAML's
-            # literal-block-scalar parsing (unindented lines like
-            # **Header** end the block prematurely). Single-quoted
-            # heredoc ('PRBODY') keeps backticks + $VAR literal so the
-            # markdown survives intact.
+            # Body via heredoc → file → --body-file (Inline-Markdown in
+            # --body "..." bricht YAMLs literal-block-scalar-Parsing).
             cat > .pr-body.md <<PRBODY
-            Auto-drafted release-notes block for v${VERSION} via the \`Draft release notes\` workflow.
+            Auto-drafted \`docs/release-notes/upcoming.md\` for v${VERSION} via the \`Draft release notes\` workflow.
 
             **Before merging:**
-            1. Polish the Highlights wording — the bullets just dump closed-issue titles; group + paraphrase per theme.
-            2. Trim or expand the Maintenance bullets — the workflow captures up to 30 \`fix\` / \`refactor\` / \`perf\` / \`test\` / \`ci\` / \`build\` / \`chore\` / \`docs\` lines. Roadmap-sync + floor-bump noise is already filtered out.
-            3. If the theme line at the top doesn't match what shipped, edit the milestone title (the source of truth) — don't just patch the block here.
+            1. Rewrite the Highlights bullets into \`###\` sections with 2-4 sentences of prose each — the release gate requires at least one \`###\` section, so an un-curated draft cannot ship.
+            2. Trim the Fixes bullets to the notable ones (roadmap-sync + floor-bump noise is already filtered).
+            3. Check the front-matter \`title:\` against the milestone theme — the release title resolves from the milestone at tag time.
 
-            After merge, push the \`v${VERSION}\` tag — \`release.yml\` will use this block as the GitHub Release body and the milestone-derived headline as the title.
+            After merge, push the \`v${VERSION}\` tag — \`release.yml\` uses this file as the GitHub Release body (with the Installation block collapsed below it and the auto-generated commit list after the seam).
             PRBODY
-            # The heredoc above respects the YAML indentation so each
-            # line starts with 12 spaces in the .md; strip them so the
-            # PR body is clean markdown.
             sed -i 's/^            //' .pr-body.md
             gh pr create \
               --title "chore: draft release notes for v${VERSION}" \

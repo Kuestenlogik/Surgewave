@@ -16,6 +16,60 @@ env:
 
 jobs:
   # ================================================================
+  # verify-notes: Gate — kein Release ohne kuratierten Body
+  # ================================================================
+  # Bowire-Pattern (docs/release-notes/): der GitHub-Release-Body ist
+  # kuratierte Prosa aus dem Repo, nicht Installations-Boilerplate.
+  # Source-of-truth-Kette:
+  #   1) docs/release-notes/v<tag>.md  (konservierter Body)
+  #   2) docs/release-notes/upcoming.md (kanonischer Pfad vor dem Tag)
+  #   3) Legacy: Body eines GitHub-Draft-Release fuer den Tag
+  # Fail-fast hier spart die komplette Build-Zeit und verhindert das
+  # "mit Platzhalter-Body geshippt, im Nachgang editiert"-Muster.
+  verify-notes:
+    name: Verify curated release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify curated release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          FILE_BODY=""
+          for candidate in "docs/release-notes/${TAG}.md" "docs/release-notes/upcoming.md"; do
+            if [[ -f "$candidate" ]]; then
+              # Front-matter strippen; "echt" ist ein Body erst mit
+              # mindestens einer ###-Section (Platzhalter-Erkennung —
+              # das Template traegt nur ##-Headings + HTML-Kommentare).
+              BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' "$candidate")
+              SECTION_COUNT=$(echo "$BODY" | grep -cE '^### ' || true)
+              if [[ "${SECTION_COUNT:-0}" -gt 0 ]]; then
+                FILE_BODY="$candidate"
+                break
+              fi
+            fi
+          done
+          if [[ -n "$FILE_BODY" ]]; then
+            echo "✓ Kuratierter Body fuer ${TAG} gefunden: ${FILE_BODY}"
+            exit 0
+          fi
+          # Legacy-Fallback: GitHub-Draft-Release-Body.
+          BODY=$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name == \"${TAG}\") | .body" 2>/dev/null | head -c 200 || true)
+          if [[ -n "$BODY" ]]; then
+            echo "✓ Kuratierter Body fuer ${TAG} gefunden (legacy: GitHub-Draft-Release)"
+            exit 0
+          fi
+          echo "::error::Kein kuratierter Release-Body fuer ${TAG} gefunden."
+          echo ""
+          echo "Kuratiere docs/release-notes/upcoming.md (mind. eine ###-Section),"
+          echo "committe + pushe, und pushe den Tag danach erneut."
+          echo "Konvention: docs/release-notes/README.md"
+          exit 1
+
+  # ================================================================
   # build-msi: WiX MSI build (Windows-only)
   # ================================================================
   # WiX v5 ist Windows-only (`warning WIX0000: WiX Toolset only supports
@@ -25,6 +79,7 @@ jobs:
   # downloaded sie wieder vorm GitHub-Release-Schritt.
   build-msi:
     name: Build Windows MSI
+    needs: [verify-notes]
     runs-on: windows-latest
 
     steps:
@@ -340,10 +395,140 @@ jobs:
           name: release-packages-${{ steps.version.outputs.VERSION }}
           path: artifacts/packages/*.nupkg
 
+      # Bowire-Pattern: der kuratierte Body kommt aus docs/release-notes/
+      # (v<tag>.md → upcoming.md → Legacy-Draft), Front-matter wird
+      # gestrippt, die Installations-Kommandos wandern in einen
+      # eingeklappten <details>-Block, und ein Seam trennt Editorial
+      # von der auto-generierten Commit-Liste.
+      - name: Pull editorial body (file first, GitHub draft as fallback)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          V="${{ steps.version.outputs.VERSION }}"
+          NOTES=""
+          for candidate in "docs/release-notes/${TAG}.md" "docs/release-notes/upcoming.md"; do
+            if [[ -f "$candidate" ]]; then
+              CANDIDATE_BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' "$candidate")
+              SECTION_COUNT=$(echo "$CANDIDATE_BODY" | grep -cE '^### ' || true)
+              if [[ "${SECTION_COUNT:-0}" -gt 0 ]]; then
+                NOTES="$CANDIDATE_BODY"
+                echo "Using editorial body from ${candidate} (${SECTION_COUNT} section(s))"
+                break
+              else
+                echo "Skipping ${candidate} — no ### subsections detected (treated as placeholder)."
+              fi
+            fi
+          done
+          if [[ -z "$NOTES" ]]; then
+            NOTES=$(gh api "repos/${{ github.repository }}/releases" \
+              --jq ".[] | select(.tag_name == \"${TAG}\") | .body" 2>/dev/null || true)
+            [[ -n "$NOTES" ]] && echo "Using editorial body from GitHub draft release (legacy)."
+          fi
+          {
+            if [[ -z "$NOTES" ]]; then
+              echo "## $TAG"
+              echo ""
+              echo "_See the auto-generated change list below._"
+            else
+              echo "$NOTES"
+            fi
+            echo ""
+            echo "<details>"
+            echo "<summary><b>Installation</b> — NuGet, Container, MSI, Linux, Helm</summary>"
+            echo ""
+            echo "**NuGet:**"
+            echo '```bash'
+            echo "dotnet add package Kuestenlogik.Surgewave.Client --version ${V}"
+            echo '```'
+            echo ""
+            echo "**Container — pre-built (Docker Hub, multi-arch linux/amd64 + arm64):**"
+            echo '```bash'
+            echo "docker pull kuestenlogik/surgewave-broker:${V}"
+            echo "docker pull kuestenlogik/surgewave-control:${V}"
+            echo "# …oder :latest"
+            echo '```'
+            echo ""
+            echo "**Container — alternative registry (GHCR):**"
+            echo '```bash'
+            echo "docker pull ghcr.io/kuestenlogik/surgewave-broker:${V}"
+            echo "docker pull ghcr.io/kuestenlogik/surgewave-control:${V}"
+            echo '```'
+            echo ""
+            echo "**Container — build from source:**"
+            echo '```bash'
+            echo "dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer"
+            echo "dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer"
+            echo '```'
+            echo ""
+            echo "**Windows MSI (silent install):**"
+            echo '```powershell'
+            echo "msiexec /i surgewave-${V}-win-x64.msi /qn"
+            echo '```'
+            echo ""
+            echo "**Linux:**"
+            echo '```bash'
+            echo "sudo bash install.sh"
+            echo '```'
+            echo ""
+            echo "**Helm:**"
+            echo '```bash'
+            echo "helm install surgewave deploy/helm/surgewave/ --set broker.image.tag=${V}"
+            echo '```'
+            echo ""
+            echo "</details>"
+            echo ""
+            echo "---"
+            echo ""
+            echo "_The full commit list, contributors, and compare-URL diff are auto-generated below._"
+            echo ""
+          } > release-body.md
+          echo "----- release-body.md -----"
+          cat release-body.md
+          echo "----- end -----"
+
+      # Release-Titel-Theme aus dem passenden Milestone-Titel
+      # (`vX.Y[.Z] — <theme>`-Konvention) — der GitHub-Release-Titel
+      # liest sich dann `v0.4.0 — Production hardening & trustworthy admin`.
+      - name: Resolve release title from milestone
+        id: title
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          BASE=$(echo "$VERSION" | sed -E 's/-.*$//')
+          MAJ_MIN=$(echo "$BASE" | cut -d. -f1-2)
+          MS_TITLES=$(gh api "repos/${{ github.repository }}/milestones?state=all&per_page=100" \
+            --jq '.[].title' 2>/dev/null)
+          THEME=""
+          for candidate in "v${BASE}" "v${MAJ_MIN}"; do
+            FULL=$(echo "$MS_TITLES" | grep -E "^${candidate}([[:space:]]+[—-][[:space:]]+.+)?$" | head -n 1 || true)
+            if [[ -n "$FULL" ]]; then
+              CANDIDATE_THEME=$(echo "$FULL" | sed -E "s/^${candidate}[[:space:]]+[—-][[:space:]]+//; t; d")
+              if [[ -n "$CANDIDATE_THEME" ]]; then
+                THEME="$CANDIDATE_THEME"
+                echo "Resolved theme from milestone '${FULL}': ${THEME}"
+                break
+              fi
+            fi
+          done
+          if [[ -n "$THEME" ]]; then
+            echo "title=${TAG} — ${THEME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No theme found on milestone matching v${BASE} or v${MAJ_MIN} — release title will be bare ${TAG}."
+            echo "title=${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          name: ${{ steps.title.outputs.title }}
+          body_path: release-body.md
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-rc') }}
           files: |
             artifacts/packages/*.nupkg
             publish/*.tar.gz
@@ -351,46 +536,3 @@ jobs:
             publish/*.msi
             publish/*.deb
             publish/*.rpm
-          body: |
-            ## Surgewave ${{ github.ref_name }}
-
-            ### Installation
-
-            **NuGet:**
-            ```bash
-            dotnet add package Kuestenlogik.Surgewave.Client --version ${{ steps.version.outputs.VERSION }}
-            ```
-
-            **Container — pre-built (Docker Hub, multi-arch linux/amd64 + arm64):**
-            ```bash
-            docker pull kuestenlogik/surgewave-broker:${{ steps.version.outputs.VERSION }}
-            docker pull kuestenlogik/surgewave-control:${{ steps.version.outputs.VERSION }}
-            # …oder :latest
-            ```
-
-            **Container — alternative registry (GHCR):**
-            ```bash
-            docker pull ghcr.io/kuestenlogik/surgewave-broker:${{ steps.version.outputs.VERSION }}
-            docker pull ghcr.io/kuestenlogik/surgewave-control:${{ steps.version.outputs.VERSION }}
-            ```
-
-            **Container — build from source:**
-            ```bash
-            dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer
-            dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer
-            ```
-
-            **Windows MSI (silent install):**
-            ```powershell
-            msiexec /i surgewave-${{ steps.version.outputs.VERSION }}-win-x64.msi /qn
-            ```
-
-            **Linux:**
-            ```bash
-            sudo bash install.sh
-            ```
-
-            **Helm:**
-            ```bash
-            helm install surgewave deploy/helm/surgewave/ --set broker.image.tag=${{ steps.version.outputs.VERSION }}
-            ```
