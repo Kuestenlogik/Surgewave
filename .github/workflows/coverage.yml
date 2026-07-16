@@ -57,7 +57,22 @@ jobs:
             --results-directory artifacts/coverage/raw \
             --settings coverlet.runsettings \
             --filter "FullyQualifiedName!~IntegrationTests" \
+            --diag:artifacts/coverage/diag/vstest.log \
             --verbosity minimal
+
+      # Diagnose-Artefakt: Rohdaten + Collector-Logs. Auf Linux liefern
+      # Core/Clustering/Protocol.Kafka 0 % (lokal auf Windows nicht) — die
+      # Coverlet-Instrumentierungswarnungen landen NUR im Datacollector-Log,
+      # nie in der Konsole. Bleibt drin, bis die Ursache fixiert ist.
+      - name: Upload raw coverage + collector diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-raw-diag
+          path: |
+            artifacts/coverage/raw/**/coverage.cobertura.xml
+            artifacts/coverage/diag/**
+          retention-days: 3
 
       - name: Generate coverage report
         uses: danielpalme/ReportGenerator-GitHub-Action@5
