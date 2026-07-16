@@ -9,6 +9,11 @@
     <!-- Transitive Pins: Microsoft.OpenApi 2.0.0 (via Microsoft.AspNetCore.OpenApi) hat
          GHSA-v5pm-xwqc-g5wc; 2.9.0 ist die gepatchte 2.x-Linie. -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
+    <!-- OpenTelemetry.Exporter.Prometheus.AspNetCore hat hier BEWUSST KEINEN zentralen Eintrag:
+         upstream gibt es den Exporter nur als -beta, und CentralPackageTransitivePinning promotet
+         zentral gepinnte transitive Pakete in die nuspec JEDES packbaren Projekts, das den Broker
+         (transitiv) referenziert — das liess jeden stabilen Release-Pack an NU5104 scheitern.
+         Broker/Gateway referenzieren den Exporter direkt mit VersionOverride. -->
     <!-- Extracted Surgewave modules (external repos) -->
     <!-- WiX (MSI installer) -->
     <PackageVersion Include="WixToolset.UI.wixext" Version="5.0.1" />
@@ -83,7 +88,6 @@
     <PackageVersion Include="Spectre.Console" Version="0.55.2" />
     <!-- OpenTelemetry / Metrics -->
     <PackageVersion Include="OpenTelemetry" Version="1.15.3" />
-    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.15.3-beta.1" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />

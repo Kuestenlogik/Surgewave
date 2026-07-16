@@ -130,7 +130,10 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <PackageReference Include="OpenTelemetry" />
-    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
+    <!-- VersionOverride statt zentralem Pin: der Exporter existiert upstream nur als -beta, und ein
+         zentraler Eintrag wuerde via CentralPackageTransitivePinning in die nuspec jedes packbaren
+         Downstream-Projekts promotet (NU5104 beim stabilen Release-Pack). -->
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" VersionOverride="1.15.3-beta.1" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
