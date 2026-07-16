@@ -76,22 +76,11 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topicLength = BinaryPrimitives.ReadInt16BigEndian(span[position..]);
         position += 2;
 
-        // Use interned topic name to avoid repeated string allocations (same cache as ParseProduceBatch)
-        string topic;
-        if (topicLength > 0)
-        {
-            var topicSpan = span.Slice(position, topicLength);
-            var hash = GetSpanHashCode(topicSpan);
-            if (!_topicNameCache.TryGetValue(hash, out topic!))
-            {
-                topic = Encoding.UTF8.GetString(topicSpan);
-                _topicNameCache.TryAdd(hash, topic);
-            }
-        }
-        else
-        {
-            topic = string.Empty;
-        }
+        // Use interned topic name to avoid repeated string allocations (same cache as ParseProduceBatch).
+        // The cache verifies bytes on hit — a 32-bit hash collision must not route to the wrong topic (#73).
+        var topic = topicLength > 0
+            ? _topicNameCache.GetOrAdd(span.Slice(position, topicLength))
+            : string.Empty;
         position += topicLength > 0 ? topicLength : 0;
 
         var partition = BinaryPrimitives.ReadInt32BigEndian(span[position..]);
@@ -335,8 +324,9 @@ public sealed class NativeDataHandler : INativeRequestHandler
     private record struct ParsedPartitionBatch(int Partition, List<ParsedMessage> Messages);
     private record struct ParsedTopicBatch(string Topic, List<ParsedPartitionBatch> Partitions);
 
-    // String interning cache for topic names to avoid repeated allocations
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _topicNameCache = new();
+    // String interning cache for topic names to avoid repeated allocations. Byte-verifying: a
+    // 32-bit hash collision returns the correct (freshly decoded) name instead of the wrong topic (#73).
+    private static readonly Utf8StringInternCache _topicNameCache = new(maxEntries: 10_000, maxByteLength: 256);
 
     private static List<ParsedTopicBatch> ParseProduceBatch(ReadOnlyMemory<byte> payload)
     {
@@ -346,22 +336,10 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topicLength = BinaryPrimitives.ReadInt16BigEndian(span[position..]);
         position += 2;
 
-        // Use interned topic name to avoid repeated string allocations
-        string topic;
-        if (topicLength > 0)
-        {
-            var topicSpan = span.Slice(position, topicLength);
-            var hash = GetSpanHashCode(topicSpan);
-            if (!_topicNameCache.TryGetValue(hash, out topic!))
-            {
-                topic = Encoding.UTF8.GetString(topicSpan);
-                _topicNameCache.TryAdd(hash, topic);
-            }
-        }
-        else
-        {
-            topic = string.Empty;
-        }
+        // Use interned topic name to avoid repeated string allocations (byte-verifying cache, #73)
+        var topic = topicLength > 0
+            ? _topicNameCache.GetOrAdd(span.Slice(position, topicLength))
+            : string.Empty;
         position += topicLength > 0 ? topicLength : 0;
 
         var partition = BinaryPrimitives.ReadInt32BigEndian(span[position..]);
@@ -402,22 +380,6 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topics = ListPool<ParsedTopicBatch>.Rent(1);
         topics.Add(new ParsedTopicBatch(topic, partitions));
         return topics;
-    }
-
-    /// <summary>
-    /// Fast hash for topic name span (for interning cache)
-    /// </summary>
-    private static int GetSpanHashCode(ReadOnlySpan<byte> span)
-    {
-        unchecked
-        {
-            int hash = 17;
-            foreach (var b in span)
-            {
-                hash = hash * 31 + b;
-            }
-            return hash;
-        }
     }
 
     private async Task HandleFetchAsync(NativeRequestContext context, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

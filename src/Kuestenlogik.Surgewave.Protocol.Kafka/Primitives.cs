@@ -718,36 +718,14 @@ public sealed class KafkaProtocolReader
     // String interning cache for frequently repeated short strings (topic names,
     // client IDs). Avoids 500K+ UTF8.GetString allocations/sec when the same
     // 5-50 topic names appear in every request. Strings >64 bytes are not cached
-    // (unlikely to be topic names, and the cache would grow unbounded).
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> s_stringCache = new();
+    // (unlikely to be topic names). Byte-verifying: the previous "rough UTF8 length
+    // check" did NOT detect 32-bit hash collisions and returned the wrong string (#73).
+    private static readonly Kuestenlogik.Surgewave.Core.Util.Utf8StringInternCache s_stringCache =
+        new(maxEntries: 10_000, maxByteLength: 64);
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static string InternShortString(byte[] buffer, int offset, int length)
-    {
-        if (length > 64)
-            return System.Text.Encoding.UTF8.GetString(buffer, offset, length);
-
-        // Hash the raw bytes — cheaper than decoding to string first
-        var hash = new HashCode();
-        hash.AddBytes(buffer.AsSpan(offset, length));
-        var key = hash.ToHashCode();
-
-        if (s_stringCache.TryGetValue(key, out var cached))
-        {
-            // Verify: hash collision check (compare actual bytes)
-            if (cached.Length <= length * 3) // rough UTF8 length check
-            {
-                return cached;
-            }
-        }
-
-        var value = System.Text.Encoding.UTF8.GetString(buffer, offset, length);
-        if (s_stringCache.Count < 10_000) // cap cache size
-        {
-            s_stringCache.TryAdd(key, value);
-        }
-        return value;
-    }
+        => s_stringCache.GetOrAdd(buffer.AsSpan(offset, length));
 
     public byte[]? ReadBytes()
     {
