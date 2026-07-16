@@ -5,6 +5,19 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
+  <!-- Coverage-Fix: Coverlet/Cecil muss beim Instrumentieren die CustomAttribute-
+       Signaturen aufloesen; die [LoggerMessage]-Attribute tragen LogLevel-Enum-
+       Argumente aus Microsoft.Extensions.Logging.Abstractions. Ohne die
+       Compilation-Context-Referenzen in der deps.json wirft Cecil auf dem Linux-
+       Runner eine AssemblyResolutionException und Coverlet UEBERSPRINGT genau die
+       logging-schweren Module — Core/Clustering/Protocol.Kafka standen dadurch
+       uniform auf 0 % Coverage (Coverlets dokumentierter Fix fuer
+       CecilAssemblyResolutionException). In targets evaluiert, damit IsTestProject
+       aus dem csproj bereits aufgeloest ist. -->
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <PreserveCompilationContext>true</PreserveCompilationContext>
+  </PropertyGroup>
+
   <!--
     Surgewave Plugin Package Creation Target
     Usage: dotnet build -p:CreateSurgewavePackage=true
