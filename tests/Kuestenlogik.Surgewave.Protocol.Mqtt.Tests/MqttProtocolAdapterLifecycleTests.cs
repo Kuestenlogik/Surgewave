@@ -36,7 +36,11 @@ public sealed class MqttProtocolAdapterLifecycleTests : IDisposable
         await adapter.StartAsync(CancellationToken.None);
 
         Assert.NotNull(adapter.ExecuteTask);
-        Assert.True(adapter.ExecuteTask!.IsCompletedSuccessfully);
+        // StartAsync does not guarantee the ExecuteAsync task is OBSERVABLY completed yet (the
+        // host may schedule it); the disabled contract is "completes promptly without a server",
+        // so await it with a timeout — a real server loop would trip the TimeoutException here.
+        await adapter.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(adapter.ExecuteTask.IsCompletedSuccessfully);
         Assert.Equal(0, adapter.ActiveClients);
 
         await adapter.StopAsync(CancellationToken.None);
