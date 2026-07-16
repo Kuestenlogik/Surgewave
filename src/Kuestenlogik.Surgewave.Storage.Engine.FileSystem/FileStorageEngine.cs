@@ -306,8 +306,16 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
             return EmptyStorageReadLease.Instance;
         }
 
+        // Trim to the valid prefix, TRANSFERRING pool ownership to the trimmed view — a plain
+        // Slice() is non-owning and the parent rent (maxBytes, typically LOH-sized) would leak
+        // because the lease only disposes the buffer it is handed (#75). Non-default pool
+        // implementations keep their own parent-lifetime semantics via the non-owning fallback.
         var finalBuffer = validBytes < bytesRead
-            ? buffer.Slice(0, validBytes)
+            ? buffer switch
+            {
+                PooledSurgewaveBuffer pooled => pooled.SliceTransferringOwnership(0, validBytes),
+                _ => buffer.Slice(0, validBytes),
+            }
             : buffer;
 
         return new StorageReadLease(finalBuffer, batchOffsets);
@@ -340,9 +348,14 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
             await pendingWrite;
         }
 
-        await _logFile.FlushAsync(cancellationToken);
-        await _indexFile.FlushAsync(cancellationToken);
-        await _timeIndexFile.FlushAsync(cancellationToken);
+        // Real durability flush (#76): batch writes go through RandomAccess on the SafeFileHandle
+        // and bypass the FileStream buffer, so FlushAsync() flushed an empty user-space buffer and
+        // never issued an fsync — the "flush" was page-cache-only. Flush(flushToDisk: true) drains
+        // the FileStream buffer (the index files DO write through it) AND calls
+        // FlushFileBuffers/fsync on the handle, which covers the RandomAccess-written log bytes.
+        _logFile.Flush(flushToDisk: true);
+        _indexFile.Flush(flushToDisk: true);
+        _timeIndexFile.Flush(flushToDisk: true);
         _pendingIndexCount = 0;
     }
 
@@ -506,9 +519,10 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
 
             if (flush)
             {
-                await _logFile.FlushAsync();
-                await _indexFile.FlushAsync();
-                await _timeIndexFile.FlushAsync();
+                // Real disk flush — see FlushAsync for why FlushAsync() alone was a no-op (#76).
+                _logFile.Flush(flushToDisk: true);
+                _indexFile.Flush(flushToDisk: true);
+                _timeIndexFile.Flush(flushToDisk: true);
             }
         }
         finally
@@ -695,7 +709,10 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
         }
 
         try { _pendingIndexWrite?.Wait(TimeSpan.FromSeconds(5)); } catch { }
-        try { _logFile?.Flush(); _indexFile?.Flush(); _timeIndexFile?.Flush(); } catch { }
+        // Clean shutdown flushes to DISK (#76): closing the handles only hands the pages to the OS;
+        // Flush() without flushToDisk never fsyncs, so a post-shutdown power loss could drop
+        // acknowledged data.
+        try { _logFile?.Flush(flushToDisk: true); _indexFile?.Flush(flushToDisk: true); _timeIndexFile?.Flush(flushToDisk: true); } catch { }
 
         _mmapManager?.Dispose();
         _logFile?.Dispose();
