@@ -8,16 +8,11 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Next up
 
-### v0.4 — Production hardening & trustworthy admin
+### Later
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `area:broker` `track:performance`
 
 ## Backlog
-
-### v0.4 — Production hardening & trustworthy admin
-
-- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
-- [#54](https://github.com/Kuestenlogik/Surgewave/issues/54) **Vulnerable transitives shipped by 0.3.0 packages: Microsoft.OpenApi 2.0.0 (fix available) + SQLitePCLRaw.lib.e_sqlite3 2.1.11 (no upstream fix yet)** 
 
 ### v0.5 — AI-friendly broker
 
@@ -36,6 +31,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
+- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
