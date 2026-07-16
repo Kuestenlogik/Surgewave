@@ -52,7 +52,10 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
+- [#73](https://github.com/Kuestenlogik/Surgewave/issues/73) **bug(protocol): span-hash string intern caches return the wrong string on 32-bit collision — produce can route to the wrong topic** 
+- [#74](https://github.com/Kuestenlogik/Surgewave/issues/74) **bug(broker): pooled decompression buffer leaked on every compressed batch on the native fetch/stream path** 
+- [#75](https://github.com/Kuestenlogik/Surgewave/issues/75) **bug(storage): owning ArrayPool buffer leaked (LOH) on every trimmed pooled read in FileStorageEngine** 
 
 ---
 
-*Generated 2026-07-15 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-07-16 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
