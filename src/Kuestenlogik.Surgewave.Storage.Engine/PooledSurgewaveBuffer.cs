@@ -110,6 +110,25 @@ public sealed class PooledSurgewaveBuffer : ISurgewaveWritableBuffer
         return new PooledSurgewaveBuffer(_array, _offset + start, length, ownsArray: false);
     }
 
+    /// <summary>
+    /// Returns a trimmed view over the same underlying array and TRANSFERS pool ownership to it:
+    /// the returned buffer inherits responsibility for returning the rented array, and this
+    /// instance becomes disposed (its <see cref="Dispose"/> is then a no-op). Used when a read
+    /// over-rents and a lease must carry only the valid prefix — handing out a non-owning
+    /// <see cref="Slice"/> there would leak the rent because nothing disposes the parent (#75).
+    /// </summary>
+    public ISurgewaveBuffer SliceTransferringOwnership(int start, int length)
+    {
+        if (start < 0 || length < 0 || start + length > _length)
+            throw new ArgumentOutOfRangeException(nameof(start), "Slice parameters out of range");
+
+        ObjectDisposedException.ThrowIf(_array == null, this);
+
+        var array = _array;
+        _array = null; // this instance is now disposed and must NOT return the array
+        return new PooledSurgewaveBuffer(array, _offset + start, length, _ownsArray);
+    }
+
     public void Dispose()
     {
         var array = _array;
