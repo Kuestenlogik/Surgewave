@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using K4os.Compression.LZ4;
 
 namespace Kuestenlogik.Surgewave.Protocol.Native;
@@ -77,29 +79,44 @@ public static class NativeCompressionCodec
     }
 
     /// <summary>
-    /// Compress with a size header for decompression.
-    /// Format: [originalSize:4 bytes][compressedData]
+    /// Compresses data directly into a single pooled buffer with the 4-byte big-endian
+    /// original-size header prepended: [originalSize:4][compressedData].
     /// </summary>
-    public static (byte[] Data, bool WasCompressed) CompressWithHeader(ReadOnlySpan<byte> data)
+    /// <returns>
+    /// <c>true</c> when compression wins: the frame occupies <c>pooledBuffer[0..frameLength)</c> and
+    /// the CALLER owns the rent — it must return <paramref name="pooledBuffer"/> to
+    /// <see cref="ArrayPool{T}.Shared"/> once the bytes are on the wire.
+    /// <c>false</c> when the payload is too small or incompressible: nothing is rented,
+    /// <paramref name="pooledBuffer"/> is null, and the caller sends the original payload
+    /// unchanged — no copy at all.
+    /// </returns>
+    public static bool TryCompressWithHeader(
+        ReadOnlySpan<byte> data,
+        [NotNullWhen(true)] out byte[]? pooledBuffer,
+        out int frameLength)
     {
+        pooledBuffer = null;
+        frameLength = 0;
+
         if (data.Length < MinCompressionSize)
         {
-            return (data.ToArray(), false);
+            return false;
         }
 
-        var (compressed, wasCompressed) = Compress(data);
+        var rented = ArrayPool<byte>.Shared.Rent(4 + LZ4Codec.MaximumOutputSize(data.Length));
+        var compressedSize = LZ4Codec.Encode(data, rented.AsSpan(4), CompressionLevel);
 
-        if (!wasCompressed)
+        // Reject unless the framed result is strictly smaller than the original payload —
+        // the 4-byte header is part of what goes on the wire, so it counts here.
+        if (compressedSize <= 0 || compressedSize + 4 >= data.Length)
         {
-            // Compress already called data.ToArray() - reuse that allocation instead of copying again
-            return (compressed, false);
+            ArrayPool<byte>.Shared.Return(rented);
+            return false;
         }
 
-        // Prepend original size
-        var result = new byte[4 + compressed.Length];
-        BinaryPrimitives.WriteInt32BigEndian(result, data.Length);
-        compressed.CopyTo(result.AsSpan(4));
-
-        return (result, true);
+        BinaryPrimitives.WriteInt32BigEndian(rented, data.Length);
+        pooledBuffer = rented;
+        frameLength = 4 + compressedSize;
+        return true;
     }
 }

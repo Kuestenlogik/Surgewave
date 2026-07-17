@@ -141,6 +141,10 @@ public sealed class SurgewaveNativeHandler
         // AND from concurrent push-streaming background tasks.
         var writeLock = new SemaphoreSlim(1, 1);
 
+        // One responder per connection — holds the PipeWriter/lock that used to be captured in a
+        // fresh closure for every single request (#83).
+        var responder = new NativeConnectionResponder(pipeWriter, writeLock);
+
         // Per-connection subscription manager â€” null if logManager not available
         StreamSubscriptionManager? subscriptionManager = null;
         if (_logManager != null && _recordBatchSerializer != null)
@@ -162,7 +166,7 @@ public sealed class SurgewaveNativeHandler
             if (version != SurgewaveNativeProtocol.Version)
             {
                 _logger.LogWarning("Unsupported Surgewave native protocol version: {Version}", version);
-                await SendErrorAsync(pipeWriter, writeLock, false, 0, SurgewaveOpCode.Handshake, SurgewaveErrorCode.InvalidRequest,
+                await responder.SendErrorAsync(0, SurgewaveOpCode.Handshake, SurgewaveErrorCode.InvalidRequest,
                     $"Unsupported protocol version: {version}", cancellationToken);
                 return;
             }
@@ -170,7 +174,7 @@ public sealed class SurgewaveNativeHandler
             _logger.LogInformation("Surgewave native client connected, protocol version {Version}", version);
 
             // Send handshake response and determine if client supports compression
-            var clientSupportsCompression = await SendHandshakeResponseAsync(pipeWriter, writeLock, cancellationToken);
+            await SendHandshakeResponseAsync(responder, cancellationToken);
 
             // Create PipeReader for efficient batched network reads.
             // PipeReader accumulates data in internal buffers, reducing syscalls.
@@ -190,7 +194,7 @@ public sealed class SurgewaveNativeHandler
 
                 // Start reader and processor as concurrent tasks
                 var readerTask = ReadRequestsAsync(pipeReader, requestChannel.Writer, cancellationToken);
-                var processorTask = ProcessPipelinedRequestsAsync(pipeWriter, writeLock, clientSupportsCompression, subscriptionManager, requestChannel.Reader, cancellationToken);
+                var processorTask = ProcessPipelinedRequestsAsync(responder, subscriptionManager, requestChannel.Reader, cancellationToken);
 
                 // Wait for either to complete (reader finishes on disconnect, processor on channel completion)
                 await Task.WhenAny(readerTask, processorTask);
@@ -332,13 +336,15 @@ public sealed class SurgewaveNativeHandler
     /// The writeLock serializes PipeWriter access between this loop and push-streaming background tasks.
     /// </summary>
     private async Task ProcessPipelinedRequestsAsync(
-        PipeWriter pipeWriter,
-        SemaphoreSlim writeLock,
-        bool clientSupportsCompression,
+        NativeConnectionResponder responder,
         StreamSubscriptionManager? subscriptionManager,
         ChannelReader<PendingNativeRequest> reader,
         CancellationToken cancellationToken)
     {
+        // One reusable context per connection: this loop is the single reader and awaits each
+        // handler to completion, so only Header changes between requests (#83).
+        var context = new NativeRequestContext(responder, _config, subscriptionManager);
+
         await foreach (var request in reader.ReadAllAsync(cancellationToken))
         {
             try
@@ -348,7 +354,16 @@ public sealed class SurgewaveNativeHandler
                     ? request.DecompressedPayload
                     : request.RentedPayload.AsMemory(0, request.PayloadLength);
 
-                await ProcessRequestAsync(pipeWriter, writeLock, clientSupportsCompression, subscriptionManager, request.Header, actualPayload, cancellationToken);
+                context.SetHeader(request.Header);
+
+                // Dispatch to appropriate handler using O(1) lookup
+                var handled = await _dispatcher.TryDispatchAsync(context, actualPayload, cancellationToken);
+
+                if (!handled)
+                {
+                    await responder.SendErrorAsync(request.Header.RequestId, request.Header.OpCode,
+                        SurgewaveErrorCode.InvalidRequest, $"Unknown opcode: {request.Header.OpCode}", cancellationToken);
+                }
             }
             finally
             {
@@ -358,40 +373,7 @@ public sealed class SurgewaveNativeHandler
         }
     }
 
-    private async Task ProcessRequestAsync(
-        PipeWriter pipeWriter,
-        SemaphoreSlim writeLock,
-        bool clientSupportsCompression,
-        StreamSubscriptionManager? subscriptionManager,
-        SurgewaveRequestHeader header,
-        ReadOnlyMemory<byte> payload,
-        CancellationToken cancellationToken)
-    {
-        // Create context for handlers â€” PipeWriter is captured in the closures.
-        // writeLock ensures push-streaming tasks and response writes don't race on the PipeWriter.
-        var context = new NativeRequestContext
-        {
-            Header = header,
-            Config = _config,
-            SendResponseAsync = (reqId, opCode, errorCode, p, ct) =>
-                SendResponseAsync(pipeWriter, writeLock, clientSupportsCompression, reqId, opCode, errorCode, p, ct),
-            SendErrorAsync = (reqId, opCode, errorCode, msg, ct) =>
-                SendErrorAsync(pipeWriter, writeLock, clientSupportsCompression, reqId, opCode, errorCode, msg, ct),
-            ClientSupportsCompression = clientSupportsCompression,
-            SubscriptionManager = subscriptionManager
-        };
-
-        // Dispatch to appropriate handler using O(1) lookup
-        var handled = await _dispatcher.TryDispatchAsync(context, payload, cancellationToken);
-
-        if (!handled)
-        {
-            await SendErrorAsync(pipeWriter, writeLock, clientSupportsCompression, header.RequestId, header.OpCode,
-                SurgewaveErrorCode.InvalidRequest, $"Unknown opcode: {header.OpCode}", cancellationToken);
-        }
-    }
-
-    private async Task<bool> SendHandshakeResponseAsync(PipeWriter pipeWriter, SemaphoreSlim writeLock, CancellationToken cancellationToken)
+    private async Task SendHandshakeResponseAsync(NativeConnectionResponder responder, CancellationToken cancellationToken)
     {
         // Response: version(1) + capabilities(4)
         var payload = new byte[5];
@@ -402,69 +384,9 @@ public sealed class SurgewaveNativeHandler
         payload[3] = 0; // reserved
         payload[4] = 0; // reserved
 
-        var clientSupportsCompression = _config.NativeProtocolCompressionEnabled;
-
-        await SendResponseAsync(pipeWriter, writeLock, false, 0, SurgewaveOpCode.Handshake, SurgewaveErrorCode.None, payload, cancellationToken);
-        return clientSupportsCompression;
+        // Sent uncompressed: the client only learns compression is available from this response.
+        await responder.SendResponseAsync(0, SurgewaveOpCode.Handshake, SurgewaveErrorCode.None, payload, cancellationToken);
+        responder.ClientSupportsCompression = _config.NativeProtocolCompressionEnabled;
     }
 
-    private async Task SendResponseAsync(PipeWriter pipeWriter, SemaphoreSlim writeLock, bool clientSupportsCompression,
-        uint requestId, SurgewaveOpCode opCode, SurgewaveErrorCode errorCode, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-    {
-        var flags = SurgewaveProtocolFlags.None;
-        ReadOnlyMemory<byte> actualPayload = payload;
-
-        // Compress large responses if client supports it
-        if (clientSupportsCompression && payload.Length >= NativeCompressionCodec.MinCompressionSize)
-        {
-            var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(payload.Span);
-            if (wasCompressed)
-            {
-                actualPayload = compressed;
-                flags |= SurgewaveProtocolFlags.Compressed;
-            }
-        }
-
-        var header = new SurgewaveResponseHeader
-        {
-            Flags = flags,
-            RequestId = requestId,
-            OpCode = opCode,
-            ErrorCode = errorCode,
-            PayloadLength = actualPayload.Length
-        };
-
-        // Serialize writes: both the processor loop and push-streaming tasks share this PipeWriter.
-        await writeLock.WaitAsync(cancellationToken);
-        try
-        {
-            // Write header + payload directly into PipeWriter's managed buffer (zero-allocation)
-            var totalLength = SurgewaveResponseHeader.Size + actualPayload.Length;
-            var span = pipeWriter.GetSpan(totalLength);
-            header.WriteTo(span);
-            if (actualPayload.Length > 0)
-            {
-                actualPayload.Span.CopyTo(span.Slice(SurgewaveResponseHeader.Size));
-            }
-            pipeWriter.Advance(totalLength);
-
-            // Flush to push data to the socket
-            await pipeWriter.FlushAsync(cancellationToken);
-        }
-        finally
-        {
-            writeLock.Release();
-        }
-    }
-
-    private Task SendErrorAsync(PipeWriter pipeWriter, SemaphoreSlim writeLock, bool clientSupportsCompression,
-        uint requestId, SurgewaveOpCode opCode, SurgewaveErrorCode errorCode, string message, CancellationToken cancellationToken)
-    {
-        var messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
-        var payload = new byte[2 + messageBytes.Length];
-        BinaryPrimitives.WriteInt16BigEndian(payload.AsSpan(0, 2), (short)messageBytes.Length);
-        messageBytes.CopyTo(payload.AsSpan(2));
-
-        return SendResponseAsync(pipeWriter, writeLock, clientSupportsCompression, requestId, SurgewaveOpCode.Error, errorCode, payload, cancellationToken);
-    }
 }

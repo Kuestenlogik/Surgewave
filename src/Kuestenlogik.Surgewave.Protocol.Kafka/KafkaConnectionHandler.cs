@@ -174,13 +174,11 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
                 var rentedBuffer = ArrayPool<byte>.Shared.Rent(size);
                 requestBody.CopyTo(rentedBuffer);
 
-                // Parse using the Kafka protocol parser
-                KafkaRequest? request;
+                // Parse using the Kafka protocol parser — span-based header, no MemoryStream/BinaryReader
+                KafkaRequest request;
                 try
                 {
-                    using var memoryStream = new MemoryStream(rentedBuffer, 0, size, writable: false, publiclyVisible: true);
-                    using var reader = new BinaryReader(memoryStream);
-                    request = KafkaProtocolHandler.ParseRequestFromReader(reader, size);
+                    request = KafkaProtocolHandler.ParseRequest(rentedBuffer, size);
                 }
                 catch (Exception ex)
                 {
@@ -223,11 +221,17 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
         {
             try
             {
-                var sw = System.Diagnostics.Stopwatch.StartNew();
+                // Timestamp instead of a Stopwatch object, and a cached name instead of
+                // ApiKey.ToString() — both were paid per request, the Stopwatch even with
+                // metrics disabled.
+                var startTimestamp = _metrics is null ? 0L : System.Diagnostics.Stopwatch.GetTimestamp();
                 var response = await ProcessRequestAsync(pending.Request, connectionState, cancellationToken);
-                sw.Stop();
+                if (_metrics is not null)
+                {
+                    var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTimestamp);
+                    _metrics.RecordRequest(ApiKeyName.Of(pending.Request.ApiKey), elapsed.TotalMilliseconds);
+                }
 
-                _metrics?.RecordRequest(pending.Request.ApiKey.ToString(), sw.Elapsed.TotalMilliseconds);
                 Log.SendingResponse(_logger, endpoint, response.CorrelationId);
 
                 // Write response directly into PipeWriter — batches multiple responses

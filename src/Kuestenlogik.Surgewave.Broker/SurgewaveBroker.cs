@@ -179,6 +179,13 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
 
         // Enterprise plugin: Kuestenlogik.Surgewave.Transport.SharedMemory
 
+        // Buffer policy on the listener BEFORE Start: accepted sockets inherit these on
+        // Windows, and the listen-time receive buffer feeds the TCP window scale negotiated
+        // in the SYN/ACK (later dynamic-config increases only apply within that scale).
+        // Linux does not inherit listener options — the per-accept set in HandleClientAsync
+        // covers it there.
+        _listener.Server.SendBufferSize = _config.SocketSendBufferBytes;
+        _listener.Server.ReceiveBufferSize = _config.SocketReceiveBufferBytes;
         _listener.Start();
         Log.BrokerStarted(_logger);
 
@@ -213,6 +220,9 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
 
         try
         {
+            // Must run here, not in the accept loop: a SocketException on an already-dead
+            // client would hit the accept loop's catch (SocketException) and stop the listener.
+            ConfigureAcceptedSocket(client, _config);
 #pragma warning disable CA2000
             Stream stream;
             if (_tlsHandler != null)
@@ -249,6 +259,21 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             _metrics.DecrementActiveConnections();
             Log.ClientDisconnected(_logger, endpoint);
         }
+    }
+
+    /// <summary>
+    /// Per-accepted-socket policy: Nagle off — matches every outbound socket in the repo
+    /// (TcpTransport, TcpPeerTransport, RemoteQueryClient) and makes the Kafka handler's
+    /// "no FlushAsync, TCP_NODELAY pushes data immediately" assumption actually true — plus
+    /// the configured socket buffers (<see cref="BrokerConfig.SocketSendBufferBytes"/>/
+    /// <see cref="BrokerConfig.SocketReceiveBufferBytes"/>). Reads the config per accept, so
+    /// dynamic changes apply to new connections (Kafka semantics). Runs once per connection.
+    /// </summary>
+    internal static void ConfigureAcceptedSocket(TcpClient client, BrokerConfig config)
+    {
+        client.NoDelay = true;
+        client.SendBufferSize = config.SocketSendBufferBytes;
+        client.ReceiveBufferSize = config.SocketReceiveBufferBytes;
     }
 
     /// <summary>

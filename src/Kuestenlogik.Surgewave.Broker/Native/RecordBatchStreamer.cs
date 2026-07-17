@@ -167,6 +167,30 @@ internal static class RecordBatchStreamer
     /// This is the zero-copy fast path - just extracts metadata from batch header.
     /// Returns the number of records in the batch.
     /// </summary>
+    /// <summary>
+    /// Reads the record count out of a RecordBatch-v2 header without parsing any records, so the
+    /// fetch/push paths can size their writer up front (#83). Returns 0 for truncated batches,
+    /// mirroring <see cref="StreamBatchRawToWriter"/>'s 61-byte guard.
+    /// </summary>
+    /// <remarks>
+    /// The count is producer-controlled: Kafka-compat produce stores client batches verbatim, so a
+    /// corrupt or hostile batch can claim any int32. It is clamped to what the remaining bytes can
+    /// physically hold (7 bytes is the smallest possible record) — an unclamped value would
+    /// overflow the capacity estimate and throw out of the caller's per-batch try/catch, killing
+    /// the connection instead of skipping the one bad batch.
+    /// </remarks>
+    public static int PeekRecordCount(ReadOnlySpan<byte> recordBatch)
+    {
+        if (recordBatch.Length < 61)
+        {
+            return 0;
+        }
+
+        const int MinRecordBytes = 7;
+        var count = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(recordBatch.Slice(57, 4));
+        return Math.Clamp(count, 0, (recordBatch.Length - 61) / MinRecordBytes);
+    }
+
     public static int StreamBatchRawToWriter(ReadOnlySpan<byte> recordBatch, BigEndianWriter writer)
     {
         if (recordBatch.Length < 61)

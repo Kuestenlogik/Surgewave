@@ -5,6 +5,7 @@ using Kuestenlogik.Surgewave.Broker.Quotas;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
+using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Observability;
 using Kuestenlogik.Surgewave.Core.Pipeline;
@@ -86,9 +87,46 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
         // Default = direct LogManager call (pre-G21 behaviour). Operators that
         // enable disaggregated storage pass a RoutingPartitionAppender via
         // SurgewaveRuntimeBuilder.WithPartitionAppender(...).
+        // Validate: these bytes came from a producer with their own CRC. Checking it costs the same
+        // single pass the append already made to overwrite it, and stops us from silently healing
+        // corruption into the log (#85).
         _partitionAppender = partitionAppender
-            ?? new DelegatingPartitionAppender((tp, batch, _, ct) => _logManager.AppendBatchAsync(tp, batch, ct).AsTask());
+            ?? new DelegatingPartitionAppender((tp, batch, _, ct) =>
+                _logManager.AppendBatchAsync(tp, batch, BatchCrcMode.Validate, ct).AsTask());
         _disaggregatedReader = disaggregatedReader;
+    }
+
+    /// <summary>
+    /// Rewrites a transformed batch's CRC so the validating append accepts it: a record-transform
+    /// plugin changes the records but carries no CRC contract (#85).
+    /// </summary>
+    /// <returns>
+    /// The same memory when it is array-backed (stamped in place), otherwise a stamped copy —
+    /// never the unstamped input, which the append would reject as corrupt.
+    /// </returns>
+    private static ReadOnlyMemory<byte> RestampCrc(ReadOnlyMemory<byte> batch)
+    {
+        if (batch.Length < RecordBatchValidator.MinBatchHeaderSize)
+        {
+            // Too short to be a RecordBatch — let the append reject it with a precise message.
+            return batch;
+        }
+
+        if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(batch, out ArraySegment<byte> segment))
+        {
+            StampCrc(segment.Array!.AsSpan(segment.Offset, segment.Count));
+            return batch;
+        }
+
+        var copy = batch.ToArray();
+        StampCrc(copy);
+        return copy;
+    }
+
+    private static void StampCrc(Span<byte> batch)
+    {
+        var crc = Crc32C.Compute(batch[RecordBatchValidator.CrcDataOffset..]);
+        BinaryPrimitives.WriteUInt32BigEndian(batch.Slice(RecordBatchValidator.CrcOffset, 4), crc);
     }
 
     public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
@@ -276,7 +314,9 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             });
                             continue;
                         }
-                        recordsToAppend = transformed.Value;
+                        // The plugin rewrote the records, so the producer's CRC no longer describes
+                        // them. Restamp before the validating append (#85).
+                        recordsToAppend = RestampCrc(transformed.Value);
                     }
 
                     // Store raw RecordBatch bytes through the appender — defaults to
@@ -357,6 +397,32 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             topic, partitionData.Index, baseOffset,
                             Principal: connectionState.AuthenticatedUser,
                             RejectReason: null, Consumers: null,
+                            Key: null, Value: null,
+                            Timestamp: DateTimeOffset.UtcNow));
+                    }
+                }
+                catch (DataCorruptionException dex)
+                {
+                    // The producer's CRC did not match its own bytes — answer the way Kafka does
+                    // instead of healing the corruption into the log (#85).
+                    ProduceError(dex, topic, partitionData.Index);
+                    _metrics?.RecordProduceError(topic, partitionData.Index, ErrorCode.CorruptMessage.ToString());
+
+                    partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                    {
+                        Index = partitionData.Index,
+                        ErrorCode = ErrorCode.CorruptMessage,
+                        BaseOffset = -1,
+                        LogAppendTimeMs = -1
+                    });
+
+                    if (_observability?.HasSubscribers == true)
+                    {
+                        _observability.Publish(new SurgewaveBrokerEvent(
+                            SurgewaveBrokerEventKind.Rejected,
+                            topic, partitionData.Index, Offset: null,
+                            Principal: connectionState.AuthenticatedUser,
+                            RejectReason: dex.Message, Consumers: null,
                             Key: null, Value: null,
                             Timestamp: DateTimeOffset.UtcNow));
                     }

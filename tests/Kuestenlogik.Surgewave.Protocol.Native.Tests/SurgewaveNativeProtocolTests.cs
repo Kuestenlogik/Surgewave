@@ -1,3 +1,4 @@
+using System.Buffers;
 using Kuestenlogik.Surgewave.Protocol.Native;
 using Xunit;
 
@@ -475,13 +476,55 @@ public sealed class SurgewaveNativeProtocolTests
             originalData[i] = (byte)(i % 256);
         }
 
-        // Compress
-        var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(originalData);
-        Assert.True(wasCompressed);
+        // Compress into a pooled frame
+        Assert.True(NativeCompressionCodec.TryCompressWithHeader(originalData, out var pooled, out var frameLength));
+        try
+        {
+            // Decompress
+            var decompressed = NativeCompressionCodec.DecompressWithHeader(pooled.AsSpan(0, frameLength));
+            Assert.Equal(originalData, decompressed);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pooled);
+        }
+    }
 
-        // Decompress
-        var decompressed = NativeCompressionCodec.DecompressWithHeader(compressed);
-        Assert.Equal(originalData, decompressed);
+    [Fact]
+    public void TryCompressWithHeader_BelowMinSize_ReturnsFalse_AndRentsNothing()
+    {
+        var data = new byte[NativeCompressionCodec.MinCompressionSize - 1];
+
+        Assert.False(NativeCompressionCodec.TryCompressWithHeader(data, out var pooled, out var frameLength));
+        Assert.Null(pooled);
+        Assert.Equal(0, frameLength);
+    }
+
+    [Fact]
+    public void TryCompressWithHeader_OwnershipContract_BufferIsNonNullIffCompressed()
+    {
+        // Pseudo-random data: LZ4 may or may not win — either way the contract must hold,
+        // a rented buffer is handed out exactly when the method reports success.
+        var randomData = new byte[2048];
+        uint seed = 42;
+        for (int i = 0; i < randomData.Length; i++)
+        {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            randomData[i] = (byte)(seed >> 16);
+        }
+
+        var wasCompressed = NativeCompressionCodec.TryCompressWithHeader(randomData, out var pooled, out var frameLength);
+
+        Assert.Equal(wasCompressed, pooled is not null);
+        if (pooled is not null)
+        {
+            Assert.True(frameLength < randomData.Length);
+            ArrayPool<byte>.Shared.Return(pooled);
+        }
+        else
+        {
+            Assert.Equal(0, frameLength);
+        }
     }
 
     [Fact]
@@ -493,12 +536,17 @@ public sealed class SurgewaveNativeProtocolTests
             originalData[i] = (byte)(i % 32);
         }
 
-        var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(originalData);
-        Assert.True(wasCompressed);
-
-        // Verify header format: [originalSize:4 bytes][compressedData]
-        var sizePrefix = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(compressed.AsSpan(0, 4));
-        Assert.Equal(originalData.Length, sizePrefix);
+        Assert.True(NativeCompressionCodec.TryCompressWithHeader(originalData, out var pooled, out _));
+        try
+        {
+            // Verify header format: [originalSize:4 bytes][compressedData]
+            var sizePrefix = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(pooled.AsSpan(0, 4));
+            Assert.Equal(originalData.Length, sizePrefix);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pooled);
+        }
     }
 
     [Fact]
@@ -540,12 +588,17 @@ public sealed class SurgewaveNativeProtocolTests
             jsonPattern.CopyTo(largePayload, i * jsonPattern.Length);
         }
 
-        var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(largePayload);
-
-        Assert.True(wasCompressed);
-        // With header (4 bytes) + compressed data, should still be much smaller
-        Assert.True(compressed.Length < largePayload.Length / 2,
-            $"Expected significant compression. Original: {largePayload.Length}, Compressed: {compressed.Length}");
+        Assert.True(NativeCompressionCodec.TryCompressWithHeader(largePayload, out var pooled, out var frameLength));
+        try
+        {
+            // With header (4 bytes) + compressed data, should still be much smaller
+            Assert.True(frameLength < largePayload.Length / 2,
+                $"Expected significant compression. Original: {largePayload.Length}, Compressed: {frameLength}");
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pooled);
+        }
     }
 
     [Fact]

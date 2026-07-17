@@ -28,8 +28,8 @@ Section: `Surgewave`
 | `LogSegmentBytes` | long | `1073741824` | Max segment size (1 GB) |
 | `MaxConnectionsPerIp` | int | `100` | Max concurrent connections per IP |
 | `MaxRequestSize` | int | `1048576` | Max message size (1 MB) |
-| `SocketSendBufferBytes` | int | `131072` | Socket send buffer |
-| `SocketReceiveBufferBytes` | int | `131072` | Socket receive buffer |
+| `SocketSendBufferBytes` | int | `102400` | Socket send buffer, applied to accepted data-port sockets (new connections) |
+| `SocketReceiveBufferBytes` | int | `102400` | Socket receive buffer, applied to accepted data-port sockets (new connections) |
 | `EnableDualMode` | bool | `true` | IPv4+IPv6 dual-stack binding |
 | `ProducerBatchSizeBytes` | int | `16384` | Default batch size advertised to clients |
 | `ProducerLingerMs` | int | `5` | Default linger time advertised to clients |

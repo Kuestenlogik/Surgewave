@@ -55,6 +55,9 @@ public class ProtocolBenchmarks
 
         // AllowAutoTopicCreation: true
         writer.Write((byte)1);
+        // IncludeClusterAuthorizedOperations: false — present in v8..v10, was missing here, which
+        // left the frame one byte short and ran the parser off the end.
+        writer.Write((byte)0);
         // IncludeTopicAuthorizedOperations: false
         writer.Write((byte)0);
         // Tagged fields (empty)
@@ -269,16 +272,20 @@ public class ProtocolBenchmarks
     private static void WriteCompactString(BinaryWriter writer, string value)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(value);
-        WriteVarInt(writer, bytes.Length + 1);
+        WriteUnsignedVarInt(writer, (uint)bytes.Length + 1);
         writer.Write(bytes);
     }
 
     private static void WriteCompactBytes(BinaryWriter writer, byte[] value)
     {
-        WriteVarInt(writer, value.Length + 1);
+        WriteUnsignedVarInt(writer, (uint)value.Length + 1);
         writer.Write(value);
     }
 
+    /// <summary>
+    /// Zigzag varint — the encoding Kafka uses for the fields INSIDE a record (length, deltas,
+    /// key/value lengths). Not for compact string/array lengths, see <see cref="WriteUnsignedVarInt"/>.
+    /// </summary>
     private static void WriteVarInt(BinaryWriter writer, int value)
     {
         var v = (uint)((value << 1) ^ (value >> 31));
@@ -288,6 +295,21 @@ public class ProtocolBenchmarks
             v >>= 7;
         }
         writer.Write((byte)v);
+    }
+
+    /// <summary>
+    /// Unsigned varint — what COMPACT_STRING/COMPACT_ARRAY lengths use. These were written with the
+    /// zigzag encoder, so every length came out doubled (11 became 22) and the broker rejected the
+    /// frame before a single benchmark iteration ran.
+    /// </summary>
+    private static void WriteUnsignedVarInt(BinaryWriter writer, uint value)
+    {
+        while ((value & ~0x7Fu) != 0)
+        {
+            writer.Write((byte)((value & 0x7F) | 0x80));
+            value >>= 7;
+        }
+        writer.Write((byte)value);
     }
 
     // Benchmarks
