@@ -63,4 +63,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-report
-          path: artifacts/benchmarks/regression-*.md
+          # Raw BDN reports too — the baseline is captured from these (they must come from an
+          # ubuntu run so latency is comparable to what the gate later measures).
+          path: |
+            artifacts/benchmarks/regression-*.md
+            artifacts/benchmarks/results/*-report-full-compressed.json
