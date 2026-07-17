@@ -24,26 +24,43 @@ jobs:
       - name: Build benchmarks
         run: dotnet build benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release
 
+      # Only the hot-path classes the gate has a baseline for — running all ~95 methods rebuilds a
+      # generated project per class and takes hours. --buildTimeout: BenchmarkDotNet builds that
+      # generated project itself, and its 2-minute default is not enough for this repo's graph; it
+      # reports the timeout as an empty "Build Error" and runs zero benchmarks.
       - name: Run unit benchmarks
-        run: dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release -- --filter '*' --exporters json --job short --artifacts artifacts/benchmarks
+        run: >
+          dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release --
+          --filter '*ProtocolBenchmarks*' '*CompressionBenchmarks*' '*SerializationBenchmarks*'
+          --exporters json --job short --buildTimeout 900 --artifacts artifacts/benchmarks
 
+      # BenchmarkDotNet writes one report per benchmark class (named *-report-full-compressed.json
+      # by --exporters json — NOT *-report-full.json, which is what the old find looked for, so it
+      # never matched). Compare every report against the baseline; fail if any class regresses.
       - name: Check for regressions
         run: |
-          REPORT=$(find artifacts/benchmarks -name '*-report-full.json' -type f | head -1)
-          if [ -z "$REPORT" ]; then
+          shopt -s nullglob
+          reports=(artifacts/benchmarks/results/*-report-full-compressed.json)
+          if [ ${#reports[@]} -eq 0 ]; then
             echo "No benchmark report found"
             exit 1
           fi
-          dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Regression -c Release -- \
-            compare "$REPORT" \
-            benchmarks/baselines/unit-baseline.json \
-            -o artifacts/benchmarks/regression-report.md \
-            --config benchmarks/regression-config.json \
-            --fail-on-regression
+          status=0
+          for report in "${reports[@]}"; do
+            echo "::group::compare $(basename "$report")"
+            dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Regression -c Release -- \
+              compare "$report" \
+              benchmarks/baselines/unit-baseline.json \
+              -o "artifacts/benchmarks/regression-$(basename "$report" .json).md" \
+              --config benchmarks/regression-config.json \
+              --fail-on-regression || status=1
+            echo "::endgroup::"
+          done
+          exit $status
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-report
-          path: artifacts/benchmarks/regression-report.md
+          path: artifacts/benchmarks/regression-*.md
