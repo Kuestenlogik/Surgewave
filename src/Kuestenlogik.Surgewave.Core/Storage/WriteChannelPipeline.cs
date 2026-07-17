@@ -125,35 +125,57 @@ internal sealed class WriteChannelPipeline : IDisposable
         Dictionary<TopicPartition, List<WriteRequest>> batch,
         CancellationToken cancellationToken)
     {
-        // Process partitions in parallel - each partition has its own semaphore lock
-        var tasks = batch.Select(async kvp =>
+        // Single-partition batch (the dominant case): flush inline, no Task[] and no fan-out.
+        if (batch.Count == 1)
         {
-            var (topicPartition, requests) = kvp;
-            try
+            foreach (var (topicPartition, requests) in batch)
             {
-                var log = _getOrCreateLog(topicPartition);
+                await FlushPartitionAsync(topicPartition, requests, cancellationToken);
+            }
 
-                // Write each RecordBatch separately within this partition
-                foreach (var request in requests)
-                {
-                    var offset = await log.AppendBatchAsync(
-                        request.RecordBatch,
-                        request.RecordBatchOffset,
-                        request.RecordBatchLength,
-                        cancellationToken);
-                    request.CompletionSource.TrySetResult(offset);
-                }
-            }
-            catch (Exception ex)
-            {
-                foreach (var request in requests)
-                {
-                    request.CompletionSource.TrySetException(ex);
-                }
-            }
-        });
+            return;
+        }
+
+        // Process partitions in parallel - each partition has its own semaphore lock.
+        // A named method instead of a LINQ async lambda: that allocated an iterator, a delegate
+        // and a display class capturing this/cancellationToken on every flush (#83).
+        var tasks = new Task[batch.Count];
+        var i = 0;
+        foreach (var (topicPartition, requests) in batch)
+        {
+            tasks[i++] = FlushPartitionAsync(topicPartition, requests, cancellationToken);
+        }
 
         await Task.WhenAll(tasks);
+    }
+
+    private async Task FlushPartitionAsync(
+        TopicPartition topicPartition,
+        List<WriteRequest> requests,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var log = _getOrCreateLog(topicPartition);
+
+            // Write each RecordBatch separately within this partition
+            foreach (var request in requests)
+            {
+                var offset = await log.AppendBatchAsync(
+                    request.RecordBatch,
+                    request.RecordBatchOffset,
+                    request.RecordBatchLength,
+                    cancellationToken);
+                request.CompletionSource.TrySetResult(offset);
+            }
+        }
+        catch (Exception ex)
+        {
+            foreach (var request in requests)
+            {
+                request.CompletionSource.TrySetException(ex);
+            }
+        }
     }
 
     public void WaitForCompletion(TimeSpan timeout)

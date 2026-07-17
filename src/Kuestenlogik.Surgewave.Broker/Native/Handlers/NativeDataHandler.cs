@@ -157,7 +157,9 @@ public sealed class NativeDataHandler : INativeRequestHandler
                 // without re-decoding. The block layout is documented on
                 // NativeMessageHeaderCodec.
                 var headersStart = position;
-                NativeMessageHeaderCodec.Decode(span[headersStart..], out var headerBytes);
+                // Only the block length is needed — Decode would materialize a dictionary with a
+                // string key and byte[] value per header, all of it discarded (#83).
+                var headerBytes = NativeMessageHeaderCodec.GetBlockLength(span[headersStart..]);
                 var headers = headerBytes > 0
                     ? payload.Slice(headersStart, headerBytes)
                     : ReadOnlyMemory<byte>.Empty;
@@ -364,7 +366,8 @@ public sealed class NativeDataHandler : INativeRequestHandler
             position += valueLength > 0 ? valueLength : 0;
 
             var headersStart = position;
-            NativeMessageHeaderCodec.Decode(span[headersStart..], out var headerBytes);
+            // Length only — see HandleProduceAsync: Decode's dictionary would be thrown away (#83).
+            var headerBytes = NativeMessageHeaderCodec.GetBlockLength(span[headersStart..]);
             var headers = headerBytes > 0
                 ? payload.Slice(headersStart, headerBytes)
                 : ReadOnlyMemory<byte>.Empty;
@@ -450,15 +453,27 @@ public sealed class NativeDataHandler : INativeRequestHandler
             (data, batchOffsets) = await _logManager.ReadBatchesContiguousAsync(topicPartition, offset, maxBytes, cancellationToken);
         }
 
+        // Pre-size for the native re-framing: it writes fixed int32/int64 fields where Kafka used
+        // varints, so the output is LARGER than the input for small records — "data.Length + 128"
+        // guaranteed a grow+copy of the whole response (#83). 24 bytes/record upper-bounds the
+        // fixed-field delta; the 61-byte batch header is not copied and credits header expansion.
+        var dataSpan = data.Span;
+        var estimatedRecords = 0;
+        for (int i = 0; i < batchOffsets.Count; i++)
+        {
+            var start = batchOffsets[i];
+            var end = i + 1 < batchOffsets.Count ? batchOffsets[i + 1] : data.Length;
+            estimatedRecords += RecordBatchStreamer.PeekRecordCount(dataSpan.Slice(start, end - start));
+        }
+
         // Use pooled writer for zero-allocation fetch path (Dispose returns to pool)
-        using var writer = BigEndianWriter.Rent(data.Length + 128);
+        using var writer = BigEndianWriter.Rent(12 + data.Length + estimatedRecords * 24);
 
         writer.Write(log.HighWatermark);
         var countPosition = writer.Length;
         writer.Write(0); // Placeholder for message count
 
         var totalMessageCount = 0;
-        var dataSpan = data.Span;
         for (int i = 0; i < batchOffsets.Count; i++)
         {
             var batchStart = batchOffsets[i];

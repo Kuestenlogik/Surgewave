@@ -125,10 +125,6 @@ public sealed class ProduceRequest : KafkaRequest
 
     public static ProduceRequest ReadFrom(BinaryReader reader, short apiVersion, int correlationId, string clientId)
     {
-        // Produce v9+ uses flexible format (COMPACT_ARRAY + COMPACT_STRING)
-        bool isFlexible = ProtocolVersions.IsFlexible(ApiKey.Produce, apiVersion);
-        bool usesTopicId = apiVersion >= 13;
-
         // Zero-copy: reuse the underlying MemoryStream buffer directly instead of
         // copying all remaining bytes into a new array. The buffer is owned by the
         // pooled request read pipeline (ReadRequestRetainingBufferAsync) and lives
@@ -149,6 +145,20 @@ public sealed class ProduceRequest : KafkaRequest
             protocolReader = new KafkaProtocolReader(remainingBytes);
         }
 
+        return ReadFrom(protocolReader, apiVersion, correlationId, clientId);
+    }
+
+    /// <summary>
+    /// Hot-path overload: parses straight out of the caller's (pooled) request buffer.
+    /// The Records slices point into that buffer and stay valid until the read pipeline
+    /// returns it to the pool.
+    /// </summary>
+    public static ProduceRequest ReadFrom(KafkaProtocolReader protocolReader, short apiVersion, int correlationId, string clientId)
+    {
+        // Produce v9+ uses flexible format (COMPACT_ARRAY + COMPACT_STRING)
+        bool isFlexible = ProtocolVersions.IsFlexible(ApiKey.Produce, apiVersion);
+        bool usesTopicId = apiVersion >= 13;
+
         // TransactionalId (v3+, nullable)
         string? transactionalId = null;
         if (apiVersion >= ProtocolVersions.Features.Produce.TransactionalIdVersion)
@@ -164,7 +174,9 @@ public sealed class ProduceRequest : KafkaRequest
 
         // TopicData
         var topicCount = isFlexible ? protocolReader.ReadVarInt() - 1 : protocolReader.ReadInt32();
-        var topicData = new List<TopicProduceData>();
+        // Clamped: a corrupt/hostile count must not turn into a huge pre-allocation. Real requests
+        // are far below the cap, so they still get an exact-size list.
+        var topicData = new List<TopicProduceData>(Math.Clamp(topicCount, 0, 1024));
 
         for (int i = 0; i < topicCount; i++)
         {
@@ -186,7 +198,7 @@ public sealed class ProduceRequest : KafkaRequest
 
             // Partitions
             var partitionCount = isFlexible ? protocolReader.ReadVarInt() - 1 : protocolReader.ReadInt32();
-            var partitions = new List<PartitionProduceData>();
+            var partitions = new List<PartitionProduceData>(Math.Clamp(partitionCount, 0, 1024));
 
             for (int j = 0; j < partitionCount; j++)
             {
