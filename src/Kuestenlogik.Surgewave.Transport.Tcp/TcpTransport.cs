@@ -191,13 +191,7 @@ public sealed class TcpTransport : ISurgewaveTransport
                     OpCode = opCode,
                     PayloadLength = actualPayload.Length
                 };
-                header.WriteTo(_requestHeaderBuffer);
-
-                await _stream!.WriteAsync(_requestHeaderBuffer, cancellationToken);
-                if (actualPayload.Length > 0)
-                {
-                    await _stream.WriteAsync(actualPayload, cancellationToken);
-                }
+                await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
             }
             finally
             {
@@ -245,15 +239,9 @@ public sealed class TcpTransport : ISurgewaveTransport
                 OpCode = opCode,
                 PayloadLength = actualPayload.Length
             };
-            header.WriteTo(_requestHeaderBuffer);
+            await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
 
-            await _stream!.WriteAsync(_requestHeaderBuffer, cancellationToken);
-            if (actualPayload.Length > 0)
-            {
-                await _stream.WriteAsync(actualPayload, cancellationToken);
-            }
-
-            await _stream.ReadExactlyAsync(_responseHeaderBuffer, cancellationToken);
+            await _stream!.ReadExactlyAsync(_responseHeaderBuffer, cancellationToken);
             var responseHeader = SurgewaveResponseHeader.ReadFrom(_responseHeaderBuffer);
 
             if (responseHeader.RequestId != requestId)

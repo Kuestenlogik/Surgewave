@@ -214,14 +214,8 @@ public sealed class QuicTransport : ISurgewaveTransport
                     OpCode = opCode,
                     PayloadLength = actualPayload.Length
                 };
-                header.WriteTo(_requestHeaderBuffer);
-
-                await _stream!.WriteAsync(_requestHeaderBuffer, cancellationToken);
-                if (actualPayload.Length > 0)
-                {
-                    await _stream.WriteAsync(actualPayload, cancellationToken);
-                }
-                await _stream.FlushAsync(cancellationToken);
+                await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                await _stream!.FlushAsync(cancellationToken);
             }
             finally
             {
@@ -269,14 +263,8 @@ public sealed class QuicTransport : ISurgewaveTransport
                 OpCode = opCode,
                 PayloadLength = actualPayload.Length
             };
-            header.WriteTo(_requestHeaderBuffer);
-
-            await _stream!.WriteAsync(_requestHeaderBuffer, cancellationToken);
-            if (actualPayload.Length > 0)
-            {
-                await _stream.WriteAsync(actualPayload, cancellationToken);
-            }
-            await _stream.FlushAsync(cancellationToken);
+            await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+            await _stream!.FlushAsync(cancellationToken);
 
             await _stream.ReadExactlyAsync(_responseHeaderBuffer, cancellationToken);
             var responseHeader = SurgewaveResponseHeader.ReadFrom(_responseHeaderBuffer);
