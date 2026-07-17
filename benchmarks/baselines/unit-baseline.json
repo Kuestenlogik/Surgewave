@@ -1,10 +1,172 @@
 {
   "version": 1,
-  "timestamp": "2026-03-14T00:00:00Z",
+  "timestamp": "2026-07-17T17:53:18.5526413+00:00",
   "environment": {
     "os": "Windows 11",
     "cpu": "Unknown",
     "runtime": ".NET 10"
   },
-  "benchmarks": {}
+  "benchmarks": {
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_LZ4_1MB": {
+      "meanNs": 2501250.60546875,
+      "medianNs": 2510490.8359375,
+      "stdDevNs": 17470.887630493646,
+      "allocatedBytes": 2118701,
+      "operationsPerSecond": 399.8000031718508
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_Zstd_1MB": {
+      "meanNs": 6689851.2734375,
+      "medianNs": 6634051.375,
+      "stdDevNs": 112922.69244154706,
+      "allocatedBytes": 1583438,
+      "operationsPerSecond": 149.48015421068726
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_Gzip_64KB": {
+      "meanNs": 1530882.634765625,
+      "medianNs": 1537756.3125,
+      "stdDevNs": 12744.23017440087,
+      "allocatedBytes": 162992,
+      "operationsPerSecond": 653.217939305385
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_LZ4_64KB": {
+      "meanNs": 147688.7403564453,
+      "medianNs": 147696.89318847656,
+      "stdDevNs": 402.987394291032,
+      "allocatedBytes": 181449,
+      "operationsPerSecond": 6770.996878885349
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_Zstd_64KB": {
+      "meanNs": 398541.6048177083,
+      "medianNs": 399052.30810546875,
+      "stdDevNs": 4853.601817639728,
+      "allocatedBytes": 98936,
+      "operationsPerSecond": 2509.148324570522
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_Gzip_1KB": {
+      "meanNs": 23356.12838236491,
+      "medianNs": 23250.326705932617,
+      "stdDevNs": 204.0671003507561,
+      "allocatedBytes": 2208,
+      "operationsPerSecond": 42815.315262398195
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_LZ4_1KB": {
+      "meanNs": 3007.1704762776694,
+      "medianNs": 3007.0326080322266,
+      "stdDevNs": 0.8867636486740427,
+      "allocatedBytes": 4144,
+      "operationsPerSecond": 332538.5134925301
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Compress_Zstd_1KB": {
+      "meanNs": 5837.0087483723955,
+      "medianNs": 5904.598785400391,
+      "stdDevNs": 118.68823672385868,
+      "allocatedBytes": 1904,
+      "operationsPerSecond": 171320.62724402157
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Decompress_Gzip_64KB": {
+      "meanNs": 154363.26765950522,
+      "medianNs": 154335.0908203125,
+      "stdDevNs": 1306.5192784490446,
+      "allocatedBytes": 131552,
+      "operationsPerSecond": 6478.225131938784
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Decompress_LZ4_64KB": {
+      "meanNs": 34816.74912516276,
+      "medianNs": 34708.10870361328,
+      "stdDevNs": 206.37625336563676,
+      "allocatedBytes": 131776,
+      "operationsPerSecond": 28721.808472270033
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Decompress_Zstd_64KB": {
+      "meanNs": 51281.12178548177,
+      "medianNs": 51233.58215332031,
+      "stdDevNs": 130.12045048359363,
+      "allocatedBytes": 131176,
+      "operationsPerSecond": 19500.353447476857
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Decompress_Gzip_1KB": {
+      "meanNs": 6144.829238891602,
+      "medianNs": 6146.872413635254,
+      "stdDevNs": 5.803022647815475,
+      "allocatedBytes": 2528,
+      "operationsPerSecond": 162738.45230244007
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Decompress_LZ4_1KB": {
+      "meanNs": 986.942128499349,
+      "medianNs": 975.3230590820312,
+      "stdDevNs": 22.23832808990111,
+      "allocatedBytes": 2752,
+      "operationsPerSecond": 1013230.6354380733
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.CompressionBenchmarks.Decompress_Zstd_1KB": {
+      "meanNs": 1156.1894664764404,
+      "medianNs": 1146.8214168548584,
+      "stdDevNs": 17.945047027674377,
+      "allocatedBytes": 2152,
+      "operationsPerSecond": 864910.1457804856
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.ProtocolBenchmarks.Parse_MetadataRequest": {
+      "meanNs": 178.26697413126627,
+      "medianNs": 178.4836814403534,
+      "stdDevNs": 0.7457117130564525,
+      "allocatedBytes": 440,
+      "operationsPerSecond": 5609563.997331629
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.ProtocolBenchmarks.Parse_ProduceRequest": {
+      "meanNs": 179.27602815628052,
+      "medianNs": 179.13318014144897,
+      "stdDevNs": 0.4489641557757525,
+      "allocatedBytes": 448,
+      "operationsPerSecond": 5577990.6007749615
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.ProtocolBenchmarks.Parse_FetchRequest": {
+      "meanNs": 207.90984678268433,
+      "medianNs": 206.47751688957214,
+      "stdDevNs": 2.6505029257608026,
+      "allocatedBytes": 528,
+      "operationsPerSecond": 4809777.004189897
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.SerializationBenchmarks.Serialize_SmallBatch": {
+      "meanNs": 724.1132535934448,
+      "medianNs": 722.5223169326782,
+      "stdDevNs": 3.386625578155172,
+      "allocatedBytes": 1232,
+      "operationsPerSecond": 1380999.4431636967
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.SerializationBenchmarks.Serialize_MediumBatch": {
+      "meanNs": 15919.25967915853,
+      "medianNs": 15900.869125366211,
+      "stdDevNs": 161.50023806986505,
+      "allocatedBytes": 51648,
+      "operationsPerSecond": 62816.99150301559
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.SerializationBenchmarks.Serialize_LargeBatch": {
+      "meanNs": 344327.0823567708,
+      "medianNs": 329971.39892578125,
+      "stdDevNs": 43235.74900881236,
+      "allocatedBytes": 1017977,
+      "operationsPerSecond": 2904.215355804806
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.SerializationBenchmarks.Parse_SmallBatch": {
+      "meanNs": 378.92432737350464,
+      "medianNs": 378.37708950042725,
+      "stdDevNs": 1.9001117097981233,
+      "allocatedBytes": 696,
+      "operationsPerSecond": 2639049.350384682
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.SerializationBenchmarks.Parse_MediumBatch": {
+      "meanNs": 3907.367518107096,
+      "medianNs": 3905.9494018554688,
+      "stdDevNs": 5.154933071527494,
+      "allocatedBytes": 6456,
+      "operationsPerSecond": 255926.78327951214
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.SerializationBenchmarks.Parse_LargeBatch": {
+      "meanNs": 35591.12687174479,
+      "medianNs": 35598.93957519531,
+      "stdDevNs": 98.34362074189858,
+      "allocatedBytes": 64056,
+      "operationsPerSecond": 28096.890654897572
+    }
+  }
 }
