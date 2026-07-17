@@ -413,47 +413,58 @@ public sealed class SurgewaveNativeHandler
     {
         var flags = SurgewaveProtocolFlags.None;
         ReadOnlyMemory<byte> actualPayload = payload;
+        byte[]? compressionBuffer = null;
 
-        // Compress large responses if client supports it
-        if (clientSupportsCompression && payload.Length >= NativeCompressionCodec.MinCompressionSize)
+        // Compress large responses if client supports it — straight into a pooled buffer that the
+        // finally below returns once the bytes were copied into the PipeWriter. On rejection
+        // nothing is rented and the original payload goes out unchanged.
+        if (clientSupportsCompression && payload.Length >= NativeCompressionCodec.MinCompressionSize &&
+            NativeCompressionCodec.TryCompressWithHeader(payload.Span, out compressionBuffer, out var frameLength))
         {
-            var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(payload.Span);
-            if (wasCompressed)
-            {
-                actualPayload = compressed;
-                flags |= SurgewaveProtocolFlags.Compressed;
-            }
+            actualPayload = compressionBuffer.AsMemory(0, frameLength);
+            flags |= SurgewaveProtocolFlags.Compressed;
         }
 
-        var header = new SurgewaveResponseHeader
-        {
-            Flags = flags,
-            RequestId = requestId,
-            OpCode = opCode,
-            ErrorCode = errorCode,
-            PayloadLength = actualPayload.Length
-        };
-
-        // Serialize writes: both the processor loop and push-streaming tasks share this PipeWriter.
-        await writeLock.WaitAsync(cancellationToken);
         try
         {
-            // Write header + payload directly into PipeWriter's managed buffer (zero-allocation)
-            var totalLength = SurgewaveResponseHeader.Size + actualPayload.Length;
-            var span = pipeWriter.GetSpan(totalLength);
-            header.WriteTo(span);
-            if (actualPayload.Length > 0)
+            var header = new SurgewaveResponseHeader
             {
-                actualPayload.Span.CopyTo(span.Slice(SurgewaveResponseHeader.Size));
-            }
-            pipeWriter.Advance(totalLength);
+                Flags = flags,
+                RequestId = requestId,
+                OpCode = opCode,
+                ErrorCode = errorCode,
+                PayloadLength = actualPayload.Length
+            };
 
-            // Flush to push data to the socket
-            await pipeWriter.FlushAsync(cancellationToken);
+            // Serialize writes: both the processor loop and push-streaming tasks share this PipeWriter.
+            await writeLock.WaitAsync(cancellationToken);
+            try
+            {
+                // Write header + payload directly into PipeWriter's managed buffer (zero-allocation)
+                var totalLength = SurgewaveResponseHeader.Size + actualPayload.Length;
+                var span = pipeWriter.GetSpan(totalLength);
+                header.WriteTo(span);
+                if (actualPayload.Length > 0)
+                {
+                    actualPayload.Span.CopyTo(span.Slice(SurgewaveResponseHeader.Size));
+                }
+                pipeWriter.Advance(totalLength);
+
+                // Flush to push data to the socket
+                await pipeWriter.FlushAsync(cancellationToken);
+            }
+            finally
+            {
+                writeLock.Release();
+            }
         }
         finally
         {
-            writeLock.Release();
+            // The pipe holds its own copy now; actualPayload must not be touched past this point.
+            if (compressionBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(compressionBuffer);
+            }
         }
     }
 

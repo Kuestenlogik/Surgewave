@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using Kuestenlogik.Surgewave.Protocol.Native;
@@ -169,33 +170,43 @@ public sealed class TcpTransport : ISurgewaveTransport
         {
             var flags = SurgewaveProtocolFlags.None;
             ReadOnlyMemory<byte> actualPayload = payload;
+            byte[]? compressionBuffer = null;
 
             if (compress && _options.EnableCompression && ServerSupportsCompression &&
-                payload.Length >= NativeCompressionCodec.MinCompressionSize)
+                payload.Length >= NativeCompressionCodec.MinCompressionSize &&
+                NativeCompressionCodec.TryCompressWithHeader(payload.Span, out compressionBuffer, out var frameLength))
             {
-                var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(payload.Span);
-                if (wasCompressed)
-                {
-                    actualPayload = compressed;
-                    flags |= SurgewaveProtocolFlags.Compressed;
-                }
+                actualPayload = compressionBuffer.AsMemory(0, frameLength);
+                flags |= SurgewaveProtocolFlags.Compressed;
             }
 
-            await _sendLock.WaitAsync(cancellationToken);
             try
             {
-                var header = new SurgewaveRequestHeader
+                await _sendLock.WaitAsync(cancellationToken);
+                try
                 {
-                    Flags = flags,
-                    RequestId = requestId,
-                    OpCode = opCode,
-                    PayloadLength = actualPayload.Length
-                };
-                await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                    var header = new SurgewaveRequestHeader
+                    {
+                        Flags = flags,
+                        RequestId = requestId,
+                        OpCode = opCode,
+                        PayloadLength = actualPayload.Length
+                    };
+                    await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                }
+                finally
+                {
+                    _sendLock.Release();
+                }
             }
             finally
             {
-                _sendLock.Release();
+                // Return before awaiting the response: otherwise every in-flight request would
+                // hold a pool array for a full round-trip. actualPayload is dead from here on.
+                if (compressionBuffer is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(compressionBuffer);
+                }
             }
 
             return await pending.Completion.Task.WaitAsync(cancellationToken);
@@ -220,26 +231,35 @@ public sealed class TcpTransport : ISurgewaveTransport
 
             var flags = SurgewaveProtocolFlags.None;
             ReadOnlyMemory<byte> actualPayload = payload;
+            byte[]? compressionBuffer = null;
 
             if (compress && _options.EnableCompression && ServerSupportsCompression &&
-                payload.Length >= NativeCompressionCodec.MinCompressionSize)
+                payload.Length >= NativeCompressionCodec.MinCompressionSize &&
+                NativeCompressionCodec.TryCompressWithHeader(payload.Span, out compressionBuffer, out var frameLength))
             {
-                var (compressed, wasCompressed) = NativeCompressionCodec.CompressWithHeader(payload.Span);
-                if (wasCompressed)
-                {
-                    actualPayload = compressed;
-                    flags |= SurgewaveProtocolFlags.Compressed;
-                }
+                actualPayload = compressionBuffer.AsMemory(0, frameLength);
+                flags |= SurgewaveProtocolFlags.Compressed;
             }
 
-            var header = new SurgewaveRequestHeader
+            try
             {
-                Flags = flags,
-                RequestId = requestId,
-                OpCode = opCode,
-                PayloadLength = actualPayload.Length
-            };
-            await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                var header = new SurgewaveRequestHeader
+                {
+                    Flags = flags,
+                    RequestId = requestId,
+                    OpCode = opCode,
+                    PayloadLength = actualPayload.Length
+                };
+                await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+            }
+            finally
+            {
+                // The request is on the wire; the rent is not needed for the response read.
+                if (compressionBuffer is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(compressionBuffer);
+                }
+            }
 
             await _stream!.ReadExactlyAsync(_responseHeaderBuffer, cancellationToken);
             var responseHeader = SurgewaveResponseHeader.ReadFrom(_responseHeaderBuffer);
