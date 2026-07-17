@@ -24,8 +24,12 @@ jobs:
       - name: Build benchmarks
         run: dotnet build benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release
 
+      # --buildTimeout: BenchmarkDotNet generates a project per job and builds it. Its 2-minute
+      # default is not enough for this repo's project graph, and BDN reports the timeout as an
+      # empty "Build Error" and runs zero benchmarks — which is how this gate silently produced
+      # no report at all.
       - name: Run unit benchmarks
-        run: dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release -- --filter '*' --exporters json --job short --artifacts artifacts/benchmarks
+        run: dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release -- --filter '*' --exporters json --job short --buildTimeout 900 --artifacts artifacts/benchmarks
 
       - name: Check for regressions
         run: |
