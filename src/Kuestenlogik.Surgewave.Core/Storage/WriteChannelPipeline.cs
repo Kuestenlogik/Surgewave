@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Pipeline;
 
@@ -161,16 +162,27 @@ internal sealed class WriteChannelPipeline : IDisposable
             // Write each RecordBatch separately within this partition
             foreach (var request in requests)
             {
-                var offset = await log.AppendBatchAsync(
-                    request.RecordBatch,
-                    request.RecordBatchOffset,
-                    request.RecordBatchLength,
-                    cancellationToken);
-                request.CompletionSource.TrySetResult(offset);
+                try
+                {
+                    var offset = await log.AppendBatchAsync(
+                        request.RecordBatch,
+                        request.RecordBatchOffset,
+                        request.RecordBatchLength,
+                        request.CrcMode,
+                        cancellationToken);
+                    request.CompletionSource.TrySetResult(offset);
+                }
+                catch (DataCorruptionException dex)
+                {
+                    // Only this producer's batch is bad. Faulting the whole list would reject the
+                    // valid batches queued behind it on the same partition (#85).
+                    request.CompletionSource.TrySetException(dex);
+                }
             }
         }
         catch (Exception ex)
         {
+            // Fatal for the partition (IO, disposed, cancellation) — everything still pending fails.
             foreach (var request in requests)
             {
                 request.CompletionSource.TrySetException(ex);

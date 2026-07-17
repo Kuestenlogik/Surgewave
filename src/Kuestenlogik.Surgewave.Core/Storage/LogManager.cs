@@ -219,14 +219,24 @@ public sealed class LogManager : IDisposable
     /// <summary>
     /// Append raw Kafka RecordBatch bytes to a specific partition (via channel pipeline)
     /// </summary>
+    public ValueTask<long> AppendBatchAsync(
+        TopicPartition topicPartition,
+        byte[] recordBatch,
+        CancellationToken cancellationToken = default)
+        => AppendBatchAsync(topicPartition, recordBatch, BatchCrcMode.Recompute, cancellationToken);
+
+    /// <summary>
+    /// Append raw Kafka RecordBatch bytes with explicit CRC handling (#85).
+    /// </summary>
     public async ValueTask<long> AppendBatchAsync(
         TopicPartition topicPartition,
         byte[] recordBatch,
+        BatchCrcMode crcMode,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var request = WriteRequest.Create(topicPartition, recordBatch, cancellationToken);
+        var request = WriteRequest.Create(topicPartition, recordBatch, 0, recordBatch.Length, crcMode, cancellationToken);
 
         await _writePipeline.Writer.WriteAsync(request, cancellationToken);
 
@@ -248,6 +258,16 @@ public sealed class LogManager : IDisposable
         TopicPartition topicPartition,
         ReadOnlyMemory<byte> recordBatch,
         CancellationToken cancellationToken = default)
+        => AppendBatchAsync(topicPartition, recordBatch, BatchCrcMode.Recompute, cancellationToken);
+
+    /// <summary>
+    /// Append raw Kafka RecordBatch from ReadOnlyMemory with explicit CRC handling (#85).
+    /// </summary>
+    public ValueTask<long> AppendBatchAsync(
+        TopicPartition topicPartition,
+        ReadOnlyMemory<byte> recordBatch,
+        BatchCrcMode crcMode,
+        CancellationToken cancellationToken = default)
     {
         // Try to get underlying array to avoid allocation
         if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(recordBatch, out var segment))
@@ -255,14 +275,14 @@ public sealed class LogManager : IDisposable
             if (segment.Offset == 0 && segment.Count == segment.Array!.Length)
             {
                 // Memory is backed by exact-fit array - use directly
-                return AppendBatchAsync(topicPartition, segment.Array, cancellationToken);
+                return AppendBatchAsync(topicPartition, segment.Array, crcMode, cancellationToken);
             }
             // Array-backed but sliced - use slice overload
-            return AppendBatchSliceAsync(topicPartition, segment.Array!, segment.Offset, segment.Count, cancellationToken);
+            return AppendBatchSliceAsync(topicPartition, segment.Array!, segment.Offset, segment.Count, crcMode, cancellationToken);
         }
 
         // Not array-backed - must copy (rare case for native memory)
-        return AppendBatchAsync(topicPartition, recordBatch.ToArray(), cancellationToken);
+        return AppendBatchAsync(topicPartition, recordBatch.ToArray(), crcMode, cancellationToken);
     }
 
     /// <summary>
@@ -274,12 +294,13 @@ public sealed class LogManager : IDisposable
         byte[] buffer,
         int offset,
         int length,
+        BatchCrcMode crcMode,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         // Zero-copy: pass slice directly without copying
-        var request = WriteRequest.Create(topicPartition, buffer, offset, length, cancellationToken);
+        var request = WriteRequest.Create(topicPartition, buffer, offset, length, crcMode, cancellationToken);
         await _writePipeline.Writer.WriteAsync(request, cancellationToken);
 
         try

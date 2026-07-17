@@ -179,7 +179,10 @@ public sealed class NativeDataHandler : INativeRequestHandler
             var (recordBatch, recordBatchLength) = _recordBatchSerializer.SerializeMessagesPooled(messages);
             try
             {
-                var actualBaseOffset = await _logManager.AppendBatchAsync(topicPartition, recordBatch.AsMemory(0, recordBatchLength), cancellationToken);
+                // Trusted: the serializer just wrote this batch's CRC, so the append does not need
+                // a second pass over every byte (#85).
+                var actualBaseOffset = await _logManager.AppendBatchAsync(
+                    topicPartition, recordBatch.AsMemory(0, recordBatchLength), BatchCrcMode.Trusted, cancellationToken);
 
                 // Response: baseOffset(8) + messageCount(4) - use pooled buffer to avoid allocation
                 var responsePayload = ArrayPool<byte>.Shared.Rent(12);
@@ -280,7 +283,9 @@ public sealed class NativeDataHandler : INativeRequestHandler
                         var (recordBatch, recordBatchLength) = _recordBatchSerializer.SerializeMessagesPooled(messages);
                         try
                         {
-                            var actualBaseOffset = await _logManager.AppendBatchAsync(topicPartition, recordBatch.AsMemory(0, recordBatchLength), cancellationToken);
+                            // Trusted: serializer-fresh CRC — see HandleProduceAsync (#85).
+                            var actualBaseOffset = await _logManager.AppendBatchAsync(
+                                topicPartition, recordBatch.AsMemory(0, recordBatchLength), BatchCrcMode.Trusted, cancellationToken);
                             writer.Write((short)SurgewaveErrorCode.None);
                             writer.Write(actualBaseOffset);
                         }
