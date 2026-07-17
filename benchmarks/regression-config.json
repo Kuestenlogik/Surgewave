@@ -1,0 +1,8 @@
+{
+  "_comment": "Thresholds are percentage regressions that fail the gate. Latency/throughput are set wide because the gate runs on shared GitHub runners with --job short (3 iterations), which are noisy; allocation is byte-exact and hardware-independent, so it stays tight and is the primary signal. The baseline MUST be captured on the same runner class (ubuntu-latest) — a baseline from another machine makes the latency comparison meaningless.",
+  "latencyThresholdPercent": 40.0,
+  "throughputThresholdPercent": 40.0,
+  "allocationThresholdPercent": 20.0,
+  "excludedBenchmarks": [],
+  "categoryOverrides": {}
+}

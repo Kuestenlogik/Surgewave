@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Kuestenlogik.Surgewave.Benchmarks.Regression.Models;
 
 namespace Kuestenlogik.Surgewave.Benchmarks.Regression;
@@ -6,8 +7,15 @@ namespace Kuestenlogik.Surgewave.Benchmarks.Regression;
 /// <summary>
 /// Parses BenchmarkDotNet JSON export files into <see cref="BenchmarkEntry"/> dictionaries.
 /// </summary>
-public sealed class BenchmarkResultParser
+public sealed partial class BenchmarkResultParser
 {
+    // BenchmarkDotNet writes raw NaN / Infinity tokens for NA benchmarks (failed, or filtered out
+    // of a run). Those are not valid JSON, so System.Text.Json cannot parse a report containing
+    // even one of them — which would crash the whole gate on a single flaky benchmark. Rewrite them
+    // to null before parsing; the affected entries then read as zero and drop out of the comparison.
+    [GeneratedRegex(@"(?<=:\s?)(-?Infinity|NaN)\b")]
+    private static partial Regex NonFiniteTokenRegex();
+
     /// <summary>
     /// Parses a BenchmarkDotNet JSON report string into benchmark entries keyed by full name.
     /// </summary>
@@ -15,7 +23,8 @@ public sealed class BenchmarkResultParser
     {
         var results = new Dictionary<string, BenchmarkEntry>(StringComparer.Ordinal);
 
-        using var doc = JsonDocument.Parse(jsonContent);
+        var sanitized = NonFiniteTokenRegex().Replace(jsonContent, "null");
+        using var doc = JsonDocument.Parse(sanitized);
         var root = doc.RootElement;
 
         if (!root.TryGetProperty("Benchmarks", out var benchmarksArray))
@@ -33,8 +42,9 @@ public sealed class BenchmarkResultParser
 
             var entry = new BenchmarkEntry();
 
-            // Parse Statistics
-            if (benchmark.TryGetProperty("Statistics", out var stats))
+            // Parse Statistics. For an NA benchmark this is null (JSON null), not an object, so
+            // guard the kind — TryGetProperty on a null element throws.
+            if (benchmark.TryGetProperty("Statistics", out var stats) && stats.ValueKind == JsonValueKind.Object)
             {
                 entry.MeanNs = GetDouble(stats, "Mean");
                 entry.MedianNs = GetDouble(stats, "Median");
@@ -43,7 +53,7 @@ public sealed class BenchmarkResultParser
             }
 
             // Parse Memory
-            if (benchmark.TryGetProperty("Memory", out var memory))
+            if (benchmark.TryGetProperty("Memory", out var memory) && memory.ValueKind == JsonValueKind.Object)
             {
                 entry.AllocatedBytes = GetLong(memory, "BytesAllocatedPerOperation");
             }
