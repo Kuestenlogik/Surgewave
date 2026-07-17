@@ -146,6 +146,44 @@ public static class RecordBatchValidator
     }
 
     /// <summary>
+    /// Reads the boundary of ONE complete record batch out of a concatenated Kafka records section
+    /// starting at <paramref name="cursor"/> (the leader packs N back-to-back batches behind one
+    /// length prefix; the follower must split them, #92/#93). Returns false at a clean end and when
+    /// the trailing bytes are an INCOMPLETE batch — a remote fetch may truncate the last batch at
+    /// maxBytes, and the caller then stops and re-fetches from it. Never throws: corruption of a
+    /// COMPLETE batch is surfaced later by a per-batch <see cref="BatchCrcMode.Validate"/> append,
+    /// not here.
+    /// </summary>
+    public static bool TryReadBatchBoundary(
+        ReadOnlySpan<byte> section, int cursor,
+        out int totalLength, out long baseOffset, out int recordCount)
+    {
+        totalLength = 0;
+        baseOffset = -1;
+        recordCount = 0;
+
+        // Need the 12-byte length prefix (baseOffset int64 + batchLength int32).
+        if (cursor < 0 || cursor + 12 > section.Length)
+            return false;
+
+        var batchLength = BinaryPrimitives.ReadInt32BigEndian(section.Slice(cursor + 8, 4));
+        // batchLength counts the bytes AFTER the first 12; a valid batch's fixed header must reach
+        // the record-count field at 57..60, i.e. batchLength >= MinBatchHeaderSize - 12.
+        if (batchLength < MinBatchHeaderSize - 12)
+            return false;
+
+        var total = 12 + batchLength;
+        // Incomplete trailing batch (truncated by the remote's maxBytes) — stop cleanly.
+        if (cursor + total > section.Length)
+            return false;
+
+        baseOffset = BinaryPrimitives.ReadInt64BigEndian(section.Slice(cursor, 8));
+        recordCount = BinaryPrimitives.ReadInt32BigEndian(section.Slice(cursor + 57, 4));
+        totalLength = total;
+        return true;
+    }
+
+    /// <summary>
     /// Extracts the base offset from a record batch header.
     /// </summary>
     /// <param name="batch">The record batch bytes</param>

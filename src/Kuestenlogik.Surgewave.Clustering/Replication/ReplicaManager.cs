@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
+using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
@@ -217,21 +218,49 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Append data to the local log (for both leader and follower).
-    /// Returns the log-end offset after the append (the next offset to fetch),
-    /// which is <c>baseOffset + recordCount</c>. Returning the base offset here
-    /// would understate the LEO for multi-record batches and make the follower
-    /// re-fetch a single record at a time, so the ISR would never converge (#69).
+    /// Append fetched data to the local follower log. Returns the log-end offset after the append
+    /// (the next offset to fetch).
     /// </summary>
+    /// <remarks>
+    /// The leader packs N complete record batches behind ONE records-length prefix
+    /// (ReplicationServer), so this splits the section and appends EACH batch offset-preserving at
+    /// its own header base offset. That keeps the log's single-batch contract, so each batch keeps
+    /// its own producer CRC (#92), NextOffset advances past EVERY batch rather than only the first
+    /// (#93, and the multi-record-batch LEO the #69 fix needs), and per-batch Validate rejects a
+    /// genuinely corrupt remote batch instead of silently healing it.
+    /// </remarks>
     public async Task<long> AppendAsync(TopicPartition tp, byte[] recordBatch, CancellationToken ct)
     {
-        await _logManager.AppendBatchAsync(tp, recordBatch, ct);
+        var log = _logManager.GetOrCreateLog(tp);
 
-        // AppendBatchAsync returns the batch's base offset; the log's NextOffset
-        // is the true LEO after the whole batch (covers multi-record batches).
-        var nextOffset = _logManager.GetLog(tp)?.NextOffset ?? 0;
+        var cursor = 0;
+        while (RecordBatchValidator.TryReadBatchBoundary(recordBatch, cursor, out var total, out var baseOffset, out _))
+        {
+            // Idempotent: skip any batch the log already has. The leader re-sends from an older
+            // offset after a connection drop or a partial-commit IO fault; skipping avoids
+            // duplicates without relying on the offset-preserving guard throwing.
+            if (baseOffset >= log.NextOffset)
+            {
+                try
+                {
+                    await log.AppendBatchAtOffsetAsync(recordBatch, cursor, total, baseOffset, BatchCrcMode.Validate, ct);
+                }
+                catch (DataCorruptionException ex)
+                {
+                    // Refuse this batch and everything after it; keep the good prefix. NextOffset
+                    // still points at this batch, so the next fetch re-requests it — transient
+                    // corruption heals, persistent corruption stalls this follower under-replicated.
+                    LogCorruptFollowerBatch(tp.Topic, tp.Partition, ex);
+                    break;
+                }
+            }
 
-        // Update local replica state
+            cursor += total;
+        }
+
+        // The log's NextOffset is the true LEO after every committed batch.
+        var nextOffset = log.NextOffset;
+
         if (_localReplicas.TryGetValue(tp, out var replica))
         {
             replica.LogEndOffset = nextOffset; // LEO is next offset to write
@@ -239,6 +268,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
         return nextOffset;
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Rejected corrupt follower batch for {Topic}-{Partition}; kept the good prefix, will re-fetch")]
+    private partial void LogCorruptFollowerBatch(string topic, int partition, Exception ex);
 
     /// <summary>
     /// Called when a follower reports its fetch position.
