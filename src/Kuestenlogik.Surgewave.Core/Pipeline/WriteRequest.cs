@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Storage;
 
 namespace Kuestenlogik.Surgewave.Core.Pipeline;
 
@@ -21,6 +22,9 @@ public sealed class WriteRequest
     public PooledCompletionSource<long> CompletionSource { get; private set; } = null!;
     public CancellationToken CancellationToken { get; private set; }
 
+    /// <summary>How the append should treat the batch's CRC field (#85).</summary>
+    public BatchCrcMode CrcMode { get; private set; }
+
     /// <summary>
     /// Gets a Span view of the record batch slice.
     /// </summary>
@@ -33,13 +37,21 @@ public sealed class WriteRequest
     /// </summary>
     public static WriteRequest Create(TopicPartition topicPartition, byte[] recordBatch, CancellationToken cancellationToken)
     {
-        return Create(topicPartition, recordBatch, 0, recordBatch.Length, cancellationToken);
+        return Create(topicPartition, recordBatch, 0, recordBatch.Length, BatchCrcMode.Recompute, cancellationToken);
     }
 
     /// <summary>
     /// Create a new write request for a slice of a buffer. Zero-copy for ArrayPool buffers.
     /// </summary>
     public static WriteRequest Create(TopicPartition topicPartition, byte[] buffer, int offset, int length, CancellationToken cancellationToken)
+    {
+        return Create(topicPartition, buffer, offset, length, BatchCrcMode.Recompute, cancellationToken);
+    }
+
+    /// <summary>
+    /// Create a new write request for a slice of a buffer with explicit CRC handling (#85).
+    /// </summary>
+    public static WriteRequest Create(TopicPartition topicPartition, byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken)
     {
         if (!s_pool.TryTake(out var request))
         {
@@ -54,6 +66,7 @@ public sealed class WriteRequest
         request.RecordBatch = buffer;
         request.RecordBatchOffset = offset;
         request.RecordBatchLength = length;
+        request.CrcMode = crcMode;
         request.CompletionSource = PooledCompletionSource<long>.Rent();
         request.CancellationToken = cancellationToken;
         return request;
@@ -72,6 +85,8 @@ public sealed class WriteRequest
         RecordBatchLength = 0;
         TopicPartition = default;
         CancellationToken = default;
+        // Must reset: a leaked Trusted would skip CRC handling on someone else's append.
+        CrcMode = BatchCrcMode.Recompute;
 
         // Return to pool if not full
         if (Interlocked.Increment(ref s_poolSize) <= MaxPoolSize)

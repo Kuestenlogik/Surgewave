@@ -26,9 +26,7 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
     public IProtocolRequest ParseRequest(ReadOnlySpan<byte> data)
     {
         var buffer = data.ToArray();
-        using var memoryStream = new MemoryStream(buffer);
-        using var reader = new BinaryReader(memoryStream);
-        return ParseRequestFromReader(reader, buffer.Length);
+        return ParseRequest(buffer, buffer.Length);
     }
 
     /// <summary>
@@ -61,12 +59,7 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
         {
             await stream.ReadExactlyAsync(requestBytes.AsMemory(0, size), cancellationToken);
 
-            // publiclyVisible: true so MemoryStream.TryGetBuffer() succeeds — zero-copy parsers
-            // (ProduceRequest, FetchRequest) get a direct view into the pooled buffer.
-            using var memoryStream = new MemoryStream(requestBytes, 0, size, writable: false, publiclyVisible: true);
-            using var reader = new BinaryReader(memoryStream);
-
-            var request = ParseRequestFromReader(reader, size);
+            var request = ParseRequest(requestBytes, size);
             return (size, request);
         }
         finally
@@ -100,12 +93,7 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
         {
             await stream.ReadExactlyAsync(requestBytes.AsMemory(0, size), cancellationToken);
 
-            // publiclyVisible: true so MemoryStream.TryGetBuffer() succeeds — zero-copy parsers
-            // (ProduceRequest, FetchRequest) get a direct view into the pooled buffer.
-            using var memoryStream = new MemoryStream(requestBytes, 0, size, writable: false, publiclyVisible: true);
-            using var reader = new BinaryReader(memoryStream);
-
-            var request = ParseRequestFromReader(reader, size);
+            var request = ParseRequest(requestBytes, size);
             return (size, request, requestBytes);
         }
         catch
@@ -166,7 +154,7 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
     }
 
     /// <summary>
-    /// Parse the request header from a BinaryReader.
+    /// Parse the request header out of <paramref name="data"/> and return its length in bytes.
     ///
     /// Per Kafka protocol spec (RequestHeader.json), ClientId is ALWAYS serialized as a regular STRING
     /// (int16 length prefix), even in flexible header versions. This is for backward compatibility -
@@ -175,103 +163,106 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
     /// Header v1: ApiKey, ApiVersion, CorrelationId, ClientId (STRING)
     /// Header v2: ApiKey, ApiVersion, CorrelationId, ClientId (STRING), TaggedFields
     /// </summary>
-    private static (ApiKey apiKey, short apiVersion, int correlationId, string clientId) ReadRequestHeader(BinaryReader reader)
+    private static int ReadRequestHeader(
+        ReadOnlySpan<byte> data, out ApiKey apiKey, out short apiVersion, out int correlationId, out string clientId)
     {
-        // Wrap everything in try-catch at the very top level
-        string debugInfo = "not-yet-set";
-        try
+        // Validate we have enough data for the minimum header (8 bytes: apiKey + apiVersion + correlationId)
+        if (data.Length < 8)
+            throw new InvalidDataException($"Request too short for header: {data.Length} bytes");
+
+        apiKey = (ApiKey)System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(data);
+        apiVersion = System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(data[2..]);
+        correlationId = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(data[4..]);
+        var position = 8;
+
+        // ClientId is ALWAYS a regular STRING (int16 length) in all header versions
+        // per RequestHeader.json: "flexibleVersions": "none" for ClientId field
+        if (position + 2 > data.Length)
+            throw new InvalidDataException($"Request too short for ClientId length: only {data.Length - position} bytes remaining");
+
+        int clientIdLength = System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(data[position..]);
+        position += 2;
+        if (clientIdLength <= 0)
         {
-            var stream = (MemoryStream)reader.BaseStream;
-            var totalLength = stream.Length;
-            var startPosition = stream.Position;
-
-            // Build debug info first
-            debugInfo = $"totalLength={totalLength}, startPosition={startPosition}";
-
-            // Validate we have enough data for the minimum header (8 bytes: apiKey + apiVersion + correlationId)
-            if (totalLength - startPosition < 8)
-                throw new InvalidDataException($"Request too short for header: {totalLength - startPosition} bytes ({debugInfo})");
-
-            var apiKey = (ApiKey)BinaryHelpers.ReadInt16BigEndian(reader);
-            var apiVersion = BinaryHelpers.ReadInt16BigEndian(reader);
-            var correlationId = BinaryHelpers.ReadInt32BigEndian(reader);
-
-            // ClientId is ALWAYS a regular STRING (int16 length) in all header versions
-            // per RequestHeader.json: "flexibleVersions": "none" for ClientId field
-            // Need at least 2 bytes for the length prefix
-            if (stream.Position + 2 > totalLength)
-                throw new InvalidDataException($"Request too short for ClientId length: only {totalLength - stream.Position} bytes remaining ({debugInfo})");
-
-            var clientId = BinaryHelpers.ReadString(reader);
-
-            // Check if this request uses a flexible header (v2+) which has tagged fields
-            // For ApiVersions v3+, the header IS flexible (has tagged fields), but ClientId is still a STRING.
-            // The special handling is that ClientId remains a regular STRING for backward compatibility,
-            // but the header still includes tagged fields at the end.
-            bool usesFlexibleHeader = (apiKey == ApiKey.ApiVersions && apiVersion >= 3) ||
-                                     (apiKey != ApiKey.ApiVersions && ProtocolVersions.IsFlexible(apiKey, apiVersion));
-
-            if (usesFlexibleHeader)
-            {
-                // Read and skip tagged fields in header v2+
-                var positionBefore = stream.Position;
-                var remainingSize = (int)(stream.Length - stream.Position);
-
-                // If there's data remaining, parse the tagged fields
-                if (remainingSize > 0)
-                {
-                    // Use ArrayPool to avoid allocation
-                    var bytesForHeader = ArrayPool<byte>.Shared.Rent(remainingSize);
-                    try
-                    {
-                        stream.Read(bytesForHeader, 0, remainingSize);
-                        var headerReader = new KafkaProtocolReader(bytesForHeader, remainingSize);
-
-                        // Skip tagged fields in header
-                        var headerTags = headerReader.ReadVarInt();
-                        for (int i = 0; i < headerTags; i++)
-                        {
-                            var tag = headerReader.ReadVarInt();
-                            var tagSize = headerReader.ReadVarInt();
-                            // Bounds check before skipping
-                            if (tagSize < 0 || tagSize > headerReader.Remaining)
-                                throw new InvalidDataException($"Invalid tagged field size {tagSize}, only {headerReader.Remaining} bytes remaining");
-                            headerReader.Skip(tagSize);
-                        }
-
-                        // Calculate bytes consumed for header tagged fields
-                        var bytesConsumed = remainingSize - headerReader.Remaining;
-                        if (bytesConsumed < 0 || bytesConsumed > remainingSize)
-                            throw new InvalidDataException($"Invalid header parsing state: consumed {bytesConsumed} of {remainingSize} bytes");
-
-                        // Set stream position to after tagged fields
-                        stream.Position = positionBefore + bytesConsumed;
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(bytesForHeader);
-                    }
-                }
-                // If remainingSize is 0, there are no tagged fields - nothing to skip
-            }
-
-            return (apiKey, apiVersion, correlationId, clientId);
+            clientId = string.Empty; // matches BinaryHelpers.ReadString: null (-1) and empty both map to ""
         }
-        catch (Exception ex)
+        else
         {
-            if (ex is InvalidDataException)
-                throw;
-            throw new InvalidDataException($"Error parsing request header: {ex.GetType().Name}: {ex.Message} ({debugInfo})", ex);
+            if (position + clientIdLength > data.Length)
+                throw new InvalidDataException($"ClientId length {clientIdLength} exceeds the {data.Length - position} bytes remaining");
+            clientId = KafkaProtocolReader.InternUtf8(data.Slice(position, clientIdLength));
+            position += clientIdLength;
+        }
+
+        // Check if this request uses a flexible header (v2+) which has tagged fields.
+        // For ApiVersions v3+, the header IS flexible (has tagged fields), but ClientId is still a STRING
+        // for backward compatibility.
+        bool usesFlexibleHeader = (apiKey == ApiKey.ApiVersions && apiVersion >= 3) ||
+                                 (apiKey != ApiKey.ApiVersions && ProtocolVersions.IsFlexible(apiKey, apiVersion));
+
+        if (usesFlexibleHeader && position < data.Length)
+        {
+            var (headerTags, read) = KafkaProtocolPrimitives.ReadVarInt(data[position..]);
+            position += read;
+            for (int i = 0; i < headerTags; i++)
+            {
+                (_, read) = KafkaProtocolPrimitives.ReadVarInt(data[position..]); // tag id
+                position += read;
+                var (tagSize, sizeRead) = KafkaProtocolPrimitives.ReadVarInt(data[position..]);
+                position += sizeRead;
+                if (tagSize < 0 || position + tagSize > data.Length)
+                    throw new InvalidDataException(
+                        $"Invalid tagged field size {tagSize}, only {data.Length - position} bytes remaining");
+                position += tagSize;
+            }
+        }
+
+        return position;
+    }
+
+    /// <summary>
+    /// Hot-path parse: span-based header, Produce/Fetch straight from the caller's buffer via
+    /// <see cref="KafkaProtocolReader"/>, every other ApiKey through the BinaryReader fallback
+    /// (the long tail — admin/control-plane traffic, not the data plane).
+    /// </summary>
+    /// <remarks>
+    /// The caller owns <paramref name="buffer"/> (typically an ArrayPool rent) and must keep it
+    /// alive for as long as zero-copy slices out of it live — <c>ProduceRequest.Records</c> points
+    /// into it. This method never takes ownership and never rents.
+    /// </remarks>
+    internal static KafkaRequest ParseRequest(byte[] buffer, int size)
+    {
+        var headerLength = ReadRequestHeader(
+            buffer.AsSpan(0, size), out var apiKey, out var apiVersion, out var correlationId, out var clientId);
+
+        switch (apiKey)
+        {
+            case ApiKey.Produce:
+                return ProduceRequest.ReadFrom(
+                    new KafkaProtocolReader(buffer, headerLength, size - headerLength),
+                    apiVersion, correlationId, clientId);
+            case ApiKey.Fetch:
+                return FetchRequest.ReadFrom(
+                    new KafkaProtocolReader(buffer, headerLength, size - headerLength),
+                    apiVersion, correlationId, clientId);
+            default:
+            {
+                // publiclyVisible: true so MemoryStream.TryGetBuffer() keeps working for parsers
+                // that reach for the underlying array.
+                using var memoryStream = new MemoryStream(
+                    buffer, headerLength, size - headerLength, writable: false, publiclyVisible: true);
+                using var reader = new BinaryReader(memoryStream);
+                return ReadRequestBody(reader, apiKey, apiVersion, correlationId, clientId);
+            }
         }
     }
 
     /// <summary>
-    /// Parse a request from a BinaryReader
+    /// Parse a request body (header already consumed) from a BinaryReader.
     /// </summary>
-    internal static KafkaRequest ParseRequestFromReader(BinaryReader reader, int messageSize)
+    private static KafkaRequest ReadRequestBody(
+        BinaryReader reader, ApiKey apiKey, short apiVersion, int correlationId, string clientId)
     {
-        var (apiKey, apiVersion, correlationId, clientId) = ReadRequestHeader(reader);
-
         return apiKey switch
         {
             ApiKey.Produce => ProduceRequest.ReadFrom(reader, apiVersion, correlationId, clientId),

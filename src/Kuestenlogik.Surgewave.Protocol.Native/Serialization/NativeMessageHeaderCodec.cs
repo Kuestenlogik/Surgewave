@@ -104,4 +104,50 @@ public static class NativeMessageHeaderCodec
         bytesConsumed = pos;
         return headers;
     }
+
+    /// <summary>
+    /// Computes the byte length of an encoded header block without materializing keys or values —
+    /// the broker's produce path only needs to skip the block, it never reads the headers (#83).
+    /// Consumes exactly the same bytes as <see cref="Decode"/> and rejects the same malformed
+    /// input: a bad length must throw here too, because a silently wrong block length would
+    /// mis-frame every following message instead of failing the request.
+    /// </summary>
+    public static int GetBlockLength(ReadOnlySpan<byte> source)
+    {
+        var count = BinaryPrimitives.ReadInt32BigEndian(source);
+        var pos = 4;
+        if (count <= 0)
+        {
+            return pos;
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            var keyLen = BinaryPrimitives.ReadInt32BigEndian(source[pos..]);
+            pos += 4;
+            // Mirrors Decode's source.Slice(pos, keyLen) bounds check.
+            if (keyLen < 0 || pos + keyLen > source.Length)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(source), $"Header key length {keyLen} exceeds the {source.Length - pos} bytes remaining");
+            }
+
+            pos += keyLen;
+            var valLen = BinaryPrimitives.ReadInt32BigEndian(source[pos..]);
+            pos += 4;
+            // Decode treats valLen < 0 as a null value and consumes no value bytes.
+            if (valLen > 0)
+            {
+                if (pos + valLen > source.Length)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(source), $"Header value length {valLen} exceeds the {source.Length - pos} bytes remaining");
+                }
+
+                pos += valLen;
+            }
+        }
+
+        return pos;
+    }
 }

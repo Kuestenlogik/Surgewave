@@ -42,12 +42,41 @@ public sealed class StorageEngineSegmentAdapter : IFileLogSegment, IMemoryLogSeg
         return _engine.FirstOffset;
     }
 
-    public async ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(
+    public ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(
         byte[] recordBatch,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return await _engine.AppendAsync(recordBatch.AsSpan(), cancellationToken);
+        return _engine.AppendAsync(recordBatch.AsSpan(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Append a slice of a pooled buffer. Forwards straight to the engine's span-based
+    /// positioned write — without this overload the default-interface chain in
+    /// <see cref="ILogSegment"/> would ToArray() the slice into a fresh array right before
+    /// the file write, one full copy per produced batch.
+    /// </summary>
+    public ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(
+        byte[] buffer,
+        int offset,
+        int length,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _engine.AppendAsync(buffer.AsSpan(offset, length), cancellationToken);
+    }
+
+    /// <summary>
+    /// Append from <see cref="ReadOnlyMemory{T}"/>. The engine copies synchronously out of the
+    /// span (<see cref="ISurgewaveStorageEngine"/> contract), so the caller keeps buffer
+    /// ownership for the duration of the call and nothing is retained afterwards.
+    /// </summary>
+    public ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(
+        ReadOnlyMemory<byte> recordBatch,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _engine.AppendAsync(recordBatch.Span, cancellationToken);
     }
 
     public async ValueTask FlushAsync(CancellationToken cancellationToken = default)

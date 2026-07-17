@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using Kuestenlogik.Surgewave.Protocol.Amqp;
 
@@ -22,6 +23,10 @@ namespace Kuestenlogik.Surgewave.Benchmarks.Transport;
 ///   AmqpPatternMatch  — AmqpTopicPatternMatcher.Matches for various wildcard patterns
 ///   AmqpFrameSize     — Framing overhead vs raw payload across payload sizes
 /// </summary>
+// One baseline per category (AmqpWrite, AmqpRead, ...) — only valid if BenchmarkDotNet groups by
+// category. Without this it sees five baselines in one job group and refuses to run anything.
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
 [SimpleJob(RuntimeMoniker.HostProcess)]
 [MemoryDiagnoser]
 [RankColumn]

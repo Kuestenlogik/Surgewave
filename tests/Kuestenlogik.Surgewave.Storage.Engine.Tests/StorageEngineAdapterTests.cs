@@ -52,6 +52,89 @@ public class StorageEngineAdapterTests : IDisposable
         Assert.Equal(5, adapter.CurrentOffset);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Adapter_SliceOverload_WritesOnlySlice_AndDoesNotRetainCallerBuffer(bool fileEngine)
+    {
+        // Arrange: put the batch at a non-zero offset inside a larger buffer, exactly like the
+        // pooled produce path does.
+        var batch = CreateTestBatch(baseOffset: 0, recordCount: 5);
+        const int sliceOffset = 7;
+        var pooled = new byte[sliceOffset + batch.Length + 11];
+        pooled.AsSpan().Fill(0xAA); // surrounding bytes must never reach the log
+        batch.CopyTo(pooled.AsSpan(sliceOffset));
+
+        var fileDir = Path.Combine(_tempDir, $"slice-{fileEngine}");
+        ISurgewaveStorageEngine engine = fileEngine
+            ? new FileStorageEngine(fileDir, baseOffset: 0, createNew: true, useMmap: false)
+            : new MemoryStorageEngine(baseOffset: 0);
+        using var adapter = new StorageEngineSegmentAdapter(engine);
+
+        // Act: go through the interface so the overload resolution matches the real hot path
+        // (PartitionLog holds an ILogSegment, not the concrete adapter).
+        ILogSegment segment = adapter;
+        var (baseOffset, recordCount) = await segment.AppendBatchAsync(pooled, sliceOffset, batch.Length);
+
+        // Overwrite the source buffer: the engine must have copied synchronously, so this must
+        // not affect what was stored. This is what makes forwarding the caller's slice safe.
+        pooled.AsSpan().Fill(0xFF);
+
+        // Assert
+        Assert.Equal(0, baseOffset);
+        Assert.Equal(5, recordCount);
+
+        var stored = await adapter.ReadBatchesAsync(0, maxBytes: 1024 * 1024);
+        Assert.Single(stored);
+        Assert.Equal(batch, stored[0]);
+    }
+
+    [Fact]
+    public async Task Adapter_MemoryOverload_MatchesByteArrayOverload()
+    {
+        var batch = CreateTestBatch(baseOffset: 0, recordCount: 4);
+
+        var arrayEngine = new MemoryStorageEngine(baseOffset: 0);
+        using var arrayAdapter = new StorageEngineSegmentAdapter(arrayEngine);
+        var memoryEngine = new MemoryStorageEngine(baseOffset: 0);
+        using var memoryAdapter = new StorageEngineSegmentAdapter(memoryEngine);
+
+        var viaArray = await arrayAdapter.AppendBatchAsync(batch);
+        var viaMemory = await memoryAdapter.AppendBatchAsync(batch.AsMemory());
+
+        Assert.Equal(viaArray, viaMemory);
+        Assert.Equal(arrayAdapter.CurrentOffset, memoryAdapter.CurrentOffset);
+
+        var fromArray = await arrayAdapter.ReadBatchesAsync(0, maxBytes: 1024 * 1024);
+        var fromMemory = await memoryAdapter.ReadBatchesAsync(0, maxBytes: 1024 * 1024);
+        Assert.Equal(fromArray[0], fromMemory[0]);
+    }
+
+    [Fact]
+    public async Task Adapter_SliceAppend_PersistsAcrossReopen_FileEngine()
+    {
+        var fileDir = Path.Combine(_tempDir, "slice-reopen");
+        var batch = CreateTestBatch(baseOffset: 0, recordCount: 3);
+        var pooled = new byte[4 + batch.Length];
+        batch.CopyTo(pooled.AsSpan(4));
+
+        {
+            using var engine = new FileStorageEngine(fileDir, baseOffset: 0, createNew: true, useMmap: false);
+            using var adapter = new StorageEngineSegmentAdapter(engine);
+            ILogSegment segment = adapter;
+            await segment.AppendBatchAsync(pooled, 4, batch.Length);
+            await adapter.FlushAsync();
+        }
+
+        {
+            using var engine = new FileStorageEngine(fileDir, baseOffset: 0, createNew: false, useMmap: false);
+            using var adapter = new StorageEngineSegmentAdapter(engine);
+            var stored = await adapter.ReadBatchesAsync(0, maxBytes: 1024 * 1024);
+            Assert.Single(stored);
+            Assert.Equal(batch, stored[0]);
+        }
+    }
+
     [Fact]
     public async Task Adapter_ReadsBackAppendedData()
     {

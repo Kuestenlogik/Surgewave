@@ -53,10 +53,9 @@ public static class BinaryHelpers
     public static string ReadString(BinaryReader reader)
     {
         var length = ReadInt16BigEndian(reader);
-        if (length < 0) return string.Empty;
+        if (length <= 0) return string.Empty;
 
-        var bytes = reader.ReadBytes(length);
-        return Encoding.UTF8.GetString(bytes);
+        return ReadUtf8Interned(reader, length);
     }
 
     /// <summary>
@@ -66,6 +65,34 @@ public static class BinaryHelpers
     {
         var length = ReadInt16BigEndian(reader);
         if (length < 0) return null;
+        if (length == 0) return string.Empty;
+
+        return ReadUtf8Interned(reader, length);
+    }
+
+    /// <summary>
+    /// Reads <paramref name="length"/> UTF-8 bytes into stack space and interns them through the
+    /// shared wire-string cache — replaces the byte[] + string pair the old ReadBytes/GetString
+    /// combination allocated per string. Strings longer than the stack buffer fall back to a
+    /// plain decode (they are past the cache's length limit anyway).
+    /// A short read at end-of-stream yields the shorter string, exactly as ReadBytes did.
+    /// </summary>
+    private static string ReadUtf8Interned(BinaryReader reader, int length)
+    {
+        if (length <= 256)
+        {
+            Span<byte> buffer = stackalloc byte[256];
+            var span = buffer[..length];
+            var total = 0;
+            while (total < length)
+            {
+                var read = reader.Read(span[total..]);
+                if (read == 0) break;
+                total += read;
+            }
+
+            return KafkaProtocolReader.InternUtf8(span[..total]);
+        }
 
         var bytes = reader.ReadBytes(length);
         return Encoding.UTF8.GetString(bytes);

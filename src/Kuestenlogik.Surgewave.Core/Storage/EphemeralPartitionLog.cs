@@ -56,6 +56,12 @@ public sealed class EphemeralPartitionLog : IPartitionLog
 
     public ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
     {
+        return AppendBatchAsync(buffer, offset, length, BatchCrcMode.Recompute, cancellationToken);
+    }
+
+    /// <inheritdoc cref="PartitionLog.AppendBatchAsync(byte[], int, int, BatchCrcMode, CancellationToken)"/>
+    public ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (length == 0)
@@ -63,8 +69,8 @@ public sealed class EphemeralPartitionLog : IPartitionLog
 
         var recordBatch = buffer.AsSpan(offset, length);
 
-        // Pre-calculate CRC (CPU-intensive, outside lock)
-        var crc = Util.Crc32C.Compute(recordBatch[21..]);
+        // Single CRC pass, outside the lock (#85)
+        var crc = RecordBatchValidator.PrepareAppendCrc(recordBatch, crcMode, TopicPartition.Topic, TopicPartition.Partition);
         var recordCount = GetRecordCountFromBatch(recordBatch);
 
         long baseOffset;
@@ -78,7 +84,7 @@ public sealed class EphemeralPartitionLog : IPartitionLog
             _nextOffset += recordCount;
 
             // Write offset + CRC into batch header
-            WriteOffsetAndCrc(buffer.AsSpan(offset, length), baseOffset, crc);
+            WriteOffsetAndCrc(buffer.AsSpan(offset, length), baseOffset, crc, writeCrc: crcMode == BatchCrcMode.Recompute);
 
             // Write to ring buffer with wrap-around
             WriteToRingBuffer(buffer, offset, length);
@@ -411,11 +417,17 @@ public sealed class EphemeralPartitionLog : IPartitionLog
         return BinaryPrimitives.ReadInt32BigEndian(recordBatch.Slice(57, 4));
     }
 
+    /// <param name="writeCrc">
+    /// False when the batch's own CRC must survive — see PartitionLog.WriteOffsetAndCrc.
+    /// </param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void WriteOffsetAndCrc(Span<byte> recordBatch, long baseOffset, uint crc)
+    private static void WriteOffsetAndCrc(Span<byte> recordBatch, long baseOffset, uint crc, bool writeCrc)
     {
         BinaryPrimitives.WriteInt64BigEndian(recordBatch[..8], baseOffset);
-        BinaryPrimitives.WriteUInt32BigEndian(recordBatch.Slice(17, 4), crc);
+        if (writeCrc)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(recordBatch.Slice(17, 4), crc);
+        }
     }
 
     private void UpdateHighWatermark(long newValue)

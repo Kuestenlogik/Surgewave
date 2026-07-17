@@ -37,6 +37,19 @@ public interface IPartitionLog : IDisposable
     /// <returns>The base offset assigned to the batch.</returns>
     ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default);
 
+    /// <summary>Appends a slice of a record batch buffer with explicit CRC handling (#85).</summary>
+    /// <param name="buffer">The buffer containing the record batch.</param>
+    /// <param name="offset">The start offset within the buffer.</param>
+    /// <param name="length">The number of bytes to append.</param>
+    /// <param name="crcMode">
+    /// <see cref="BatchCrcMode.Validate"/> checks the producer's CRC and rejects corrupt batches;
+    /// <see cref="BatchCrcMode.Trusted"/> skips the pass for serializer-fresh bytes;
+    /// <see cref="BatchCrcMode.Recompute"/> keeps the legacy overwrite.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The base offset assigned to the batch.</returns>
+    ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Appends a record batch at a specific target offset (for offset-preserving geo-replication).
     /// The target offset must be greater than or equal to the current <see cref="NextOffset"/>.

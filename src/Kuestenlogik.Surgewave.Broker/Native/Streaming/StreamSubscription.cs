@@ -157,14 +157,24 @@ public sealed class StreamSubscription : IAsyncDisposable
                 // Deduct credit
                 Interlocked.Add(ref _creditBytes, -data.Length);
 
+                // Pre-size like the fetch path: the native re-framing replaces varints with fixed
+                // fields, so small records make the output exceed the input (#83).
+                var dataSpan = data.Span;
+                var estimatedRecords = 0;
+                for (var i = 0; i < batchOffsets.Count; i++)
+                {
+                    var start = batchOffsets[i];
+                    var end = i + 1 < batchOffsets.Count ? batchOffsets[i + 1] : data.Length;
+                    estimatedRecords += RecordBatchStreamer.PeekRecordCount(dataSpan.Slice(start, end - start));
+                }
+
                 // Deserialize and stream to client
-                using var writer = BigEndianWriter.Rent(data.Length + 128);
+                using var writer = BigEndianWriter.Rent(12 + data.Length + estimatedRecords * 24);
                 writer.Write(log.HighWatermark);
                 var countPos = writer.Length;
                 writer.Write(0); // message count placeholder
 
                 var totalMessages = 0;
-                var dataSpan = data.Span;
                 for (var i = 0; i < batchOffsets.Count; i++)
                 {
                     var batchStart = batchOffsets[i];

@@ -35,8 +35,8 @@ public sealed class RequestDispatcher
     /// </summary>
     public Task<KafkaResponse> DispatchAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
-        _logger?.LogDebug("Dispatching request: ApiKey={ApiKey}, CorrelationId={CorrelationId}",
-            request.ApiKey, request.CorrelationId);
+        if (_logger is not null)
+            Log.DispatchingRequest(_logger, request.ApiKey, request.CorrelationId);
 
         if (_handlers.TryGetValue(request.ApiKey, out var handler))
         {
@@ -50,7 +50,8 @@ public sealed class RequestDispatcher
         // masks the real problem and breaks unrelated subsequent requests on the same
         // socket. A clean error response lets the client handle the unsupported-API
         // gracefully (log + skip) without tearing down the connection.
-        _logger?.LogDebug("No handler for API key {ApiKey} — returning UnsupportedVersion error response", request.ApiKey);
+        if (_logger is not null)
+            Log.NoHandlerForApiKey(_logger, request.ApiKey);
         return Task.FromResult<KafkaResponse>(new UnsupportedApiKeyResponse
         {
             CorrelationId = request.CorrelationId,

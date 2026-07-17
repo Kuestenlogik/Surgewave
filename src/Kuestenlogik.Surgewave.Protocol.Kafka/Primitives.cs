@@ -727,6 +727,12 @@ public sealed class KafkaProtocolReader
     private static string InternShortString(byte[] buffer, int offset, int length)
         => s_stringCache.GetOrAdd(buffer.AsSpan(offset, length));
 
+    /// <summary>
+    /// Interns a short UTF-8 wire string (topic names, client ids) through the shared cache.
+    /// Byte-verifying, so a 32-bit hash collision can never hand back the wrong string (#73).
+    /// </summary>
+    internal static string InternUtf8(ReadOnlySpan<byte> utf8) => s_stringCache.GetOrAdd(utf8);
+
     public byte[]? ReadBytes()
     {
         var length = ReadInt32();

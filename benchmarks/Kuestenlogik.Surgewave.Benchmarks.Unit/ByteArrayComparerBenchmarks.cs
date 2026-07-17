@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using Kuestenlogik.Surgewave.Core.Util;
 
@@ -10,6 +11,11 @@ namespace Kuestenlogik.Surgewave.Benchmarks.Unit;
 /// Tests both equality checks and hash code generation across different array sizes.
 /// Simulates the key comparison workload that happens during log compaction.
 /// </summary>
+// Each size/operation category has its own naive baseline. Without grouping by category
+// BenchmarkDotNet sees six baselines in one job group, refuses to validate, and then runs NOTHING
+// in the whole assembly — which is why the regression gate never produced a report.
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
 [SimpleJob(RuntimeMoniker.HostProcess)]
 [MemoryDiagnoser]
 [RankColumn]

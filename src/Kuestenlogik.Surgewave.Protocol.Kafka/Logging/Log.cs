@@ -15,8 +15,10 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] Waiting for request")]
     public static partial void WaitingForRequest(ILogger logger, object? endpoint);
 
+    // apiKey is typed (not object): the generator formats it after the IsEnabled check, so a
+    // disabled Debug level costs no boxing per request.
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] Received {ApiKey} request (size: {Size}, correlationId: {CorrelationId})")]
-    public static partial void RequestReceived(ILogger logger, object? endpoint, object apiKey, int size, int correlationId);
+    public static partial void RequestReceived(ILogger logger, object? endpoint, ApiKey apiKey, int size, int correlationId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] Sending response for correlationId: {CorrelationId}")]
     public static partial void SendingResponse(ILogger logger, object? endpoint, int correlationId);
@@ -29,6 +31,13 @@ internal static partial class Log
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] IO error")]
     public static partial void IoError(ILogger logger, Exception ex, object? endpoint);
+
+    // ── Request dispatch ─────────────────────────────────────────────────────
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Dispatching request: ApiKey={ApiKey}, CorrelationId={CorrelationId}")]
+    public static partial void DispatchingRequest(ILogger logger, ApiKey apiKey, int correlationId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "No handler for API key {ApiKey} — returning UnsupportedVersion error response")]
+    public static partial void NoHandlerForApiKey(ILogger logger, ApiKey apiKey);
 
     // ── Metadata handling ────────────────────────────────────────────────────
     [LoggerMessage(Level = LogLevel.Debug, Message = "Metadata request for ALL topics, found {TopicCount} topics")]

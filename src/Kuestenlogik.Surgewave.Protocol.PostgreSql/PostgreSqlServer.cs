@@ -100,10 +100,20 @@ public sealed class PostgreSqlServer : BackgroundService
         {
             using (client)
             {
-                var stream = client.GetStream();
-                var queryExecutor = new QueryExecutor(_logManager, _config.ServerVersion, _logger, _viewRegistry);
-                var handler = new PostgreSqlConnectionHandler(stream, queryExecutor, _config, _logger);
-                await handler.HandleAsync(ct).ConfigureAwait(false);
+                // NoDelay needs the write buffering below: PgWriter emits one stream write per
+                // protocol message (one per result row), which Nagle used to coalesce. The
+                // BufferedStream restores coalescing up to the handler's existing per-message
+                // FlushAsync discipline — same model as real PostgreSQL (8 KB output buffer +
+                // TCP_NODELAY). The handler is strictly sequential, so buffered read/write
+                // mode switching is safe.
+                client.NoDelay = true;
+                var stream = new BufferedStream(client.GetStream(), 8192);
+                await using (stream.ConfigureAwait(false))
+                {
+                    var queryExecutor = new QueryExecutor(_logManager, _config.ServerVersion, _logger, _viewRegistry);
+                    var handler = new PostgreSqlConnectionHandler(stream, queryExecutor, _config, _logger);
+                    await handler.HandleAsync(ct).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }

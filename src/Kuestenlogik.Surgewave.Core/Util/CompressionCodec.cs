@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.IO.Compression;
 using K4os.Compression.LZ4;
 using K4os.Compression.LZ4.Streams;
@@ -290,19 +291,54 @@ public static class CompressionCodec
 
     private static (byte[], int, bool) DecompressGzipPooled(ReadOnlySpan<byte> compressedData)
     {
-        // GZIP doesn't expose uncompressed size upfront, use stream approach
-        using var inputStream = new MemoryStream(compressedData.ToArray());
-        using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
+        var sizeHint = GetGzipSizeHint(compressedData);
 
-        // Read into expandable buffer, then rent final size
-        using var outputStream = new MemoryStream();
-        gzipStream.CopyTo(outputStream);
+        // GZipStream needs a Stream, so the input copy is unavoidable — but the allocation is not.
+        var input = ArrayPool<byte>.Shared.Rent(compressedData.Length);
+        try
+        {
+            compressedData.CopyTo(input);
+            using var inputStream = new MemoryStream(input, 0, compressedData.Length, writable: false);
+            using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
 
-        var length = (int)outputStream.Length;
-        var buffer = ArrayPool<byte>.Shared.Rent(length);
-        outputStream.Position = 0;
-        _ = outputStream.Read(buffer, 0, length);
-        return (buffer, length, true);
+            // Dispose is a no-op once the buffer is detached, so this both hands ownership to the
+            // caller on success and returns the rent if a corrupt frame throws mid-read.
+            using var writer = new PooledArrayBufferWriter(sizeHint);
+
+            int read;
+            while ((read = gzipStream.Read(writer.GetSpan(4096))) > 0)
+            {
+                writer.Advance(read);
+            }
+
+            var (buffer, length) = writer.DetachBuffer();
+            return (buffer, length, true);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(input);
+        }
+    }
+
+    /// <summary>
+    /// RFC 1952: the last four bytes (ISIZE, little-endian) hold the uncompressed size mod 2^32 —
+    /// an exact-size hint for our single-member frames. It is attacker-supplied on the produce
+    /// path, so it is capped by what deflate can actually expand to (~1032:1); the writer still
+    /// grows if the hint turns out to be too small.
+    /// </summary>
+    internal static int GetGzipSizeHint(ReadOnlySpan<byte> compressedData)
+    {
+        const int MinHint = 256;
+        const long MaxDeflateRatio = 1032;
+
+        if (compressedData.Length < 18)
+        {
+            return Math.Max(compressedData.Length * 3, MinHint);
+        }
+
+        var declared = BinaryPrimitives.ReadUInt32LittleEndian(compressedData[^4..]);
+        var maxPlausible = compressedData.Length * MaxDeflateRatio;
+        return (int)Math.Clamp(Math.Min(declared, (ulong)maxPlausible), MinHint, 1 << 26);
     }
 
     private static (byte[], int, bool) DecompressSnappyPooled(ReadOnlySpan<byte> compressedData)
@@ -317,18 +353,17 @@ public static class CompressionCodec
 
     private static (byte[], int, bool) DecompressLz4Pooled(ReadOnlySpan<byte> compressedData)
     {
-        // LZ4 frame format - use stream approach but with pooled output
-        using var inputStream = new MemoryStream(compressedData.ToArray());
-        using var lz4Stream = LZ4Stream.Decode(inputStream);
+        // LZ4 frames rarely carry a content-size field, so decode straight into a pooled growable
+        // writer: span source means no input copy, and the output lands in the rented array.
+        var initialCapacity = (int)Math.Min(3L * compressedData.Length, 1L << 26);
 
-        // Read in chunks to pooled buffer
-        using var outputStream = new MemoryStream();
-        lz4Stream.CopyTo(outputStream);
+        // Dispose is a no-op once detached: ownership goes to the caller on success, and a corrupt
+        // frame gives the rent back instead of leaking it.
+        using var writer = new PooledArrayBufferWriter(initialCapacity);
 
-        var length = (int)outputStream.Length;
-        var buffer = ArrayPool<byte>.Shared.Rent(length);
-        outputStream.Position = 0;
-        _ = outputStream.Read(buffer, 0, length);
+        LZ4Frame.Decode(compressedData, writer);
+
+        var (buffer, length) = writer.DetachBuffer();
         return (buffer, length, true);
     }
 

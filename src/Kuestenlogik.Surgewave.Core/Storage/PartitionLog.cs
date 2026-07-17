@@ -141,7 +141,20 @@ public sealed class PartitionLog : IPartitionLog
     /// Zero-copy for ArrayPool buffers - no intermediate allocation.
     /// Uses lock-free atomic offset claim for maximum concurrency.
     /// </summary>
-    public async ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+    public ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+    {
+        return AppendBatchAsync(buffer, offset, length, BatchCrcMode.Recompute, cancellationToken);
+    }
+
+    /// <summary>
+    /// Append a slice of a Kafka RecordBatch buffer to the log, with explicit CRC handling (#85).
+    /// </summary>
+    /// <param name="crcMode">
+    /// <see cref="BatchCrcMode.Validate"/> checks the producer's CRC and rejects corrupt batches;
+    /// <see cref="BatchCrcMode.Trusted"/> skips the pass for serializer-fresh bytes;
+    /// <see cref="BatchCrcMode.Recompute"/> keeps the legacy overwrite.
+    /// </param>
+    public async ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -153,8 +166,10 @@ public sealed class PartitionLog : IPartitionLog
         var recordBatch = buffer.AsSpan(offset, length);
 
         // === LOCK-FREE PREPARATION (outside all locks) ===
-        // 1. Pre-calculate CRC (CPU-intensive, bytes 21+)
-        var crc = Util.Crc32C.Compute(recordBatch[21..]);
+        // 1. One CRC pass over bytes 21+ (CPU-intensive): Validate compares it against the
+        //    producer's, Trusted skips it entirely, Recompute overwrites the field with it.
+        //    Throws before any offset is claimed or anything is written.
+        var crc = RecordBatchValidator.PrepareAppendCrc(recordBatch, crcMode, _topicPartition.Topic, _topicPartition.Partition);
 
         // 2. Extract record count from batch header (bytes 57-60, big-endian)
         var recordCount = GetRecordCountFromBatch(recordBatch);
@@ -180,7 +195,7 @@ public sealed class PartitionLog : IPartitionLog
             baseOffset = Interlocked.Add(ref _nextOffset, recordCount) - recordCount;
 
             // Write offset and CRC into batch (fast, just 12 bytes) - modifies buffer in place
-            WriteOffsetAndCrc(buffer.AsSpan(offset, length), baseOffset, crc);
+            WriteOffsetAndCrc(buffer.AsSpan(offset, length), baseOffset, crc, writeCrc: crcMode == BatchCrcMode.Recompute);
 
             // Capture segment reference before releasing lock
             segmentToWrite = _activeSegment;
@@ -230,7 +245,11 @@ public sealed class PartitionLog : IPartitionLog
                 $"Target offset {targetOffset} is less than current NextOffset {currentNext}. Offset-preserving write requires targetOffset >= NextOffset.");
 
         var span = recordBatch.AsSpan();
-        var crc = Util.Crc32C.Compute(span[21..]);
+        // Stays on Recompute (#85): the geo-replication caller hands in a whole Kafka fetch
+        // records section, which is a CONCATENATION of batches. Validating would compare a CRC
+        // over all of them against the first batch's stored CRC and reject every multi-batch
+        // fetch. Follower-side validation needs batch splitting first — tracked separately.
+        var crc = RecordBatchValidator.PrepareAppendCrc(span, BatchCrcMode.Recompute, _topicPartition.Topic, _topicPartition.Partition);
         var recordCount = GetRecordCountFromBatch(span);
 
         _appendLock.EnterReadLock();
@@ -247,7 +266,7 @@ public sealed class PartitionLog : IPartitionLog
             Interlocked.Exchange(ref _nextOffset, targetOffset + recordCount);
 
             // Write target offset and CRC into batch header
-            WriteOffsetAndCrc(recordBatch.AsSpan(), targetOffset, crc);
+            WriteOffsetAndCrc(recordBatch.AsSpan(), targetOffset, crc, writeCrc: true);
         }
         finally
         {
@@ -422,13 +441,21 @@ public sealed class PartitionLog : IPartitionLog
     /// Write the baseOffset and pre-calculated CRC into the RecordBatch header.
     /// This is very fast (just writing 12 bytes) and done inside the lock.
     /// </summary>
-    private static void WriteOffsetAndCrc(Span<byte> recordBatch, long baseOffset, uint crc)
+    /// <param name="writeCrc">
+    /// False when the batch's own CRC must survive: it was either validated against these very
+    /// bytes or written by the serializer moments ago. baseOffset lies outside the CRC-covered
+    /// region (which starts at byte 21), so stamping it does not invalidate the checksum.
+    /// </param>
+    private static void WriteOffsetAndCrc(Span<byte> recordBatch, long baseOffset, uint crc, bool writeCrc)
     {
         // Write baseOffset (bytes 0-7, big-endian)
         System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(recordBatch[..8], baseOffset);
 
-        // Write pre-calculated CRC (bytes 17-20, big-endian)
-        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(recordBatch.Slice(17, 4), crc);
+        if (writeCrc)
+        {
+            // Write pre-calculated CRC (bytes 17-20, big-endian)
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(recordBatch.Slice(17, 4), crc);
+        }
     }
 
     /// <summary>

@@ -53,6 +53,7 @@
          friend grants are dead and removed. Broker.Tests keeps its grant — it exercises this
          assembly's internals directly (e.g. TransactionMarkerReplicator, ResolveListOffsetTimestamp). -->
     <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker.Tests" />
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Protocol.Kafka.Tests" />
   </ItemGroup>
 
 </Project>

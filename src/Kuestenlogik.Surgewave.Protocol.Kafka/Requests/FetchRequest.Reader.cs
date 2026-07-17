@@ -7,11 +7,6 @@ public sealed partial class FetchRequest
     /// </summary>
     public static FetchRequest ReadFrom(BinaryReader reader, short apiVersion, int correlationId, string clientId)
     {
-        // Version 12+ uses flexible format (compact strings/arrays, tagged fields)
-        bool isFlexible = ProtocolVersions.IsFlexible(ApiKey.Fetch, apiVersion);
-        // Version 13+ uses TopicId instead of topic name
-        bool usesTopicId = apiVersion >= 13;
-
         // Zero-copy: reuse the MemoryStream's internal buffer directly instead of
         // allocating + copying all remaining bytes. The buffer is pooled and outlives
         // the parse (returned in ProcessKafkaRequestsAsync's finally block).
@@ -28,6 +23,19 @@ public sealed partial class FetchRequest
             var remainingBytes = reader.ReadBytes(remainingSize);
             protocolReader = new KafkaProtocolReader(remainingBytes);
         }
+
+        return ReadFrom(protocolReader, apiVersion, correlationId, clientId);
+    }
+
+    /// <summary>
+    /// Hot-path overload: parses straight out of the caller's (pooled) request buffer.
+    /// </summary>
+    public static FetchRequest ReadFrom(KafkaProtocolReader protocolReader, short apiVersion, int correlationId, string clientId)
+    {
+        // Version 12+ uses flexible format (compact strings/arrays, tagged fields)
+        bool isFlexible = ProtocolVersions.IsFlexible(ApiKey.Fetch, apiVersion);
+        // Version 13+ uses TopicId instead of topic name
+        bool usesTopicId = apiVersion >= 13;
 
         // Read fields according to version. KIP-903 (Fetch v15+) removed the top-level
         // ReplicaId field — it now lives only inside the ReplicaState tagged field.
@@ -97,8 +105,9 @@ public sealed partial class FetchRequest
 
     private static List<FetchTopic> ReadTopicsFlexible(KafkaProtocolReader protocolReader, short apiVersion, bool usesTopicId)
     {
-        var topics = new List<FetchTopic>();
         var topicCount = protocolReader.ReadVarInt() - 1;
+        // Clamped: a corrupt/hostile count must not turn into a huge pre-allocation.
+        var topics = new List<FetchTopic>(Math.Clamp(topicCount, 0, 1024));
 
         for (int i = 0; i < topicCount; i++)
         {
@@ -131,7 +140,7 @@ public sealed partial class FetchRequest
     private static List<FetchPartition> ReadPartitionsFlexible(KafkaProtocolReader protocolReader, short apiVersion)
     {
         var partitionCount = protocolReader.ReadVarInt() - 1;
-        var partitions = new List<FetchPartition>();
+        var partitions = new List<FetchPartition>(Math.Clamp(partitionCount, 0, 1024));
 
         for (int j = 0; j < partitionCount; j++)
         {
@@ -176,14 +185,14 @@ public sealed partial class FetchRequest
 
     private static List<FetchTopic> ReadTopicsNonFlexible(KafkaProtocolReader protocolReader, short apiVersion)
     {
-        var topics = new List<FetchTopic>();
         var topicCount = protocolReader.ReadInt32();
+        var topics = new List<FetchTopic>(Math.Clamp(topicCount, 0, 1024));
 
         for (int i = 0; i < topicCount; i++)
         {
             var topicName = protocolReader.ReadString() ?? string.Empty;
             var partitionCount = protocolReader.ReadInt32();
-            var partitions = new List<FetchPartition>();
+            var partitions = new List<FetchPartition>(Math.Clamp(partitionCount, 0, 1024));
 
             for (int j = 0; j < partitionCount; j++)
             {
@@ -243,7 +252,7 @@ public sealed partial class FetchRequest
                 }
 
                 var partCount = protocolReader.ReadVarInt() - 1;
-                var forgottenPartitions = new List<int>();
+                var forgottenPartitions = new List<int>(Math.Clamp(partCount, 0, 1024));
                 for (int j = 0; j < partCount; j++)
                 {
                     forgottenPartitions.Add(protocolReader.ReadInt32());
@@ -266,7 +275,7 @@ public sealed partial class FetchRequest
             {
                 var forgottenTopic = protocolReader.ReadString();
                 var partCount = protocolReader.ReadInt32();
-                var forgottenPartitions = new List<int>();
+                var forgottenPartitions = new List<int>(Math.Clamp(partCount, 0, 1024));
                 for (int j = 0; j < partCount; j++)
                 {
                     forgottenPartitions.Add(protocolReader.ReadInt32());

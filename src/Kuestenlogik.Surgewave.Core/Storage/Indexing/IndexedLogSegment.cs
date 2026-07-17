@@ -42,7 +42,18 @@ public sealed class IndexedLogSegment : ILogSegment, IFileLogSegment, IMemoryLog
 
     public long? GetFirstMessageOffset() => _inner.GetFirstMessageOffset();
 
-    public async ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(byte[] recordBatch, CancellationToken cancellationToken = default)
+    public ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(byte[] recordBatch, CancellationToken cancellationToken = default)
+        => AppendBatchAsync(recordBatch.AsMemory(), cancellationToken);
+
+    public ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+        => AppendBatchAsync(buffer.AsMemory(offset, length), cancellationToken);
+
+    /// <summary>
+    /// Forwards the caller's slice to the inner segment instead of letting the default-interface
+    /// chain ToArray() it (issue #79). Reading the buffer after the await is safe: the producer
+    /// must keep it valid until the outer append completes (LogManager slice contract).
+    /// </summary>
+    public async ValueTask<(long baseOffset, int recordCount)> AppendBatchAsync(ReadOnlyMemory<byte> recordBatch, CancellationToken cancellationToken = default)
     {
         var filePositionBefore = _filePosition;
 
@@ -50,7 +61,7 @@ public sealed class IndexedLogSegment : ILogSegment, IFileLogSegment, IMemoryLog
         var result = await _inner.AppendBatchAsync(recordBatch, cancellationToken);
 
         // Notify custom indexers
-        _indexers.OnBatchAppended(result.baseOffset, filePositionBefore, recordBatch);
+        _indexers.OnBatchAppended(result.baseOffset, filePositionBefore, recordBatch.Span);
 
         // Update tracked position
         _filePosition += recordBatch.Length;
