@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
@@ -229,12 +230,36 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// (#93, and the multi-record-batch LEO the #69 fix needs), and per-batch Validate rejects a
     /// genuinely corrupt remote batch instead of silently healing it.
     /// </remarks>
-    public async Task<long> AppendAsync(TopicPartition tp, byte[] recordBatch, CancellationToken ct)
+    public Task<long> AppendAsync(TopicPartition tp, byte[] recordBatch, CancellationToken ct)
+        => AppendAsync(tp, recordBatch.AsMemory(), ct);
+
+    /// <summary>
+    /// <see cref="AppendAsync(TopicPartition, byte[], CancellationToken)"/> over a memory slice: the
+    /// follower ingest passes a slice INTO its pooled fetch-response body (#82 S4), so there is no
+    /// per-partition copy of the records.
+    /// </summary>
+    /// <remarks>
+    /// The slice's backing array and absolute offset are recovered via <see cref="MemoryMarshal"/> and
+    /// fed to the offset-preserving append exactly as a standalone batch <c>byte[]</c> would be — so
+    /// per-batch Validate CRC (over <c>buffer[offset..offset+length]</c>), NextOffset advancing past
+    /// EVERY batch, and the idempotent <c>baseOffset &gt;= NextOffset</c> skip are byte-for-byte identical
+    /// to the array overload. The pooled body is single-owner for this fetch, and the in-place
+    /// <c>WriteOffsetAndCrc</c> writes back the same base offset it read from the header, so mutating the
+    /// pooled buffer in place is safe and observably a no-op.
+    /// </remarks>
+    public async Task<long> AppendAsync(TopicPartition tp, ReadOnlyMemory<byte> recordBatch, CancellationToken ct)
     {
+        if (!MemoryMarshal.TryGetArray(recordBatch, out var segment) || segment.Array is null)
+            throw new InvalidOperationException("Follower record batch must be backed by an array.");
+        var buffer = segment.Array;
+        var baseArrayOffset = segment.Offset;
+
         var log = _logManager.GetOrCreateLog(tp);
 
         var cursor = 0;
-        while (RecordBatchValidator.TryReadBatchBoundary(recordBatch, cursor, out var total, out var baseOffset, out _))
+        // recordBatch.Span is re-derived each iteration on purpose: a ReadOnlySpan local cannot live
+        // across the await below, and Span is a cheap wrapper over the same backing array.
+        while (RecordBatchValidator.TryReadBatchBoundary(recordBatch.Span, cursor, out var total, out var baseOffset, out _))
         {
             // Idempotent: skip any batch the log already has. The leader re-sends from an older
             // offset after a connection drop or a partial-commit IO fault; skipping avoids
@@ -243,7 +268,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             {
                 try
                 {
-                    await log.AppendBatchAtOffsetAsync(recordBatch, cursor, total, baseOffset, BatchCrcMode.Validate, ct);
+                    await log.AppendBatchAtOffsetAsync(buffer, baseArrayOffset + cursor, total, baseOffset, BatchCrcMode.Validate, ct);
                 }
                 catch (DataCorruptionException ex)
                 {

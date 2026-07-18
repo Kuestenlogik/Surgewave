@@ -144,8 +144,9 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
             // Build fetch request
             var fetchRequest = BuildFetchRequest(partitions);
 
-            // Send request and get response
-            var response = await connection.SendFetchRequestAsync(fetchRequest, ct);
+            // Send request and get response. The response owns the pooled body its record slices point
+            // into; dispose it only after ProcessFetchResponseAsync has appended every batch.
+            using var response = await connection.SendFetchRequestAsync(fetchRequest, ct);
 
             // Process response
             await ProcessFetchResponseAsync(partitions, response, ct);
@@ -233,7 +234,7 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
             return;
 
         // Parse base offset from record batch
-        var baseOffset = BinaryPrimitives.ReadInt64BigEndian(data.AsSpan(0, 8));
+        var baseOffset = BinaryPrimitives.ReadInt64BigEndian(data.Span[..8]);
 
         // Append to local log. AppendAsync now returns the log-end offset after
         // the whole batch (baseOffset + recordCount), which is exactly the next
@@ -365,10 +366,27 @@ internal sealed class ReplicaFetchRequest
     }
 }
 
-internal sealed class ReplicaFetchResponse
+internal sealed class ReplicaFetchResponse : IDisposable
 {
+    private byte[]? _pooledBuffer;
+
     public int ThrottleTimeMs { get; set; }
     public List<TopicResponse> Topics { get; set; } = [];
+
+    /// <summary>
+    /// Take ownership of the pooled response body that the partition <see cref="PartitionResponse.RecordBatch"/>
+    /// slices point into. It is returned to the pool on <see cref="Dispose"/> — i.e. only after the caller
+    /// has finished appending the fetched batches, so the slices stay valid for the whole append.
+    /// </summary>
+    public void AttachPooledBuffer(byte[] buffer) => _pooledBuffer = buffer;
+
+    public void Dispose()
+    {
+        var buffer = _pooledBuffer;
+        _pooledBuffer = null;
+        if (buffer is not null)
+            ArrayPool<byte>.Shared.Return(buffer);
+    }
 
     public sealed class TopicResponse
     {
@@ -383,7 +401,7 @@ internal sealed class ReplicaFetchResponse
         public long HighWatermark { get; set; }
         public long LastStableOffset { get; set; }
         public long LogStartOffset { get; set; }
-        public byte[] RecordBatch { get; set; } = [];
+        public ReadOnlyMemory<byte> RecordBatch { get; set; }
     }
 }
 
@@ -434,16 +452,24 @@ internal sealed class LeaderConnection : IAsyncDisposable
         await lease.Stream.FlushAsync(ct);
 
         var (body, length) = await ReadResponseAsync(lease.Stream, ct);
+        ReplicaFetchResponse response;
         try
         {
-            // ParseFetchResponse is synchronous and ToArrays every partition's records, so nothing
-            // references the pooled body once it returns — safe to hand back to the pool here.
-            return ParseFetchResponse(body, length);
+            response = ParseFetchResponse(body, length);
         }
-        finally
+        catch
         {
+            // Parse threw before the response could take ownership of the pooled body — return it here
+            // so the rent is not leaked.
             ArrayPool<byte>.Shared.Return(body);
+            throw;
         }
+
+        // Ownership transfers to the response: each partition's records are now a slice INTO this pooled
+        // body, so the buffer must stay alive until the response is disposed — which the caller does only
+        // after the fetched batches have been appended.
+        response.AttachPooledBuffer(body);
+        return response;
     }
 
     private byte[] SerializeFetchRequest(ReplicaFetchRequest request, int correlationId)
@@ -606,12 +632,14 @@ internal sealed class LeaderConnection : IAsyncDisposable
                     // real bytes into the rented tail.
                     if (recordsLen > length - offset)
                         throw new InvalidDataException($"Replication fetch response truncated: record batch of {recordsLen} bytes exceeds the {length}-byte body at offset {offset}.");
-                    partitionResponse.RecordBatch = data.AsSpan(offset, recordsLen).ToArray();
+                    // Slice into the pooled body — no copy. The body outlives parsing (returned to the
+                    // pool only when the response is disposed, after the batches are appended).
+                    partitionResponse.RecordBatch = new ReadOnlyMemory<byte>(data, offset, recordsLen);
                     offset += recordsLen;
                 }
                 else
                 {
-                    partitionResponse.RecordBatch = [];
+                    partitionResponse.RecordBatch = ReadOnlyMemory<byte>.Empty;
                 }
 
                 topicResponse.Partitions.Add(partitionResponse);
