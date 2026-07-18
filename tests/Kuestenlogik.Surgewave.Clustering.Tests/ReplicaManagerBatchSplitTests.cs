@@ -66,6 +66,32 @@ public sealed class ReplicaManagerBatchSplitTests
     }
 
     [Fact]
+    public async Task AppendAsync_MemorySliceAtNonZeroOffset_SplitsAndPreservesOffsets()
+    {
+        // #82 S4: the follower ingest hands in a ReadOnlyMemory slice INTO its pooled fetch-response
+        // body, so the records never start at array index 0. Exercise that overload directly with a
+        // non-zero offset (the byte[] overload only ever yields an offset-0 slice) to prove the
+        // absolute-offset arithmetic (segment.Offset + cursor) locates each batch correctly.
+        var (rm, lm) = NewManager();
+        var tp = new TopicPartition { Topic = "repl-sliced", Partition = 0 };
+        var section = Concat(CreateValidBatch(0, 3), CreateValidBatch(3, 2));
+
+        const int prefix = 37;
+        var backing = new byte[prefix + section.Length + 11];
+        Array.Fill(backing, (byte)0xAB); // junk padding on both sides, like an over-rented pool buffer
+        section.CopyTo(backing, prefix);
+        var slice = new ReadOnlyMemory<byte>(backing, prefix, section.Length);
+
+        var leo = await rm.AppendAsync(tp, slice, CancellationToken.None);
+
+        Assert.Equal(5, leo); // both batches split and appended from the offset slice
+        var stored = await lm.GetLog(tp)!.ReadBatchesAsync(0);
+        Assert.Equal(2, stored.Count);
+        Assert.True(RecordBatchValidator.ValidateCrc(stored[0]));
+        Assert.True(RecordBatchValidator.ValidateCrc(stored[1]));
+    }
+
+    [Fact]
     public async Task AppendAsync_CorruptSecondBatch_CommitsGoodPrefixOnly()
     {
         var (rm, lm) = NewManager();
