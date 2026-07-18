@@ -36,7 +36,11 @@ jobs:
           else
             COMMIT_COUNT=$(git rev-list --count HEAD)
             SHORT_SHA=$(git rev-parse --short HEAD)
-            echo "VERSION=0.1.0-ci.${COMMIT_COUNT}.${SHORT_SHA}" >> $GITHUB_ENV
+            # Prefix the sha with 'g' (git-describe convention). An all-numeric short sha with a
+            # leading zero (e.g. 0558208) is an INVALID SemVer 2.0 pre-release identifier, which makes
+            # `dotnet pack` fail with "PackageVersion string ... is invalid"; the letter forces an
+            # alphanumeric identifier, where leading zeros are allowed.
+            echo "VERSION=0.1.0-ci.${COMMIT_COUNT}.g${SHORT_SHA}" >> $GITHUB_ENV
           fi
 
       - name: Restore
