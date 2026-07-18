@@ -173,20 +173,12 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
             var valueBytes = await SerializeValueAsync(value, topic, cancellationToken).ConfigureAwait(false)
                 ?? throw new ArgumentNullException(nameof(value), "Value cannot serialize to null");
 
-            var builder = _client.Messaging.Send(topic)
-                .ToPartition(0)
-                .WithValue(valueBytes);
-
-            if (keyBytes != null)
-                builder.WithKey(keyBytes);
-
-            if (headers != null)
-            {
-                foreach (var (headerKey, headerValue) in headers)
-                    builder.WithHeader(headerKey, headerValue);
-            }
-
-            var offset = await builder.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+            // Direct send — byte-identical to Send(topic).ToPartition(0)...ExecuteAsync (which is a
+            // pure passthrough to this same SendAsync), minus a per-call SendBuilder allocation (#80).
+            // Partition 0 preserves today's no-key-hash behavior for the keyed overload.
+            var offset = await _client.Messaging
+                .SendAsync(topic, 0, keyBytes, valueBytes, headers, cancellationToken)
+                .ConfigureAwait(false);
 
             var result = new ProduceResult
             {
@@ -233,20 +225,10 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
             var valueBytes = await SerializeValueAsync(value, topic, cancellationToken).ConfigureAwait(false)
                 ?? throw new ArgumentNullException(nameof(value), "Value cannot serialize to null");
 
-            var builder = _client.Messaging.Send(topic)
-                .ToPartition(partition)
-                .WithValue(valueBytes);
-
-            if (keyBytes != null)
-                builder.WithKey(keyBytes);
-
-            if (headers != null)
-            {
-                foreach (var (headerKey, headerValue) in headers)
-                    builder.WithHeader(headerKey, headerValue);
-            }
-
-            var offset = await builder.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+            // Direct send — see the keyed overload; byte-identical minus the SendBuilder alloc (#80).
+            var offset = await _client.Messaging
+                .SendAsync(topic, partition, keyBytes, valueBytes, headers, cancellationToken)
+                .ConfigureAwait(false);
 
             var result = new ProduceResult
             {

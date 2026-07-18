@@ -53,6 +53,11 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     private SurgewaveNativeClient _client;
     private readonly List<string> _subscribedTopics = [];
     private readonly Dictionary<(string topic, int partition), long> _offsets = [];
+    // Already-decoded batch buffer per (topic,partition): the facade fetches a whole batch, so
+    // serve its remaining messages by cursor instead of re-fetching + re-decoding one full batch
+    // per delivered message (#80). Single-consumer-thread contract, same as _offsets. Invalidated
+    // on Assign/Seek/retention-jump/reconnect so a relocated offset never serves a stale record.
+    private readonly Dictionary<(string topic, int partition), (List<ReceivedMessage> Messages, int Index)> _decodedBuffers = [];
     private readonly Dictionary<Type, Func<ConsumeResult<TKey, TValue>, CancellationToken, Task>> _handlers = [];
     private readonly HashSet<(string topic, int partition)> _pausedPartitions = [];
     private Func<ConsumeResult<TKey, TValue>, CancellationToken, Task>? _defaultHandler;
@@ -508,6 +513,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _offsets[(topic, partition)] = offset;
+        _decodedBuffers.Remove((topic, partition)); // offset moved — a stale buffer must not serve (#80)
     }
 
     /// <summary>
@@ -544,6 +550,28 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
             if (offset < 0) continue; // Skip if offset is -1 (latest, not yet determined)
             if (_pausedPartitions.Contains((topic, partition))) continue; // Skip paused partitions
 
+            // Serve from the already-decoded buffer before issuing any fetch (#80). Semantics are
+            // unchanged: we keep the Offset>=offset filter, advance _offsets by exactly +1 per
+            // served message, and deserialize after advancing — identical to the fetch path below.
+            if (_decodedBuffers.TryGetValue((topic, partition), out var buffered))
+            {
+                var idx = buffered.Index;
+                while (idx < buffered.Messages.Count && buffered.Messages[idx].Offset < offset)
+                    idx++;
+
+                if (idx < buffered.Messages.Count)
+                {
+                    // A fetch would have observed cancellation here; a buffered serve must too.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var bufMsg = buffered.Messages[idx];
+                    _decodedBuffers[(topic, partition)] = (buffered.Messages, idx + 1);
+                    _offsets[(topic, partition)] = bufMsg.Offset + 1;
+                    return await BuildConsumeResultAsync(topic, partition, bufMsg, cancellationToken).ConfigureAwait(false);
+                }
+
+                _decodedBuffers.Remove((topic, partition)); // exhausted — fall through to fetch
+            }
+
             try
             {
                 // Per-partition long-poll budget: honour the caller's overall
@@ -562,6 +590,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                     // Jump to latest available data
                     var latestOffset = await _client.Messaging.GetLatestOffsetAsync(topic, partition, cancellationToken);
                     _offsets[(topic, partition)] = latestOffset;
+                    _decodedBuffers.Remove((topic, partition)); // offset relocated — drop stale buffer
                     continue;
                 }
 
@@ -569,29 +598,18 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                 {
                     // Find the first message at or after the requested offset
                     // (broker may return a batch that starts before the requested offset)
-                    var msg = result.Messages.FirstOrDefault(m => m.Offset >= offset);
-                    if (msg == null)
+                    var firstIndex = result.Messages.FindIndex(m => m.Offset >= offset);
+                    if (firstIndex < 0)
                     {
                         // All messages are below requested offset - shouldn't happen but handle gracefully
                         continue;
                     }
+                    var msg = result.Messages[firstIndex];
+                    // Keep the rest of the decoded batch to serve on subsequent calls (#80).
+                    _decodedBuffers[(topic, partition)] = (result.Messages, firstIndex + 1);
                     _offsets[(topic, partition)] = msg.Offset + 1;
 
-                    var keyValue = msg.Key is { Length: > 0 }
-                        ? await DeserializeKeyAsync(msg.Key, topic, cancellationToken).ConfigureAwait(false)
-                        : default;
-                    var valueValue = await DeserializeValueAsync(msg.Value, topic, cancellationToken).ConfigureAwait(false);
-
-                    return new ConsumeResult<TKey, TValue>
-                    {
-                        Topic = topic,
-                        Partition = partition,
-                        Offset = msg.Offset,
-                        Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp),
-                        Key = keyValue,
-                        Value = valueValue,
-                        Headers = msg.Headers
-                    };
+                    return await BuildConsumeResultAsync(topic, partition, msg, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex) when (IsConnectionError(ex))
@@ -605,6 +623,30 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         // No messages available, wait a bit
         await Task.Delay(Math.Min(100, (int)timeout.TotalMilliseconds), cancellationToken);
         return null;
+    }
+
+    /// <summary>
+    /// Deserializes one already-decoded message into a <see cref="ConsumeResult{TKey, TValue}"/>.
+    /// Shared by the buffered-serve and fetch-serve paths so both behave identically (#80).
+    /// </summary>
+    private async Task<ConsumeResult<TKey, TValue>> BuildConsumeResultAsync(
+        string topic, int partition, ReceivedMessage msg, CancellationToken cancellationToken)
+    {
+        var keyValue = msg.Key is { Length: > 0 }
+            ? await DeserializeKeyAsync(msg.Key, topic, cancellationToken).ConfigureAwait(false)
+            : default;
+        var valueValue = await DeserializeValueAsync(msg.Value, topic, cancellationToken).ConfigureAwait(false);
+
+        return new ConsumeResult<TKey, TValue>
+        {
+            Topic = topic,
+            Partition = partition,
+            Offset = msg.Offset,
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp),
+            Key = keyValue,
+            Value = valueValue,
+            Headers = msg.Headers
+        };
     }
 
     private ValueTask<TKey> DeserializeKeyAsync(byte[] data, string topic, CancellationToken cancellationToken)
@@ -633,6 +675,9 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     private async Task HandleDisconnectionAsync(Exception ex, CancellationToken cancellationToken)
     {
         _isConnected = false;
+        // Drop all decoded buffers: the connection broke and offsets may relocate on reconnect,
+        // so nothing buffered from the old client should be served (#80).
+        _decodedBuffers.Clear();
         Disconnected?.Invoke(this, new DisconnectedEventArgs(ex));
 
         if (!_options.EnableAutoReconnect)
@@ -679,6 +724,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     public void Seek(string topic, int partition, long offset)
     {
         _offsets[(topic, partition)] = offset;
+        _decodedBuffers.Remove((topic, partition)); // offset moved — a stale buffer must not serve (#80)
     }
 
     /// <summary>
