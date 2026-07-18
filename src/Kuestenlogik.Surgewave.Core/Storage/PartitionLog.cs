@@ -516,9 +516,16 @@ public sealed class PartitionLog : IPartitionLog
             {
                 segmentBatches = await currentSegment.ReadBatchesAsync(segmentStartOffset, maxBytes - totalBytes, cancellationToken);
             }
-            else
+            else if (currentSegment.GetFilePositionForOffset(segmentStartOffset) != null)
             {
                 segmentBatches = _reader.ReadBatchesWithMmap(currentSegment, segmentStartOffset, maxBytes - totalBytes);
+            }
+            else
+            {
+                // Closed segment with no resolvable mmap position (StorageEngineSegmentAdapter over
+                // the File engine): read via the segment's own method, else it returns empty and
+                // rolled data is silently lost (#99).
+                segmentBatches = await currentSegment.ReadBatchesAsync(segmentStartOffset, maxBytes - totalBytes, cancellationToken);
             }
 
             // Validate CRC if enabled

@@ -376,6 +376,42 @@ public class StorageEngineAdapterTests : IDisposable
         Assert.True(partitionLog.Segments.Count > 1, $"Expected multiple segments, got {partitionLog.Segments.Count}");
     }
 
+    [Fact]
+    public async Task FileEngine_MultipleSegments_ReadsBackAllData_AcrossTheRoll()
+    {
+        // Reproduces the suspected data-loss-on-read: closed File-engine segments are
+        // StorageEngineSegmentAdapter instances (which implement IMemoryLogSegment), so a
+        // read spanning a closed segment routes into the memory branch, whose
+        // GetFilePositionForOffset returns null → empty. The existing multi-segment test only
+        // checks the write side (NextOffset), so this gap was uncovered.
+        var fileDir = Path.Combine(_tempDir, "file-multi-segment-readback");
+        // Exact production wiring: FileLogSegmentFactory.Create(useMmap: true) — but 1KB segments
+        // to force a roll with little data.
+        var engineFactory = new FileStorageEngineFactory(useMmap: true, defaultMaxSize: 1024);
+        var segmentFactory = new StorageEngineSegmentFactory(engineFactory, isPersistent: true);
+        var topicPartition = new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = "multi-seg-readback", Partition = 0 };
+
+        using var partitionLog = new PartitionLog(fileDir, topicPartition, segmentFactory, maxSegmentBytes: 1024);
+
+        for (long offset = 0; offset < 20; offset++)
+        {
+            await partitionLog.AppendBatchAsync(CreateTestBatch(baseOffset: offset, recordCount: 1));
+        }
+        Assert.True(partitionLog.Segments.Count > 1, "test needs multiple segments");
+
+        // Control: the ACTIVE (last) segment reads fine — isolates the defect to closed segments.
+        var lastOffset = partitionLog.NextOffset - 1;
+        Assert.NotEmpty(await partitionLog.ReadBatchesAsync(lastOffset));
+
+        // The bug: read from offset 0, which lives in a CLOSED segment.
+        var batches = await partitionLog.ReadBatchesAsync(0);
+        var (contiguous, batchOffsets) = await partitionLog.ReadBatchesContiguousAsync(0, maxBytes: 1024 * 1024);
+
+        Assert.Equal(20, batches.Count);
+        Assert.True(contiguous.Length > 0, "contiguous read across the segment roll returned empty");
+        Assert.Equal(20, batchOffsets.Count);
+    }
+
     // ==================== Mmap Tests ====================
 
     [Fact]
