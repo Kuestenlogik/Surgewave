@@ -446,10 +446,14 @@ internal sealed class LeaderConnection : IAsyncDisposable
         await using var lease = await _connection.AcquireStreamAsync(ct);
         var correlationId = Interlocked.Increment(ref _correlationId);
 
-        var requestBytes = SerializeFetchRequest(request, correlationId);
-
-        await lease.Stream.WriteAsync(requestBytes, ct);
+        var (requestBuffer, requestLength) = SerializeFetchRequest(request, correlationId);
+        await lease.Stream.WriteAsync(requestBuffer.AsMemory(0, requestLength), ct);
         await lease.Stream.FlushAsync(ct);
+        // Return the pooled request buffer ONLY after a fully successful write+flush; on cancel/fault the
+        // throw skips this and the rent drops to GC (same reasoning as the leader's WriteResponseAsync —
+        // a canceled-but-still-draining send may pin the buffer, so a finally-return could hand it to the
+        // next renter mid-send and corrupt the wire).
+        ArrayPool<byte>.Shared.Return(requestBuffer);
 
         var (body, length) = await ReadResponseAsync(lease.Stream, ct);
         ReplicaFetchResponse response;
@@ -472,69 +476,73 @@ internal sealed class LeaderConnection : IAsyncDisposable
         return response;
     }
 
-    private byte[] SerializeFetchRequest(ReplicaFetchRequest request, int correlationId)
+    // Fixed fetch-REQUEST body bytes, excluding the 4-byte size prefix and the variable topic section:
+    // header (apiKey 2 + apiVer 2 + corrId 4 + clientId 2 + replicaId 4 + maxWait 4 + minBytes 4 +
+    // maxBytes 4 + isolation 1 + sessionId 4 + sessionEpoch 4 + topicCount 4 = 39) + trailer
+    // (forgottenTopics 4 + rackId 2 = 6).
+    private const int FetchRequestFixedBytes = 39 + 6;
+    // Per-partition fetch-REQUEST width: partition 4 + currentLeaderEpoch 4 + fetchOffset 8 +
+    // logStartOffset 8 + partitionMaxBytes 4. (Distinct from the response's FetchPartitionFixedBytes.)
+    private const int FetchRequestPartitionBytes = 4 + 4 + 8 + 8 + 4;
+
+    /// <summary>
+    /// Two-pass exact-size serialization of a fetch request into a pooled buffer — replaces the old
+    /// MemoryStream + per-topic GetBytes + ToArray path. Pass 1 computes the exact size; pass 2 writes
+    /// big-endian directly via <see cref="BinaryPrimitives"/>. The returned buffer is rented from
+    /// <see cref="ArrayPool{T}"/> and may be larger than <c>TotalLength</c>; the caller sends exactly
+    /// <c>TotalLength</c> bytes and returns the buffer to the pool after a successful send. Wire bytes are
+    /// byte-identical to the previous BinaryWriter path on a little-endian host.
+    /// <c>static</c> + no instance state so the round-trip test can reach it (InternalsVisibleTo).
+    /// </summary>
+    internal static (byte[] Buffer, int TotalLength) SerializeFetchRequest(ReplicaFetchRequest request, int correlationId)
     {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
+        // Pass 1 — exact body size (excludes the 4-byte size prefix).
+        var size = FetchRequestFixedBytes;
+        foreach (var topic in request.Topics)
+            size += 2 + System.Text.Encoding.UTF8.GetByteCount(topic.Topic) + 4
+                  + FetchRequestPartitionBytes * topic.Partitions.Count;
 
-        // Placeholder for size
-        writer.Write(0);
+        var total = 4 + size;
+        var buffer = ArrayPool<byte>.Shared.Rent(total);
+        var span = buffer.AsSpan();
+        var o = 0;
 
-        // API Key (Fetch = 1)
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)1));
-        // API Version
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)11));
-        // Correlation ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(correlationId));
-        // Client ID (nullable string)
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)-1));
+        // Pass 2 — write into the exact-size frame.
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], size); o += 4;             // size prefix
+        BinaryPrimitives.WriteInt16BigEndian(span[o..], 1); o += 2;                // api key (Fetch)
+        BinaryPrimitives.WriteInt16BigEndian(span[o..], 11); o += 2;               // api version
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId); o += 4;
+        BinaryPrimitives.WriteInt16BigEndian(span[o..], -1); o += 2;               // client id (null string)
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], request.ReplicaId); o += 4;
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], request.MaxWaitMs); o += 4;
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], request.MinBytes); o += 4;
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], request.MaxBytes); o += 4;
+        span[o] = request.IsolationLevel; o += 1;                                  // isolation level (raw byte)
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], 0); o += 4;                // session id
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], -1); o += 4;               // session epoch
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], request.Topics.Count); o += 4;
 
-        // Replica ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(request.ReplicaId));
-        // Max Wait Ms
-        writer.Write(BinaryPrimitives.ReverseEndianness(request.MaxWaitMs));
-        // Min Bytes
-        writer.Write(BinaryPrimitives.ReverseEndianness(request.MinBytes));
-        // Max Bytes
-        writer.Write(BinaryPrimitives.ReverseEndianness(request.MaxBytes));
-        // Isolation Level
-        writer.Write((byte)request.IsolationLevel);
-        // Session ID
-        writer.Write(BinaryPrimitives.ReverseEndianness(0));
-        // Session Epoch
-        writer.Write(BinaryPrimitives.ReverseEndianness(-1));
-
-        // Topics array
-        writer.Write(BinaryPrimitives.ReverseEndianness(request.Topics.Count));
         foreach (var topic in request.Topics)
         {
-            // Topic name
-            var topicBytes = System.Text.Encoding.UTF8.GetBytes(topic.Topic);
-            writer.Write(BinaryPrimitives.ReverseEndianness((short)topicBytes.Length));
-            writer.Write(topicBytes);
-
-            // Partitions
-            writer.Write(BinaryPrimitives.ReverseEndianness(topic.Partitions.Count));
+            var nameLen = System.Text.Encoding.UTF8.GetByteCount(topic.Topic);
+            BinaryPrimitives.WriteInt16BigEndian(span[o..], (short)nameLen); o += 2;
+            System.Text.Encoding.UTF8.GetBytes(topic.Topic, span.Slice(o, nameLen)); o += nameLen;
+            BinaryPrimitives.WriteInt32BigEndian(span[o..], topic.Partitions.Count); o += 4;
             foreach (var partition in topic.Partitions)
             {
-                writer.Write(BinaryPrimitives.ReverseEndianness(partition.Partition));
-                writer.Write(BinaryPrimitives.ReverseEndianness(-1)); // Current leader epoch
-                writer.Write(BinaryPrimitives.ReverseEndianness(partition.FetchOffset));
-                writer.Write(BinaryPrimitives.ReverseEndianness(-1L)); // Log start offset
-                writer.Write(BinaryPrimitives.ReverseEndianness(partition.PartitionMaxBytes));
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], partition.Partition); o += 4;
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], -1); o += 4;         // current leader epoch
+                BinaryPrimitives.WriteInt64BigEndian(span[o..], partition.FetchOffset); o += 8;
+                BinaryPrimitives.WriteInt64BigEndian(span[o..], -1L); o += 8;        // log start offset
+                BinaryPrimitives.WriteInt32BigEndian(span[o..], partition.PartitionMaxBytes); o += 4;
             }
         }
 
-        // Forgotten topics
-        writer.Write(BinaryPrimitives.ReverseEndianness(0));
-        // Rack ID
-        writer.Write(BinaryPrimitives.ReverseEndianness((short)-1));
+        BinaryPrimitives.WriteInt32BigEndian(span[o..], 0); o += 4;                // forgotten topics
+        BinaryPrimitives.WriteInt16BigEndian(span[o..], -1); o += 2;               // rack id
 
-        var data = ms.ToArray();
-        var size = data.Length - 4;
-        BinaryPrimitives.WriteInt32BigEndian(data.AsSpan(0, 4), size);
-
-        return data;
+        System.Diagnostics.Debug.Assert(o == total, "fetch-request pass-1 size disagrees with pass-2 writes");
+        return (buffer, o);
     }
 
     private async Task<(byte[] Buffer, int Length)> ReadResponseAsync(Stream stream, CancellationToken ct)
