@@ -232,11 +232,21 @@ public sealed class PartitionLog : IPartitionLog
     /// Validates that targetOffset >= current NextOffset. If targetOffset > NextOffset,
     /// advances the offset to the target position (sparse offsets).
     /// </summary>
-    public async ValueTask<long> AppendBatchAtOffsetAsync(byte[] recordBatch, long targetOffset, CancellationToken cancellationToken = default)
+    public ValueTask<long> AppendBatchAtOffsetAsync(byte[] recordBatch, long targetOffset, CancellationToken cancellationToken = default)
+        => AppendBatchAtOffsetAsync(recordBatch, 0, recordBatch.Length, targetOffset, BatchCrcMode.Recompute, cancellationToken);
+
+    /// <summary>
+    /// Offset-preserving append of a single batch (a slice of a split replication fetch section)
+    /// with explicit CRC handling (#85). The follower-ingest split hands in exactly ONE batch, so
+    /// per-batch <see cref="BatchCrcMode.Validate"/> finally works: the CRC pass covers this batch's
+    /// bytes 21.. and compares against this batch's own stored CRC (#92).
+    /// </summary>
+    public async ValueTask<long> AppendBatchAtOffsetAsync(
+        byte[] buffer, int offset, int length, long targetOffset, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (recordBatch.Length == 0)
+        if (length == 0)
             return Volatile.Read(ref _nextOffset);
 
         var currentNext = Volatile.Read(ref _nextOffset);
@@ -244,12 +254,8 @@ public sealed class PartitionLog : IPartitionLog
             throw new InvalidOperationException(
                 $"Target offset {targetOffset} is less than current NextOffset {currentNext}. Offset-preserving write requires targetOffset >= NextOffset.");
 
-        var span = recordBatch.AsSpan();
-        // Stays on Recompute (#85): the geo-replication caller hands in a whole Kafka fetch
-        // records section, which is a CONCATENATION of batches. Validating would compare a CRC
-        // over all of them against the first batch's stored CRC and reject every multi-batch
-        // fetch. Follower-side validation needs batch splitting first — tracked separately.
-        var crc = RecordBatchValidator.PrepareAppendCrc(span, BatchCrcMode.Recompute, _topicPartition.Topic, _topicPartition.Partition);
+        var span = buffer.AsSpan(offset, length);
+        var crc = RecordBatchValidator.PrepareAppendCrc(span, crcMode, _topicPartition.Topic, _topicPartition.Partition);
         var recordCount = GetRecordCountFromBatch(span);
 
         _appendLock.EnterReadLock();
@@ -265,8 +271,8 @@ public sealed class PartitionLog : IPartitionLog
             // Set the offset to targetOffset atomically
             Interlocked.Exchange(ref _nextOffset, targetOffset + recordCount);
 
-            // Write target offset and CRC into batch header
-            WriteOffsetAndCrc(recordBatch.AsSpan(), targetOffset, crc, writeCrc: true);
+            // writeCrc only for Recompute; Validate/Trusted keep the batch's own producer CRC (#92).
+            WriteOffsetAndCrc(buffer.AsSpan(offset, length), targetOffset, crc, writeCrc: crcMode == BatchCrcMode.Recompute);
         }
         finally
         {
@@ -276,7 +282,7 @@ public sealed class PartitionLog : IPartitionLog
         await _segmentWriteLock.WaitAsync(cancellationToken);
         try
         {
-            await _activeSegment!.AppendBatchAsync(recordBatch, 0, recordBatch.Length, cancellationToken);
+            await _activeSegment!.AppendBatchAsync(buffer, offset, length, cancellationToken);
         }
         finally
         {
@@ -284,7 +290,7 @@ public sealed class PartitionLog : IPartitionLog
         }
 
         UpdateHighWatermark(targetOffset + recordCount);
-        Interlocked.Add(ref _dirtyBytes, recordBatch.Length);
+        Interlocked.Add(ref _dirtyBytes, length);
 
         return targetOffset;
     }

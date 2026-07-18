@@ -60,6 +60,16 @@ public interface IPartitionLog : IDisposable
     /// <returns>The base offset assigned to the batch.</returns>
     ValueTask<long> AppendBatchAtOffsetAsync(byte[] recordBatch, long targetOffset, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Offset-preserving append of a SLICE of a buffer (one batch of a split replication fetch
+    /// section) with explicit CRC handling (#85). <see cref="BatchCrcMode.Validate"/> checks the
+    /// batch's own CRC and rejects corruption; <see cref="BatchCrcMode.Recompute"/> keeps the legacy
+    /// overwrite. <paramref name="targetOffset"/> must be &gt;= <see cref="NextOffset"/> — a larger
+    /// value is a valid sparse gap.
+    /// </summary>
+    ValueTask<long> AppendBatchAtOffsetAsync(
+        byte[] buffer, int offset, int length, long targetOffset, BatchCrcMode crcMode, CancellationToken cancellationToken = default);
+
     /// <summary>Reads record batches starting from the specified offset.</summary>
     /// <param name="startOffset">The offset to start reading from.</param>
     /// <param name="maxBytes">Maximum number of bytes to read (default: 1MB).</param>

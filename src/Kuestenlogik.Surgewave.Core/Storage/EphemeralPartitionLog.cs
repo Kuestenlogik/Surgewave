@@ -103,13 +103,51 @@ public sealed class EphemeralPartitionLog : IPartitionLog
         return new ValueTask<long>(baseOffset);
     }
 
-    /// <summary>
-    /// Append a record batch at a specific target offset (for offset-preserving geo-replication).
-    /// Not supported for ephemeral logs.
-    /// </summary>
     public ValueTask<long> AppendBatchAtOffsetAsync(byte[] recordBatch, long targetOffset, CancellationToken cancellationToken = default)
+        => AppendBatchAtOffsetAsync(recordBatch, 0, recordBatch.Length, targetOffset, BatchCrcMode.Recompute, cancellationToken);
+
+    /// <summary>
+    /// Offset-preserving append on the ring buffer (#92/#93). Only ever driven by the background
+    /// replication fetcher, never the produce hot path. Ephemeral leader logs are always dense, so
+    /// targetOffset == NextOffset and this degenerates to <see cref="AppendBatchAsync(byte[], int, int, BatchCrcMode, CancellationToken)"/>'s
+    /// self-assign behaviour; the offset is still honoured for the rare replicated-ephemeral case.
+    /// </summary>
+    public ValueTask<long> AppendBatchAtOffsetAsync(
+        byte[] buffer, int offset, int length, long targetOffset, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Offset-preserving writes are not supported for ephemeral partition logs.");
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (length == 0)
+            return new ValueTask<long>(Volatile.Read(ref _nextOffset));
+
+        var recordBatch = buffer.AsSpan(offset, length);
+        var crc = RecordBatchValidator.PrepareAppendCrc(recordBatch, crcMode, TopicPartition.Topic, TopicPartition.Partition);
+        var recordCount = GetRecordCountFromBatch(recordBatch);
+
+        bool lockTaken = false;
+        try
+        {
+            _lock.Enter(ref lockTaken);
+
+            var currentNext = _nextOffset;
+            if (targetOffset < currentNext)
+                throw new InvalidOperationException(
+                    $"Target offset {targetOffset} is less than current NextOffset {currentNext}. Offset-preserving write requires targetOffset >= NextOffset.");
+
+            _nextOffset = targetOffset + recordCount;
+
+            WriteOffsetAndCrc(buffer.AsSpan(offset, length), targetOffset, crc, writeCrc: crcMode == BatchCrcMode.Recompute);
+            WriteToRingBuffer(buffer, offset, length);
+            AddBatchEntry(targetOffset, recordCount, _writePosition - length, length);
+        }
+        finally
+        {
+            if (lockTaken) _lock.Exit(false);
+        }
+
+        UpdateHighWatermark(targetOffset + recordCount);
+
+        return new ValueTask<long>(targetOffset);
     }
 
     public ValueTask<List<byte[]>> ReadBatchesAsync(long startOffset, int maxBytes = 1048576, CancellationToken cancellationToken = default)

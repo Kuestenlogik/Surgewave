@@ -1,5 +1,5 @@
-using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
@@ -166,18 +166,38 @@ public sealed partial class GeoReplicaFetcher : IAsyncDisposable
             return;
         }
 
-        // Extract base offset from the record batch
-        var baseOffset = BinaryPrimitives.ReadInt64BigEndian(result.RecordBatch.AsSpan(0, 8));
-
-        // Extract record count
-        var recordCount = BinaryPrimitives.ReadInt32BigEndian(result.RecordBatch.AsSpan(57, 4));
-
-        // Offset-preserving write to local log
+        // A remote Kafka fetch returns a records section of N complete batches behind one length
+        // prefix (plus possibly a truncated trailing batch at maxBytes). Split it and append each
+        // batch offset-preserving at its OWN remote base offset, validating its CRC — so each batch
+        // keeps its own checksum (#92) and _fetchPositions advances past every committed batch (#93).
+        var data = result.RecordBatch;
         var log = _logManager.GetOrCreateLog(tp);
-        await log.AppendBatchAtOffsetAsync(result.RecordBatch, baseOffset, ct);
+        var cursor = 0;
+        long firstBaseOffset = -1;
+        try
+        {
+            while (RecordBatchValidator.TryReadBatchBoundary(data, cursor, out var total, out var batchBaseOffset, out _))
+            {
+                if (firstBaseOffset < 0)
+                    firstBaseOffset = batchBaseOffset;
 
-        // Update fetch position
-        var newOffset = baseOffset + recordCount;
+                // Skip batches already stored (idempotent re-fetch); pin the rest at the remote's
+                // own offset — a leading gap is a valid sparse gap when remote retention advanced.
+                if (batchBaseOffset >= log.NextOffset)
+                    await log.AppendBatchAtOffsetAsync(data, cursor, total, batchBaseOffset, BatchCrcMode.Validate, ct);
+
+                cursor += total;
+            }
+        }
+        catch (DataCorruptionException ex)
+        {
+            // Keep the good prefix; refuse the corrupt batch and everything after it. _fetchPositions
+            // advances only to the committed LEO below, so the next cycle re-fetches from it.
+            LogCorruptRemoteBatch(tp.Topic, tp.Partition, ex);
+        }
+
+        // Authoritative LEO past every committed batch (fixes the old baseOffset + first-batch-count).
+        var newOffset = log.NextOffset;
         _fetchPositions[tp] = newOffset;
 
         // Update lag
@@ -188,11 +208,15 @@ public sealed partial class GeoReplicaFetcher : IAsyncDisposable
         _link.LastFetchTimestamp = DateTimeOffset.UtcNow;
 
         // Record metrics
-        _metrics?.RecordReplicationBytes(tp.Topic, tp.Partition, result.RecordBatch.Length);
+        _metrics?.RecordReplicationBytes(tp.Topic, tp.Partition, data.Length);
         _metrics?.RecordReplicationLag(tp.Topic, tp.Partition, lag);
 
-        LogFetchedData(tp.Topic, tp.Partition, baseOffset, recordCount, result.RecordBatch.Length);
+        LogFetchedData(tp.Topic, tp.Partition, firstBaseOffset < 0 ? fetchOffset : firstBaseOffset,
+            (int)(newOffset - fetchOffset), data.Length);
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Rejected corrupt remote batch for {Topic}-{Partition}; kept the good prefix, will re-fetch")]
+    private partial void LogCorruptRemoteBatch(string topic, int partition, Exception ex);
 
     public async ValueTask DisposeAsync()
     {
