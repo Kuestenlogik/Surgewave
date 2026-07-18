@@ -264,7 +264,9 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return body;
     }
 
-    private ReplicationRequest ParseRequest(byte[] data)
+    // internal static so the S5 fetch-request round-trip test can drive the exact leader parser
+    // (field-free; dispatches to the static Parse* helpers).
+    internal static ReplicationRequest ParseRequest(byte[] data)
     {
         var offset = 0;
 
@@ -428,7 +430,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return request;
     }
 
-    private ReplicationRequest ParseFetchRequest(byte[] data, int offset, int correlationId)
+    internal static ReplicationRequest ParseFetchRequest(byte[] data, int offset, int correlationId)
     {
         var request = new ReplicationRequest
         {
