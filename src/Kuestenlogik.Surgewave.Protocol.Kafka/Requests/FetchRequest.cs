@@ -298,7 +298,9 @@ public sealed class FetchResponse : KafkaResponse
         public long LogStartOffset { get; init; } = -1;
         /// <summary>Preferred read replica for follower fetching (v11+)</summary>
         public int PreferredReadReplica { get; init; } = -1;
-        public required byte[] RecordSet { get; init; }
+        // ReadOnlyMemory, not byte[]: the fetch handler serves the record set straight from the
+        // storage read without a defensive ToArray copy per partition (#78).
+        public required ReadOnlyMemory<byte> RecordSet { get; init; }
 
         /// <summary>
         /// Diverging epoch information for truncation detection (v12+ tagged field, tag 0).
@@ -465,7 +467,7 @@ public sealed class FetchResponse : KafkaResponse
                 {
                     writer.WriteInt32(partition.RecordSet.Length);
                 }
-                writer.WriteRaw(partition.RecordSet);
+                writer.WriteRaw(partition.RecordSet.Span);
 
                 // Partition tagged fields (v12+)
                 // Tags: 0=DivergingEpoch, 1=CurrentLeader, 2=SnapshotId
