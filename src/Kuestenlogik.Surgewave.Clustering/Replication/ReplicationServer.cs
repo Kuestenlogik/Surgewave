@@ -657,15 +657,16 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
     /// <summary>
     /// Per-partition fetch result gathered in pass 1 of <see cref="HandleFetchAsync"/> so the exact
-    /// response size is known before serializing. <see cref="Batches"/> is <c>null</c> for an error
-    /// partition (which serializes with zero-length records).
+    /// response size is known before serializing. <see cref="Records"/> is the concatenated record
+    /// batches as a single contiguous slice (empty for an error partition, which serializes with
+    /// zero-length records).
     /// </summary>
     private readonly record struct FetchPartitionResult(
         int Partition,
         ClusterRpcStatus Status,
         long HighWatermark,
         long LogStartOffset,
-        List<byte[]>? Batches,
+        ReadOnlyMemory<byte> Records,
         int BatchBytes);
 
     /// <summary>Fixed serialized size of one fetch partition response, excluding the record batches.</summary>
@@ -695,12 +696,15 @@ public sealed partial class ReplicationServer : IAsyncDisposable
                 if (!_replicaManager.IsLeader(tp))
                 {
                     partitions.Add(new FetchPartitionResult(
-                        partitionData.Partition, ClusterRpcStatus.NotLeaderForPartition, 0L, 0L, null, 0));
+                        partitionData.Partition, ClusterRpcStatus.NotLeaderForPartition, 0L, 0L, default, 0));
                     bodySize += FetchPartitionFixedBytes;
                     continue;
                 }
 
-                var batches = await _logManager.ReadBatchesAsync(
+                // Contiguous read: one slice over the concatenated batches instead of a List<byte[]> plus
+                // its per-batch heap arrays. The returned memory stays valid until pass 2 copies it into
+                // the frame (same lifetime the client fetch path already relies on).
+                var (records, _) = await _logManager.ReadBatchesContiguousAsync(
                     tp, partitionData.FetchOffset, partitionData.PartitionMaxBytes, ct);
 
                 // Update follower position for ISR tracking
@@ -709,13 +713,9 @@ public sealed partial class ReplicationServer : IAsyncDisposable
                 var hw = _replicaManager.GetHighWatermark(tp);
                 var log = _logManager.GetOrCreateLog(tp);
 
-                var batchBytes = 0;
-                foreach (var batch in batches)
-                    batchBytes += batch.Length;
-
                 partitions.Add(new FetchPartitionResult(
-                    partitionData.Partition, ClusterRpcStatus.None, hw, log.LogStartOffset, batches, batchBytes));
-                bodySize += FetchPartitionFixedBytes + batchBytes;
+                    partitionData.Partition, ClusterRpcStatus.None, hw, log.LogStartOffset, records, records.Length));
+                bodySize += FetchPartitionFixedBytes + records.Length;
             }
 
             topics.Add((name, partitions));
@@ -748,13 +748,10 @@ public sealed partial class ReplicationServer : IAsyncDisposable
                 BinaryPrimitives.WriteInt32BigEndian(span[o..], -1); o += 4;   // preferred read replica
                 BinaryPrimitives.WriteInt32BigEndian(span[o..], p.BatchBytes); o += 4;
 
-                if (p.Batches is null)
+                if (p.Records.Length == 0)
                     continue;
-                foreach (var batch in p.Batches)
-                {
-                    batch.CopyTo(span[o..]);
-                    o += batch.Length;
-                }
+                p.Records.Span.CopyTo(span[o..]);
+                o += p.Records.Length;
             }
         }
 
