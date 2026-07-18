@@ -39,6 +39,13 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private Task? _acceptTask;
 
+    /// <summary>
+    /// The actual bound endpoint once started — test-only (via InternalsVisibleTo), so a harness can
+    /// start the server on an ephemeral port (<c>ReplicationPort = 0</c>) and connect a follower to the
+    /// real port. Not part of the public API.
+    /// </summary>
+    internal IPEndPoint? BoundEndPoint => _listener?.LocalEndPoint;
+
     public ReplicationServer(
         ILogger<ReplicationServer> logger,
         ClusterState clusterState,
