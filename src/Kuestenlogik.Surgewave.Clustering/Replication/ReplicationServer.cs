@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Net;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
@@ -502,7 +503,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return request;
     }
 
-    private async Task<byte[]> ProcessRequestAsync(ReplicationRequest request, CancellationToken ct)
+    private async Task<PooledFrame> ProcessRequestAsync(ReplicationRequest request, CancellationToken ct)
     {
         return request.ApiKey switch
         {
@@ -516,7 +517,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         };
     }
 
-    private byte[] HandleMetadataUpdate(ReplicationRequest request)
+    private PooledFrame HandleMetadataUpdate(ReplicationRequest request)
     {
         if (_metadataStateMachine == null || request.MetadataUpdateRequest == null)
         {
@@ -557,10 +558,10 @@ public sealed partial class ReplicationServer : IAsyncDisposable
             new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.None, _clusterState.MetadataVersion));
     }
 
-    private static byte[] SerializeMetadataUpdateResponse(int correlationId, MetadataUpdateResponse response)
+    private static PooledFrame SerializeMetadataUpdateResponse(int correlationId, MetadataUpdateResponse response)
     {
         var frame = NewFrame(18, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.BrokerId);
         BinaryPrimitives.WriteInt16BigEndian(span[(o + 8)..], response.ErrorCode);
@@ -568,7 +569,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return frame;
     }
 
-    private async Task<byte[]> HandleRequestVoteAsync(ReplicationRequest request, CancellationToken ct)
+    private async Task<PooledFrame> HandleRequestVoteAsync(ReplicationRequest request, CancellationToken ct)
     {
         if (_raftNode == null || request.RequestVoteRequest == null)
         {
@@ -579,7 +580,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return SerializeRequestVoteResponse(request.CorrelationId, response);
     }
 
-    private async Task<byte[]> HandleAppendEntriesAsync(ReplicationRequest request, CancellationToken ct)
+    private async Task<PooledFrame> HandleAppendEntriesAsync(ReplicationRequest request, CancellationToken ct)
     {
         if (_raftNode == null || request.AppendEntriesRequest == null)
         {
@@ -590,7 +591,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return SerializeAppendEntriesResponse(request.CorrelationId, response);
     }
 
-    private async Task<byte[]> HandlePreVoteAsync(ReplicationRequest request, CancellationToken ct)
+    private async Task<PooledFrame> HandlePreVoteAsync(ReplicationRequest request, CancellationToken ct)
     {
         if (_raftNode == null || request.PreVoteRequest == null)
         {
@@ -601,38 +602,38 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return SerializePreVoteResponse(request.CorrelationId, response);
     }
 
-    private static byte[] SerializePreVoteResponse(int correlationId, PreVoteResponse response)
+    private static PooledFrame SerializePreVoteResponse(int correlationId, PreVoteResponse response)
     {
         var frame = NewFrame(9, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.Term);
-        frame[o + 8] = (byte)(response.VoteGranted ? 1 : 0);
+        span[o + 8] = (byte)(response.VoteGranted ? 1 : 0);
         return frame;
     }
 
-    private static byte[] SerializeRequestVoteResponse(int correlationId, RequestVoteResponse response)
+    private static PooledFrame SerializeRequestVoteResponse(int correlationId, RequestVoteResponse response)
     {
         var frame = NewFrame(9, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.Term);
-        frame[o + 8] = (byte)(response.VoteGranted ? 1 : 0);
+        span[o + 8] = (byte)(response.VoteGranted ? 1 : 0);
         return frame;
     }
 
-    private static byte[] SerializeAppendEntriesResponse(int correlationId, AppendEntriesResponse response)
+    private static PooledFrame SerializeAppendEntriesResponse(int correlationId, AppendEntriesResponse response)
     {
         var frame = NewFrame(17, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.Term);
-        frame[o + 8] = (byte)(response.Success ? 1 : 0);
+        span[o + 8] = (byte)(response.Success ? 1 : 0);
         BinaryPrimitives.WriteInt64BigEndian(span[(o + 9)..], response.MatchIndex);
         return frame;
     }
 
-    private byte[] HandleHeartbeat(ReplicationRequest request)
+    private PooledFrame HandleHeartbeat(ReplicationRequest request)
     {
         if (_heartbeatManager == null || request.HeartbeatRequest == null)
         {
@@ -643,15 +644,15 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return SerializeHeartbeatResponse(request.CorrelationId, response);
     }
 
-    private static byte[] SerializeHeartbeatResponse(int correlationId, HeartbeatResponse response)
+    private static PooledFrame SerializeHeartbeatResponse(int correlationId, HeartbeatResponse response)
     {
         var frame = NewFrame(21, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.BrokerId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 8)..], response.BrokerEpoch);
         BinaryPrimitives.WriteInt64BigEndian(span[(o + 12)..], response.Timestamp);
-        frame[o + 20] = (byte)(response.IsController ? 1 : 0);
+        span[o + 20] = (byte)(response.IsController ? 1 : 0);
         return frame;
     }
 
@@ -672,7 +673,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     /// <summary>Fixed serialized size of one fetch partition response, excluding the record batches.</summary>
     private const int FetchPartitionFixedBytes = 4 + 2 + 8 + 8 + 8 + 4 + 4 + 4;
 
-    private async Task<byte[]> HandleFetchAsync(ReplicationRequest request, CancellationToken ct)
+    private async Task<PooledFrame> HandleFetchAsync(ReplicationRequest request, CancellationToken ct)
     {
         var fetchRequest = request.FetchRequest!;
         var replicaId = fetchRequest.ReplicaId;
@@ -723,7 +724,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
         // Pass 2 — serialize into the exact-size frame.
         var frame = NewFrame(bodySize, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
 
         BinaryPrimitives.WriteInt32BigEndian(span[o..], request.CorrelationId); o += 4;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], 0); o += 4;            // throttle time
@@ -758,10 +759,10 @@ public sealed partial class ReplicationServer : IAsyncDisposable
         return frame;
     }
 
-    private static byte[] BuildErrorResponse(int correlationId, ClusterRpcStatus errorCode)
+    private static PooledFrame BuildErrorResponse(int correlationId, ClusterRpcStatus errorCode)
     {
         var frame = NewFrame(18, out var o);
-        var span = frame.AsSpan();
+        var span = frame.Span;
         BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
         BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], 0);              // throttle time
         BinaryPrimitives.WriteInt16BigEndian(span[(o + 8)..], (short)errorCode);
@@ -771,23 +772,46 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Allocate a response frame — <c>[int32 size][body]</c> — with the size prefix already filled in,
-    /// so <see cref="WriteResponseAsync"/> hands the complete frame to the transport in one write
-    /// (instead of a separate 4-byte prefix write per response). <paramref name="offset"/> points at
-    /// the body start; every response builder in this class returns such a frame.
+    /// A response frame — <c>[int32 size][body]</c> — backed by a pooled array. The array is rented
+    /// from <see cref="ArrayPool{T}"/> and may be larger than requested, so <see cref="Length"/> travels
+    /// with it: <see cref="Span"/>/<see cref="Memory"/> expose exactly the frame bytes (the padded tail
+    /// is never written or sent, keeping the wire byte-identical). The buffer is returned to the pool by
+    /// <see cref="WriteResponseAsync"/> after a successful write.
     /// </summary>
-    private static byte[] NewFrame(int bodySize, out int offset)
+    private readonly struct PooledFrame(byte[] buffer, int length)
     {
-        var frame = new byte[4 + bodySize];
-        BinaryPrimitives.WriteInt32BigEndian(frame, bodySize);
-        offset = 4;
-        return frame;
+        public byte[] Buffer { get; } = buffer;
+        public int Length { get; } = length;
+        public Span<byte> Span => Buffer.AsSpan(0, Length);
+        public ReadOnlyMemory<byte> Memory => Buffer.AsMemory(0, Length);
     }
 
-    private static async Task WriteResponseAsync(Stream stream, byte[] frame, CancellationToken ct)
+    /// <summary>
+    /// Rent a response frame — <c>[int32 size][body]</c> — from the shared array pool with the size
+    /// prefix already filled in, so <see cref="WriteResponseAsync"/> hands the complete frame to the
+    /// transport in one write (instead of a separate 4-byte prefix write per response) and then returns
+    /// the buffer to the pool. <paramref name="offset"/> points at the body start; every response
+    /// builder in this class returns such a frame.
+    /// </summary>
+    private static PooledFrame NewFrame(int bodySize, out int offset)
     {
-        await stream.WriteAsync(frame, ct);
+        var length = 4 + bodySize;
+        var buffer = ArrayPool<byte>.Shared.Rent(length);
+        BinaryPrimitives.WriteInt32BigEndian(buffer, bodySize);
+        offset = 4;
+        return new PooledFrame(buffer, length);
+    }
+
+    private static async Task WriteResponseAsync(Stream stream, PooledFrame frame, CancellationToken ct)
+    {
+        // Return the pooled buffer ONLY after a fully successful write+flush. If either await throws
+        // (cancellation or I/O fault), a canceled-but-still-draining socket send may still pin the
+        // buffer; returning it then would let the next RPC rent+overwrite it mid-send and transmit
+        // corruption. On that path we deliberately drop the rent to GC — exactly the old non-pooled
+        // behavior, and the follower's CRC-Validate + idempotent re-fetch self-heals a garbled frame.
+        await stream.WriteAsync(frame.Memory, ct);
         await stream.FlushAsync(ct);
+        ArrayPool<byte>.Shared.Return(frame.Buffer);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Replication server started on port {Port}")]
