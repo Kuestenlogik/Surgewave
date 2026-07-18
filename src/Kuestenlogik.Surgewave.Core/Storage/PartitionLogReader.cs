@@ -55,33 +55,28 @@ internal sealed class PartitionLogReader : IDisposable
             // Active segment: use async I/O
             return await segment.ReadBatchesContiguousAsync(startOffset, maxBytes, cancellationToken);
         }
-        else
+
+        // Closed segment. The memory/mmap fast paths need a resolvable file position; the
+        // StorageEngineSegmentAdapter (default File engine) can never resolve one, so fall back to
+        // the segment's own read — which serves any committed offset via the engine. Without this
+        // fallback a read from a closed segment returns empty, silently losing rolled data (#99).
+        var filePosition = segment.GetFilePositionForOffset(startOffset);
+        if (filePosition == null)
         {
-            // Closed segment: use mmap for file segments, direct access for memory segments
-            if (segment is IMemoryLogSegment memorySegment)
-            {
-                return ReadBatchesContiguousFromMemorySegment(memorySegment, startOffset, maxBytes);
-            }
+            return await segment.ReadBatchesContiguousAsync(startOffset, maxBytes, cancellationToken);
+        }
 
-            if (segment is not IFileLogSegment fileSegment)
-            {
-                return (ReadOnlyMemory<byte>.Empty, []);
-            }
+        if (segment is IMemoryLogSegment memorySegment)
+        {
+            return ReadBatchesContiguousFromMemorySegment(memorySegment, startOffset, maxBytes);
+        }
 
-            var reader = GetOrCreateMmapReader(fileSegment);
-            if (reader == null)
-            {
-                return (ReadOnlyMemory<byte>.Empty, []);
-            }
-
-            var filePosition = segment.GetFilePositionForOffset(startOffset);
-            if (filePosition == null)
-            {
-                return (ReadOnlyMemory<byte>.Empty, []);
-            }
-
+        if (segment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
+        {
             return reader.ReadBatchesContiguous(filePosition.Value, maxBytes);
         }
+
+        return await segment.ReadBatchesContiguousAsync(startOffset, maxBytes, cancellationToken);
     }
 
     /// <summary>
@@ -110,35 +105,43 @@ internal sealed class PartitionLogReader : IDisposable
                     return (result.Data, result.BatchOffsets, idx);
                 }, cancellationToken));
             }
-            else if (currentSegment is IMemoryLogSegment memorySegment)
+            else if (currentSegment.GetFilePositionForOffset(segmentStartOffset) is { } filePosition)
             {
-                // Memory segment: direct memory access (synchronous, no I/O)
-                var seg = memorySegment;
+                if (currentSegment is IMemoryLogSegment memorySegment)
+                {
+                    // Memory segment: direct memory access (synchronous, no I/O)
+                    var seg = memorySegment;
+                    var startOff = segmentStartOffset;
+                    var toRead = bytesToRead;
+                    readTasks.Add(Task.Run(() =>
+                    {
+                        var result = ReadBatchesContiguousFromMemorySegment(seg, startOff, toRead);
+                        return (result.Data, result.BatchOffsets, idx);
+                    }, cancellationToken));
+                }
+                else if (currentSegment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
+                {
+                    // File segment: use mmap (synchronous but fast)
+                    readTasks.Add(Task.Run(() =>
+                    {
+                        var result = reader.ReadBatchesContiguous(filePosition, bytesToRead);
+                        return ((ReadOnlyMemory<byte>)result.Data, result.BatchOffsets, idx);
+                    }, cancellationToken));
+                }
+            }
+            else
+            {
+                // No resolvable fast-path position (StorageEngineSegmentAdapter over the File
+                // engine): read via the segment's own contiguous read, else the closed segment
+                // silently returns empty and rolled data is lost (#99).
+                var seg = currentSegment;
                 var startOff = segmentStartOffset;
                 var toRead = bytesToRead;
-                readTasks.Add(Task.Run(() =>
+                readTasks.Add(Task.Run(async () =>
                 {
-                    var result = ReadBatchesContiguousFromMemorySegment(seg, startOff, toRead);
+                    var result = await seg.ReadBatchesContiguousAsync(startOff, toRead, cancellationToken);
                     return (result.Data, result.BatchOffsets, idx);
                 }, cancellationToken));
-            }
-            else if (currentSegment is IFileLogSegment fileSegment)
-            {
-                // File segment: use mmap (synchronous but fast)
-                var reader = GetOrCreateMmapReader(fileSegment);
-                if (reader != null)
-                {
-                    var filePosition = currentSegment.GetFilePositionForOffset(segmentStartOffset);
-                    if (filePosition != null)
-                    {
-                        var fp = filePosition.Value;
-                        readTasks.Add(Task.Run(() =>
-                        {
-                            var result = reader.ReadBatchesContiguous(fp, bytesToRead);
-                            return ((ReadOnlyMemory<byte>)result.Data, result.BatchOffsets, idx);
-                        }, cancellationToken));
-                    }
-                }
             }
 
             // Estimate bytes we'll get (we don't know exact until read completes)
