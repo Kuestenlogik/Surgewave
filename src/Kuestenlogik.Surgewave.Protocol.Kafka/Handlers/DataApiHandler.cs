@@ -523,7 +523,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         Partition = partitionData.Partition,
                         ErrorCode = ErrorCode.TopicAuthorizationFailed,
                         HighWatermark = 0,
-                        RecordSet = []
+                        RecordSet = ReadOnlyMemory<byte>.Empty
                     });
                 }
                 responses.Add(new FetchResponse.FetchableTopicResponse
@@ -561,7 +561,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         || (_delayIndex != null && IsDelayDeliveryEnabled(topic) && _delayIndex.HasDelayedRecords(topicPartition))
                         || (_ttlIndex != null && IsTtlEnabled(topic) && _ttlIndex.HasTtlRecords(topicPartition));
 
-                    byte[] recordSet;
+                    ReadOnlyMemory<byte> recordSet;
                     int messageCount;
 
                     // Disaggregated read fallback: when the topic uses
@@ -583,7 +583,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             cancellationToken).ConfigureAwait(false);
                         if (disagRead.HitManifest)
                         {
-                            recordSet = disagRead.LogBytes.ToArray();
+                            recordSet = disagRead.LogBytes;   // already ReadOnlyMemory; no copy (#78)
                             messageCount = 0;
                             // Same record-count tallying pattern as the
                             // contiguous fast path: walk the concatenated
@@ -619,9 +619,11 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
                         BatchesRead(batchOffsets.Count, topic, partitionData.Partition, partitionData.FetchOffset);
 
-                        recordSet = contiguousData.Length > 0
-                            ? contiguousData.ToArray()   // single copy for the response
-                            : Array.Empty<byte>();
+                        // Serve the contiguous read straight into the response — no defensive copy.
+                        // The bytes are owned by the read (the File adapter's standalone array, or the
+                        // memory engine's append-only GC-rooted slice) and are only read from here on
+                        // (serialized into the thread-local writer, then the PipeWriter span) (#78).
+                        recordSet = contiguousData;
 
                         messageCount = 0;
                         foreach (var offset in batchOffsets)
@@ -709,7 +711,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         Partition = partitionData.Partition,
                         ErrorCode = ErrorCode.Unknown,
                         HighWatermark = 0,
-                        RecordSet = []
+                        RecordSet = ReadOnlyMemory<byte>.Empty
                     });
                 }
             }
