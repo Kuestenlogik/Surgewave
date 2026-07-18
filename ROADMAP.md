@@ -48,8 +48,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
-- [#92](https://github.com/Kuestenlogik/Surgewave/issues/92) **bug(clustering): follower ingest stamps a whole-blob CRC into the first batch's header on multi-batch fetches** 
-- [#93](https://github.com/Kuestenlogik/Surgewave/issues/93) **bug(clustering): follower ingest counts only the first batch's records — multi-batch fetches duplicate data on disk** 
 
 ---
 
