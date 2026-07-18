@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
@@ -393,9 +394,15 @@ internal sealed class ReplicaFetchResponse
 /// </summary>
 internal sealed class LeaderConnection : IAsyncDisposable
 {
+    /// <summary>Upper bound on a fetch response body, mirroring the leader's own frame cap.</summary>
+    private const int MaxResponseBytes = 100 * 1024 * 1024;
+
     private readonly BrokerNode _broker;
     private readonly IPeerTransport _peerTransport;
     private readonly ILogger _logger;
+    // Reused per connection: AcquireStreamAsync serializes reads, so exactly one fetch response is
+    // being read at a time and the 4-byte size prefix never needs a fresh allocation.
+    private readonly byte[] _sizeBuffer = new byte[4];
     private IPeerConnection? _connection;
     private int _correlationId;
 
@@ -426,9 +433,17 @@ internal sealed class LeaderConnection : IAsyncDisposable
         await lease.Stream.WriteAsync(requestBytes, ct);
         await lease.Stream.FlushAsync(ct);
 
-        var responseBytes = await ReadResponseAsync(lease.Stream, ct);
-
-        return ParseFetchResponse(responseBytes);
+        var (body, length) = await ReadResponseAsync(lease.Stream, ct);
+        try
+        {
+            // ParseFetchResponse is synchronous and ToArrays every partition's records, so nothing
+            // references the pooled body once it returns — safe to hand back to the pool here.
+            return ParseFetchResponse(body, length);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(body);
+        }
     }
 
     private byte[] SerializeFetchRequest(ReplicaFetchRequest request, int correlationId)
@@ -496,19 +511,23 @@ internal sealed class LeaderConnection : IAsyncDisposable
         return data;
     }
 
-    private static async Task<byte[]> ReadResponseAsync(Stream stream, CancellationToken ct)
+    private async Task<(byte[] Buffer, int Length)> ReadResponseAsync(Stream stream, CancellationToken ct)
     {
-        var sizeBuffer = new byte[4];
-        await stream.ReadExactlyAsync(sizeBuffer, ct);
-        var size = BinaryPrimitives.ReadInt32BigEndian(sizeBuffer);
+        await stream.ReadExactlyAsync(_sizeBuffer, ct);
+        var size = BinaryPrimitives.ReadInt32BigEndian(_sizeBuffer);
+        if (size <= 0 || size > MaxResponseBytes)
+            throw new InvalidDataException($"Replication fetch response size {size} is out of range (0, {MaxResponseBytes}].");
 
-        var body = new byte[size];
-        await stream.ReadExactlyAsync(body, ct);
+        // Rent the body instead of allocating it: for a real fetch this is routinely >=1MB (an LOH
+        // allocation per RPC). The rent may be larger than `size`; the caller parses exactly `size`
+        // bytes and returns the buffer to the pool once parsing completes.
+        var body = ArrayPool<byte>.Shared.Rent(size);
+        await stream.ReadExactlyAsync(body.AsMemory(0, size), ct);
 
-        return body;
+        return (body, size);
     }
 
-    private ReplicaFetchResponse ParseFetchResponse(byte[] data)
+    private ReplicaFetchResponse ParseFetchResponse(byte[] data, int length)
     {
         var response = new ReplicaFetchResponse { Topics = [] };
         var offset = 0;
@@ -582,6 +601,11 @@ internal sealed class LeaderConnection : IAsyncDisposable
 
                 if (recordsLen > 0)
                 {
+                    // Bound the record slice against the actual response length: the body is now a
+                    // (possibly larger) pooled rent, so a malformed over-claim must not read past the
+                    // real bytes into the rented tail.
+                    if (recordsLen > length - offset)
+                        throw new InvalidDataException($"Replication fetch response truncated: record batch of {recordsLen} bytes exceeds the {length}-byte body at offset {offset}.");
                     partitionResponse.RecordBatch = data.AsSpan(offset, recordsLen).ToArray();
                     offset += recordsLen;
                 }
