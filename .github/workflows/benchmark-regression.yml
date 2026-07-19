@@ -31,7 +31,7 @@ jobs:
       - name: Run unit benchmarks
         run: >
           dotnet run --project benchmarks/Kuestenlogik.Surgewave.Benchmarks.Unit -c Release --
-          --filter '*ProtocolBenchmarks*' '*CompressionBenchmarks*' '*SerializationBenchmarks*' '*ReplicationAppendBenchmarks*'
+          --filter '*ProtocolBenchmarks*' '*CompressionBenchmarks*' '*SerializationBenchmarks*' '*ReplicationAppendBenchmarks*' '*Crc32CBenchmarks*'
           --exporters json --job short --buildTimeout 900 --artifacts artifacts/benchmarks
 
       # BenchmarkDotNet writes one report per benchmark class (named *-report-full-compressed.json
