@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -44,7 +44,7 @@ jobs:
       # dead internal links between site/ pages and docs/ markdown without
       # waiting for the full build to come up red.
       - name: Setup Node for link-check
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
 
@@ -88,7 +88,7 @@ jobs:
       # already-rendered HTML — marketing + docs in one index. No runtime
       # server, shipped as static JS alongside the site.
       - name: Setup Node for Pagefind
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
 
