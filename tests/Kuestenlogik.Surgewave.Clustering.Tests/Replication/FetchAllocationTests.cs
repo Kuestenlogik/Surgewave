@@ -95,10 +95,15 @@ public sealed class FetchAllocationTests
         var allocPerFetch = (GC.GetTotalAllocatedBytes(precise: true) - allocBefore) / n;
         var gen2 = GC.CollectionCount(2) - gen2Before;
 
-        // Measured baseline: ~5.5 KB/fetch and 0 Gen2 for a 2 MB frame (all pooled). A reintroduced
-        // per-frame/body/partition copy would add ~2 MB/fetch — an ~8x jump past this ceiling plus Gen2 churn.
+        // gen2 <= 1 is the tight, robust guard: the pooled path keeps a 2 MB frame off the LOH, so 30
+        // fetches trigger no Gen2; a reintroduced ~2 MB copy would push ~60 MB through the LOH and force
+        // several Gen2 collections. The allocPerFetch ceiling is a coarse magnitude backstop only, set
+        // WELL above the uninstrumented baseline (~5.5 KB/fetch): under coverlet coverage instrumentation
+        // GC.GetTotalAllocatedBytes is inflated (~400 KB/fetch observed) since every executed line records
+        // a hit, so the ceiling must clear that while still catching an MB-scale regression (a 2 MB copy
+        // lands at ~2.4 MB even instrumented).
         Assert.True(gen2 <= 1, $"expected no Gen2/LOH churn from the pooled fetch path, saw {gen2} collection(s)");
-        Assert.True(allocPerFetch < 256 * 1024,
+        Assert.True(allocPerFetch < 1_500_000,
             $"alloc/fetch={allocPerFetch} B for a ~2 MB frame — a reintroduced per-frame/body/partition copy would land here");
     }
 
