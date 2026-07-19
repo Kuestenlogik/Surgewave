@@ -181,6 +181,34 @@
       "stdDevNs": 0.7426602589244863,
       "allocatedBytes": 72,
       "operationsPerSecond": 18026457.20697783
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.Crc32CBenchmarks.Serial_16KB": {
+      "meanNs": 1902.0305302937825,
+      "medianNs": 1901.9765157699585,
+      "stdDevNs": 0.22326464912979294,
+      "allocatedBytes": 0,
+      "operationsPerSecond": 525753.916182167
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.Crc32CBenchmarks.Interleaved_16KB": {
+      "meanNs": 752.9114866256714,
+      "medianNs": 752.9365930557251,
+      "stdDevNs": 0.3977905595761645,
+      "allocatedBytes": 0,
+      "operationsPerSecond": 1328177.372458092
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.Crc32CBenchmarks.Serial_64KB": {
+      "meanNs": 7650.989528949444,
+      "medianNs": 7651.015167236328,
+      "stdDevNs": 1.1363052019130382,
+      "allocatedBytes": 0,
+      "operationsPerSecond": 130702.04791370429
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.Crc32CBenchmarks.Interleaved_64KB": {
+      "meanNs": 2867.2410673413956,
+      "medianNs": 2866.2834873199463,
+      "stdDevNs": 2.629171092227581,
+      "allocatedBytes": 0,
+      "operationsPerSecond": 348767.3259811511
     }
   }
 }

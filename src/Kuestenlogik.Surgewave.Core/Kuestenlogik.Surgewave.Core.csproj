@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Core.Tests" />
+    <!-- Crc32CBenchmarks measures the internal serial vs interleaved CRC32C kernels head-to-head (#85 S2). -->
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Benchmarks.Unit" />
   </ItemGroup>
 
   <ItemGroup>
