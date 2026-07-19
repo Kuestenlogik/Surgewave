@@ -57,13 +57,13 @@ At the storage layer, `DefaultSurgewaveBufferPool` and `PooledSurgewaveBuffer` p
 
 ### SIMD Optimizations
 
-Five SIMD utility classes in `Kuestenlogik.Surgewave.Core.Util` accelerate hot-path operations:
+Three SIMD utility classes in `Kuestenlogik.Surgewave.Core.Util` accelerate hot-path operations:
 
 - **`SimdSpanComparer`** --- AVX2/SSE2 byte-span equality comparison and pattern search. Processes 32 bytes per cycle on AVX2, 16 bytes on SSE2, with scalar fallback. Used for header key matching in the message pipeline.
-- **`SimdBufferCopy`** --- AVX2/SSE2 bulk memory copy. Processes 256 bytes at a time (8 x 32-byte vectors) for cache-line efficiency. Includes `Fill` and `Zero` operations. Threshold at 256 bytes below which `Span.CopyTo` is faster.
-- **`SimdVarIntScanner`** --- AVX2/SSE2 VarInt boundary detection using `MoveMask` to find terminator bytes (bit 7 = 0) across 16/32 bytes simultaneously. Enables fast record batch parsing by locating VarInt boundaries without decoding. Includes `BatchReadVarInts`, `ScanRecordOffsets`, and `ExtractKeyValue` for zero-copy record field extraction.
 - **`SimdBigEndian`** --- SSSE3 `PSHUFB` / AVX2 `VPSHUFB` byte-swap operations for batch big-endian encoding/decoding. Processes 4 Int64s or 8 Int32s per AVX2 cycle using pre-computed shuffle masks. Specialized two- and four-element variants (`Write2Int64sBigEndian`, `Write4Int32sBigEndian`) for common patterns like offset+timestamp pairs.
 - **`SimdByteArrayComparer`** --- SIMD-accelerated byte array equality for use in dictionary lookups and hash comparisons.
+
+> Note (ADR 015, #85): the earlier `SimdBufferCopy` and `SimdVarIntScanner` helpers were removed as dead code — they had no production callers (the record-batch parser decodes varints via `VarintCodec`, and bulk copies use `Span.CopyTo`/pooled buffers). CRC acceleration is pursued in `Crc32C.cs` (hardware CRC32 + interleaving), not a hand-rolled SIMD layer.
 
 All SIMD utilities use `[MethodImpl(MethodImplOptions.AggressiveInlining)]` and provide transparent scalar fallbacks, so the same code runs correctly on hardware without AVX2/SSE2 support.
 

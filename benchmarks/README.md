@@ -77,7 +77,6 @@ Includes:
 - `ProtocolBenchmarks` - Kafka protocol parsing
 - `SimdBigEndianBenchmarks` - SIMD-optimized byte operations
 - `ByteArrayComparerBenchmarks` - SIMD key comparison
-- `VarIntScannerBenchmarks` - VarInt parsing
 - `BufferPoolBenchmarks` - Memory pool vs heap allocation
 - `StartupBenchmarks` - Initialization overhead
 

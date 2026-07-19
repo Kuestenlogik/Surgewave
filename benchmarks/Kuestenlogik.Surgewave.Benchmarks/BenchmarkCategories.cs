@@ -17,7 +17,6 @@ namespace Kuestenlogik.Surgewave.Benchmarks;
 /// - SimdBigEndianBenchmarks: SIMD-accelerated big-endian conversions
 /// - BufferPoolBenchmarks: ArrayPool performance
 /// - ByteArrayComparerBenchmarks: Key comparison algorithms
-/// - VarIntScannerBenchmarks: Variable-length integer parsing
 /// - StorageBenchmarks: Log append/read operations (uses temp files)
 /// - MemoryMappedReadBenchmarks: Memory-mapped file read performance
 /// - ThroughputBenchmarks: Internal serialization throughput
@@ -75,7 +74,6 @@ public static class BenchmarkCategories
         "SimdBigEndianBenchmarks",
         "BufferPoolBenchmarks",
         "ByteArrayComparerBenchmarks",
-        "VarIntScannerBenchmarks",
         "StorageBenchmarks",
         "MemoryMappedReadBenchmarks",
         "ThroughputBenchmarks",
