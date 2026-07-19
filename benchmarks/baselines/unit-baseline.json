@@ -167,6 +167,20 @@
       "stdDevNs": 98.34362074189858,
       "allocatedBytes": 64056,
       "operationsPerSecond": 28096.890654897572
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.ReplicationAppendBenchmarks.Split_ByteArray": {
+      "meanNs": 55.79623908599218,
+      "medianNs": 55.958534598350525,
+      "stdDevNs": 0.5299168498304988,
+      "allocatedBytes": 72,
+      "operationsPerSecond": 17922354.918201882
+    },
+    "Kuestenlogik.Surgewave.Benchmarks.Unit.ReplicationAppendBenchmarks.Split_ReadOnlyMemory": {
+      "meanNs": 55.474017357826234,
+      "medianNs": 55.38093024492264,
+      "stdDevNs": 0.7426602589244863,
+      "allocatedBytes": 72,
+      "operationsPerSecond": 18026457.20697783
     }
   }
 }

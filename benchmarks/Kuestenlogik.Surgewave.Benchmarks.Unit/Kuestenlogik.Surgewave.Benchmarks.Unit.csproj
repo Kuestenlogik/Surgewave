@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
