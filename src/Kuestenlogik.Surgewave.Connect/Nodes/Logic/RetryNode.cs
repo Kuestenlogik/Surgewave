@@ -40,6 +40,10 @@ internal sealed class RetryNodeTask : ProcessorTask
     private long _maxBackoffMs = 30000;
 
     private readonly ConcurrentQueue<RetryEntry> _retryQueue = new();
+    // Serializes emissions/queue mutations between the pipeline thread (PutAsync)
+    // and the background retry timer thread. EmittedRecords (base class) is a plain
+    // List and must never be mutated from two threads concurrently.
+    private readonly Lock _gate = new();
     private Timer? _retryTimer;
 
     public override void Start(IDictionary<string, string> config)
@@ -67,35 +71,38 @@ internal sealed class RetryNodeTask : ProcessorTask
 
     public override Task PutAsync(IReadOnlyList<SinkRecord> records, CancellationToken cancellationToken)
     {
-        foreach (var record in records)
+        lock (_gate)
         {
-            if (!HasErrorMarker(record))
+            foreach (var record in records)
             {
-                // Pass-through: no error markers, emit directly
-                var key = GetKeyString(record);
-                var headers = ConvertHeaders(record.Headers);
-                EmitRecord(key, record.Value, headers);
-                continue;
+                if (!HasErrorMarker(record))
+                {
+                    // Pass-through: no error markers, emit directly
+                    var key = GetKeyString(record);
+                    var headers = ConvertHeaders(record.Headers);
+                    EmitRecord(key, record.Value, headers);
+                    continue;
+                }
+
+                var retryCount = GetRetryCount(record);
+
+                if (retryCount >= _maxAttempts)
+                {
+                    // Max retries exceeded — emit error
+                    EmitError(record, new InvalidOperationException(
+                        $"Max retry attempts ({_maxAttempts}) exceeded after {retryCount} retries"));
+                    continue;
+                }
+
+                // Calculate backoff
+                var backoff = (long)(_backoffMs * Math.Pow(_backoffMultiplier, retryCount));
+                if (backoff > _maxBackoffMs)
+                    backoff = _maxBackoffMs;
+
+                var nextRetryAt = DateTimeOffset.UtcNow.AddMilliseconds(backoff);
+
+                _retryQueue.Enqueue(new RetryEntry(record, retryCount + 1, nextRetryAt));
             }
-
-            var retryCount = GetRetryCount(record);
-
-            if (retryCount >= _maxAttempts)
-            {
-                // Max retries exceeded — emit error
-                EmitError(record, new InvalidOperationException(
-                    $"Max retry attempts ({_maxAttempts}) exceeded after {retryCount} retries"));
-                continue;
-            }
-
-            // Calculate backoff
-            var backoff = (long)(_backoffMs * Math.Pow(_backoffMultiplier, retryCount));
-            if (backoff > _maxBackoffMs)
-                backoff = _maxBackoffMs;
-
-            var nextRetryAt = DateTimeOffset.UtcNow.AddMilliseconds(backoff);
-
-            _retryQueue.Enqueue(new RetryEntry(record, retryCount + 1, nextRetryAt));
         }
 
         return Task.CompletedTask;
@@ -103,29 +110,34 @@ internal sealed class RetryNodeTask : ProcessorTask
 
     internal void OnRetryTimer(object? state)
     {
-        var now = DateTimeOffset.UtcNow;
-        var requeue = new List<RetryEntry>();
-
-        while (_retryQueue.TryDequeue(out var entry))
+        // Serialize against PutAsync and any overlapping timer callback so that
+        // emissions into the (non-thread-safe) EmittedRecords list never race.
+        lock (_gate)
         {
-            if (entry.NextRetryAt <= now)
-            {
-                // Re-emit with updated retry count header
-                var key = GetKeyString(entry.Record);
-                var headers = ConvertHeaders(entry.Record.Headers) ?? [];
-                headers["_retry_count"] = entry.RetryCount.ToString(CultureInfo.InvariantCulture);
-                headers["_retry_next_at"] = "";
-                EmitRecord(key, entry.Record.Value, headers);
-            }
-            else
-            {
-                requeue.Add(entry);
-            }
-        }
+            var now = DateTimeOffset.UtcNow;
+            var requeue = new List<RetryEntry>();
 
-        foreach (var entry in requeue)
-        {
-            _retryQueue.Enqueue(entry);
+            while (_retryQueue.TryDequeue(out var entry))
+            {
+                if (entry.NextRetryAt <= now)
+                {
+                    // Re-emit with updated retry count header
+                    var key = GetKeyString(entry.Record);
+                    var headers = ConvertHeaders(entry.Record.Headers) ?? [];
+                    headers["_retry_count"] = entry.RetryCount.ToString(CultureInfo.InvariantCulture);
+                    headers["_retry_next_at"] = "";
+                    EmitRecord(key, entry.Record.Value, headers);
+                }
+                else
+                {
+                    requeue.Add(entry);
+                }
+            }
+
+            foreach (var entry in requeue)
+            {
+                _retryQueue.Enqueue(entry);
+            }
         }
     }
 
