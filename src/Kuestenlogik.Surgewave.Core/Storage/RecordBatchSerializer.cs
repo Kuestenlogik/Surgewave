@@ -469,66 +469,6 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
         return System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(recordBatch.Slice(57, 4));
     }
 
-    #region BigEndian Read/Write Helpers
-
-    private static uint ReadUInt32BigEndian(BinaryReader reader)
-    {
-        Span<byte> buffer = stackalloc byte[4];
-        reader.Read(buffer);
-        return System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(buffer);
-    }
-
-    private static short ReadInt16BigEndian(BinaryReader reader)
-    {
-        Span<byte> buffer = stackalloc byte[2];
-        reader.Read(buffer);
-        return System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(buffer);
-    }
-
-    private static int ReadInt32BigEndian(BinaryReader reader)
-    {
-        Span<byte> buffer = stackalloc byte[4];
-        reader.Read(buffer);
-        return System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(buffer);
-    }
-
-    private static long ReadInt64BigEndian(BinaryReader reader)
-    {
-        Span<byte> buffer = stackalloc byte[8];
-        reader.Read(buffer);
-        return System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(buffer);
-    }
-
-    private static void WriteBigEndianInt16(BinaryWriter writer, short value)
-    {
-        Span<byte> buffer = stackalloc byte[2];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt16BigEndian(buffer, value);
-        writer.Write(buffer);
-    }
-
-    private static void WriteBigEndianInt32(BinaryWriter writer, int value)
-    {
-        Span<byte> buffer = stackalloc byte[4];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(buffer, value);
-        writer.Write(buffer);
-    }
-
-    private static void WriteBigEndianInt64(BinaryWriter writer, long value)
-    {
-        Span<byte> buffer = stackalloc byte[8];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(buffer, value);
-        writer.Write(buffer);
-    }
-
-    private static void WriteBigEndianUInt32(BinaryWriter writer, uint value)
-    {
-        Span<byte> buffer = stackalloc byte[4];
-        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer, value);
-        writer.Write(buffer);
-    }
-
-    #endregion
-
     /// <summary>
     /// Translate the native-wire header block (int32 count + int32-prefixed
     /// key/value pairs, big-endian) into the Kafka RecordBatch header layout

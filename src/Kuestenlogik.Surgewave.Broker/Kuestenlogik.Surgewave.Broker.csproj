@@ -45,6 +45,15 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+    <!-- DATAS (dynamic heap-count adaptation) is ON by default for ServerGC on .NET 9/10.
+         We pin it OFF to keep the full one-heap-per-core ServerGC configuration: the broker
+         targets max throughput (Aeron/Kafka-competitive) plus low P99 on a dedicated box, and
+         DATAS trades peak throughput / adds heap-count-ramp variance for memory adaptivity.
+         Pinning here also stops a throughput-critical knob from silently flipping under a TFM
+         bump, and restores the behavior all perf work (#73-#87) was validated under. Reversible:
+         memory-constrained container deployments can re-enable it at deploy time via
+         DOTNET_GCDynamicAdaptationMode=1 (no rebuild). See #87. -->
+    <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
   </PropertyGroup>
 
   <!-- Container Publishing (.NET Native) -->

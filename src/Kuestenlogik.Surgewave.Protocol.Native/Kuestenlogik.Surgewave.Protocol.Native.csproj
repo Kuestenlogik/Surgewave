@@ -3,6 +3,8 @@
   <PropertyGroup>
     <Description>Surgewave Native Protocol definitions and utilities for high-performance binary communication</Description>
     <PackageTags>surgewave;kafka;protocol;native;binary</PackageTags>
+    <!-- Required for [module: SkipLocalsInit] to be honored by the compiler. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

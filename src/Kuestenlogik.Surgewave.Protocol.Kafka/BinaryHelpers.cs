@@ -43,7 +43,9 @@ public static class BinaryHelpers
     public static long ReadInt64BigEndian(BinaryReader reader)
     {
         Span<byte> buffer = stackalloc byte[8];
-        reader.Read(buffer);
+        int bytesRead = reader.Read(buffer);
+        if (bytesRead < 8)
+            throw new InvalidDataException($"Expected 8 bytes but read {bytesRead}");
         return BinaryPrimitives.ReadInt64BigEndian(buffer);
     }
 
