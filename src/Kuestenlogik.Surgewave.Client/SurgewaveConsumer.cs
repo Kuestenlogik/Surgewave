@@ -58,6 +58,23 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     // per delivered message (#80). Single-consumer-thread contract, same as _offsets. Invalidated
     // on Assign/Seek/retention-jump/reconnect so a relocated offset never serves a stale record.
     private readonly Dictionary<(string topic, int partition), (List<ReceivedMessage> Messages, int Index)> _decodedBuffers = [];
+    // Opt-in background prefetch (#80 C2): at most ONE in-flight fetch per partition
+    // (single-flight), armed when a fresh batch is adopted. A prefetched result is only
+    // ever adopted when its generation AND start offset still match the consumer state;
+    // Seek/Assign/reconnect/rebalance bump the generation so a stale result can never
+    // serve. Prefetch tasks swallow every error and return null — the synchronous fetch
+    // path owns error handling, reconnect and the retention jump. Commit safety:
+    // prefetching never touches _offsets. Single-consumer-thread contract, same as
+    // _offsets.
+    private readonly Dictionary<(string topic, int partition), PrefetchState> _prefetches = [];
+    private int _prefetchGeneration;
+    // Cancels in-flight prefetch fetches on disconnect/dispose. Without it, an orphaned
+    // prefetch awaiting a pipelined TCP response would hang forever after the transport
+    // is disposed (the reader loop exits without faulting pending requests) and leak
+    // its pooled buffers. Renewed on reconnect so new prefetches work again.
+    private CancellationTokenSource _prefetchCts = new();
+
+    private sealed record PrefetchState(Task<ReceiveResult?> Fetch, long StartOffset, int Generation);
     private readonly Dictionary<Type, Func<ConsumeResult<TKey, TValue>, CancellationToken, Task>> _handlers = [];
     private readonly HashSet<(string topic, int partition)> _pausedPartitions = [];
     private Func<ConsumeResult<TKey, TValue>, CancellationToken, Task>? _defaultHandler;
@@ -124,7 +141,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         _options.Validate();
 
         (_host, _port) = ParseBootstrapServers(_options.BootstrapServers!);
-        _client = new SurgewaveNativeClient(_host, _port, _options.Transport);
+        _client = CreateClient(_options, _host, _port);
         ConnectWithRetry();
     }
 
@@ -137,9 +154,19 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         _options.Validate();
 
         (_host, _port) = ParseBootstrapServers(_options.BootstrapServers!);
-        _client = new SurgewaveNativeClient(_host, _port, _options.Transport);
+        _client = CreateClient(_options, _host, _port);
         ConnectWithRetry();
     }
+
+    /// <summary>
+    /// Builds the native client — over the injected test transport when the
+    /// options carry one (#102), over a real connection otherwise.
+    /// </summary>
+    private static SurgewaveNativeClient CreateClient(
+        SurgewaveConsumerOptions<TKey, TValue> options, string host, int port, ILogger? logger = null)
+        => options.TransportFactory is { } factory
+            ? new SurgewaveNativeClient(factory())
+            : new SurgewaveNativeClient(host, port, options.Transport, logger: logger);
 
     private SurgewaveConsumer(SurgewaveConsumerOptions<TKey, TValue> options, SurgewaveNativeClient client, string host, int port)
     {
@@ -165,7 +192,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         options.Validate();
 
         var (host, port) = ParseBootstrapServers(options.BootstrapServers!);
-        var client = new SurgewaveNativeClient(host, port, options.Transport, logger: logger);
+        var client = CreateClient(options, host, port, logger);
         try
         {
             await client.ConnectAsync(cancellationToken);
@@ -190,7 +217,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         options.Validate();
 
         var (host, port) = ParseBootstrapServers(options.BootstrapServers!);
-        var client = new SurgewaveNativeClient(host, port, options.Transport, logger: logger);
+        var client = CreateClient(options, host, port, logger);
         try
         {
             await client.ConnectAsync(cancellationToken);
@@ -514,6 +541,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         ObjectDisposedException.ThrowIf(_disposed, this);
         _offsets[(topic, partition)] = offset;
         _decodedBuffers.Remove((topic, partition)); // offset moved — a stale buffer must not serve (#80)
+        _prefetchGeneration++; // an in-flight prefetch for the old position must not adopt (#80 C2)
     }
 
     /// <summary>
@@ -564,9 +592,17 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                     // A fetch would have observed cancellation here; a buffered serve must too.
                     cancellationToken.ThrowIfCancellationRequested();
                     var bufMsg = buffered.Messages[idx];
+                    // Deserialize BEFORE advancing: if the deserializer throws, the
+                    // position must not move, or auto-commit would commit an offset that
+                    // was never delivered (silent loss). The next call retries this record.
+                    var bufferedResult = await BuildConsumeResultAsync(topic, partition, bufMsg, cancellationToken).ConfigureAwait(false);
+                    // The deserializer awaited — discard if the partition was relocated
+                    // meanwhile (background rebalance), same guard as the fetch path.
+                    if (!_offsets.TryGetValue((topic, partition), out var offsetAfterDecode) || offsetAfterDecode != offset)
+                        continue;
                     _decodedBuffers[(topic, partition)] = (buffered.Messages, idx + 1);
                     _offsets[(topic, partition)] = bufMsg.Offset + 1;
-                    return await BuildConsumeResultAsync(topic, partition, bufMsg, cancellationToken).ConfigureAwait(false);
+                    return bufferedResult;
                 }
 
                 _decodedBuffers.Remove((topic, partition)); // exhausted — fall through to fetch
@@ -574,14 +610,44 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
 
             try
             {
-                // Per-partition long-poll budget: honour the caller's overall
-                // timeout. Without this, a Consume(timeout: 500ms) would still
-                // sit in a 5s long-poll per partition — N partitions × 5s on a
-                // drained topic blows past any test expectation.
-                var perPartitionWaitMs = Math.Max(1, (int)Math.Min(timeout.TotalMilliseconds, 5000));
-                var result = await _client.Messaging.ReceiveAsync(topic, partition, offset, _options.FetchMaxBytes, maxWaitMs: perPartitionWaitMs, cancellationToken);
+                ReceiveResult? result = null;
+
+                // Adopt a matching background prefetch instead of fetching (#80 C2).
+                // The entry is removed unconditionally: adopted or stale, the slot must
+                // free up so a new prefetch can arm for this partition.
+                if (_prefetches.Remove((topic, partition), out var prefetch)
+                    && prefetch.Generation == _prefetchGeneration
+                    && prefetch.StartOffset == offset)
+                {
+                    var prefetched = await prefetch.Fetch.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    // Only a non-empty result is adopted; empty/failed prefetches fall
+                    // through to the synchronous fetch, which owns long-polling, the
+                    // retention jump and connection-error handling.
+                    if (prefetched is { Messages.Count: > 0 })
+                        result = prefetched;
+                }
+
+                if (result is null)
+                {
+                    // Per-partition long-poll budget: honour the caller's overall
+                    // timeout. Without this, a Consume(timeout: 500ms) would still
+                    // sit in a 5s long-poll per partition — N partitions × 5s on a
+                    // drained topic blows past any test expectation.
+                    var perPartitionWaitMs = Math.Max(1, (int)Math.Min(timeout.TotalMilliseconds, 5000));
+                    result = await _client.Messaging.ReceiveAsync(topic, partition, offset, _options.FetchMaxBytes, maxWaitMs: perPartitionWaitMs, cancellationToken);
+                }
                 _isConnected = true;
                 _reconnectAttempts = 0;
+
+                // Re-validate before every state write below: while the fetch (or the
+                // adopted prefetch) was awaited, the heartbeat background task may have
+                // run a rebalance that relocated or revoked this partition. A result
+                // fetched for the old position must be discarded, never written back —
+                // otherwise it would overwrite the rejoined position and re-serve stale
+                // records (found by the #80 C2 adversarial review; the underlying
+                // background-mutation model is tracked separately).
+                if (!_offsets.TryGetValue((topic, partition), out var currentOffset) || currentOffset != offset)
+                    continue;
 
                 // Handle case where requested offset has no data but newer data exists
                 // This can happen when old segments were deleted (retention policy)
@@ -589,8 +655,13 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                 {
                     // Jump to latest available data
                     var latestOffset = await _client.Messaging.GetLatestOffsetAsync(topic, partition, cancellationToken);
-                    _offsets[(topic, partition)] = latestOffset;
-                    _decodedBuffers.Remove((topic, partition)); // offset relocated — drop stale buffer
+                    // Same guard: the jump itself awaited — only relocate if nothing
+                    // else moved the position meanwhile.
+                    if (_offsets.TryGetValue((topic, partition), out currentOffset) && currentOffset == offset)
+                    {
+                        _offsets[(topic, partition)] = latestOffset;
+                        _decodedBuffers.Remove((topic, partition)); // offset relocated — drop stale buffer
+                    }
                     continue;
                 }
 
@@ -605,11 +676,22 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                         continue;
                     }
                     var msg = result.Messages[firstIndex];
+                    // Deserialize BEFORE advancing: if the deserializer throws, the
+                    // position must not move, or auto-commit would commit an offset that
+                    // was never delivered (silent loss). The next call retries this record.
+                    var consumeResult = await BuildConsumeResultAsync(topic, partition, msg, cancellationToken).ConfigureAwait(false);
+                    // The deserializer awaited — re-validate once more before writing.
+                    if (!_offsets.TryGetValue((topic, partition), out currentOffset) || currentOffset != offset)
+                        continue;
                     // Keep the rest of the decoded batch to serve on subsequent calls (#80).
                     _decodedBuffers[(topic, partition)] = (result.Messages, firstIndex + 1);
                     _offsets[(topic, partition)] = msg.Offset + 1;
 
-                    return await BuildConsumeResultAsync(topic, partition, msg, cancellationToken).ConfigureAwait(false);
+                    // A fresh batch was adopted — arm the background fetch for the batch
+                    // after it so the next boundary costs no round-trip (#80 C2).
+                    StartPrefetch(topic, partition, result.Messages[^1].Offset + 1);
+
+                    return consumeResult;
                 }
             }
             catch (Exception ex) when (IsConnectionError(ex))
@@ -623,6 +705,45 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         // No messages available, wait a bit
         await Task.Delay(Math.Min(100, (int)timeout.TotalMilliseconds), cancellationToken);
         return null;
+    }
+
+    /// <summary>
+    /// Arms the single-flight background prefetch for the batch starting at
+    /// <paramref name="nextOffset"/> (#80 C2). No-op unless enabled, and never more
+    /// than one in flight per partition.
+    /// </summary>
+    private void StartPrefetch(string topic, int partition, long nextOffset)
+    {
+        if (!_options.EnablePrefetch) return;
+        if (_prefetches.ContainsKey((topic, partition))) return;
+
+        _prefetches[(topic, partition)] = new PrefetchState(
+            PrefetchAsync(_client, topic, partition, nextOffset, _options.FetchMaxBytes, _prefetchCts.Token),
+            nextOffset,
+            _prefetchGeneration);
+    }
+
+    /// <summary>
+    /// The background fetch behind <see cref="StartPrefetch"/>. Never long-polls
+    /// (maxWaitMs: 0) so the latency behaviour at the partition end stays identical to
+    /// the on-demand path, and swallows every error — a failed prefetch simply falls
+    /// back to the synchronous fetch, which owns error handling and reconnect. Captures
+    /// the client it was started with; after a reconnect the generation guard drops the
+    /// result.
+    /// </summary>
+    private static async Task<ReceiveResult?> PrefetchAsync(
+        SurgewaveNativeClient client, string topic, int partition, long offset, int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await client.Messaging.ReceiveAsync(
+                topic, partition, offset, maxBytes, maxWaitMs: 0, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -678,6 +799,14 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         // Drop all decoded buffers: the connection broke and offsets may relocate on reconnect,
         // so nothing buffered from the old client should be served (#80).
         _decodedBuffers.Clear();
+        // Same for prefetches: results fetched on the dead client must not adopt, and
+        // their in-flight fetches must be cancelled before the client is disposed so no
+        // orphaned task hangs on a never-completing pipelined response (#80 C2).
+        _prefetches.Clear();
+        _prefetchGeneration++;
+        _prefetchCts.Cancel();
+        _prefetchCts.Dispose();
+        _prefetchCts = new CancellationTokenSource();
         Disconnected?.Invoke(this, new DisconnectedEventArgs(ex));
 
         if (!_options.EnableAutoReconnect)
@@ -700,7 +829,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
             try
             {
                 await _client.DisposeAsync();
-                _client = new SurgewaveNativeClient(_host, _port, _options.Transport);
+                _client = CreateClient(_options, _host, _port);
                 await _client.ConnectAsync();
                 _isConnected = true;
                 _reconnectAttempts = 0;
@@ -725,6 +854,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     {
         _offsets[(topic, partition)] = offset;
         _decodedBuffers.Remove((topic, partition)); // offset moved — a stale buffer must not serve (#80)
+        _prefetchGeneration++; // an in-flight prefetch for the old position must not adopt (#80 C2)
     }
 
     /// <summary>
@@ -771,7 +901,23 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
             offset,
             cancellationToken);
 
+        SetPositionFromCommit(topic, partition, offset);
+    }
+
+    /// <summary>
+    /// Explicit commits also move the facade's position. When that actually relocates
+    /// it, the decoded buffer and any in-flight prefetch are stale and must be
+    /// invalidated exactly like Seek — the buffer cursor only skips forward, so a
+    /// rewound position would otherwise be silently ignored.
+    /// </summary>
+    private void SetPositionFromCommit(string topic, int partition, long offset)
+    {
+        if (_offsets.TryGetValue((topic, partition), out var current) && current == offset)
+            return;
+
         _offsets[(topic, partition)] = offset;
+        _decodedBuffers.Remove((topic, partition));
+        _prefetchGeneration++;
     }
 
     /// <inheritdoc />
@@ -803,7 +949,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                 offset.Offset,
                 cancellationToken).ConfigureAwait(false);
 
-            _offsets[(offset.Topic, offset.Partition)] = offset.Offset;
+            SetPositionFromCommit(offset.Topic, offset.Partition, offset.Offset);
         }
     }
 
@@ -867,6 +1013,12 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         var currentPartitions = _offsets.Keys.ToList();
         OnPartitionsRevoked(currentPartitions);
         _offsets.Clear();
+        // Positions will be re-resolved from committed offsets — nothing decoded or
+        // fetched for the old assignment may serve or adopt (#80/#80 C2), same as the
+        // reconnect path.
+        _decodedBuffers.Clear();
+        _prefetches.Clear();
+        _prefetchGeneration++;
 
         // Rejoin group
         await JoinConsumerGroupAsync(cancellationToken);
@@ -1091,6 +1243,14 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     {
         if (_disposed) return;
         _disposed = true;
+
+        // Cancel and orphan any in-flight prefetches; they swallow errors internally
+        // and their results are never observed after this point. Cancelling matters:
+        // an uncancelled prefetch awaiting a pipelined response would outlive the
+        // disposed transport forever (#80 C2).
+        _prefetches.Clear();
+        _prefetchCts.Cancel();
+        _prefetchCts.Dispose();
 
         // Stop background tasks
         if (_heartbeatCts != null)
