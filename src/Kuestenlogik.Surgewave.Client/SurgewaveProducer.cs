@@ -34,7 +34,10 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 {
     private readonly SurgewaveProducerOptions<TKey, TValue> _options;
     private readonly SurgewaveNativeClient _client;
-    private readonly SurgewaveBatchingProducer _producer;
+    // Lazily-created auto-batching producers, one per (topic, partition). Only populated when
+    // EnableBatching is set; Lazy guarantees a single batcher (and its background loop) per key
+    // even under concurrent ProduceAsync. Empty in the default (direct-send) configuration.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Topic, int Partition), Lazy<SurgewaveBatchingProducer>> _batchers = new();
     private bool _disposed;
 
     /// <inheritdoc />
@@ -54,12 +57,6 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
         _client = new SurgewaveNativeClient(host, port, _options.Transport);
         _client.ConnectAsync().GetAwaiter().GetResult();
 
-        _producer = new SurgewaveBatchingProducer(
-            _client,
-            topic: null!, // Topic specified per message
-            partition: 0,
-            maxBatchSize: _options.BatchSize,
-            lingerTime: TimeSpan.FromMilliseconds(_options.LingerMs));
     }
 
     /// <summary>
@@ -75,24 +72,12 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
         _client = new SurgewaveNativeClient(host, port, _options.Transport);
         _client.ConnectAsync().GetAwaiter().GetResult();
 
-        _producer = new SurgewaveBatchingProducer(
-            _client,
-            topic: null!,
-            partition: 0,
-            maxBatchSize: _options.BatchSize,
-            lingerTime: TimeSpan.FromMilliseconds(_options.LingerMs));
     }
 
     private SurgewaveProducer(SurgewaveProducerOptions<TKey, TValue> options, SurgewaveNativeClient client)
     {
         _options = options;
         _client = client;
-        _producer = new SurgewaveBatchingProducer(
-            _client,
-            topic: null!,
-            partition: 0,
-            maxBatchSize: _options.BatchSize,
-            lingerTime: TimeSpan.FromMilliseconds(_options.LingerMs));
     }
 
     /// <summary>
@@ -149,6 +134,21 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
     }
 #pragma warning restore CA2000
 
+    // Resolve (creating on first use) the batcher for a topic/partition. maxInFlight:1 keeps a
+    // single request per partition in flight so batches reach the broker in produce order —
+    // preserving the per-partition ordering the direct path gives, while still coalescing many
+    // messages into one request.
+    private SurgewaveBatchingProducer GetBatcher(string topic, int partition)
+        => _batchers.GetOrAdd((topic, partition), static (k, o) => new Lazy<SurgewaveBatchingProducer>(
+            () => new SurgewaveBatchingProducer(
+                o.client,
+                k.Topic,
+                k.Partition,
+                maxBatchSize: o.options.BatchSize,
+                lingerTime: TimeSpan.FromMilliseconds(o.options.LingerMs),
+                maxInFlight: 1)),
+            (client: _client, options: _options)).Value;
+
     /// <inheritdoc />
     public Task<ProduceResult> ProduceAsync(
         string topic,
@@ -173,12 +173,17 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
             var valueBytes = await SerializeValueAsync(value, topic, cancellationToken).ConfigureAwait(false)
                 ?? throw new ArgumentNullException(nameof(value), "Value cannot serialize to null");
 
-            // Direct send — byte-identical to Send(topic).ToPartition(0)...ExecuteAsync (which is a
-            // pure passthrough to this same SendAsync), minus a per-call SendBuilder allocation (#80).
             // Partition 0 preserves today's no-key-hash behavior for the keyed overload.
-            var offset = await _client.Messaging
-                .SendAsync(topic, 0, keyBytes, valueBytes, headers, cancellationToken)
-                .ConfigureAwait(false);
+            // When batching is enabled, coalesce through the per-partition batcher (offset/acks/
+            // ordering preserved); otherwise send directly — byte-identical to
+            // Send(topic).ToPartition(0)...ExecuteAsync, minus a per-call SendBuilder alloc (#80).
+            var offset = _options.EnableBatching
+                ? await GetBatcher(topic, 0)
+                    .ProduceAndWaitAsync(keyBytes, valueBytes, headers, cancellationToken)
+                    .ConfigureAwait(false)
+                : await _client.Messaging
+                    .SendAsync(topic, 0, keyBytes, valueBytes, headers, cancellationToken)
+                    .ConfigureAwait(false);
 
             var result = new ProduceResult
             {
@@ -225,10 +230,15 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
             var valueBytes = await SerializeValueAsync(value, topic, cancellationToken).ConfigureAwait(false)
                 ?? throw new ArgumentNullException(nameof(value), "Value cannot serialize to null");
 
-            // Direct send — see the keyed overload; byte-identical minus the SendBuilder alloc (#80).
-            var offset = await _client.Messaging
-                .SendAsync(topic, partition, keyBytes, valueBytes, headers, cancellationToken)
-                .ConfigureAwait(false);
+            // See the keyed overload: batch through the per-partition batcher when enabled,
+            // otherwise send directly (byte-identical minus the SendBuilder alloc, #80).
+            var offset = _options.EnableBatching
+                ? await GetBatcher(topic, partition)
+                    .ProduceAndWaitAsync(keyBytes, valueBytes, headers, cancellationToken)
+                    .ConfigureAwait(false)
+                : await _client.Messaging
+                    .SendAsync(topic, partition, keyBytes, valueBytes, headers, cancellationToken)
+                    .ConfigureAwait(false);
 
             var result = new ProduceResult
             {
@@ -270,7 +280,10 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
     /// </summary>
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        await _producer.FlushAsync(cancellationToken);
+        // Direct-send mode buffers nothing (every ProduceAsync already awaited persistence);
+        // with batching enabled, drain every per-partition batcher.
+        foreach (var batcher in _batchers.Values)
+            await batcher.Value.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static (string host, int port) ParseBootstrapServers(string servers)
@@ -285,7 +298,12 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
         if (_disposed) return;
         _disposed = true;
 
-        await _producer.DisposeAsync();
+        // Dispose drains each batcher (sends the remaining batch, awaits in-flight) before the
+        // client connection is torn down.
+        foreach (var batcher in _batchers.Values)
+            await batcher.Value.DisposeAsync().ConfigureAwait(false);
+        _batchers.Clear();
+
         await _client.DisposeAsync();
     }
 }
@@ -324,6 +342,16 @@ public sealed class SurgewaveProducerOptions<TKey, TValue>
     /// Async value serializer for schema registry integration. Takes precedence over ValueSerializer if set.
     /// </summary>
     public IAsyncSerializer<TValue>? AsyncValueSerializer { get; set; }
+
+    /// <summary>
+    /// When enabled, <see cref="SurgewaveProducer{TKey, TValue}.ProduceAsync(string, TKey, TValue, CancellationToken)"/>
+    /// routes through an auto-batching producer (one per topic/partition) instead of sending one
+    /// broker request per message — trading up to <see cref="LingerMs"/> of latency for far higher
+    /// throughput under concurrent producers. Per-message offsets, acks and per-partition ordering
+    /// are preserved (ordering via a single in-flight request per partition). Default: false, which
+    /// keeps the direct one-request-per-message behavior unchanged.
+    /// </summary>
+    public bool EnableBatching { get; set; }
 
     /// <summary>
     /// Batch size for batching producer.

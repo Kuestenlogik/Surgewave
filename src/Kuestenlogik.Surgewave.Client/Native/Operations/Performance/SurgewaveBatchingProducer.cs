@@ -69,18 +69,30 @@ public sealed class SurgewaveBatchingProducer : IAsyncDisposable
     /// Produce a message with automatic batching. Returns immediately after queueing.
     /// </summary>
     public ValueTask ProduceAsync(byte[]? key, byte[] value, CancellationToken cancellationToken = default)
+        => ProduceAsync(key, value, null, cancellationToken);
+
+    /// <summary>
+    /// Produce a message (with headers) with automatic batching. Returns immediately after queueing.
+    /// </summary>
+    public ValueTask ProduceAsync(byte[]? key, byte[] value, IReadOnlyDictionary<string, byte[]>? headers, CancellationToken cancellationToken = default)
     {
-        var request = new ProduceRequest(key, value, null);
+        var request = new ProduceRequest(key, value, headers, null);
         return _channel.Writer.WriteAsync(request, cancellationToken);
     }
 
     /// <summary>
     /// Produce a message and wait for acknowledgment.
     /// </summary>
-    public async Task<long> ProduceAndWaitAsync(byte[]? key, byte[] value, CancellationToken cancellationToken = default)
+    public Task<long> ProduceAndWaitAsync(byte[]? key, byte[] value, CancellationToken cancellationToken = default)
+        => ProduceAndWaitAsync(key, value, null, cancellationToken);
+
+    /// <summary>
+    /// Produce a message (with headers) and wait for acknowledgment; returns the assigned offset.
+    /// </summary>
+    public async Task<long> ProduceAndWaitAsync(byte[]? key, byte[] value, IReadOnlyDictionary<string, byte[]>? headers, CancellationToken cancellationToken = default)
     {
         var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var request = new ProduceRequest(key, value, tcs);
+        var request = new ProduceRequest(key, value, headers, tcs);
         await _channel.Writer.WriteAsync(request, cancellationToken);
         return await tcs.Task;
     }
@@ -91,7 +103,7 @@ public sealed class SurgewaveBatchingProducer : IAsyncDisposable
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
         var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var flushRequest = new ProduceRequest(null, [], tcs, true);
+        var flushRequest = new ProduceRequest(null, [], null, tcs, true);
         await _channel.Writer.WriteAsync(flushRequest, cancellationToken);
         await tcs.Task;
     }
@@ -260,18 +272,18 @@ public sealed class SurgewaveBatchingProducer : IAsyncDisposable
     private async Task SendBatchDirectAsync(List<ProduceRequest> batch)
     {
         // Rent array from pool to avoid per-batch allocation
-        var messages = ArrayPool<(byte[]? Key, byte[] Value)>.Shared.Rent(batch.Count);
+        var messages = ArrayPool<(byte[]? Key, byte[] Value, IReadOnlyDictionary<string, byte[]>? Headers)>.Shared.Rent(batch.Count);
         try
         {
             // Build message array using rented buffer
             for (int i = 0; i < batch.Count; i++)
             {
-                messages[i] = (batch[i].Key, batch[i].Value);
+                messages[i] = (batch[i].Key, batch[i].Value, batch[i].Headers);
             }
 
             // Use ArraySegment to pass only the valid portion (IReadOnlyList<T>)
             var baseOffset = await _client.Messaging.SendBatchAsync(_topic, _partition,
-                new ArraySegment<(byte[]?, byte[])>(messages, 0, batch.Count));
+                new ArraySegment<(byte[]?, byte[], IReadOnlyDictionary<string, byte[]>?)>(messages, 0, batch.Count));
 
             // Signal completion to all requests
             for (int i = 0; i < batch.Count; i++)
@@ -290,7 +302,7 @@ public sealed class SurgewaveBatchingProducer : IAsyncDisposable
         finally
         {
             // Return array to pool
-            ArrayPool<(byte[]? Key, byte[] Value)>.Shared.Return(messages, clearArray: true);
+            ArrayPool<(byte[]? Key, byte[] Value, IReadOnlyDictionary<string, byte[]>? Headers)>.Shared.Return(messages, clearArray: true);
         }
     }
 
@@ -317,6 +329,7 @@ public sealed class SurgewaveBatchingProducer : IAsyncDisposable
     private readonly record struct ProduceRequest(
         byte[]? Key,
         byte[] Value,
+        IReadOnlyDictionary<string, byte[]>? Headers,
         TaskCompletionSource<long>? Completion,
         bool IsFlush = false);
 }

@@ -3,6 +3,7 @@ using System.Text;
 using Confluent.Kafka;
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
+using Kuestenlogik.Surgewave.Client;
 using Kuestenlogik.Surgewave.Client.Native;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol;
@@ -239,6 +240,65 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         Assert.Null(result.Messages[2].Key);
 
         _output.WriteLine($"Fetched {result.Messages.Count} messages, high watermark: {result.HighWatermark}");
+    }
+
+    [Fact]
+    public async Task NativeFacade_BatchingEnabled_PreservesOffsetsHeadersAndOrdering()
+    {
+        // Arrange — a topic on the running broker.
+        var topicName = $"test-batch-facade-{Guid.NewGuid():N}";
+        await using (var admin = new SurgewaveNativeClient("localhost", _port))
+        {
+            await admin.ConnectAsync();
+            await admin.Topics.CreateAsync(topicName, 1);
+        }
+
+        // The opt-in batching facade (#80): ProduceAsync routes through the per-partition
+        // SurgewaveBatchingProducer instead of one broker request per message.
+        await using var producer = await SurgewaveProducer<string, string>.CreateAsync(opts =>
+        {
+            opts.BootstrapServers = $"localhost:{_port}";
+            opts.EnableBatching = true;
+            opts.BatchSize = 8;   // < message count so multiple requests are coalesced
+            opts.LingerMs = 5;
+        });
+
+        // Act — produce concurrently so the batcher actually coalesces several messages per request.
+        const int count = 20;
+        var tasks = Enumerable.Range(0, count).Select(i =>
+            producer.ProduceAsync(
+                topicName, 0, $"k{i}", $"v{i}",
+                new Dictionary<string, byte[]> { ["seq"] = Encoding.UTF8.GetBytes(i.ToString()) }))
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+
+        // Assert — batching assigns a unique, contiguous offset to every message (no loss, no dup).
+        var offsets = results.Select(r => r.Offset).OrderBy(o => o).ToArray();
+        Assert.Equal(Enumerable.Range(0, count).Select(i => (long)i), offsets);
+        Assert.All(results, r => Assert.Equal(0, r.Partition));
+
+        // Read back: every value and its header survive the batching path (order across concurrent
+        // producers is not guaranteed, so compare as sets).
+        await using var reader = new SurgewaveNativeClient("localhost", _port);
+        await reader.ConnectAsync();
+        var recv = await reader.Messaging.ReceiveAsync(topicName, 0, 0, maxBytes: 4 * 1024 * 1024);
+
+        Assert.Equal(count, recv.Messages.Count);
+        var readValues = recv.Messages.Select(m => m.ValueString).OrderBy(v => v, StringComparer.Ordinal).ToArray();
+        var expectedValues = Enumerable.Range(0, count).Select(i => $"v{i}").OrderBy(v => v, StringComparer.Ordinal).ToArray();
+        Assert.Equal(expectedValues, readValues);
+        Assert.All(recv.Messages, m =>
+        {
+            Assert.NotNull(m.Headers);
+            Assert.True(m.Headers!.ContainsKey("seq"));
+        });
+
+        // Sequential produces on a single partition keep monotonically increasing offsets (maxInFlight:1).
+        var oa = (await producer.ProduceAsync(topicName, 0, "seq-a", "seq-a")).Offset;
+        var ob = (await producer.ProduceAsync(topicName, 0, "seq-b", "seq-b")).Offset;
+        Assert.True(ob > oa, $"expected {ob} > {oa}");
+
+        _output.WriteLine($"Batching facade produced {count} messages at contiguous offsets 0..{count - 1}");
     }
 
     [Fact]
