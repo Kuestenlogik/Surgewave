@@ -81,6 +81,23 @@ public sealed class SurgewaveConsumerOptions<TKey, TValue>
     public int FetchMaxBytes { get; set; } = 1024 * 1024;
 
     /// <summary>
+    /// Opt-in (#80 C2): fetch the next batch in the background while the current
+    /// decoded batch is being consumed, so sequential consumers do not pay a broker
+    /// round-trip at every batch boundary.
+    /// Default: false — off, the consumer fetches strictly on demand as before.
+    /// <para>
+    /// Semantics are unchanged when enabled: commits still reflect only consumed
+    /// offsets (a prefetched batch never advances the position), Seek/Assign and
+    /// reconnect discard any in-flight prefetch, and prefetches never long-poll —
+    /// at the partition end the latency behaviour is identical to the default path.
+    /// Leave off for seek-heavy or sparse consumers: a prefetch that is discarded
+    /// is a wasted fetch, and each armed prefetch may hold up to
+    /// <see cref="FetchMaxBytes"/> of decoded messages per partition in memory.
+    /// </para>
+    /// </summary>
+    public bool EnablePrefetch { get; set; }
+
+    /// <summary>
     /// Enable automatic reconnection on connection loss.
     /// Default: true.
     /// </summary>
@@ -115,6 +132,14 @@ public sealed class SurgewaveConsumerOptions<TKey, TValue>
     /// Auto (default) uses SharedMemory for local brokers, TCP for remote.
     /// </summary>
     public SurgewaveTransportType Transport { get; set; } = SurgewaveTransportType.Auto;
+
+    /// <summary>
+    /// Test seam (#102): when set, the consumer builds its native client over this
+    /// transport instead of opening a real connection. The reconnect path calls the
+    /// factory again, so a facade under test reconnects onto a fresh (or the same)
+    /// fake transport deterministically.
+    /// </summary>
+    internal Func<Transport.ISurgewaveTransport>? TransportFactory { get; set; }
 
     /// <summary>
     /// Maximum time in milliseconds to wait for subscribed topics to become available.
