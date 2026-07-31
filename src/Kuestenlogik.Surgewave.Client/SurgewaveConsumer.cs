@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using Kuestenlogik.Surgewave.Client.Abstractions;
 using Kuestenlogik.Surgewave.Client.Consumer;
 using Kuestenlogik.Surgewave.Client.Native;
+using Kuestenlogik.Surgewave.Client.Native.Commands;
 using Kuestenlogik.Surgewave.Client.Native.Operations.ConsumerGroups;
 using Kuestenlogik.Surgewave.Client.Serialization;
 using Kuestenlogik.Surgewave.Protocol.Native;
@@ -87,8 +88,18 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     private int _generationId;
     private CancellationTokenSource? _heartbeatCts;
     private Task? _heartbeatTask;
-    private Task? _autoCommitTask;
     private bool _initialized;
+    // Rebalance is DETECTED by the heartbeat task but EXECUTED on the consumer thread
+    // (Kafka's model). The heartbeat task must never touch _offsets/_decodedBuffers/
+    // _prefetches: they are plain dictionaries owned by the consumer thread, and a
+    // concurrent rejoin used to race every await inside ConsumeAsync (#116).
+    private volatile bool _rebalanceRequested;
+    // Set alongside _rebalanceRequested when the broker no longer knows this member —
+    // the rejoin then has to ask for a fresh member id instead of reusing the stale one.
+    private volatile bool _rejoinAsNewMember;
+    // Auto-commit is poll-driven, again like Kafka: committing from a timer task would
+    // read _offsets from a second thread (#116).
+    private long _lastAutoCommitTicks;
 
     /// <summary>
     /// Event raised when the consumer disconnects from the broker.
@@ -483,14 +494,10 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         // Trigger PartitionsAssigned event
         OnPartitionsAssigned(assignedPartitions);
 
-        // Start heartbeat background task
+        // Start heartbeat background task (no-op if one is already running — a rejoin
+        // must not spawn a second loop, #116). Auto-commit is poll-driven and needs no
+        // task at all.
         StartHeartbeatTask();
-
-        // Start auto-commit task if enabled
-        if (_options.EnableAutoCommit)
-        {
-            StartAutoCommitTask();
-        }
     }
 
     /// <summary>
@@ -569,6 +576,13 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
             _initialized = false;
             await InitializeSubscriptionAsync(cancellationToken);
         }
+
+        // Execute a rejoin the heartbeat task flagged, and run auto-commit — both on
+        // this thread, so consumer state has exactly one writer (#116).
+        if (_rebalanceRequested)
+            await HandleRebalanceAsync(cancellationToken).ConfigureAwait(false);
+
+        await MaybeAutoCommitAsync(cancellationToken).ConfigureAwait(false);
 
         if (_offsets.Count == 0)
             throw new InvalidConfigurationException("Topics", null, "No topics subscribed or assigned. Use Subscribe() or Assign() first");
@@ -954,16 +968,23 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     }
 
     /// <summary>
-    /// Start the heartbeat background task.
+    /// Start the heartbeat background task. Idempotent: a rejoin runs inside the
+    /// existing loop instead of starting a second one — replacing the CTS without
+    /// cancelling the old loop leaked one heartbeat (and auto-commit) task per
+    /// rebalance, each still holding a live token (#116).
     /// </summary>
     private void StartHeartbeatTask()
     {
+        if (_heartbeatTask != null) return;
+
         _heartbeatCts = new CancellationTokenSource();
         _heartbeatTask = HeartbeatLoopAsync(_heartbeatCts.Token);
     }
 
     /// <summary>
-    /// Heartbeat loop to keep the consumer group session alive.
+    /// Heartbeat loop to keep the consumer group session alive. It only DETECTS that a
+    /// rejoin is due and flags it; the rejoin itself runs on the consumer thread in
+    /// <see cref="ConsumeAsync(TimeSpan, CancellationToken)"/> (#116).
     /// </summary>
     private async Task HeartbeatLoopAsync(CancellationToken cancellationToken)
     {
@@ -981,12 +1002,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                     _generationId,
                     cancellationToken);
 
-                if (errorCode == (ushort)SurgewaveErrorCode.RebalanceInProgress)
-                {
-                    // Rebalance triggered - rejoin group
-                    await HandleRebalanceAsync(cancellationToken);
-                }
-                else if (errorCode != 0)
+                if (!RequestRebalanceIfNeeded((SurgewaveErrorCode)errorCode) && errorCode != 0)
                 {
                     // Other error - may need to rejoin
                     _isConnected = false;
@@ -995,6 +1011,14 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (SurgewaveProtocolException ex)
+            {
+                // Group errors arrive in the response HEADER, which makes the command
+                // layer throw before the payload is parsed — so the rejoin triggers are
+                // only reachable here, not via the returned error code (#116).
+                if (!RequestRebalanceIfNeeded(ex.ErrorCode))
+                    _isConnected = false;
             }
             catch (Exception)
             {
@@ -1005,10 +1029,37 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     }
 
     /// <summary>
+    /// Flags a rejoin for the consumer thread if the broker reported one of the
+    /// group errors that require it. Returns whether the code was such a trigger.
+    /// </summary>
+    private bool RequestRebalanceIfNeeded(SurgewaveErrorCode errorCode)
+    {
+        switch (errorCode)
+        {
+            case SurgewaveErrorCode.RebalanceInProgress:
+            case SurgewaveErrorCode.IllegalGeneration:
+                _rebalanceRequested = true;
+                return true;
+            case SurgewaveErrorCode.UnknownMemberId:
+                // The broker forgot this member (session timeout / group reset): the
+                // stale member id must not be reused on rejoin.
+                _rejoinAsNewMember = true;
+                _rebalanceRequested = true;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Handle a rebalance event by revoking partitions and rejoining the group.
+    /// Runs on the consumer thread only (flagged by the heartbeat loop, #116).
     /// </summary>
     private async Task HandleRebalanceAsync(CancellationToken cancellationToken)
     {
+        if (_rejoinAsNewMember)
+            _memberId = null; // the broker forgot us — ask for a fresh member id
+
         // Revoke current partitions
         var currentPartitions = _offsets.Keys.ToList();
         OnPartitionsRevoked(currentPartitions);
@@ -1020,47 +1071,44 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         _prefetches.Clear();
         _prefetchGeneration++;
 
-        // Rejoin group
+        // Rejoin group. The flags are cleared only after a successful rejoin, so a failed
+        // one is retried on the next poll instead of leaving the consumer silently stuck
+        // on a revoked assignment.
         await JoinConsumerGroupAsync(cancellationToken);
+        _rebalanceRequested = false;
+        _rejoinAsNewMember = false;
     }
 
     /// <summary>
-    /// Start the auto-commit background task.
+    /// Commits the current positions if auto-commit is enabled and its interval has
+    /// elapsed. Called from the consumer thread inside ConsumeAsync — like Kafka,
+    /// auto-commit happens on poll, never from a timer task that would read the
+    /// position dictionary from a second thread (#116).
     /// </summary>
-    private void StartAutoCommitTask()
+    private async Task MaybeAutoCommitAsync(CancellationToken cancellationToken)
     {
-        if (!_options.EnableAutoCommit || string.IsNullOrEmpty(_options.GroupId))
+        if (!_options.EnableAutoCommit || string.IsNullOrEmpty(_options.GroupId) || _memberId == null)
+            return;
+        if (_offsets.Count == 0)
             return;
 
-        _autoCommitTask = AutoCommitLoopAsync(_heartbeatCts!.Token);
-    }
+        var now = Environment.TickCount64;
+        if (now - _lastAutoCommitTicks < _options.AutoCommitIntervalMs)
+            return;
 
-    /// <summary>
-    /// Auto-commit loop to periodically commit offsets.
-    /// </summary>
-    private async Task AutoCommitLoopAsync(CancellationToken cancellationToken)
-    {
-        var interval = TimeSpan.FromMilliseconds(_options.AutoCommitIntervalMs);
-
-        while (!cancellationToken.IsCancellationRequested)
+        _lastAutoCommitTicks = now;
+        try
         {
-            try
-            {
-                await Task.Delay(interval, cancellationToken);
-
-                if (_memberId != null && _offsets.Count > 0)
-                {
-                    await CommitAsync(cancellationToken);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch
-            {
-                // Log and continue - auto-commit failed
-            }
+            await CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Best effort, same as the previous background loop: a failed auto-commit
+            // must not break consumption; the next interval retries.
         }
     }
 
@@ -1269,19 +1317,23 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                 }
             }
 
-            if (_autoCommitTask != null)
-            {
-                try
-                {
-                    await _autoCommitTask;
-                }
-                catch (OperationCanceledException)
-                {
-                    // Expected
-                }
-            }
-
             _heartbeatCts.Dispose();
+        }
+
+        // Final auto-commit before leaving, like Kafka's close(): auto-commit is
+        // poll-driven now, so without this the progress made since the last poll-commit
+        // would be lost (#116).
+        if (_options.EnableAutoCommit && !string.IsNullOrEmpty(_options.GroupId)
+            && _memberId != null && _offsets.Count > 0)
+        {
+            try
+            {
+                await CommitAsync();
+            }
+            catch
+            {
+                // Best effort - a failed final commit must not break disposal
+            }
         }
 
         // Leave consumer group gracefully

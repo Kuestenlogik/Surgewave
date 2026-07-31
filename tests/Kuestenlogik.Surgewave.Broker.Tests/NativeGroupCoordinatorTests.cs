@@ -167,10 +167,36 @@ public class NativeGroupCoordinatorTests
 
         var joinResult = _coordinator.JoinGroup(
             groupId, null, null, "client-1", "consumer", 10000, 30000, protocols);
+        // JoinGroup leaves the group in PreparingRebalance; only a completed SyncGroup
+        // makes it Stable, which is when heartbeats succeed (#116).
+        _coordinator.SyncGroup(groupId, joinResult.MemberId, joinResult.GenerationId,
+            [new MemberAssignment(joinResult.MemberId, [1])]);
 
         var result = _coordinator.Heartbeat(groupId, joinResult.MemberId, joinResult.GenerationId);
 
         Assert.Equal(0, result.ErrorCode);
+    }
+
+    [Fact]
+    public void Heartbeat_WhileGroupIsRebalancing_ReturnsRebalanceInProgress()
+    {
+        var groupId = "heartbeat-group-rebalance";
+        var protocols = new List<GroupProtocol> { new("range", Array.Empty<byte>()) };
+
+        var first = _coordinator.JoinGroup(
+            groupId, null, null, "client-1", "consumer", 10000, 30000, protocols);
+        _coordinator.SyncGroup(groupId, first.MemberId, first.GenerationId,
+            [new MemberAssignment(first.MemberId, [1])]);
+        Assert.Equal(0, _coordinator.Heartbeat(groupId, first.MemberId, first.GenerationId).ErrorCode);
+
+        // A second member joining puts the group back into PreparingRebalance without
+        // bumping the generation — the first member must still be told to rejoin,
+        // otherwise it keeps consuming its stale assignment forever (#116).
+        _coordinator.JoinGroup(groupId, null, null, "client-2", "consumer", 10000, 30000, protocols);
+
+        var result = _coordinator.Heartbeat(groupId, first.MemberId, first.GenerationId);
+
+        Assert.Equal(11, result.ErrorCode); // RebalanceInProgress
     }
 
     [Fact]
