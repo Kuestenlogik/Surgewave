@@ -44,8 +44,8 @@ public sealed class QuicTransport : ISurgewaveTransport
     private readonly byte[] _requestHeaderBuffer = new byte[SurgewaveNativeProtocol.HeaderSize];
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
-    private readonly ConcurrentDictionary<uint, PendingRequest> _pendingRequests = new();
-    private readonly ConcurrentBag<PendingRequest> _pendingRequestPool = new();
+    private readonly ConcurrentDictionary<uint, PendingResponse> _pendingRequests = new();
+    private readonly ConcurrentBag<PendingResponse> _pendingRequestPool = new();
     private int _pendingRequestPoolSize;
     private const int MaxPendingRequestPoolSize = 100;
     private Task? _readerTask;
@@ -69,19 +69,7 @@ public sealed class QuicTransport : ISurgewaveTransport
     public void UnregisterPushHandler(SurgewaveOpCode opCode)
         => _pushHandlers.TryRemove(opCode, out _);
 
-    private sealed class PendingRequest
-    {
-        public TaskCompletionSource<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> Completion { get; private set; } =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public void Reset()
-        {
-            Completion = new TaskCompletionSource<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-    }
-
-    private PendingRequest RentPendingRequest()
+    private PendingResponse RentPendingRequest()
     {
         if (_pendingRequestPool.TryTake(out var request))
         {
@@ -89,10 +77,10 @@ public sealed class QuicTransport : ISurgewaveTransport
             request.Reset();
             return request;
         }
-        return new PendingRequest();
+        return new PendingResponse();
     }
 
-    private void ReturnPendingRequest(PendingRequest request)
+    private void ReturnPendingRequest(PendingResponse request)
     {
         if (Interlocked.Increment(ref _pendingRequestPoolSize) <= MaxPendingRequestPoolSize)
         {
@@ -232,13 +220,42 @@ public sealed class QuicTransport : ISurgewaveTransport
                 }
             }
 
-            return await pending.Completion.Task.WaitAsync(cancellationToken);
+            return await AwaitResponseAsync(requestId, pending, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
+            // Only the party that removes the entry owns the completion.
             _pendingRequests.TryRemove(requestId, out _);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Awaits the pooled response source, honouring cancellation. See
+    /// <see cref="PendingResponse"/> for the ownership contract: whoever removes the entry from
+    /// the pending map may complete it, and a cancelled request is never recycled (#80).
+    /// </summary>
+    private async ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> AwaitResponseAsync(
+        uint requestId, PendingResponse pending, CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.CanBeCanceled)
+        {
+            var result = await pending.ValueTask.ConfigureAwait(false);
+            ReturnPendingRequest(pending);
+            return result;
+        }
+
+        await using var registration = cancellationToken.Register(static state =>
+        {
+            var (transport, id, source, token) =
+                ((QuicTransport, uint, PendingResponse, CancellationToken))state!;
+            if (transport._pendingRequests.TryRemove(id, out _))
+                source.TrySetCanceled(token);
+        }, (this, requestId, pending, cancellationToken)).ConfigureAwait(false);
+
+        var response = await pending.ValueTask.ConfigureAwait(false);
+        ReturnPendingRequest(pending);
+        return response;
     }
 
     private async ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> SendRequestSynchronousAsync(
@@ -293,24 +310,46 @@ public sealed class QuicTransport : ISurgewaveTransport
                     $"Request ID mismatch: expected {requestId}, got {responseHeader.RequestId}");
             }
 
-            var responsePayload = new byte[responseHeader.PayloadLength];
-            if (responseHeader.PayloadLength > 0)
-            {
-                await _stream.ReadExactlyAsync(responsePayload, cancellationToken);
-            }
-
-            ReadOnlyMemory<byte> finalPayload = responsePayload;
-            if ((responseHeader.Flags & SurgewaveProtocolFlags.Compressed) != 0)
-            {
-                finalPayload = NativeCompressionCodec.DecompressWithHeader(responsePayload);
-            }
-
-            return (responseHeader, finalPayload);
+            return (responseHeader, await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false));
         }
         finally
         {
             _sendLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Reads one response payload. Compressed frames are staged in a pooled buffer and returned
+    /// right after decompression (which allocates the result anyway); uncompressed frames are read
+    /// into the array that escapes to the caller, which cannot be pooled without a buffer-return
+    /// protocol on <see cref="ISurgewaveTransport"/> (#80).
+    /// </summary>
+    private static async ValueTask<ReadOnlyMemory<byte>> ReadPayloadAsync(
+        Stream stream, SurgewaveResponseHeader header, CancellationToken cancellationToken)
+    {
+        var length = header.PayloadLength;
+        if (length <= 0)
+        {
+            return ReadOnlyMemory<byte>.Empty;
+        }
+
+        if ((header.Flags & SurgewaveProtocolFlags.Compressed) != 0)
+        {
+            var staging = ArrayPool<byte>.Shared.Rent(length);
+            try
+            {
+                await stream.ReadExactlyAsync(staging.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
+                return NativeCompressionCodec.DecompressWithHeader(staging.AsSpan(0, length));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(staging);
+            }
+        }
+
+        var payload = new byte[length];
+        await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
+        return payload;
     }
 
     private async Task ReaderLoopAsync(CancellationToken cancellationToken)
@@ -324,22 +363,12 @@ public sealed class QuicTransport : ISurgewaveTransport
                 await _stream!.ReadExactlyAsync(headerBuffer, cancellationToken);
                 var responseHeader = SurgewaveResponseHeader.ReadFrom(headerBuffer);
 
-                var responsePayload = new byte[responseHeader.PayloadLength];
-                if (responseHeader.PayloadLength > 0)
-                {
-                    await _stream.ReadExactlyAsync(responsePayload, cancellationToken);
-                }
-
-                ReadOnlyMemory<byte> finalPayload = responsePayload;
-                if ((responseHeader.Flags & SurgewaveProtocolFlags.Compressed) != 0)
-                {
-                    finalPayload = NativeCompressionCodec.DecompressWithHeader(responsePayload);
-                }
+                var finalPayload = await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
 
                 if (_pendingRequests.TryRemove(responseHeader.RequestId, out var pending))
                 {
-                    pending.Completion.TrySetResult((responseHeader, finalPayload));
-                    ReturnPendingRequest(pending);
+                    // Recycling happens on the awaiting side once the result is consumed.
+                    pending.TrySetResult((responseHeader, finalPayload));
                 }
                 else if (responseHeader.RequestId == 0 &&
                          _pushHandlers.TryGetValue(responseHeader.OpCode, out var pushHandler))
@@ -353,15 +382,24 @@ public sealed class QuicTransport : ISurgewaveTransport
                 }
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Fail everything still in flight: no one will read those responses now (#80).
+            FailAllPending(new ObjectDisposedException(nameof(QuicTransport), "The transport was disposed while requests were in flight."));
+        }
         catch (Exception ex)
         {
-            foreach (var kvp in _pendingRequests)
+            FailAllPending(ex);
+        }
+    }
+
+    private void FailAllPending(Exception exception)
+    {
+        foreach (var kvp in _pendingRequests)
+        {
+            if (_pendingRequests.TryRemove(kvp.Key, out var pending))
             {
-                if (_pendingRequests.TryRemove(kvp.Key, out var pending))
-                {
-                    pending.Completion.TrySetException(ex);
-                }
+                pending.TrySetException(exception);
             }
         }
     }
