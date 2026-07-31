@@ -252,6 +252,18 @@ public sealed class NativeGroupCoordinator
                 return new HeartbeatResult { ErrorCode = 16 }; // IllegalGeneration
             }
 
+            // Tell members whose generation is still current that the group is
+            // rebalancing, so they rejoin. Without this the signal never reaches them:
+            // JoinGroup of a new member sets PreparingRebalance but does NOT bump the
+            // generation, so every existing member would keep heartbeating happily and
+            // never learn that the assignment changed (#116). Matches Kafka, where a
+            // member also heartbeats REBALANCE_IN_PROGRESS until SyncGroup completes.
+            if (group.State == GroupState.PreparingRebalance)
+            {
+                member.LastHeartbeat = DateTime.UtcNow;
+                return new HeartbeatResult { ErrorCode = 11 }; // RebalanceInProgress
+            }
+
             member.LastHeartbeat = DateTime.UtcNow;
             return new HeartbeatResult { ErrorCode = 0 };
         }

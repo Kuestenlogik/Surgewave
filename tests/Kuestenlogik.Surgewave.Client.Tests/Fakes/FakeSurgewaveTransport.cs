@@ -76,21 +76,46 @@ internal sealed class FakeSurgewaveTransport : ISurgewaveTransport
     /// </summary>
     public Func<ProduceRequest, Task>? OnProduceAsync { get; set; }
 
+    private ushort _nextHeartbeatErrorCode;
+    private TaskCompletionSource? _heartbeatErrorDelivered;
+
     /// <summary>
-    /// Error code returned in the next Heartbeat PAYLOAD, then reset to 0. Set to
-    /// RebalanceInProgress to drive the facade's background rejoin path.
-    /// NOTE: synthetic trigger. The real broker currently never emits
-    /// RebalanceInProgress on heartbeat, and real errors arrive in the response
-    /// HEADER (which makes the client throw before payload parsing) — this knob
-    /// exists to exercise the client-internal rejoin/discard logic
-    /// deterministically. The broker-driven end-to-end flow is tracked in the
-    /// rebalance-threading issue.
+    /// Makes the next Heartbeat fail with <paramref name="errorCode"/> and returns a task
+    /// that completes once that response has actually been handed to the client. Awaiting
+    /// the delivery instead of polling a request counter keeps the tests deterministic:
+    /// a heartbeat that slips through between arming and observing would otherwise look
+    /// like the signal was consumed.
+    /// <para>
+    /// The code is delivered in the response HEADER exactly like the real broker
+    /// (OperationExecutor copies the result's error code into the header), so the
+    /// client's command layer throws before payload parsing — the path the rejoin
+    /// trigger must survive (#116).
+    /// </para>
     /// </summary>
-    public ushort NextHeartbeatErrorCode { get; set; }
+    public Task FailNextHeartbeatAsync(SurgewaveErrorCode errorCode)
+    {
+        lock (_gate)
+        {
+            _nextHeartbeatErrorCode = (ushort)errorCode;
+            _heartbeatErrorDelivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return _heartbeatErrorDelivered.Task;
+        }
+    }
 
     /// <summary>Number of JoinGroup requests served — a rejoin shows up as a second join.</summary>
     public int JoinGroupCount { get { lock (_gate) return _joinGroupCount; } }
     private int _joinGroupCount;
+
+    /// <summary>
+    /// Number of Heartbeat requests served. Duplicated heartbeat loops (one leaked per
+    /// rejoin) show up here as a rate increase and as heartbeats after dispose (#116).
+    /// </summary>
+    public int HeartbeatCount { get { lock (_gate) return _heartbeatCount; } }
+    private int _heartbeatCount;
+
+    /// <summary>Member ids the fake handed out, in order (a fresh id per re-join without member id).</summary>
+    public IReadOnlyList<string> IssuedMemberIds { get { lock (_gate) return _issuedMemberIds.ToList(); } }
+    private readonly List<string> _issuedMemberIds = [];
 
     public SurgewaveTransportType TransportType => SurgewaveTransportType.Tcp;
     public bool IsConnected => _connected;
@@ -203,15 +228,33 @@ internal sealed class FakeSurgewaveTransport : ISurgewaveTransport
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Group errors travel in the header, like the real broker (#116).
+        var headerError = SurgewaveErrorCode.None;
+        TaskCompletionSource? deliveredSignal = null;
+        if (opCode == SurgewaveOpCode.Heartbeat)
+        {
+            lock (_gate)
+            {
+                if (_nextHeartbeatErrorCode != 0)
+                {
+                    headerError = (SurgewaveErrorCode)_nextHeartbeatErrorCode;
+                    _nextHeartbeatErrorCode = 0;
+                    deliveredSignal = _heartbeatErrorDelivered;
+                    _heartbeatErrorDelivered = null;
+                }
+            }
+        }
+
         byte[] response = Handle(opCode, payload.Span);
         var header = new SurgewaveResponseHeader
         {
             Flags = 0,
             RequestId = ++_requestId,
             OpCode = opCode,
-            ErrorCode = SurgewaveErrorCode.None,
+            ErrorCode = headerError,
             PayloadLength = response.Length
         };
+        deliveredSignal?.TrySetResult();
         return (header, response);
     }
 
@@ -384,12 +427,8 @@ internal sealed class FakeSurgewaveTransport : ISurgewaveTransport
 
     private byte[] HandleHeartbeat()
     {
-        var error = NextHeartbeatErrorCode;
-        NextHeartbeatErrorCode = 0;
-        var response = new byte[2];
-        var writer = new SurgewavePayloadWriter(response);
-        writer.WriteUInt16(error);
-        return response;
+        _heartbeatCount++;
+        return HandleUInt16Ok();
     }
 
     private byte[] HandleJoinGroup(ReadOnlySpan<byte> payload)
@@ -401,6 +440,7 @@ internal sealed class FakeSurgewaveTransport : ISurgewaveTransport
         var memberId = string.IsNullOrEmpty(request.MemberId)
             ? $"fake-member-{++_memberCounter}"
             : request.MemberId!;
+        _issuedMemberIds.Add(memberId);
         var generation = ++_generationId;
         var protocol = request.Protocols.Length > 0 ? request.Protocols[0] : new GroupProtocol("range", []);
 
