@@ -161,7 +161,11 @@ public sealed class FileMmapManager : IDisposable
 
             // Create a new view for this specific region
             var view = _mmf!.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
-            return new FileMmapBuffer(view, 0, length, ownsAccessor: true);
+            // The OS maps views at allocation-granularity boundaries (64 KiB on Windows), so the
+            // acquired pointer refers to the rounded-down start, not to `offset`. PointerOffset is
+            // that difference; ignoring it returned data from the wrong file position for every
+            // unaligned offset (#78).
+            return new FileMmapBuffer(view, (int)view.PointerOffset, length, ownsAccessor: true);
         }
     }
 
@@ -180,7 +184,11 @@ public sealed class FileMmapManager : IDisposable
             // Create a new accessor for each buffer to avoid lifetime issues
             // (cached accessor could be disposed by EnsureMapped while buffers still use it)
             var view = _mmf!.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
-            return new FileMmapBuffer(view, 0, length, ownsAccessor: true);
+            // The OS maps views at allocation-granularity boundaries (64 KiB on Windows), so the
+            // acquired pointer refers to the rounded-down start, not to `offset`. PointerOffset is
+            // that difference; ignoring it returned data from the wrong file position for every
+            // unaligned offset (#78).
+            return new FileMmapBuffer(view, (int)view.PointerOffset, length, ownsAccessor: true);
         }
     }
 
