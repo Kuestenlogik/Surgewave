@@ -36,6 +36,10 @@ public sealed class IndexedLogSegment : ILogSegment, IFileLogSegment, IMemoryLog
     public string LogFilePath => (_inner as IFileLogSegment)?.LogFilePath ?? string.Empty;
     public SafeFileHandle SafeFileHandle => (_inner as IFileLogSegment)?.SafeFileHandle!;
 
+    // This is a decorator: only the wrapped segment knows whether its file holds the raw batch
+    // stream, so the capability is forwarded rather than answered here (#78).
+    public bool SupportsCoreByteRangeReads => _inner.SupportsCoreByteRangeReads;
+
     // IMemoryLogSegment implementation
     public ReadOnlyMemory<byte> GetMemorySlice(long position, int length)
         => (_inner as IMemoryLogSegment)?.GetMemorySlice(position, length) ?? default;
