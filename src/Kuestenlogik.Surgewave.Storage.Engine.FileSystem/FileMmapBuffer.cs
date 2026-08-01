@@ -29,15 +29,51 @@ public sealed unsafe class FileMmapBuffer : ISurgewaveBuffer
         }
     }
 
+    // Projects the mapped region as Memory<byte> without copying. Created on first use because
+    // most reads only ever touch Span. See MmapMemoryManager for the lifetime rules.
+    private MmapMemoryManager? _memoryManager;
+
     public ReadOnlyMemory<byte> Memory
     {
         get
         {
-            // Memory-mapped regions don't have managed backing
-            // We need to copy for Memory<T> compatibility
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return ToArray();
+            // A mapped region has no managed array behind it, but Memory<T> does not require one:
+            // a MemoryManager can project native memory directly. This used to return ToArray(),
+            // which quietly pushed every Memory consumer off the zero-copy path (#78).
+            _memoryManager ??= new MmapMemoryManager(_pointer + _offset, _length);
+            return _memoryManager.Memory;
         }
+    }
+
+    /// <summary>
+    /// Projects a mapped region as <see cref="System.Memory{T}"/> without copying.
+    ///
+    /// <para><b>Lifetime.</b> The memory is only valid while the owning
+    /// <see cref="FileMmapBuffer"/> is alive — that buffer holds the pointer reference on the
+    /// mapped view, and releases it on dispose. This matches the documented contract of
+    /// <c>ISurgewaveBuffer.Memory</c> ("must not be disposed"), but the consequence is harsher
+    /// here than for a pooled array: reading through a stale projection touches unmapped address
+    /// space and takes the process down, rather than returning recycled bytes. Consumers that need
+    /// the data beyond the buffer's lifetime must copy.</para>
+    /// </summary>
+    private sealed class MmapMemoryManager(byte* pointer, int length) : MemoryManager<byte>
+    {
+        public override Span<byte> GetSpan() => new(pointer, length);
+
+        // The region is mapped, so it never moves: pinning is a no-op beyond handing out the
+        // pointer, and there is nothing to release.
+        public override MemoryHandle Pin(int elementIndex = 0)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(elementIndex);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(elementIndex, length);
+            return new MemoryHandle(pointer + elementIndex);
+        }
+
+        public override void Unpin() { }
+
+        // The view (and with it the pointer) is owned by the FileMmapBuffer, not by this manager.
+        protected override void Dispose(bool disposing) { }
     }
 
     /// <summary>
@@ -79,10 +115,12 @@ public sealed unsafe class FileMmapBuffer : ISurgewaveBuffer
 
     public bool TryGetMemory(out ReadOnlyMemory<byte> memory)
     {
-        // Memory-mapped regions can't be directly converted to Memory<T>
-        // because they don't have managed backing
-        memory = default;
-        return false;
+        // Reports true since the mapped region is projected without copying (see Memory). The
+        // memory borrows the buffer's lifetime, which is exactly what callers of TryGetMemory
+        // expect: they use it to avoid a copy and keep the owner alive while they do (#78).
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        memory = Memory;
+        return true;
     }
 
     public MemoryHandle Pin()
