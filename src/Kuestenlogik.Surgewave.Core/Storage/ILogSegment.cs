@@ -70,14 +70,33 @@ public interface ILogSegment : IDisposable
     ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadBatchesContiguousAsync(long startOffset, int maxBytes, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Whether the bytes behind <see cref="GetFilePositionForOffset"/> are the stored record
+    /// batches themselves, so the core may read that file region directly (memory-mapped reads
+    /// today, a kernel-side send later) instead of going through the segment's own read.
+    ///
+    /// <para><b>Opt in only if the file really is the batch stream.</b> The default is
+    /// <see langword="false"/>, which is always safe: the core then uses
+    /// <see cref="ReadContiguousAsync"/> and the engine stays in control of its own format.
+    /// An engine that stores a different layout — columnar, compressed, encrypted, or with its
+    /// own framing — must leave this <see langword="false"/>, otherwise the core would hand raw
+    /// file bytes to a consumer expecting record batches.</para>
+    ///
+    /// <para>This exists because the core used to infer the answer from
+    /// <c>is IFileLogSegment</c>, which is wrong for exactly those engines (#78).</para>
+    /// </summary>
+    bool SupportsCoreByteRangeReads => false;
+
+    /// <summary>
     /// Read contiguous batches, keeping the underlying storage lease alive instead of copying it
     /// into a fresh array (#78). The returned <see cref="ContiguousBatchRead.Data"/> is only valid
     /// until the read is disposed — see <see cref="ContiguousBatchRead"/> for the contract.
-    /// <para>
-    /// The default implementation delegates to <see cref="ReadBatchesContiguousAsync"/> and yields
-    /// a read with no lease, so every existing segment keeps working unchanged; engines that can
-    /// serve borrowed memory override this to skip the copy.
-    /// </para>
+    ///
+    /// <para><b>This is the hook for storage plugins.</b> The default implementation delegates to
+    /// <see cref="ReadBatchesContiguousAsync"/> and yields a read with no lease, so every existing
+    /// segment keeps working unchanged. Override it to serve reads from your own buffers — pooled,
+    /// memory-mapped, or otherwise borrowed — by returning a <see cref="ContiguousBatchRead"/> that
+    /// carries the lifetime keeping that memory valid. The core does not need to know the engine
+    /// to benefit from it.</para>
     /// </summary>
     async ValueTask<ContiguousBatchRead> ReadContiguousAsync(long startOffset, int maxBytes, CancellationToken cancellationToken = default)
     {
@@ -164,7 +183,19 @@ public readonly struct DataSource
 }
 
 /// <summary>
-/// Extended interface for file-based segments that support memory-mapped reads
+/// Extended interface for file-based segments.
+///
+/// <para><b>Extension point — implemented outside this repository.</b> Storage plugins
+/// (e.g. <c>Surgewave.Storage.Arrow</c>, <c>Surgewave.Storage.NvmeDirect</c>) implement this
+/// alongside the in-tree segments. In-tree call sites may therefore look unused; they are not.</para>
+///
+/// <para><b>Do not gate engine-specific optimizations on this type.</b> Implementing
+/// <see cref="IFileLogSegment"/> only says "there is a file behind me" — it says nothing about
+/// what that file contains. Arrow, for instance, exposes a real handle to a columnar
+/// <c>.arrow</c> file, not to verbatim stored record batches, so an <c>is IFileLogSegment</c>
+/// check would wrongly select it for byte-level fast paths such as memory-mapped reads or a
+/// future kernel-side send. Ask <see cref="ILogSegment.SupportsCoreByteRangeReads"/> instead
+/// (#78).</para>
 /// </summary>
 public interface IFileLogSegment : ILogSegment
 {
@@ -176,7 +207,11 @@ public interface IFileLogSegment : ILogSegment
 }
 
 /// <summary>
-/// Extended interface for memory-based segments that support direct memory access
+/// Extended interface for memory-based segments that support direct memory access.
+///
+/// <para><b>Extension point — also implemented by storage plugins.</b> See the note on
+/// <see cref="IFileLogSegment"/>: in-tree usages that look dead are load-bearing for
+/// out-of-tree engines.</para>
 /// </summary>
 public interface IMemoryLogSegment : ILogSegment
 {

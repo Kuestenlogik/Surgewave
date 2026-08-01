@@ -72,7 +72,7 @@ internal sealed class PartitionLogReader : IDisposable
             return new ContiguousBatchRead(memoryResult.Data, memoryResult.BatchOffsets);
         }
 
-        if (segment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
+        if (segment.SupportsCoreByteRangeReads && segment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
         {
             var mmapResult = reader.ReadBatchesContiguous(filePosition.Value, maxBytes);
             return new ContiguousBatchRead(mmapResult.Data, mmapResult.BatchOffsets);
@@ -108,7 +108,7 @@ internal sealed class PartitionLogReader : IDisposable
             return ReadBatchesContiguousFromMemorySegment(memorySegment, startOffset, maxBytes);
         }
 
-        if (segment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
+        if (segment.SupportsCoreByteRangeReads && segment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
         {
             return reader.ReadBatchesContiguous(filePosition.Value, maxBytes);
         }
@@ -156,7 +156,7 @@ internal sealed class PartitionLogReader : IDisposable
                         return (result.Data, result.BatchOffsets, idx);
                     }, cancellationToken));
                 }
-                else if (currentSegment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
+                else if (currentSegment.SupportsCoreByteRangeReads && currentSegment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
                 {
                     // File segment: use mmap (synchronous but fast)
                     readTasks.Add(Task.Run(() =>
