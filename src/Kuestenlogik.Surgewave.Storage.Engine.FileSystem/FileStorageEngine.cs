@@ -21,8 +21,13 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
     private readonly FileStream _indexFile;
     private readonly FileStream _timeIndexFile;
 
-    // Memory-mapped file for zero-copy reads
-    private readonly FileMmapManager? _mmapManager;
+    // Memory-mapped file for zero-copy reads. Created lazily on the first read that can use it,
+    // not in the constructor: a freshly created segment has an empty file, and mapping it would
+    // throw. Reads of a segment written in this process used to miss the mmap path entirely
+    // because of that (#78).
+    private FileMmapManager? _mmapManager;
+    private readonly Lock _mmapInitLock = new();
+    private readonly bool _useMmap;
 
     // Thread-safe offset index (ConcurrentDictionary for lock-free reads)
     private readonly ConcurrentDictionary<long, long> _offsetIndex = new();
@@ -117,10 +122,57 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
             LoadTimeIndex();
         }
 
-        // Initialize mmap manager for zero-copy reads (after file is created/opened)
+        // Initialize mmap manager for zero-copy reads (after file is created/opened).
+        // A reopened, non-empty file can be mapped right away; a new one is mapped lazily once
+        // it actually holds data — see GetOrCreateMmapManager.
+        _useMmap = useMmap;
         if (useMmap && !createNew && _logFile.Length > 0)
         {
             _mmapManager = new FileMmapManager(LogFilePath);
+        }
+    }
+
+    /// <summary>
+    /// Returns the mmap manager, creating it on first use once the file holds data (#78).
+    /// <para>
+    /// Mapping a segment that is still being appended to is safe here because the log is
+    /// append-only: bytes below the current write position never change again, and callers only
+    /// map regions below it. Appends go through <see cref="RandomAccess"/> straight into the page
+    /// cache — the same pages the mapping exposes — so a mapped read cannot miss a completed
+    /// write. Growth is handled by the manager, which re-maps on demand and hands out a fresh
+    /// view per buffer.
+    /// </para>
+    /// </summary>
+    private FileMmapManager? GetOrCreateMmapManager()
+    {
+        if (!_useMmap)
+        {
+            return null;
+        }
+
+        var existing = Volatile.Read(ref _mmapManager);
+        if (existing != null)
+        {
+            return existing;
+        }
+
+        lock (_mmapInitLock)
+        {
+            if (_mmapManager != null)
+            {
+                return _mmapManager;
+            }
+
+            // Nothing written yet: mapping an empty file throws, so stay on the pooled path
+            // until there is data. The next read retries.
+            if (Volatile.Read(ref _writePosition) <= 0)
+            {
+                return null;
+            }
+
+            var created = new FileMmapManager(LogFilePath);
+            Volatile.Write(ref _mmapManager, created);
+            return created;
         }
     }
 
@@ -195,27 +247,37 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
             return EmptyStorageReadLease.Instance;
         }
 
-        // Try zero-copy mmap read first
-        if (_mmapManager != null && filePosition + maxBytes <= _logFile.Length)
+        var bytesToRead = (int)Math.Min(maxBytes, availableBytes);
+
+        // Try zero-copy mmap read first. The region must lie fully below the write position:
+        // the log is append-only, so those bytes are final, whereas anything at or beyond it may
+        // still be in flight.
+#pragma warning disable CA2000 // The manager is cached in _mmapManager and disposed in Dispose()
+        if (GetOrCreateMmapManager() is { } mmapManager
+            && filePosition + bytesToRead <= Volatile.Read(ref _writePosition))
         {
-            return await ReadWithMmapAsync(filePosition, maxBytes, cancellationToken);
+            return await ReadWithMmapAsync(mmapManager, filePosition, bytesToRead, cancellationToken);
         }
+#pragma warning restore CA2000
 
         // Fallback to pooled buffer read
-        return await ReadWithPooledBufferAsync(filePosition, (int)Math.Min(maxBytes, availableBytes), cancellationToken);
+        return await ReadWithPooledBufferAsync(filePosition, bytesToRead, cancellationToken);
     }
 
-    private async ValueTask<IStorageReadLease> ReadWithMmapAsync(long filePosition, int maxBytes, CancellationToken cancellationToken)
+    private async ValueTask<IStorageReadLease> ReadWithMmapAsync(
+        FileMmapManager mmapManager, long filePosition, int maxBytes, CancellationToken cancellationToken)
     {
-        // First pass: scan to find valid batch boundaries
-        var bytesToRead = (int)Math.Min(maxBytes, _logFile.Length - filePosition);
+        // The caller already bounded this to the written region; re-clamping against
+        // _logFile.Length would be wrong while the segment is still being appended to, because
+        // the stream's cached length can lag the write position.
+        var bytesToRead = maxBytes;
 
         // Get mmap buffer for reading
         FileMmapBuffer? mmapBuffer = null;
         ISurgewaveBuffer? finalBuffer = null;
         try
         {
-            mmapBuffer = _mmapManager!.GetBuffer(filePosition, bytesToRead);
+            mmapBuffer = mmapManager.GetBuffer(filePosition, bytesToRead);
             var span = mmapBuffer.Span;
 
             var batchOffsets = new List<int>();
