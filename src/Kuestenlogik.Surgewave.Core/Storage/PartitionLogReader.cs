@@ -45,6 +45,43 @@ internal sealed class PartitionLogReader : IDisposable
     }
 
     /// <summary>
+    /// Read a single segment contiguously, keeping the storage lease alive instead of copying
+    /// (#78). Mirrors <see cref="ReadSingleSegmentContiguousAsync"/> exactly; only the two paths
+    /// that delegate to the segment can actually borrow — the memory/mmap fast paths already
+    /// return caller-owned memory and are wrapped without a lease.
+    /// </summary>
+    public async ValueTask<ContiguousBatchRead> ReadSingleSegmentContiguousLeasedAsync(
+        ILogSegment segment, ILogSegment? activeSegment, long startOffset, int maxBytes, CancellationToken cancellationToken)
+    {
+        if (segment == activeSegment)
+        {
+            return await segment.ReadContiguousAsync(startOffset, maxBytes, cancellationToken);
+        }
+
+        // Same closed-segment fallback as the copying variant: without it a read from a closed
+        // segment returns empty and silently loses rolled data (#99).
+        var filePosition = segment.GetFilePositionForOffset(startOffset);
+        if (filePosition == null)
+        {
+            return await segment.ReadContiguousAsync(startOffset, maxBytes, cancellationToken);
+        }
+
+        if (segment is IMemoryLogSegment memorySegment)
+        {
+            var memoryResult = ReadBatchesContiguousFromMemorySegment(memorySegment, startOffset, maxBytes);
+            return new ContiguousBatchRead(memoryResult.Data, memoryResult.BatchOffsets);
+        }
+
+        if (segment is IFileLogSegment fileSegment && GetOrCreateMmapReader(fileSegment) is { } reader)
+        {
+            var mmapResult = reader.ReadBatchesContiguous(filePosition.Value, maxBytes);
+            return new ContiguousBatchRead(mmapResult.Data, mmapResult.BatchOffsets);
+        }
+
+        return await segment.ReadContiguousAsync(startOffset, maxBytes, cancellationToken);
+    }
+
+    /// <summary>
     /// Read single segment contiguously.
     /// </summary>
     public async ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadSingleSegmentContiguousAsync(

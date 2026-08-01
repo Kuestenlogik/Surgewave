@@ -84,6 +84,21 @@ public interface IPartitionLog : IDisposable
     /// <returns>The contiguous data and batch boundary offsets within it.</returns>
     ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadBatchesContiguousAsync(long startOffset, int maxBytes = 1048576, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Contiguous read that keeps the underlying storage lease alive instead of copying it into a
+    /// fresh array (#78). The data is only valid until the returned read is disposed — see
+    /// <see cref="ContiguousBatchRead"/>.
+    /// <para>
+    /// The default implementation delegates to <see cref="ReadBatchesContiguousAsync"/> and returns
+    /// a lease-free read, so implementations that cannot borrow keep working unchanged.
+    /// </para>
+    /// </summary>
+    async ValueTask<ContiguousBatchRead> ReadContiguousAsync(long startOffset, int maxBytes = 1048576, CancellationToken cancellationToken = default)
+    {
+        var (data, batchOffsets) = await ReadBatchesContiguousAsync(startOffset, maxBytes, cancellationToken).ConfigureAwait(false);
+        return new ContiguousBatchRead(data, batchOffsets);
+    }
+
     /// <summary>Waits for data to become available at the specified offset.</summary>
     /// <param name="offset">The offset to wait for.</param>
     /// <param name="timeout">Maximum time to wait.</param>
