@@ -105,12 +105,19 @@ public interface ILogSegment : IDisposable
 
 /// <summary>
 /// Data source for zero-copy reads. Can be backed by either memory or a file handle.
+/// <para>
+/// The file-backed form describes a region <c>[FilePosition, FilePosition + Length)</c> of a
+/// segment file — the shape a kernel-side send (sendfile/TransmitFile) needs. It carries no
+/// ownership of the handle: whoever builds it must keep the handle alive for as long as the
+/// source is used.
+/// </para>
 /// </summary>
 public readonly struct DataSource
 {
     private readonly ReadOnlyMemory<byte> _memory;
     private readonly SafeFileHandle? _fileHandle;
     private readonly long _filePosition;
+    private readonly int _length;
 
     /// <summary>Whether this data source is backed by memory (vs file)</summary>
     public bool IsMemoryBacked => _fileHandle == null;
@@ -124,26 +131,36 @@ public readonly struct DataSource
     /// <summary>File position for file-backed sources</summary>
     public long FilePosition => _filePosition;
 
-    /// <summary>Length of data</summary>
-    public int Length => _memory.Length;
+    /// <summary>
+    /// Length of the data in bytes — the memory slice length for memory-backed sources, the
+    /// region length for file-backed ones. The file-backed length used to be dropped on
+    /// construction, so every file-backed source reported 0 bytes (#81).
+    /// </summary>
+    public int Length => _length;
 
-    private DataSource(ReadOnlyMemory<byte> memory, SafeFileHandle? fileHandle, long filePosition)
+    private DataSource(ReadOnlyMemory<byte> memory, SafeFileHandle? fileHandle, long filePosition, int length)
     {
         _memory = memory;
         _fileHandle = fileHandle;
         _filePosition = filePosition;
+        _length = length;
     }
 
     /// <summary>Create a memory-backed data source</summary>
     public static DataSource FromMemory(ReadOnlyMemory<byte> memory)
-        => new(memory, null, 0);
+        => new(memory, null, 0, memory.Length);
 
-    /// <summary>Create a file-backed data source</summary>
+    /// <summary>Create a file-backed data source describing the region [position, position + length).</summary>
     public static DataSource FromFile(SafeFileHandle handle, long position, int length)
-        => new(default, handle, position) { };
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentOutOfRangeException.ThrowIfNegative(position);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        return new DataSource(default, handle, position, length);
+    }
 
     /// <summary>Create an empty data source</summary>
-    public static DataSource Empty => new(ReadOnlyMemory<byte>.Empty, null, 0);
+    public static DataSource Empty => new(ReadOnlyMemory<byte>.Empty, null, 0, 0);
 }
 
 /// <summary>
