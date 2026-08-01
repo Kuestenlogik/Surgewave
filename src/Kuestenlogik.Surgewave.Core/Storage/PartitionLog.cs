@@ -642,6 +642,71 @@ public sealed class PartitionLog : IPartitionLog
     }
 
     /// <summary>
+    /// Contiguous read that keeps the storage lease alive instead of copying it into a fresh
+    /// array (#78). The returned data is only valid until the read is disposed.
+    /// <para>
+    /// Only the single-segment path can borrow. Multi-segment reads combine into their own buffer,
+    /// and CRC-validated reads rebuild the payload from the valid batches — both already own their
+    /// memory, so they take the copying path and return a lease-free read.
+    /// </para>
+    /// </summary>
+    public async ValueTask<ContiguousBatchRead> ReadContiguousAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_validateCrcOnRead)
+        {
+            var validated = await ReadBatchesContiguousAsync(startOffset, maxBytes, cancellationToken).ConfigureAwait(false);
+            return new ContiguousBatchRead(validated.Data, validated.BatchOffsets);
+        }
+
+        if (startOffset < LogStartOffset || startOffset >= _nextOffset)
+        {
+            return ContiguousBatchRead.Empty;
+        }
+
+        ILogSegment? segment;
+        int segmentIndex;
+        int segmentCount;
+        ILogSegment? activeSegment;
+        List<(ILogSegment segment, long offset)>? segmentsToRead = null;
+
+        lock (_segmentLock)
+        {
+            segment = FindSegment(startOffset);
+            if (segment == null)
+            {
+                return ContiguousBatchRead.Empty;
+            }
+
+            segmentIndex = _segments.IndexOf(segment);
+            segmentCount = _segments.Count;
+            activeSegment = _activeSegment;
+
+            if (segmentIndex < _segments.Count - 1 && segment != _activeSegment)
+            {
+                segmentsToRead = [];
+                for (int i = segmentIndex; i < _segments.Count; i++)
+                {
+                    var currentSegment = _segments[i];
+                    var segmentStartOffset = (i == segmentIndex) ? startOffset : currentSegment.BaseOffset;
+                    segmentsToRead.Add((currentSegment, segmentStartOffset));
+                }
+            }
+        }
+
+        if (segmentIndex == segmentCount - 1 || segment == activeSegment)
+        {
+            return await _reader.ReadSingleSegmentContiguousLeasedAsync(
+                segment, activeSegment, startOffset, maxBytes, cancellationToken).ConfigureAwait(false);
+        }
+
+        var combined = await _reader.ReadMultiSegmentContiguousAsync(
+            segmentsToRead!, activeSegment, maxBytes, cancellationToken).ConfigureAwait(false);
+        return new ContiguousBatchRead(combined.Data, combined.BatchOffsets);
+    }
+
+    /// <summary>
     /// Validates CRC for batches in a contiguous buffer and returns only valid batches.
     /// </summary>
     private (ReadOnlyMemory<byte> Data, List<int> BatchOffsets) ValidateContiguousBatches(ReadOnlyMemory<byte> data, List<int> batchOffsets)

@@ -70,6 +70,22 @@ public interface ILogSegment : IDisposable
     ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadBatchesContiguousAsync(long startOffset, int maxBytes, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Read contiguous batches, keeping the underlying storage lease alive instead of copying it
+    /// into a fresh array (#78). The returned <see cref="ContiguousBatchRead.Data"/> is only valid
+    /// until the read is disposed — see <see cref="ContiguousBatchRead"/> for the contract.
+    /// <para>
+    /// The default implementation delegates to <see cref="ReadBatchesContiguousAsync"/> and yields
+    /// a read with no lease, so every existing segment keeps working unchanged; engines that can
+    /// serve borrowed memory override this to skip the copy.
+    /// </para>
+    /// </summary>
+    async ValueTask<ContiguousBatchRead> ReadContiguousAsync(long startOffset, int maxBytes, CancellationToken cancellationToken = default)
+    {
+        var (data, batchOffsets) = await ReadBatchesContiguousAsync(startOffset, maxBytes, cancellationToken).ConfigureAwait(false);
+        return new ContiguousBatchRead(data, batchOffsets);
+    }
+
+    /// <summary>
     /// Get the file position for reading batches starting at the given offset.
     /// Returns null if no batch contains this offset.
     /// </summary>

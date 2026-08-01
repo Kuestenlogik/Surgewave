@@ -370,6 +370,28 @@ public sealed class LogManager : IDisposable
     }
 
     /// <summary>
+    /// Contiguous read that keeps the underlying storage lease alive instead of copying it into a
+    /// fresh array (#78). The returned data is only valid until the read is disposed — consume it
+    /// inside the <c>using</c> scope. See <see cref="ContiguousBatchRead"/>.
+    /// </summary>
+    public async ValueTask<ContiguousBatchRead> ReadContiguousAsync(
+        TopicPartition topicPartition,
+        long startOffset,
+        int maxBytes = 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var log = GetLog(topicPartition);
+        if (log == null)
+        {
+            return ContiguousBatchRead.Empty;
+        }
+
+        return await log.ReadContiguousAsync(startOffset, maxBytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Get topic metadata by name
     /// </summary>
     public TopicMetadata? GetTopicMetadata(string topicName)

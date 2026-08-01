@@ -441,22 +441,12 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topicPartition = new TopicPartition { Topic = topic, Partition = partition };
         var log = _logManager.GetOrCreateLog(topicPartition);
 
-        // Long-polling: keep trying until data is available or timeout
-        var deadline = DateTime.UtcNow.AddMilliseconds(maxWaitMs);
-        var (data, batchOffsets) = await _logManager.ReadBatchesContiguousAsync(topicPartition, offset, maxBytes, cancellationToken);
-
-        while (data.Length == 0 && maxWaitMs > 0 && DateTime.UtcNow < deadline)
-        {
-            // Wait for new data with remaining timeout
-            var remainingMs = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
-            if (remainingMs <= 0) break;
-
-            await log.WaitForDataAsync(offset, TimeSpan.FromMilliseconds(Math.Min(remainingMs, 1000)), cancellationToken);
-
-            // Re-read regardless of whether WaitForDataAsync returned true
-            // (handles race conditions where data arrived but notification was missed)
-            (data, batchOffsets) = await _logManager.ReadBatchesContiguousAsync(topicPartition, offset, maxBytes, cancellationToken);
-        }
+        // The read borrows the storage lease instead of copying the payload into a fresh array
+        // (#78). It stays alive for the whole handler: the re-framing below reads from it, and
+        // holding it until the response is sent is the safe side of the contract.
+        using var read = await FetchWithLongPollAsync(topicPartition, log, offset, maxBytes, maxWaitMs, cancellationToken);
+        var data = read.Data;
+        var batchOffsets = read.BatchOffsets;
 
         // Pre-size for the native re-framing: it writes fixed int32/int64 fields where Kafka used
         // varints, so the output is LARGER than the input for small records — "data.Length + 128"
@@ -503,6 +493,38 @@ public sealed class NativeDataHandler : INativeRequestHandler
 
         await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.FetchResponse,
             SurgewaveErrorCode.None, writer.AsMemory(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the partition, long-polling until data arrives or the deadline passes. Each retry
+    /// disposes the empty read before taking the next one, so at most one storage lease is held
+    /// at a time (#78).
+    /// </summary>
+    private async ValueTask<ContiguousBatchRead> FetchWithLongPollAsync(
+        TopicPartition topicPartition,
+        IPartitionLog log,
+        long offset,
+        int maxBytes,
+        int maxWaitMs,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(maxWaitMs);
+        var read = await _logManager.ReadContiguousAsync(topicPartition, offset, maxBytes, cancellationToken);
+
+        while (read.Data.Length == 0 && maxWaitMs > 0 && DateTime.UtcNow < deadline)
+        {
+            var remainingMs = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
+            if (remainingMs <= 0) break;
+
+            await log.WaitForDataAsync(offset, TimeSpan.FromMilliseconds(Math.Min(remainingMs, 1000)), cancellationToken);
+
+            // Re-read regardless of whether WaitForDataAsync returned true
+            // (handles race conditions where data arrived but notification was missed)
+            read.Dispose();
+            read = await _logManager.ReadContiguousAsync(topicPartition, offset, maxBytes, cancellationToken);
+        }
+
+        return read;
     }
 
     private async Task HandleListOffsetsAsync(NativeRequestContext context, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

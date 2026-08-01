@@ -126,6 +126,48 @@ public sealed class StorageEngineSegmentAdapter : IFileLogSegment, IMemoryLogSeg
         return (data, batchOffsets);
     }
 
+    /// <summary>
+    /// Serves the read straight out of the engine lease instead of materializing it into a fresh
+    /// array (#78): the lease travels with the read and is released when the caller disposes it.
+    /// This removes one payload-sized GC allocation per fetch per partition — the copy that
+    /// <see cref="ReadBatchesContiguousAsync"/> has to make because its signature cannot express
+    /// borrowed memory.
+    /// </summary>
+    public async ValueTask<ContiguousBatchRead> ReadContiguousAsync(
+        long startOffset,
+        int maxBytes,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var lease = await _engine.ReadAsync(startOffset, maxBytes, cancellationToken);
+        var leaseOwned = true;
+        try
+        {
+            if (lease.IsEmpty)
+            {
+                return ContiguousBatchRead.Empty;
+            }
+
+            // TryGetMemory, not Memory: buffers without managed backing (e.g. the mmap buffer)
+            // would silently copy behind Memory, which is exactly the hidden copy this change
+            // removes. When borrowing is impossible, fall back to the explicit copy and release
+            // the lease right away rather than holding it for nothing.
+            if (!lease.Data.TryGetMemory(out var memory))
+            {
+                return new ContiguousBatchRead(lease.Data.Span.ToArray(), new List<int>(lease.BatchOffsets));
+            }
+
+            // Ownership of the lease moves into the read; the caller's Dispose releases it.
+            leaseOwned = false;
+            return new ContiguousBatchRead(memory, new List<int>(lease.BatchOffsets), lease);
+        }
+        finally
+        {
+            if (leaseOwned) lease.Dispose();
+        }
+    }
+
     public long? GetFilePositionForOffset(long startOffset)
     {
         // For storage engines, we don't expose file positions directly
