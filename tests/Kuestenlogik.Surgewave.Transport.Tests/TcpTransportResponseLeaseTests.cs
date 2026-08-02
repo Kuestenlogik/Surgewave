@@ -189,6 +189,96 @@ public sealed class TcpTransportResponseLeaseTests
     }
 
     [Fact]
+    public async Task CancellingMidWrite_TearsTheConnectionDown_InsteadOfLeavingItSilentlyBroken()
+    {
+        // #117. The mechanism, measured rather than assumed: an in-flight socket send is NOT
+        // cancellable (16 MiB went through in 13 ms with the token already tripped), so a frame is
+        // never torn apart mid-write. It tears BETWEEN the two writes: a payload above
+        // NativeRequestFrameWriter.MaxCoalescedPayloadBytes is sent as header-then-payload, and the
+        // token is checked before each of them. Once the header write has to wait for a slow peer,
+        // the token has long since fired by the time the payload write starts — that write throws
+        // before sending a byte, and the peer is left counting payload bytes that never arrive.
+        //
+        // Before the fix the transport reported IsConnected and every later response vanished.
+        await using var server = new EchoNativeServer(responseDelay: TimeSpan.FromMilliseconds(300));
+        var transport = new TcpTransport(OptionsFor(server.Port, pipelining: true));
+        await transport.ConnectAsync().AsTask().WaitAsync(Timeout);
+
+        // A caller that cancelled nothing and is waiting when the connection dies under it.
+        var bystander = transport.SendRequestLeasedAsync(
+            SurgewaveOpCode.Fetch, new byte[512], compress: false, CancellationToken.None).AsTask();
+
+        // Payload above the coalescing limit → the two-write path. The slow peer makes the header
+        // write wait, so the cancellation lands between the writes.
+        var oversized = new byte[NativeRequestFrameWriter.MaxCoalescedPayloadBytes + 4096];
+
+        for (var i = 0; i < 20 && transport.IsConnected; i++)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            try
+            {
+                using var _ = await transport.SendRequestLeasedAsync(
+                    SurgewaveOpCode.Produce, oversized, compress: false, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // expected — this is the caller's own cancellation
+            }
+        }
+
+        Assert.False(transport.IsConnected,
+            "the transport still claims to be connected although a frame was left half-written and the peer can no longer parse the stream");
+
+        // The bystander fails instead of waiting forever, and with the error the client's consumer
+        // recognises as a connection error so its reconnect path takes over.
+        var bystanderFailure = await Assert.ThrowsAnyAsync<Exception>(() => bystander.WaitAsync(Timeout));
+        Assert.True(bystanderFailure is IOException or ObjectDisposedException,
+            $"in-flight request failed with {bystanderFailure.GetType().Name} — the consumer would not treat that as a connection error");
+
+        // A later request fails fast rather than disappearing into a dead connection.
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            using var _ = await transport.SendRequestLeasedAsync(
+                SurgewaveOpCode.Fetch, new byte[64], compress: false, CancellationToken.None)
+                .AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        });
+
+        await transport.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task CancellingBeforeTheFrameIsWritten_LeavesTheConnectionUsable()
+    {
+        // The counterpart: a request cancelled while it waits for the send lock has put nothing on
+        // the wire, so tearing the connection down would be an over-reaction — that is the common
+        // case whenever a client times out a queued request.
+        await using var server = new EchoNativeServer();
+        await using var transport = new TcpTransport(OptionsFor(server.Port, pipelining: true));
+        await transport.ConnectAsync().AsTask().WaitAsync(Timeout);
+
+        for (var i = 0; i < 10; i++)
+        {
+            using var cts = new CancellationTokenSource();
+            await cts.CancelAsync();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            {
+                using var _ = await transport.SendRequestLeasedAsync(
+                    SurgewaveOpCode.Fetch, new byte[256], compress: false, cts.Token);
+            });
+        }
+
+        Assert.True(transport.IsConnected);
+
+        var probe = new byte[256];
+        Array.Fill(probe, (byte)0x5A);
+        using var response = await transport.SendRequestLeasedAsync(SurgewaveOpCode.Fetch, probe, compress: false)
+            .AsTask().WaitAsync(Timeout);
+
+        Assert.True(probe.AsSpan().SequenceEqual(response.Payload.Span));
+    }
+
+    [Fact]
     public async Task RequestIdWraps_TheReservedPushIdIsSkipped_SoTheResponseStillReachesItsWaiter()
     {
         // RequestId 0 is the wire's marker for a server push. The counter is 32-bit and wraps, so a
