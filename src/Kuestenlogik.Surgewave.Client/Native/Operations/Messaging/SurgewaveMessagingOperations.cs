@@ -232,14 +232,19 @@ public sealed class SurgewaveMessagingOperations
             writer.WriteInt32(maxBytes);
             writer.WriteInt32(maxWaitMs);  // Long-polling wait time
 
-            var (header, responsePayload) = await _client.SendRequestAsync(
+            // Borrowed response: a fetch payload is the largest thing this client reads, and
+            // materializing it would cost one array per fetch. Every message is copied out while
+            // decoding below, so nothing survives this scope and the buffer goes straight back (#80).
+            using var response = await _client.SendRequestLeasedAsync(
                 SurgewaveOpCode.Fetch,
                 payloadBuffer.AsMemory(0, writer.Position),
                 cancellationToken);
 
+            var header = response.Header;
             if (header.ErrorCode != SurgewaveErrorCode.None)
                 throw new ProtocolException(SurgewaveOpCode.Fetch, header.ErrorCode);
 
+            var responsePayload = response.Payload;
             var reader = new SurgewavePayloadReader(responsePayload.Span);
             var highWatermark = reader.ReadInt64();
             var messageCount = reader.ReadInt32();

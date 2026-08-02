@@ -43,6 +43,28 @@ public interface ISurgewaveTransport : IAsyncDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Send a request and receive a response whose payload may be borrowed from a pool (#80).
+    ///
+    /// <para><b>This is the allocation-free read path.</b> <see cref="SendRequestAsync"/> must give
+    /// the caller memory it owns forever, so an uncompressed response costs one array the size of
+    /// the payload — on a fetch, the client's largest source of garbage. Here the caller returns
+    /// the buffer instead, by disposing the lease once it has decoded or copied what it needs.</para>
+    ///
+    /// <para>The default implementation delegates to <see cref="SendRequestAsync"/> and yields a
+    /// lease that owns nothing, so every existing transport keeps working unchanged and callers can
+    /// use this path unconditionally. Transports override it to serve from their own pooled reads.</para>
+    /// </summary>
+    async ValueTask<SurgewaveResponseLease> SendRequestLeasedAsync(
+        SurgewaveOpCode opCode,
+        ReadOnlyMemory<byte> payload,
+        bool compress = true,
+        CancellationToken cancellationToken = default)
+    {
+        var (header, responsePayload) = await SendRequestAsync(opCode, payload, compress, cancellationToken).ConfigureAwait(false);
+        return new SurgewaveResponseLease(header, responsePayload);
+    }
+
+    /// <summary>
     /// Register a handler for unsolicited server-push messages identified by op-code.
     /// Push messages arrive with RequestId == 0 and are dispatched to the handler
     /// instead of completing a pending request.

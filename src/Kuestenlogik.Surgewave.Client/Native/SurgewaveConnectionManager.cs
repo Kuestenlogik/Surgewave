@@ -134,6 +134,20 @@ public sealed class SurgewaveConnectionManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Send a request and receive a response whose payload may be borrowed from the transport's
+    /// pool (#80). The caller must dispose the lease once it has decoded or copied the payload —
+    /// see <see cref="SurgewaveResponseLease"/> for the contract.
+    /// </summary>
+    internal async Task<SurgewaveResponseLease> SendRequestLeasedAsync(
+        SurgewaveOpCode opCode,
+        ReadOnlyMemory<byte> payload,
+        CancellationToken cancellationToken)
+    {
+        EnsureConnected();
+        return await _transport!.SendRequestLeasedAsync(opCode, payload, _enableCompression, cancellationToken);
+    }
+
+    /// <summary>
     /// Register a handler for unsolicited server-push messages (streaming subscriptions).
     /// </summary>
     internal void RegisterPushHandler(SurgewaveOpCode opCode, Func<SurgewaveResponseHeader, ReadOnlyMemory<byte>, Task> handler)
