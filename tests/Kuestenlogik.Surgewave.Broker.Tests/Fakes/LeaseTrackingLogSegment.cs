@@ -68,7 +68,13 @@ internal sealed class LeaseTrackingLogSegment(ILogSegment inner, LeaseTracker tr
         public void Dispose()
         {
             if (_released)
+            {
+                // Do not absorb it: a pooled lease that is released twice hands the same buffer out
+                // to two callers, and a fake that shrugs makes that indistinguishable from correct
+                // behaviour.
+                tracker.DoubleReleased();
                 return;
+            }
 
             _released = true;
             Array.Fill(buffer, ReleasedFill);

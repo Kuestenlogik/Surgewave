@@ -442,9 +442,36 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var log = _logManager.GetOrCreateLog(topicPartition);
 
         // The read borrows the storage lease instead of copying the payload into a fresh array
-        // (#78). It stays alive for the whole handler: the re-framing below reads from it, and
-        // holding it until the response is sent is the safe side of the contract.
-        using var read = await FetchWithLongPollAsync(topicPartition, log, offset, maxBytes, maxWaitMs, cancellationToken);
+        // (#78). The lease is released as soon as the re-framing below has copied everything into
+        // the pooled writer — deliberately NOT held across the socket write: with the File engine
+        // that lease can own a memory-mapped view, and a mapped view pins its segment file on
+        // Windows, where retention then cannot delete it (File.Delete fails with
+        // ERROR_USER_MAPPED_FILE). Holding it across a backpressured write to a slow consumer would
+        // stretch that window over the whole response.
+        BigEndianWriter writer;
+        using (var read = await FetchWithLongPollAsync(topicPartition, log, offset, maxBytes, maxWaitMs, cancellationToken))
+        {
+            writer = ReframeFetchResponse(read, log.HighWatermark);
+        }
+
+        using (writer)
+        {
+            await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.FetchResponse,
+                SurgewaveErrorCode.None, writer.AsMemory(), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Re-frames the borrowed batches into a pooled writer: the native wire writes fixed-width
+    /// int32/int64 where the stored Kafka batch uses varints, so the bytes have to be transformed
+    /// rather than forwarded.
+    ///
+    /// <para>Split out so the storage lease's scope is a <c>using</c> block the eye can check: once
+    /// this returns, everything the response needs lives in the writer, and the caller may release
+    /// the lease before touching the socket.</para>
+    /// </summary>
+    private BigEndianWriter ReframeFetchResponse(in ContiguousBatchRead read, long highWatermark)
+    {
         var data = read.Data;
         var batchOffsets = read.BatchOffsets;
 
@@ -462,37 +489,43 @@ public sealed class NativeDataHandler : INativeRequestHandler
         }
 
         // Use pooled writer for zero-allocation fetch path (Dispose returns to pool)
-        using var writer = BigEndianWriter.Rent(12 + data.Length + estimatedRecords * 24);
-
-        writer.Write(log.HighWatermark);
-        var countPosition = writer.Length;
-        writer.Write(0); // Placeholder for message count
-
-        var totalMessageCount = 0;
-        for (int i = 0; i < batchOffsets.Count; i++)
+        var writer = BigEndianWriter.Rent(12 + data.Length + estimatedRecords * 24);
+        try
         {
-            var batchStart = batchOffsets[i];
-            var batchEnd = i + 1 < batchOffsets.Count ? batchOffsets[i + 1] : data.Length;
-            var batchSpan = dataSpan.Slice(batchStart, batchEnd - batchStart);
+            writer.Write(highWatermark);
+            var countPosition = writer.Length;
+            writer.Write(0); // Placeholder for message count
 
-            try
+            var totalMessageCount = 0;
+            for (int i = 0; i < batchOffsets.Count; i++)
             {
-                totalMessageCount += RecordBatchStreamer.StreamBatchRawToWriter(batchSpan, writer);
-            }
-            catch (Exception ex)
-            {
-                // Only log if warning level is enabled (avoid allocation when disabled)
-                if (_logger.IsEnabled(LogLevel.Warning))
+                var batchStart = batchOffsets[i];
+                var batchEnd = i + 1 < batchOffsets.Count ? batchOffsets[i + 1] : data.Length;
+                var batchSpan = dataSpan.Slice(batchStart, batchEnd - batchStart);
+
+                try
                 {
-                    _logger.LogWarning(ex, "Failed to parse record batch at offset {BatchIndex}", i);
+                    totalMessageCount += RecordBatchStreamer.StreamBatchRawToWriter(batchSpan, writer);
+                }
+                catch (Exception ex)
+                {
+                    // Only log if warning level is enabled (avoid allocation when disabled)
+                    if (_logger.IsEnabled(LogLevel.Warning))
+                    {
+                        _logger.LogWarning(ex, "Failed to parse record batch at offset {BatchIndex}", i);
+                    }
                 }
             }
+
+            writer.PatchInt32(countPosition, totalMessageCount);
+            return writer;
         }
-
-        writer.PatchInt32(countPosition, totalMessageCount);
-
-        await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.FetchResponse,
-            SurgewaveErrorCode.None, writer.AsMemory(), cancellationToken);
+        catch
+        {
+            // The rent must not escape a failed re-framing — nobody downstream will see it.
+            writer.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

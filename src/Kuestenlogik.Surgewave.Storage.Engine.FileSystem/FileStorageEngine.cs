@@ -163,6 +163,16 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
                 return _mmapManager;
             }
 
+            // Disposal takes this same lock, so checking here orders the two: a reader that gets in
+            // first creates a manager that Dispose then disposes; one that arrives afterwards sees
+            // the flag and falls back to the pooled read. Without it, a read that raced disposal
+            // could map the file after Dispose had already released its manager — leaving a mapping
+            // nobody owns, which on Windows blocks the segment file from ever being deleted.
+            if (_disposed)
+            {
+                return null;
+            }
+
             // Nothing written yet: mapping an empty file throws, so stay on the pooled path
             // until there is data. The next read retries.
             if (Volatile.Read(ref _writePosition) <= 0)
@@ -457,6 +467,17 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
         }
     }
 
+    /// <summary>
+    /// Deletes the segment's files.
+    ///
+    /// <para><b>Failure is reported, not swallowed.</b> A memory-mapped view held by an in-flight
+    /// read pins its file on Windows: <c>File.Delete</c> then fails with
+    /// <c>ERROR_USER_MAPPED_FILE</c>. Swallowing that leaves a log file on disk that the partition
+    /// has already dropped from its segment list — and <c>LoadExistingSegments</c> picks it up
+    /// again on the next start, serving records that retention had deleted. The caller retries
+    /// instead (#78 follow-up).</para>
+    /// </summary>
+    /// <exception cref="IOException">The log file could not be deleted; retry once readers are done.</exception>
     public void DeleteStorage()
     {
         if (!_disposed)
@@ -465,9 +486,14 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
         var indexPath = Path.Combine(_baseDirectory, $"{_baseOffset:D20}.index");
         var timeIndexPath = Path.Combine(_baseDirectory, $"{_baseOffset:D20}.timeindex");
 
-        try { File.Delete(LogFilePath); } catch { }
+        // The indexes are derived data — a leftover is harmless because the log file's absence
+        // already removes the records, and a stale index without its log is ignored on load.
         try { File.Delete(indexPath); } catch { }
         try { File.Delete(timeIndexPath); } catch { }
+
+        // The log file is the record. Let the exception out so the partition can keep the segment
+        // on its retry list rather than believing the data is gone.
+        File.Delete(LogFilePath);
     }
 
     private void UpdateIndexes(long batchBaseOffset, long filePosition, long maxTimestamp, int recordCount)
@@ -776,7 +802,14 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
         // acknowledged data.
         try { _logFile?.Flush(flushToDisk: true); _indexFile?.Flush(flushToDisk: true); _timeIndexFile?.Flush(flushToDisk: true); } catch { }
 
-        _mmapManager?.Dispose();
+        // Under the same lock GetOrCreateMmapManager uses, so a read racing disposal cannot install
+        // a manager after this line has run.
+        lock (_mmapInitLock)
+        {
+            _mmapManager?.Dispose();
+            _mmapManager = null;
+        }
+
         _logFile?.Dispose();
         _indexFile?.Dispose();
         _timeIndexFile?.Dispose();
