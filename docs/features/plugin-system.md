@@ -25,6 +25,28 @@ surgewave plugin list
 surgewave plugin uninstall <plugin-id>
 ```
 
+## Kafka is a plugin, too
+
+The Kafka wire protocol is not part of the broker — it ships as `kuestenlogik.surgewave.protocol.kafka`, exactly like MQTT or AMQP. `surgewave-broker.dll` holds no reference to `Kuestenlogik.Surgewave.Protocol.Kafka`, so a published broker contains the Kafka assembly only under `plugins/kuestenlogik.surgewave.protocol.kafka/`.
+
+**Delete that directory and the broker speaks native only.** No rebuild, no config change:
+
+```
+plugins/kuestenlogik.surgewave.protocol.kafka/   ← remove to drop Kafka support
+```
+
+A Kafka client then gets its connection closed at the magic-byte probe, because no handler claims those bytes. The broker says so on startup — it reports what the listener actually speaks, not what the config asks for:
+
+```
+Kafka is enabled in configuration but no Kafka protocol plugin is installed — the broker
+listens native-only on localhost:9092 and will close Kafka clients. Install the plugin
+(plugins/kuestenlogik.surgewave.protocol.kafka) or set Surgewave:Kafka:Enabled=false.
+```
+
+`Surgewave:Kafka:Enabled` (default `true`) is the second switch: with the plugin installed it turns the wire protocol off without removing anything. Both switches lead to the same listener behaviour; the difference is that removing the plugin also removes the code from the process.
+
+Kafka shares the broker's main listener (protocol detection on the first bytes), so no separate port appears or disappears either way.
+
 ## Plugin Package Format (.swpkg)
 
 Surgewave Plugin Packages are ZIP archives containing:

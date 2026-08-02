@@ -85,10 +85,12 @@
 
   <!-- Publish-specific settings for optimized builds -->
   <!-- Use: dotnet publish -c Release -p:Optimized=true -r win-x64 -->
-  <!-- Protocol DLLs are excluded from the single-file bundle via ExcludeFromSingleFile
-       so that BrokerPluginActivator.Discover<T> can find them via Directory.GetFiles()
-       in AppContext.BaseDirectory at runtime. Their transitive dependencies remain
-       bundled and are resolvable via the single-file extraction temp directory.
+  <!-- Optional protocols need no single-file exclusion any more (#61): this project does not
+       reference them, so they never enter the bundle in the first place. They are published as
+       .swpkg packages and installed into plugins/<id>/ next to the executable, which single-file
+       publishing does not touch — BrokerPluginActivator loads them from there via their manifest.
+       An earlier ExcludeFromSingleFile contract lived here for the days when the broker still
+       referenced the protocol assemblies; it is gone, and nothing needs to be preserved.
        Kuestenlogik.Surgewave.Protocol.Native stays bundled as it is part of the broker core. -->
   <PropertyGroup Condition="'$(Optimized)' == 'true'">
     <SelfContained>true</SelfContained>
