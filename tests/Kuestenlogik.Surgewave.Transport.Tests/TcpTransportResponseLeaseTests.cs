@@ -70,26 +70,36 @@ public sealed class TcpTransportResponseLeaseTests
 
         const int iterations = 20;
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        // Process-wide, not per-thread: the payload copy happens in the continuation after the
+        // socket await, so it lands on a pool thread and a per-thread counter simply does not see it
+        // — the earlier version of this test read 39 KB where 1.3 MB was allocated. This assembly
+        // runs its tests serially (xunit.runner.json), so nothing else contributes here.
+        var before = GC.GetTotalAllocatedBytes(precise: true);
         for (var i = 0; i < iterations; i++)
         {
             using var response = await transport.SendRequestLeasedAsync(SurgewaveOpCode.Fetch, request, compress: false);
             Assert.Equal(request.Length, response.Payload.Length);
         }
-        var leasedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        var leasedBytes = GC.GetTotalAllocatedBytes(precise: true) - before;
 
-        before = GC.GetAllocatedBytesForCurrentThread();
+        before = GC.GetTotalAllocatedBytes(precise: true);
         for (var i = 0; i < iterations; i++)
         {
             var (_, payload) = await transport.SendRequestAsync(SurgewaveOpCode.Fetch, request, compress: false);
             Assert.Equal(request.Length, payload.Length);
         }
-        var materializedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        var materializedBytes = GC.GetTotalAllocatedBytes(precise: true) - before;
 
-        Assert.True(materializedBytes > iterations * (long)request.Length * 0.9,
-            $"the materializing path allocated only {materializedBytes} B — the comparison would be meaningless");
-        Assert.True(leasedBytes < materializedBytes / 4,
-            $"leased path allocated {leasedBytes} B vs {materializedBytes} B materialized — the payload is not being borrowed");
+        Assert.True(materializedBytes > 0 && leasedBytes > 0,
+            $"allocation measurement broke (leased {leasedBytes} B, materialized {materializedBytes} B) — a zero or negative reading means the counter did not observe the work");
+
+        // The echo server runs in this process and allocates a request and a response array per
+        // round on BOTH paths, so the absolute figures are dominated by it. What separates the two
+        // paths is the one payload-sized copy the materializing path has to make per response — so
+        // that difference is the assertion, not the ratio.
+        var extraPerResponse = (materializedBytes - leasedBytes) / (double)iterations;
+        Assert.True(extraPerResponse > request.Length * 0.8,
+            $"the materializing path allocated only {extraPerResponse:F0} B more per response than the leased one (expected about {request.Length} B) — the payload is not being borrowed");
     }
 
     [Fact]
@@ -118,20 +128,24 @@ public sealed class TcpTransportResponseLeaseTests
     }
 
     [Fact]
-    public async Task CancelledRequest_DoesNotStrandTheBuffer_AndLaterRequestsStillMatch()
+    public async Task CancelledRequest_WhoseResponseArrivesAnyway_ReleasesTheBufferInTheReaderLoop()
     {
-        // Cancellation is the case where nobody consumes the response: the reader loop has to
-        // release the lease itself, and the connection has to keep working afterwards.
-        await using var server = new EchoNativeServer();
+        // The branch under test is the one where a response arrives for a waiter that is already
+        // gone: only the reader loop can release that lease. Reaching it requires the request to be
+        // ON THE WIRE before cancellation — cancelling beforehand merely aborts at the send lock and
+        // never produces a response at all, which is why the server answers with a delay here.
+        await using var server = new EchoNativeServer(responseDelay: TimeSpan.FromMilliseconds(300));
         await using var transport = new TcpTransport(OptionsFor(server.Port, pipelining: true));
         await transport.ConnectAsync().AsTask().WaitAsync(Timeout);
 
-        for (var i = 0; i < 20; i++)
+        // Small requests on purpose: a payload big enough to fill the socket send buffer would have
+        // its write aborted MID-FRAME by the cancellation, leaving the connection desynchronised —
+        // a different (and pre-existing) problem that would mask the branch under test here.
+        for (var i = 0; i < 10; i++)
         {
-            using var cts = new CancellationTokenSource();
-            await cts.CancelAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
-            var request = new byte[2048];
+            var request = new byte[1024];
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             {
                 using var _ = await transport.SendRequestLeasedAsync(
@@ -139,11 +153,65 @@ public sealed class TcpTransportResponseLeaseTests
             });
         }
 
-        var probe = new byte[2048];
+        // Give the orphaned responses time to arrive and be released by the reader loop.
+        await Task.Delay(TimeSpan.FromSeconds(4));
+
+        // The connection still works and serves correct bytes — a buffer released twice or handed to
+        // the wrong waiter would show up here.
+        var probe = new byte[1024];
         Array.Fill(probe, (byte)0x77);
         using var response = await transport.SendRequestLeasedAsync(SurgewaveOpCode.Fetch, probe, compress: false)
             .AsTask().WaitAsync(Timeout);
 
+        Assert.True(probe.AsSpan().SequenceEqual(response.Payload.Span));
+    }
+
+    [Fact]
+    public async Task DisposeWithRequestInFlight_FaultsTheWaiter_InsteadOfHangingForever()
+    {
+        // A caller that passed CancellationToken.None has no escape of its own: if the reader loop
+        // exits without faulting the pending requests, that await never returns. Nothing exercised
+        // this before — every other test consumes its response before disposing.
+        await using var server = new EchoNativeServer(neverRespond: true);
+        var transport = new TcpTransport(OptionsFor(server.Port, pipelining: true));
+        await transport.ConnectAsync().AsTask().WaitAsync(Timeout);
+
+        var inFlight = transport.SendRequestLeasedAsync(
+            SurgewaveOpCode.Fetch, new byte[1024], compress: false, CancellationToken.None).AsTask();
+
+        // Let the frame reach the server so the request is genuinely pending.
+        await Task.Delay(100);
+        Assert.False(inFlight.IsCompleted, "the server answered although it was told not to");
+
+        await transport.DisposeAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => inFlight.WaitAsync(Timeout));
+    }
+
+    [Fact]
+    public async Task RequestIdWraps_TheReservedPushIdIsSkipped_SoTheResponseStillReachesItsWaiter()
+    {
+        // RequestId 0 is the wire's marker for a server push. The counter is 32-bit and wraps, so a
+        // long-lived connection eventually reaches it; a request issued with id 0 would have its
+        // response routed to the push path and the caller would wait forever. Forcing the counter to
+        // the wrap point is the only way to reach that in a test.
+        await using var server = new EchoNativeServer();
+        await using var transport = new TcpTransport(OptionsFor(server.Port, pipelining: true));
+        await transport.ConnectAsync().AsTask().WaitAsync(Timeout);
+
+        var counter = typeof(TcpTransport).GetField("_requestIdCounter",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(counter);
+        counter!.SetValue(transport, uint.MaxValue);
+
+        var probe = new byte[256];
+        Array.Fill(probe, (byte)0x42);
+
+        // Without skipping the reserved value this await never completes.
+        using var response = await transport.SendRequestLeasedAsync(SurgewaveOpCode.Fetch, probe, compress: false)
+            .AsTask().WaitAsync(Timeout);
+
+        Assert.NotEqual(0u, response.Header.RequestId);
         Assert.True(probe.AsSpan().SequenceEqual(response.Payload.Span));
     }
 }

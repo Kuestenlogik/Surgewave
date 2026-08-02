@@ -14,6 +14,12 @@ internal sealed class LeaseTrackingLogSegmentFactory(ILogSegmentFactory inner) :
     /// <summary>Leases handed out and not yet released.</summary>
     public int OpenLeases => _tracker.OpenLeases;
 
+    /// <summary>
+    /// How often a lease was released twice — in a real pool the point at which one buffer starts
+    /// serving two callers.
+    /// </summary>
+    public int DoubleReleases => _tracker.DoubleReleases;
+
     public bool IsPersistent => inner.IsPersistent;
 
     public ILogSegment CreateSegment(string baseDirectory, long baseOffset, bool createNew, long maxSegmentSize = ILogSegment.DefaultMaxSegmentSize)

@@ -16,11 +16,24 @@ internal sealed class EchoNativeServer : IAsyncDisposable
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _acceptTask;
+    private readonly TimeSpan _responseDelay;
+    private readonly bool _neverRespond;
 
     public int Port { get; }
 
-    public EchoNativeServer()
+    /// <param name="responseDelay">
+    /// Wait this long before answering. Needed to test what happens to a request that is already on
+    /// the wire: without a delay, a client cancellation wins the race before the frame is ever sent,
+    /// and the interesting branches on the response side are never reached.
+    /// </param>
+    /// <param name="neverRespond">
+    /// Read requests and stay silent, so the caller can exercise a transport that is disposed with
+    /// requests still in flight.
+    /// </param>
+    public EchoNativeServer(TimeSpan? responseDelay = null, bool neverRespond = false)
     {
+        _responseDelay = responseDelay ?? TimeSpan.Zero;
+        _neverRespond = neverRespond;
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -34,14 +47,14 @@ internal sealed class EchoNativeServer : IAsyncDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var client = await _listener.AcceptTcpClientAsync(cancellationToken);
-                _ = Task.Run(() => ServeAsync(client, cancellationToken), cancellationToken);
+                _ = Task.Run(() => ServeAsync(client, _responseDelay, _neverRespond, cancellationToken), cancellationToken);
             }
         }
         catch (OperationCanceledException) { /* shutting down */ }
         catch (SocketException) { /* listener stopped */ }
     }
 
-    private static async Task ServeAsync(TcpClient client, CancellationToken cancellationToken)
+    private static async Task ServeAsync(TcpClient client, TimeSpan responseDelay, bool neverRespond, CancellationToken cancellationToken)
     {
         using (client)
         {
@@ -68,6 +81,12 @@ internal sealed class EchoNativeServer : IAsyncDisposable
                     var payload = new byte[header.PayloadLength];
                     if (payload.Length > 0)
                         await stream.ReadExactlyAsync(payload, cancellationToken);
+
+                    if (neverRespond)
+                        continue;
+
+                    if (responseDelay > TimeSpan.Zero)
+                        await Task.Delay(responseDelay, cancellationToken);
 
                     await WriteFrameAsync(stream, new SurgewaveResponseHeader
                     {

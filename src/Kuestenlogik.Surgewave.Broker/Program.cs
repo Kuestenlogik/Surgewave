@@ -341,8 +341,26 @@ otelBuilder.WithTracing(tracing =>
 
 // ── Protocol Plugins (IProtocolPlugin discovery) ─────────────────────────────
 // Scans loaded assemblies for IProtocolPlugin implementations (MQTT, WebSocket, AMQP, etc.)
-var activatedProtocols = BrokerPluginActivator.ActivateProtocols(
-    builder.Services, builder.Configuration);
+//
+// The activator swallows a plugin whose ConfigureServices throws and reports it through its optional
+// logger — so calling it without one turned "the Kafka plugin failed to start" into "no Kafka plugin
+// installed", complete with a warning telling the operator to install what is already installed
+// (#61). Host logging is not configured this early, hence the throwaway bootstrap factory.
+IReadOnlyList<IProtocolPlugin> activatedProtocols;
+IReadOnlyList<IBrokerPlugin> activatedPlugins;
+using (var bootstrapLoggerFactory = LoggerFactory.Create(logging => logging.AddSimpleConsole()))
+{
+    var pluginActivationLogger = bootstrapLoggerFactory.CreateLogger("Surgewave.Plugins.Activation");
+
+    activatedProtocols = BrokerPluginActivator.ActivateProtocols(
+        builder.Services, builder.Configuration, pluginActivationLogger);
+
+    // --- Enterprise Broker Plugins (IBrokerPlugin discovery) ---
+    // Scans loaded assemblies for IBrokerPlugin implementations, checks config + license,
+    // and calls ConfigureServices on each enabled plugin. Replaces per-feature if-blocks.
+    activatedPlugins = BrokerPluginActivator.ActivatePlugins(
+        builder.Services, builder.Configuration, license, pluginActivationLogger);
+}
 
 // Whether the broker actually speaks Kafka: the plugin has to be present AND enabled. Shipping
 // Protocol.Kafka as a plugins/ artefact means the assembly can simply be absent, in which case the
@@ -350,12 +368,6 @@ var activatedProtocols = BrokerPluginActivator.ActivateProtocols(
 // plugin declares for itself — the broker host names no Kafka type (#59).
 var kafkaProtocolActive = activatedProtocols.Any(p => p.FeatureId == "Surgewave.Protocol.Kafka");
 
-
-// --- Enterprise Broker Plugins (IBrokerPlugin discovery) ---
-// Scans loaded assemblies for IBrokerPlugin implementations, checks config + license,
-// and calls ConfigureServices on each enabled plugin. Replaces per-feature if-blocks.
-var activatedPlugins = BrokerPluginActivator.ActivatePlugins(
-    builder.Services, builder.Configuration, license);
 var activatedFeatures = new HashSet<string>(activatedPlugins.Select(p => p.FeatureId));
 
 // Add QueueView semantics (always-on; provides RabbitMQ-style visibility timeouts)

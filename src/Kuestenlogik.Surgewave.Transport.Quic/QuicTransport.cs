@@ -69,6 +69,25 @@ public sealed class QuicTransport : ISurgewaveTransport
     public void UnregisterPushHandler(SurgewaveOpCode opCode)
         => _pushHandlers.TryRemove(opCode, out _);
 
+    /// <summary>
+    /// Next correlation id, never zero. Zero is the wire's marker for an unsolicited server push
+    /// (see <see cref="RegisterPushHandler"/>), so a request must not carry it: the reader loop
+    /// routes on that value and would hand the response to a push handler instead of to the waiter,
+    /// which then never completes. The counter is 32-bit, so a long-lived connection does reach the
+    /// wrap — skipping the reserved value costs one branch per request.
+    /// </summary>
+    private uint NextRequestId()
+    {
+        uint id;
+        do
+        {
+            id = Interlocked.Increment(ref _requestIdCounter);
+        }
+        while (id == 0);
+
+        return id;
+    }
+
     private PendingResponse RentPendingRequest()
     {
         if (_pendingRequestPool.TryTake(out var request))
@@ -189,7 +208,7 @@ public sealed class QuicTransport : ISurgewaveTransport
         bool compress,
         CancellationToken cancellationToken)
     {
-        var requestId = Interlocked.Increment(ref _requestIdCounter);
+        var requestId = NextRequestId();
         var pending = RentPendingRequest();
 
         _pendingRequests[requestId] = pending;
@@ -284,7 +303,7 @@ public sealed class QuicTransport : ISurgewaveTransport
         await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            var requestId = Interlocked.Increment(ref _requestIdCounter);
+            var requestId = NextRequestId();
 
             var flags = SurgewaveProtocolFlags.None;
             ReadOnlyMemory<byte> actualPayload = payload;

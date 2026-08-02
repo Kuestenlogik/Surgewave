@@ -19,6 +19,7 @@ public sealed class PartitionLog : IPartitionLog
     private readonly ILogSegmentFactory _segmentFactory;
     private readonly List<ILogSegment> _segments = new();
     private readonly PartitionLogReader _reader = new();
+    private readonly PendingSegmentDeletions _pendingDeletions = new();
 #pragma warning disable CA2213 // _activeSegment is always a member of _segments and gets disposed with the collection
     private ILogSegment? _activeSegment;
 #pragma warning restore CA2213
@@ -907,6 +908,10 @@ public sealed class PartitionLog : IPartitionLog
         _appendLock.EnterWriteLock();
         try
         {
+            // Segments whose files were still pinned by an in-flight read last time get another
+            // chance here — the reader has almost certainly finished since (#78 follow-up).
+            _pendingDeletions.RetryPending();
+
             var deletedCount = 0;
             var now = DateTime.UtcNow;
             var cutoffTime = policy.RetentionHours > 0
@@ -949,7 +954,10 @@ public sealed class PartitionLog : IPartitionLog
                     _reader.RemoveMmapReader(segment.BaseOffset);
 
                     segment.Dispose();
-                    segment.DeleteFiles();
+                    // The files may still be pinned by a fetch that is mid-flight; deferring keeps
+                    // the deletion pending instead of dropping it, so the data cannot reappear
+                    // after a restart.
+                    _pendingDeletions.DeleteOrDefer(segment);
                     _segments.Remove(segment);
                     totalSize -= segment.Size;
                     deletedCount++;
@@ -1012,7 +1020,7 @@ public sealed class PartitionLog : IPartitionLog
                 _reader.RemoveMmapReader(segment.BaseOffset);
 
                 segment.Dispose();
-                segment.DeleteFiles();
+                _pendingDeletions.DeleteOrDefer(segment);
                 _segments.Remove(segment);
             }
 
@@ -1060,6 +1068,11 @@ public sealed class PartitionLog : IPartitionLog
         {
             // Dispose reader (clears mmap readers)
             _reader.Dispose();
+
+            // Last chance for deletions that were pinned by a reader: on shutdown the readers are
+            // gone, so the files usually go now. Anything still pending would otherwise reappear on
+            // the next start as records retention had already removed.
+            _pendingDeletions.RetryPending();
 
             foreach (var segment in _segments)
             {

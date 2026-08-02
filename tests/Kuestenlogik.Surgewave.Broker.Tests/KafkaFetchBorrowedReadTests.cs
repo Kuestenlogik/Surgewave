@@ -138,9 +138,11 @@ public sealed class KafkaFetchBorrowedReadTests : IDisposable
         response.ReleaseBorrowedMemory();
         response.ReleaseBorrowedMemory();
 
-        // A second release must not push the lease count below zero — i.e. must not hand the same
-        // buffer back to the pool twice, which is how two partitions end up sharing memory.
+        // The second release must reach no lease at all. Counting open leases alone would not show
+        // it — the fake reports a repeat release separately, because in a real pool that is the
+        // moment two callers start sharing one buffer.
         Assert.Equal(0, _segmentFactory.OpenLeases);
+        Assert.Equal(0, _segmentFactory.DoubleReleases);
     }
 
     /// <summary>Creates the topic, appends one batch per partition and returns the written bytes.</summary>
