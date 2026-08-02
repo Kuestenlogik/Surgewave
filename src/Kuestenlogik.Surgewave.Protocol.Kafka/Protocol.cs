@@ -137,12 +137,71 @@ public abstract class KafkaRequest : IProtocolRequest
 }
 
 /// <summary>
-/// Base class for all Kafka protocol responses
+/// Base class for all Kafka protocol responses.
+///
+/// <para>A response may carry <b>borrowed</b> memory — the fetch path serves record sets straight
+/// out of a pooled or memory-mapped storage lease instead of copying them (#78). Such a response
+/// owns that lease until it has been serialized: <b>whoever received a response calls
+/// <see cref="ReleaseBorrowedMemory"/> once it has been written</b> — for the broker that is the
+/// connection loop in <c>KafkaConnectionHandler</c>. Responses that borrow nothing (the vast
+/// majority) release to a no-op, so the rule is uniform and costs nothing.</para>
+///
+/// <para><b>Do not read a response's payload after releasing it.</b> A returned pool buffer can be
+/// handed to an unrelated partition, and a released memory-mapped view is no longer mapped at all
+/// — reading through it takes the process down. Consumers that need the bytes to outlive the
+/// response must copy them.</para>
+///
+/// <para>Deliberately <b>not</b> <see cref="IDisposable"/>: a response does not own a resource in
+/// the usual sense, and declaring it disposable would make every one of the dozens of response
+/// constructions across the handlers an ownership question (CA2000) for a rule that concerns
+/// exactly one API.</para>
 /// </summary>
 public abstract class KafkaResponse : IProtocolResponse
 {
+    // Most responses attach nothing and single-partition fetches attach exactly one lease, so the
+    // first one lives in a field and only multi-partition fetches pay for a list.
+    private IDisposable? _lifetime;
+    private List<IDisposable>? _additionalLifetimes;
+
     public required int CorrelationId { get; init; }
     public required short ApiVersion { get; init; }
+
+    /// <summary>
+    /// Ties <paramref name="lifetime"/> to this response: it is released by
+    /// <see cref="ReleaseBorrowedMemory"/>, i.e. once the response has been written to the wire
+    /// (#78). Used by the fetch path to hand a storage lease across the stack instead of
+    /// materializing its bytes into an array.
+    /// </summary>
+    public void AttachLifetime(IDisposable lifetime)
+    {
+        if (_lifetime is null)
+        {
+            _lifetime = lifetime;
+            return;
+        }
+
+        (_additionalLifetimes ??= []).Add(lifetime);
+    }
+
+    /// <summary>
+    /// Releases every attached lease, giving pooled buffers and mapped views back. Idempotent; the
+    /// payload memory of a borrowed record set is invalid afterwards.
+    /// </summary>
+    public void ReleaseBorrowedMemory()
+    {
+        var first = _lifetime;
+        var additional = _additionalLifetimes;
+        _lifetime = null;
+        _additionalLifetimes = null;
+
+        first?.Dispose();
+
+        if (additional is null)
+            return;
+
+        foreach (var lifetime in additional)
+            lifetime.Dispose();
+    }
 
     public abstract void WriteTo(KafkaProtocolWriter writer);
 
