@@ -344,6 +344,12 @@ otelBuilder.WithTracing(tracing =>
 var activatedProtocols = BrokerPluginActivator.ActivateProtocols(
     builder.Services, builder.Configuration);
 
+// Whether the broker actually speaks Kafka: the plugin has to be present AND enabled. Shipping
+// Protocol.Kafka as a plugins/ artefact means the assembly can simply be absent, in which case the
+// config flag says nothing about what the listener does (#61). FeatureId matches the one the Kafka
+// plugin declares for itself — the broker host names no Kafka type (#59).
+var kafkaProtocolActive = activatedProtocols.Any(p => p.FeatureId == "Surgewave.Protocol.Kafka");
+
 
 // --- Enterprise Broker Plugins (IBrokerPlugin discovery) ---
 // Scans loaded assemblies for IBrokerPlugin implementations, checks config + license,
@@ -1519,10 +1525,25 @@ logger.LogInformation("Replication components started (Controller: {IsController
 
 var brokerTask = Task.Run(() => surgewaveBroker.StartAsync(CancellationToken.None));
 
-if (config.Kafka.Enabled)
+// What the listener actually speaks is decided by the plugins that activated, not by the config
+// flag: with Protocol.Kafka absent from plugins/ the flag is still true, but no Kafka connection
+// handler is registered and a Kafka peer is closed on the magic-byte probe (#61). Reporting the
+// flag here would tell an operator "Kafka listener started" while every Kafka client is silently
+// dropped, so report the activation instead — and say so when the two disagree.
+if (kafkaProtocolActive)
+{
     logger.LogInformation("Kafka wire protocol listener started on {Host}:{Port}", config.Host, config.Port);
+}
+else if (config.Kafka.Enabled)
+{
+    logger.LogWarning(
+        "Kafka is enabled in configuration but no Kafka protocol plugin is installed — the broker listens native-only on {Host}:{Port} and will close Kafka clients. Install the plugin (plugins/kuestenlogik.surgewave.protocol.kafka) or set Surgewave:Kafka:Enabled=false.",
+        config.Host, config.Port);
+}
 else
+{
     logger.LogInformation("Native-only listener started on {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
+}
 
 app.MapGrpcService<ProducerServiceImpl>();
 app.MapGrpcService<ConsumerServiceImpl>();
@@ -1769,7 +1790,7 @@ app.MapGet("/sd-targets", () =>
 
 logger.LogInformation("gRPC server started on port {GrpcPort}", config.GrpcPort);
 logger.LogInformation("Surgewave broker ready to accept connections");
-if (config.Kafka.Enabled)
+if (kafkaProtocolActive)
     logger.LogInformation("  - Kafka wire protocol: {Host}:{Port}", config.Host, config.Port);
 else
     logger.LogInformation("  - Native protocol only: {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
