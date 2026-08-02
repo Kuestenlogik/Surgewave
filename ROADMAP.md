@@ -35,7 +35,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
-- [#41](https://github.com/Kuestenlogik/Surgewave/issues/41) **Decouple Kafka protocol behind the IProtocolPlugin boundary (broker must run without Protocol.Kafka assembly)** 
 - [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
 - [#43](https://github.com/Kuestenlogik/Surgewave/issues/43) **Native client: multi-broker bootstrap & failover** 
 - [#44](https://github.com/Kuestenlogik/Surgewave/issues/44) **StreamsProducer: transactional changelog writes** 
@@ -45,6 +44,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
+- [#117](https://github.com/Kuestenlogik/Surgewave/issues/117) **fix(transport): cancelling a large request aborts the write mid-frame and desynchronises the connection** 
 
 ---
 
