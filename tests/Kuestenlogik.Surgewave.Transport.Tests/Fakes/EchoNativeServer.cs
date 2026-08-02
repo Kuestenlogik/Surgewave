@@ -18,6 +18,7 @@ internal sealed class EchoNativeServer : IAsyncDisposable
     private readonly Task _acceptTask;
     private readonly TimeSpan _responseDelay;
     private readonly bool _neverRespond;
+    private readonly bool _stopReadingAfterFirstRequest;
 
     public int Port { get; }
 
@@ -30,10 +31,16 @@ internal sealed class EchoNativeServer : IAsyncDisposable
     /// Read requests and stay silent, so the caller can exercise a transport that is disposed with
     /// requests still in flight.
     /// </param>
-    public EchoNativeServer(TimeSpan? responseDelay = null, bool neverRespond = false)
+    /// <param name="stopReadingAfterFirstRequest">
+    /// Complete the handshake, read one request, then stop reading altogether. The client's socket
+    /// buffers fill up and its next large write blocks — the only way to reach a write that is
+    /// interrupted while a frame is half on the wire (#117).
+    /// </param>
+    public EchoNativeServer(TimeSpan? responseDelay = null, bool neverRespond = false, bool stopReadingAfterFirstRequest = false)
     {
         _responseDelay = responseDelay ?? TimeSpan.Zero;
         _neverRespond = neverRespond;
+        _stopReadingAfterFirstRequest = stopReadingAfterFirstRequest;
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -47,14 +54,14 @@ internal sealed class EchoNativeServer : IAsyncDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var client = await _listener.AcceptTcpClientAsync(cancellationToken);
-                _ = Task.Run(() => ServeAsync(client, _responseDelay, _neverRespond, cancellationToken), cancellationToken);
+                _ = Task.Run(() => ServeAsync(client, _responseDelay, _neverRespond, _stopReadingAfterFirstRequest, cancellationToken), cancellationToken);
             }
         }
         catch (OperationCanceledException) { /* shutting down */ }
         catch (SocketException) { /* listener stopped */ }
     }
 
-    private static async Task ServeAsync(TcpClient client, TimeSpan responseDelay, bool neverRespond, CancellationToken cancellationToken)
+    private static async Task ServeAsync(TcpClient client, TimeSpan responseDelay, bool neverRespond, bool stopReadingAfterFirstRequest, CancellationToken cancellationToken)
     {
         using (client)
         {
@@ -73,14 +80,24 @@ internal sealed class EchoNativeServer : IAsyncDisposable
                 }, [SurgewaveNativeProtocol.Version, 0 /* no compression */], cancellationToken);
 
                 var requestHeader = new byte[SurgewaveNativeProtocol.HeaderSize];
+                var requestsRead = 0;
                 while (!cancellationToken.IsCancellationRequested)
                 {
+                    if (stopReadingAfterFirstRequest && requestsRead >= 1)
+                    {
+                        // Hold the connection open but never drain it again: the client's writes
+                        // block once the socket buffers are full.
+                        await Task.Delay(Timeout.Infinite, cancellationToken);
+                    }
+
                     await stream.ReadExactlyAsync(requestHeader, cancellationToken);
                     var header = SurgewaveRequestHeader.ReadFrom(requestHeader);
 
                     var payload = new byte[header.PayloadLength];
                     if (payload.Length > 0)
                         await stream.ReadExactlyAsync(payload, cancellationToken);
+
+                    requestsRead++;
 
                     if (neverRespond)
                         continue;

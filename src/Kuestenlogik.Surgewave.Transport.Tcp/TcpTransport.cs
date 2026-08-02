@@ -27,12 +27,21 @@ public sealed class TcpTransport : ISurgewaveTransport
     private Task? _readerTask;
     private CancellationTokenSource? _readerCts;
 
+    // 0 = usable, 1 = torn down because a request frame was left half-written (#117).
+    private int _connectionFaulted;
+
     // Server-push handler support (streaming subscriptions)
     private readonly ConcurrentDictionary<SurgewaveOpCode, Func<SurgewaveResponseHeader, ReadOnlyMemory<byte>, Task>> _pushHandlers = new();
     private readonly SemaphoreSlim _pushConcurrencyLimit = new(16, 16); // Limit concurrent push handlers
 
     public SurgewaveTransportType TransportType => SurgewaveTransportType.Tcp;
-    public bool IsConnected => _client?.Connected == true;
+
+    /// <summary>
+    /// Whether this transport can still be used. A connection that was torn down after a
+    /// half-written frame reports <see langword="false"/> even though the socket may still look
+    /// open to the OS — the peer stopped making sense of the stream, so it is not usable (#117).
+    /// </summary>
+    public bool IsConnected => Volatile.Read(ref _connectionFaulted) == 0 && _client?.Connected == true;
     public bool ServerSupportsCompression { get; private set; }
 
     public TcpTransport(TransportOptions options)
@@ -212,7 +221,23 @@ public sealed class TcpTransport : ISurgewaveTransport
                         OpCode = opCode,
                         PayloadLength = actualPayload.Length
                     };
-                    await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+
+                    // Cancelling here is free: nothing of this frame is on the wire yet, so the
+                    // connection stays intact and only this caller is affected. That is the common
+                    // case — a request cancelled while it waited for the send lock.
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        // From here on the frame may be partially written, and there is no way to
+                        // tell how far it got. The connection cannot be used again (#117).
+                        FaultConnection(ex);
+                        throw;
+                    }
                 }
                 finally
                 {
@@ -301,7 +326,20 @@ public sealed class TcpTransport : ISurgewaveTransport
                     OpCode = opCode,
                     PayloadLength = actualPayload.Length
                 };
-                await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+
+                // Same split as the pipelined path: cancellation before the first byte is harmless,
+                // a failure during the write leaves an unparseable stream behind (#117).
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    FaultConnection(ex);
+                    throw;
+                }
             }
             finally
             {
@@ -474,6 +512,38 @@ public sealed class TcpTransport : ISurgewaveTransport
         {
             FailAllPending(ex);
         }
+    }
+
+    /// <summary>
+    /// Tears the connection down after a request frame could not be written completely (#117).
+    ///
+    /// <para><b>Why a failed write is fatal.</b> A frame is a header plus exactly
+    /// <c>PayloadLength</c> bytes. If the write stops in the middle — a cancellation while the
+    /// socket buffer is full, or an I/O error — the peer has consumed the header and is waiting for
+    /// bytes that will never come. It cannot resynchronise: there is no frame delimiter to scan
+    /// for. Everything written afterwards is read as the tail of the abandoned payload, so every
+    /// later response is lost and its caller waits forever. Reporting the failure only to the
+    /// caller that cancelled would leave the connection looking healthy while it is unusable.</para>
+    ///
+    /// <para>The exception handed to the waiters is an <see cref="IOException"/> on purpose: that is
+    /// what the client's consumer treats as a connection error, so its reconnect path takes over
+    /// instead of surfacing an unfamiliar failure.</para>
+    /// </summary>
+    private void FaultConnection(Exception cause)
+    {
+        if (Interlocked.Exchange(ref _connectionFaulted, 1) != 0)
+            return;
+
+        FailAllPending(new IOException(
+            "The connection was torn down: a request frame could not be written completely, so the stream is no longer in a state the peer can parse.",
+            cause));
+
+        // Stop the reader before the socket goes away; it fails its own pendings if it loses the race.
+        try { _readerCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* disposal already under way */ }
+
+        _stream?.Dispose();
+        _client?.Dispose();
     }
 
     private void FailAllPending(Exception exception)
