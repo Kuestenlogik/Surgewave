@@ -236,7 +236,19 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
 
                 // Write response directly into PipeWriter — batches multiple responses
                 // into a single socket write, reducing syscalls on the response path.
-                WriteResponseToPipeWriter(pipeWriter, response);
+                try
+                {
+                    WriteResponseToPipeWriter(pipeWriter, response);
+                }
+                finally
+                {
+                    // A fetch response can serve its record sets out of borrowed storage memory
+                    // (#78). Once the bytes are in the pipe's buffer the lease has done its job —
+                    // released here, right after the write, so a fetch never holds a pooled buffer
+                    // or a mapped view across the flush.
+                    response.ReleaseBorrowedMemory();
+                }
+
                 await pipeWriter.FlushAsync(cancellationToken);
                 Log.ResponseSent(_logger, endpoint);
             }

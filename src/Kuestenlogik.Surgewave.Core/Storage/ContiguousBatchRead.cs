@@ -29,6 +29,19 @@ public readonly struct ContiguousBatchRead : IDisposable
     public List<int> BatchOffsets { get; }
 
     /// <summary>
+    /// The resource that keeps <see cref="Data"/> alive, or <c>null</c> when the memory is already
+    /// owned by the caller and nothing has to be released.
+    ///
+    /// <para>Exposed for consumers whose lifetime is not a <c>using</c> scope: the Kafka fetch path
+    /// hands the bytes to a response object that is serialized later, so it takes the lifetime over
+    /// and releases it after the write (#78). Taking it over means <b>not</b> disposing the read as
+    /// well — ownership moves, it is not shared. A <c>null</c> here means there is nothing to move,
+    /// which is why this is a property and not a boxed <see cref="IDisposable"/> handed out
+    /// unconditionally.</para>
+    /// </summary>
+    public IDisposable? Lifetime => _lifetime;
+
+    /// <summary>
     /// Wraps memory that is already owned by the caller (no lease). Disposing is a no-op — this is
     /// what the compatibility path returns after it has copied into a plain array.
     /// </summary>

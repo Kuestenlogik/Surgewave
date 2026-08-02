@@ -476,7 +476,6 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
     private async Task<FetchResponse> HandleFetchAsync(FetchRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
     {
         var responses = new List<FetchResponse.FetchableTopicResponse>(request.Topics.Count);
-        var isReadCommitted = request.IsolationLevel == FetchRequest.ReadCommitted;
 
         // Check fetch quota upfront based on max bytes requested (inline loop avoids LINQ closure allocations)
         var clientId = request.ClientId;
@@ -497,6 +496,61 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             }
         }
 
+        // The response object exists before the fetch runs so borrowed reads can be attached to it
+        // as they happen (#78): a record set is served straight out of the storage lease, and that
+        // lease has to stay alive until the response has been serialized. Everything the response
+        // needs is already final here — the throttle time is computed above and no longer changes,
+        // and the partition results are appended through the `responses` reference.
+        var response = new FetchResponse
+        {
+            CorrelationId = request.CorrelationId,
+            ApiVersion = request.ApiVersion,
+            ThrottleTimeMs = throttleTimeMs,
+            Responses = responses
+        };
+
+        long totalBytesFetched;
+        try
+        {
+            totalBytesFetched = await FetchTopicsIntoAsync(request, connectionState, response, cancellationToken);
+        }
+        catch
+        {
+            // Nobody downstream will ever see this response, so any lease already attached to it
+            // would keep its pool buffer or mapped view for good.
+            response.ReleaseBorrowedMemory();
+            throw;
+        }
+
+        // Record fetched bytes for quota tracking (after successful fetch)
+        _quotaManager.RecordFetchedBytes(clientId, totalBytesFetched);
+
+        // Record actual bytes fetched for bandwidth quota (not the max requested)
+        if (_bandwidthQuotaManager is { Enabled: true } && totalBytesFetched > 0)
+        {
+            _bandwidthQuotaManager.RecordConsume(clientId, totalBytesFetched);
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Runs the per-partition fetch for every requested topic and appends the results to
+    /// <paramref name="response"/>, attaching the storage lease of every borrowed read to it.
+    ///
+    /// <para>Split out from <see cref="HandleFetchAsync"/> so those leases have exactly one owner:
+    /// on the way out — normally or by exception — the response is the single thing that has to be
+    /// released to give all of them back (#78).</para>
+    /// </summary>
+    /// <returns>Total record-set bytes served, for quota accounting.</returns>
+    private async Task<long> FetchTopicsIntoAsync(
+        FetchRequest request,
+        ConnectionState connectionState,
+        FetchResponse response,
+        CancellationToken cancellationToken)
+    {
+        var responses = response.Responses;
+        var isReadCommitted = request.IsolationLevel == FetchRequest.ReadCommitted;
         long totalBytesFetched = 0;
 
         foreach (var topicRequest in request.Topics)
@@ -612,17 +666,23 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
                     if (!needsFiltering)
                     {
-                        // Fast path: contiguous read — single allocation for all batches.
-                        var (contiguousData, batchOffsets) = await _logManager.ReadBatchesContiguousAsync(
+                        // Fast path: contiguous read — no per-batch allocation, and no payload copy
+                        // either: the engine hands its pooled or memory-mapped buffer over as a
+                        // lease. The lease outlives this scope because the response is serialized
+                        // later, so its ownership moves to the response — which is why the read
+                        // itself is not disposed here (#78).
+                        var read = await _logManager.ReadContiguousAsync(
                             topicPartition, partitionData.FetchOffset,
                             maxBytes: partitionData.MaxBytes, cancellationToken);
 
+                        if (read.Lifetime is { } lease)
+                            response.AttachLifetime(lease);
+
+                        var contiguousData = read.Data;
+                        var batchOffsets = read.BatchOffsets;
+
                         BatchesRead(batchOffsets.Count, topic, partitionData.Partition, partitionData.FetchOffset);
 
-                        // Serve the contiguous read straight into the response — no defensive copy.
-                        // The bytes are owned by the read (the File adapter's standalone array, or the
-                        // memory engine's append-only GC-rooted slice) and are only read from here on
-                        // (serialized into the thread-local writer, then the PipeWriter span) (#78).
                         recordSet = contiguousData;
 
                         messageCount = 0;
@@ -724,22 +784,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             });
         }
 
-        // Record fetched bytes for quota tracking (after successful fetch)
-        _quotaManager.RecordFetchedBytes(clientId, totalBytesFetched);
-
-        // Record actual bytes fetched for bandwidth quota (not the max requested)
-        if (_bandwidthQuotaManager is { Enabled: true } && totalBytesFetched > 0)
-        {
-            _bandwidthQuotaManager.RecordConsume(clientId, totalBytesFetched);
-        }
-
-        return new FetchResponse
-        {
-            CorrelationId = request.CorrelationId,
-            ApiVersion = request.ApiVersion,
-            ThrottleTimeMs = throttleTimeMs,
-            Responses = responses
-        };
+        return totalBytesFetched;
     }
 
     /// <summary>
