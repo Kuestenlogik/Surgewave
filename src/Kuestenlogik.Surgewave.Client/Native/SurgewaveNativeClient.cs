@@ -166,6 +166,17 @@ public sealed class SurgewaveNativeClient : IAsyncDisposable
         => _connectionManager.SendRequestAsync(opCode, payload, cancellationToken);
 
     /// <summary>
+    /// Send a request and receive a response whose payload may be borrowed from the transport's
+    /// pool (#80). Used by the read-heavy operations — a fetch would otherwise allocate an array
+    /// the size of the fetched data on every call. Dispose the lease after decoding.
+    /// </summary>
+    internal Task<Transport.SurgewaveResponseLease> SendRequestLeasedAsync(
+        SurgewaveOpCode opCode,
+        ReadOnlyMemory<byte> payload,
+        CancellationToken cancellationToken)
+        => _connectionManager.SendRequestLeasedAsync(opCode, payload, cancellationToken);
+
+    /// <summary>
     /// Register a handler for unsolicited server-push messages.
     /// Used internally by SurgewaveStreamingConsumer.
     /// </summary>

@@ -19,10 +19,15 @@ namespace Kuestenlogik.Surgewave.Transport;
 /// <para>The loser of that race must not complete it and must not recycle it. An instance may only
 /// be returned to a pool after its result has actually been consumed — recycling one that a reader
 /// might still complete would deliver a response to an unrelated caller.</para>
+///
+/// <para>The result is a <see cref="SurgewaveResponseLease"/>, which may hold a pooled buffer, so
+/// that race decides buffer ownership too: whoever loses is left holding a lease nobody will
+/// consume and has to dispose it (#80). A lease that is neither delivered nor disposed leaks its
+/// buffer out of the pool.</para>
 /// </summary>
-public sealed class PendingResponse : IValueTaskSource<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)>
+public sealed class PendingResponse : IValueTaskSource<SurgewaveResponseLease>
 {
-    private ManualResetValueTaskSourceCore<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> _core = new()
+    private ManualResetValueTaskSourceCore<SurgewaveResponseLease> _core = new()
     {
         // Never run a caller's continuation on the reader loop: one slow continuation would
         // stall every other in-flight response on the connection.
@@ -37,10 +42,10 @@ public sealed class PendingResponse : IValueTaskSource<(SurgewaveResponseHeader 
     public short Version => _core.Version;
 
     /// <summary>The awaitable for the current use. Await it exactly once.</summary>
-    public ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> ValueTask
+    public ValueTask<SurgewaveResponseLease> ValueTask
         => new(this, _core.Version);
 
-    public bool TrySetResult((SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload) result)
+    public bool TrySetResult(SurgewaveResponseLease result)
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0) return false;
         _core.SetResult(result);
@@ -68,7 +73,7 @@ public sealed class PendingResponse : IValueTaskSource<(SurgewaveResponseHeader 
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public (SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload) GetResult(short token)
+    public SurgewaveResponseLease GetResult(short token)
         => _core.GetResult(token);
 
     public ValueTaskSourceStatus GetStatus(short token) => _core.GetStatus(token);

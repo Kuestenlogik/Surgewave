@@ -14,8 +14,8 @@ public class PendingResponseTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
-    private static (SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload) Response(uint requestId)
-        => (new SurgewaveResponseHeader
+    private static SurgewaveResponseLease Response(uint requestId)
+        => new(new SurgewaveResponseHeader
         {
             RequestId = requestId,
             OpCode = SurgewaveOpCode.Fetch,
@@ -29,10 +29,10 @@ public class PendingResponseTests
         var pending = new PendingResponse();
         Assert.True(pending.TrySetResult(Response(7)));
 
-        var (header, payload) = await pending.ValueTask.AsTask().WaitAsync(Timeout);
+        var response = await pending.ValueTask.AsTask().WaitAsync(Timeout);
 
-        Assert.Equal(7u, header.RequestId);
-        Assert.Equal(7, payload.Span[0]);
+        Assert.Equal(7u, response.Header.RequestId);
+        Assert.Equal(7, response.Payload.Span[0]);
     }
 
     [Fact]
@@ -44,8 +44,8 @@ public class PendingResponseTests
         Assert.False(awaiter.IsCompleted);
         Assert.True(pending.TrySetResult(Response(3)));
 
-        var (header, _) = await awaiter.WaitAsync(Timeout);
-        Assert.Equal(3u, header.RequestId);
+        var response = await awaiter.WaitAsync(Timeout);
+        Assert.Equal(3u, response.Header.RequestId);
     }
 
     [Fact]
@@ -85,8 +85,8 @@ public class PendingResponseTests
         Assert.False(pending.TrySetException(new IOException("late")));
         Assert.False(pending.TrySetCanceled(new CancellationToken(true)));
 
-        var (header, _) = await pending.ValueTask.AsTask().WaitAsync(Timeout);
-        Assert.Equal(1u, header.RequestId);
+        var delivered = await pending.ValueTask.AsTask().WaitAsync(Timeout);
+        Assert.Equal(1u, delivered.Header.RequestId);
     }
 
     [Fact]
@@ -95,17 +95,17 @@ public class PendingResponseTests
         var pending = new PendingResponse();
 
         pending.TrySetResult(Response(1));
-        var (first, _) = await pending.ValueTask.AsTask().WaitAsync(Timeout);
-        Assert.Equal(1u, first.RequestId);
+        var first = await pending.ValueTask.AsTask().WaitAsync(Timeout);
+        Assert.Equal(1u, first.Header.RequestId);
 
         pending.Reset();
 
         // A recycled instance must accept a completion again (the guard has to be cleared)
         // and hand out the new result, not the stale one.
         Assert.True(pending.TrySetResult(Response(2)));
-        var (second, payload) = await pending.ValueTask.AsTask().WaitAsync(Timeout);
-        Assert.Equal(2u, second.RequestId);
-        Assert.Equal(2, payload.Span[0]);
+        var second = await pending.ValueTask.AsTask().WaitAsync(Timeout);
+        Assert.Equal(2u, second.Header.RequestId);
+        Assert.Equal(2, second.Payload.Span[0]);
     }
 
     [Fact]
@@ -142,9 +142,9 @@ public class PendingResponseTests
             await Task.WhenAll(contenders).WaitAsync(Timeout);
 
             Assert.Equal(1, wins);
-            var (header, payload) = await pending.ValueTask.AsTask().WaitAsync(Timeout);
+            var response = await pending.ValueTask.AsTask().WaitAsync(Timeout);
             // The delivered header and payload must come from the same completer.
-            Assert.Equal((byte)header.RequestId, payload.Span[0]);
+            Assert.Equal((byte)response.Header.RequestId, response.Payload.Span[0]);
         }
     }
 
@@ -178,7 +178,7 @@ public class PendingResponseTests
         before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < iterations; i++)
         {
-            var tcs = new TaskCompletionSource<(SurgewaveResponseHeader, ReadOnlyMemory<byte>)>(
+            var tcs = new TaskCompletionSource<SurgewaveResponseLease>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             tcs.TrySetResult(response);
         }

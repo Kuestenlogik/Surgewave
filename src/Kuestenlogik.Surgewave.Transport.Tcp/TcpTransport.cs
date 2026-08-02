@@ -126,7 +126,24 @@ public sealed class TcpTransport : ISurgewaveTransport
         }
     }
 
+    /// <summary>
+    /// Sends a request and materializes the response into memory the caller keeps (#80). The
+    /// payload is copied out of the transport's pooled read so the buffer can go back immediately —
+    /// this signature cannot express a loan. Callers on a hot path should use
+    /// <see cref="SendRequestLeasedAsync"/>, which skips the copy.
+    /// </summary>
     public async ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> SendRequestAsync(
+        SurgewaveOpCode opCode,
+        ReadOnlyMemory<byte> payload,
+        bool compress = true,
+        CancellationToken cancellationToken = default)
+    {
+        using var lease = await SendRequestLeasedAsync(opCode, payload, compress, cancellationToken).ConfigureAwait(false);
+        return (lease.Header, lease.Payload.ToArray());
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<SurgewaveResponseLease> SendRequestLeasedAsync(
         SurgewaveOpCode opCode,
         ReadOnlyMemory<byte> payload,
         bool compress = true,
@@ -139,7 +156,7 @@ public sealed class TcpTransport : ISurgewaveTransport
         return await SendRequestSynchronousAsync(opCode, payload, compress, cancellationToken);
     }
 
-    private async ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> SendRequestPipelinedAsync(
+    private async ValueTask<SurgewaveResponseLease> SendRequestPipelinedAsync(
         SurgewaveOpCode opCode,
         ReadOnlyMemory<byte> payload,
         bool compress,
@@ -210,7 +227,7 @@ public sealed class TcpTransport : ISurgewaveTransport
     /// the reader may still hold a reference, and reusing it would deliver a response to an
     /// unrelated caller (#80).
     /// </summary>
-    private async ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> AwaitResponseAsync(
+    private async ValueTask<SurgewaveResponseLease> AwaitResponseAsync(
         uint requestId, PendingResponse pending, CancellationToken cancellationToken)
     {
         if (!cancellationToken.CanBeCanceled)
@@ -233,7 +250,7 @@ public sealed class TcpTransport : ISurgewaveTransport
         return response;
     }
 
-    private async ValueTask<(SurgewaveResponseHeader Header, ReadOnlyMemory<byte> Payload)> SendRequestSynchronousAsync(
+    private async ValueTask<SurgewaveResponseLease> SendRequestSynchronousAsync(
         SurgewaveOpCode opCode,
         ReadOnlyMemory<byte> payload,
         bool compress,
@@ -285,7 +302,7 @@ public sealed class TcpTransport : ISurgewaveTransport
                     $"Request ID mismatch: expected {requestId}, got {responseHeader.RequestId}");
             }
 
-            return (responseHeader, await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false));
+            return await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -294,17 +311,64 @@ public sealed class TcpTransport : ISurgewaveTransport
     }
 
     /// <summary>
-    /// Reads one response payload off the wire.
+    /// Reads one response payload off the wire into a lease (#80).
     /// <para>
-    /// A compressed frame is staged in a pooled buffer and returned immediately after
-    /// decompression, which allocates the result array anyway — that read costs no garbage
-    /// beyond the decompressed payload (#80). An uncompressed frame is read straight into the
-    /// array that escapes to the caller as <see cref="ReadOnlyMemory{T}"/>; pooling it would
-    /// need a buffer-return protocol on <see cref="ISurgewaveTransport"/>, which the interface
-    /// does not have.
+    /// An uncompressed frame is read into a pooled buffer that travels with the lease, so a fetch
+    /// no longer allocates an array the size of the fetched data. A compressed frame is staged in a
+    /// pool buffer and decompressed into an array the codec allocates anyway — that lease owns
+    /// nothing and disposing it is free.
+    /// </para>
+    /// <para>
+    /// Ownership starts here: on any failure mid-read the rent goes back before the exception
+    /// leaves, because nobody downstream will ever see this lease.
     /// </para>
     /// </summary>
-    private static async ValueTask<ReadOnlyMemory<byte>> ReadPayloadAsync(
+    private static async ValueTask<SurgewaveResponseLease> ReadPayloadAsync(
+        Stream stream, SurgewaveResponseHeader header, CancellationToken cancellationToken)
+    {
+        var length = header.PayloadLength;
+        if (length <= 0)
+        {
+            return new SurgewaveResponseLease(header, ReadOnlyMemory<byte>.Empty);
+        }
+
+        if ((header.Flags & SurgewaveProtocolFlags.Compressed) != 0)
+        {
+            var staging = ArrayPool<byte>.Shared.Rent(length);
+            try
+            {
+                await stream.ReadExactlyAsync(staging.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
+                return new SurgewaveResponseLease(header, NativeCompressionCodec.DecompressWithHeader(staging.AsSpan(0, length)));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(staging);
+            }
+        }
+
+        var buffer = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            await stream.ReadExactlyAsync(buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            throw;
+        }
+
+        return new SurgewaveResponseLease(header, buffer, length);
+    }
+
+    /// <summary>
+    /// Reads a server-push payload into memory the handler keeps.
+    ///
+    /// <para>Push handlers are registered from outside the transport and the delegate contract
+    /// hands them a plain <see cref="ReadOnlyMemory{T}"/> — nothing tells a handler when the bytes
+    /// would stop being valid, so this path deliberately keeps allocating rather than lending a
+    /// pooled buffer to code that may hold on to it (#80).</para>
+    /// </summary>
+    private static async ValueTask<ReadOnlyMemory<byte>> ReadPushPayloadAsync(
         Stream stream, SurgewaveResponseHeader header, CancellationToken cancellationToken)
     {
         var length = header.PayloadLength;
@@ -343,25 +407,40 @@ public sealed class TcpTransport : ISurgewaveTransport
                 await _stream!.ReadExactlyAsync(headerBuffer, cancellationToken);
                 var responseHeader = SurgewaveResponseHeader.ReadFrom(headerBuffer);
 
-                var finalPayload = await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
+                // Push frames (RequestId 0) go to handlers that own their bytes, so they are read
+                // on the allocating path; everything else is a response and can be lent out.
+                if (responseHeader.RequestId == 0)
+                {
+                    var pushPayload = await ReadPushPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
+                    if (_pushHandlers.TryGetValue(responseHeader.OpCode, out var pushHandler))
+                    {
+                        // Server-push message: route to handler with bounded concurrency
+                        _ = Task.Run(async () =>
+                        {
+                            await _pushConcurrencyLimit.WaitAsync(cancellationToken).ConfigureAwait(false);
+                            try { await pushHandler(responseHeader, pushPayload).ConfigureAwait(false); }
+                            finally { _pushConcurrencyLimit.Release(); }
+                        }, cancellationToken);
+                    }
+                    continue;
+                }
 
+                var lease = await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
+
+                // The lease holds a pooled buffer, so it needs an owner on every branch: handing it
+                // to the waiter, or — when the waiter cancelled and took the entry, or lost its own
+                // race — releasing it here, because nobody else can (#80).
                 if (_pendingRequests.TryRemove(responseHeader.RequestId, out var pending))
                 {
                     // Recycling happens on the awaiting side, once the result is consumed:
                     // returning it here would hand the instance out again while the waiter
                     // still holds its ValueTask token.
-                    pending.TrySetResult((responseHeader, finalPayload));
+                    if (!pending.TrySetResult(lease))
+                        lease.Dispose();
                 }
-                else if (responseHeader.RequestId == 0 &&
-                         _pushHandlers.TryGetValue(responseHeader.OpCode, out var pushHandler))
+                else
                 {
-                    // Server-push message: route to handler with bounded concurrency
-                    _ = Task.Run(async () =>
-                    {
-                        await _pushConcurrencyLimit.WaitAsync(cancellationToken).ConfigureAwait(false);
-                        try { await pushHandler(responseHeader, finalPayload).ConfigureAwait(false); }
-                        finally { _pushConcurrencyLimit.Release(); }
-                    }, cancellationToken);
+                    lease.Dispose();
                 }
             }
         }
