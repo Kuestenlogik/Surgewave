@@ -10,8 +10,19 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Storage.Engine.Tests;
 
 /// <summary>
-/// Performance benchmarks comparing different storage backends.
-/// These tests measure throughput and latency for append/read operations.
+/// Cross-backend workload coverage: every storage backend has to survive the same append, read and
+/// mixed workloads and leave a consistent log behind. Throughput and latency are printed for
+/// diagnostics.
+///
+/// <para><b>No absolute performance is asserted here, on purpose.</b> These tests run in CI as part
+/// of the solution's unit tests, and a floor like "at least 100 ops/sec" measures the agent as much
+/// as the code: this file's assertions failed locally at 64–82 ops/sec on a developer machine that
+/// had been running benchmarks for hours, with the storage code byte-identical to a green run
+/// earlier the same day. A test that fails for reasons unrelated to the change teaches people to
+/// re-run until it passes, which is worse than not having it.</para>
+///
+/// <para>Throughput regressions are gated where the measurement is controlled: the benchmark suite
+/// under <c>benchmarks/</c>, run as a paired A/B against a baseline, not as a unit test.</para>
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public class StorageBackendBenchmarkTests : IDisposable
@@ -81,8 +92,10 @@ public class StorageBackendBenchmarkTests : IDisposable
         _output.WriteLine($"[{backend}] Throughput: {throughput:N0} records/sec");
         _output.WriteLine($"[{backend}] Avg latency: {latencyUs:F1} µs/batch");
 
-        // Basic sanity check
-        Assert.True(throughput > 1000, $"Expected at least 1000 records/sec, got {throughput}");
+        // What this test can verify is that the workload ran to completion and left the log
+        // consistent — every appended record accounted for. The throughput is printed for
+        // diagnostics but deliberately not asserted; see the note on the class.
+        Assert.Equal(batchCount * recordsPerBatch, log.NextOffset);
     }
 
     [Theory]
@@ -184,7 +197,10 @@ public class StorageBackendBenchmarkTests : IDisposable
         _output.WriteLine($"[{backend}] Mixed: {iterations} appends, {totalReads} reads in {sw.ElapsedMilliseconds}ms");
         _output.WriteLine($"[{backend}] Throughput: {opsPerSec:N0} ops/sec");
 
-        Assert.True(opsPerSec > 100, $"Expected at least 100 ops/sec, got {opsPerSec}");
+        // Same as above: assert the workload's outcome, not the machine's speed. Every iteration
+        // appended, and the reads in between returned data.
+        Assert.Equal(iterations * recordsPerBatch, log.NextOffset);
+        Assert.True(totalReads > 0, "the mixed workload never read anything back");
     }
 
     [Fact]
