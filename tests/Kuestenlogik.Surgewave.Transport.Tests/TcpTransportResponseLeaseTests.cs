@@ -19,12 +19,13 @@ public sealed class TcpTransportResponseLeaseTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
-    private static TransportOptions OptionsFor(int port, bool pipelining) => new()
+    private static TransportOptions OptionsFor(int port, bool pipelining, TimeSpan? writeTimeout = null) => new()
     {
         Host = "127.0.0.1",
         Port = port,
         EnablePipelining = pipelining,
-        EnableCompression = false
+        EnableCompression = false,
+        WriteTimeout = writeTimeout ?? TimeSpan.FromSeconds(30)
     };
 
     [Theory]
@@ -244,6 +245,55 @@ public sealed class TcpTransportResponseLeaseTests
         });
 
         await transport.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PeerThatStopsDraining_HitsTheWriteDeadline_InsteadOfBlockingForever()
+    {
+        // The hole left open by the #117 fix: an in-flight socket send is not cancellable, so when
+        // the peer stops reading, the write never returns and the caller's own token is powerless.
+        // The connection-level deadline is what ends that wait — and tearing the socket down is the
+        // only thing that releases the blocked send.
+        await using var server = new EchoNativeServer(neverRespond: true, stopReadingAfterFirstRequest: true);
+        await using var transport = new TcpTransport(
+            OptionsFor(server.Port, pipelining: true, writeTimeout: TimeSpan.FromSeconds(2)));
+        await transport.ConnectAsync().AsTask().WaitAsync(Timeout);
+
+        // The one request the server still reads; afterwards it never drains again.
+        _ = transport.SendRequestLeasedAsync(SurgewaveOpCode.Fetch, new byte[512], compress: false, CancellationToken.None).AsTask();
+        await Task.Delay(200);
+
+        // The kernel buffers a surprising amount on loopback — 16 MiB went through instantly when
+        // measured — so several sends still succeed. They are started without awaiting, because
+        // awaiting would park on a response that is never coming and the writes would never pile
+        // up. Once the buffers are full, one write blocks: that is the request under test, and only
+        // the deadline can end it.
+        var oversized = new byte[16 * 1024 * 1024];
+        var inFlight = new List<Task>();
+        for (var i = 0; i < 8; i++)
+        {
+            inFlight.Add(transport.SendRequestLeasedAsync(
+                SurgewaveOpCode.Produce, oversized, compress: false, CancellationToken.None).AsTask());
+        }
+
+        var start = System.Diagnostics.Stopwatch.StartNew();
+        var guard = Task.Delay(TimeSpan.FromSeconds(20));
+        var finished = await Task.WhenAny(Task.WhenAny(inFlight).Unwrap().ContinueWith(_ => 0, TaskScheduler.Default), guard);
+        start.Stop();
+
+        Assert.NotSame(guard, finished);
+        Assert.True(start.Elapsed < TimeSpan.FromSeconds(15),
+            $"the blocked write only ended after {start.Elapsed.TotalSeconds:F1} s although the deadline is 2 s");
+
+        // A dead peer means a dead connection: it must not keep presenting itself as usable.
+        Assert.False(transport.IsConnected);
+
+        // Everything that was queued behind the blocked write fails too, rather than waiting on a
+        // socket that is gone.
+        foreach (var request in inFlight)
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => request.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
     }
 
     [Fact]

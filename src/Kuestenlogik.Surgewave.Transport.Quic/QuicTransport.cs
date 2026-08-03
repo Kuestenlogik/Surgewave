@@ -254,7 +254,8 @@ public sealed class QuicTransport : ISurgewaveTransport
 
                     try
                     {
-                        await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                        await NativeRequestFrameWriter.WriteWithDeadlineAsync(
+                            _stream!, header, actualPayload, _requestHeaderBuffer, _options.WriteTimeout, cancellationToken);
                         await _stream!.FlushAsync(cancellationToken);
                     }
                     catch (Exception ex)
@@ -355,7 +356,8 @@ public sealed class QuicTransport : ISurgewaveTransport
 
                 try
                 {
-                    await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                    await NativeRequestFrameWriter.WriteWithDeadlineAsync(
+                        _stream!, header, actualPayload, _requestHeaderBuffer, _options.WriteTimeout, cancellationToken);
                     await _stream!.FlushAsync(cancellationToken);
                 }
                 catch (Exception ex)

@@ -32,21 +32,28 @@ public class ObservabilityMultiplexTests
     {
         var observability = new SurgewaveBrokerObservability(NullLogger<SurgewaveBrokerObservability>.Instance);
 
-        var a = CollectAsync(observability, count: 3);
-        var b = CollectAsync(observability, count: 3);
-        // Subscribers register inside CollectAsync; give both a moment to
-        // enter ObserveAsync before we start publishing.
-        await Task.Delay(50);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var a = observability.ObserveAsync(cts.Token).GetAsyncEnumerator();
+        await using var b = observability.ObserveAsync(cts.Token).GetAsyncEnumerator();
+
+        // Starting the enumerators registers both subscriptions: ObserveAsync adds itself to the
+        // subscriber list before its first await, so MoveNextAsync has already registered by the
+        // time it returns its (still pending) task. The previous version slept 50 ms and hoped —
+        // which held until the suite got busy enough to miss the window, and then a subscriber that
+        // registered after the publish saw nothing.
+        var nextA = a.MoveNextAsync();
+        var nextB = b.MoveNextAsync();
+        Assert.True(observability.HasSubscribers);
 
         observability.Publish(MakeEvent(1));
         observability.Publish(MakeEvent(2));
         observability.Publish(MakeEvent(3));
 
-        var aResults = await a;
-        var bResults = await b;
+        var aResults = await DrainAsync(a, nextA, count: 3);
+        var bResults = await DrainAsync(b, nextB, count: 3);
 
-        Assert.Equal([1L, 2L, 3L], aResults.Select(e => e.Offset!.Value));
-        Assert.Equal([1L, 2L, 3L], bResults.Select(e => e.Offset!.Value));
+        Assert.Equal([1L, 2L, 3L], aResults);
+        Assert.Equal([1L, 2L, 3L], bResults);
     }
 
     [Fact]
@@ -59,20 +66,15 @@ public class ObservabilityMultiplexTests
             NullLogger<SurgewaveBrokerObservability>.Instance,
             subscriberCapacity: 4);
 
-        // Start a subscription that reads exactly one event, then parks.
-        // Anything beyond capacity has to get dropped by the writer.
-        using var cts = new CancellationTokenSource();
-        var readOne = Task.Run(async () =>
-        {
-            await foreach (var ev in observability.ObserveAsync(cts.Token))
-            {
-                return ev;
-            }
-            return null!;
-        }, cts.Token);
+        // A subscription that takes one event and then parks. Anything beyond capacity has to get
+        // dropped by the writer.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var subscriber = observability.ObserveAsync(cts.Token).GetAsyncEnumerator();
 
-        // Let the subscription register before publishing.
-        await Task.Delay(50);
+        // Registers the subscription — deterministically, rather than by sleeping (see the
+        // multiplex test above).
+        var firstMove = subscriber.MoveNextAsync();
+        Assert.True(observability.HasSubscribers);
 
         // Publish well beyond the 4-slot window. Every call must return
         // synchronously — Publish never awaits the channel, the
@@ -82,9 +84,8 @@ public class ObservabilityMultiplexTests
             observability.Publish(MakeEvent(i));
         }
 
-        var first = await readOne;
-        Assert.NotNull(first);
-        cts.Cancel();
+        Assert.True(await firstMove);
+        Assert.NotNull(subscriber.Current);
     }
 
     [Fact]
@@ -105,7 +106,14 @@ public class ObservabilityMultiplexTests
             catch (OperationCanceledException) { /* expected */ }
         }, cts.Token);
 
-        await Task.Delay(50);
+        // Wait for the subscription to actually exist instead of assuming 50 ms is enough: on a busy
+        // machine it is not, and cancelling before anything registered would test nothing.
+        var registrationDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (!observability.HasSubscribers && DateTime.UtcNow < registrationDeadline)
+            await Task.Delay(5);
+
+        Assert.True(observability.HasSubscribers, "the consumer never registered");
+
         cts.Cancel();
         await consumer; // no exception propagates past the cancellation
 
@@ -116,19 +124,26 @@ public class ObservabilityMultiplexTests
         observability.Publish(MakeEvent(1));
     }
 
-    private static Task<List<SurgewaveBrokerEvent>> CollectAsync(
-        ISurgewaveBrokerObservability observability, int count)
+    /// <summary>
+    /// Reads <paramref name="count"/> offsets from an enumerator whose first move is already in
+    /// flight — that pending move is what registered the subscription, so it must be awaited rather
+    /// than restarted.
+    /// </summary>
+    private static async Task<List<long>> DrainAsync(
+        IAsyncEnumerator<SurgewaveBrokerEvent> enumerator, ValueTask<bool> pendingMove, int count)
     {
-        return Task.Run(async () =>
+        var offsets = new List<long>(count);
+
+        var hasNext = await pendingMove;
+        while (hasNext)
         {
-            var list = new List<SurgewaveBrokerEvent>();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            await foreach (var ev in observability.ObserveAsync(cts.Token))
-            {
-                list.Add(ev);
-                if (list.Count >= count) break;
-            }
-            return list;
-        });
+            offsets.Add(enumerator.Current.Offset!.Value);
+            if (offsets.Count >= count)
+                break;
+
+            hasNext = await enumerator.MoveNextAsync();
+        }
+
+        return offsets;
     }
 }

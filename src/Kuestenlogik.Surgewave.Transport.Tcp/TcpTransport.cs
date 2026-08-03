@@ -229,7 +229,8 @@ public sealed class TcpTransport : ISurgewaveTransport
 
                     try
                     {
-                        await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                        await NativeRequestFrameWriter.WriteWithDeadlineAsync(
+                            _stream!, header, actualPayload, _requestHeaderBuffer, _options.WriteTimeout, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -333,7 +334,8 @@ public sealed class TcpTransport : ISurgewaveTransport
 
                 try
                 {
-                    await NativeRequestFrameWriter.WriteAsync(_stream!, header, actualPayload, _requestHeaderBuffer, cancellationToken);
+                    await NativeRequestFrameWriter.WriteWithDeadlineAsync(
+                        _stream!, header, actualPayload, _requestHeaderBuffer, _options.WriteTimeout, cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -484,21 +486,9 @@ public sealed class TcpTransport : ISurgewaveTransport
 
                 var lease = await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
 
-                // The lease holds a pooled buffer, so it needs an owner on every branch: handing it
-                // to the waiter, or — when the waiter cancelled and took the entry, or lost its own
-                // race — releasing it here, because nobody else can (#80).
-                if (_pendingRequests.TryRemove(responseHeader.RequestId, out var pending))
-                {
-                    // Recycling happens on the awaiting side, once the result is consumed:
-                    // returning it here would hand the instance out again while the waiter
-                    // still holds its ValueTask token.
-                    if (!pending.TrySetResult(lease))
-                        lease.Dispose();
-                }
-                else
-                {
-                    lease.Dispose();
-                }
+                // The lease holds a pooled buffer, so it needs an owner on every branch. The rule
+                // is shared with the QUIC transport so a fix cannot land on only one of them (#117).
+                ResponseDelivery.DeliverOrRelease(_pendingRequests, responseHeader.RequestId, lease);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
