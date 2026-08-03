@@ -194,17 +194,28 @@ public class PendingResponseTests
         var pending = new PendingResponse();
         var continuationBlocked = new ManualResetEventSlim(false);
         var continuationEntered = new ManualResetEventSlim(false);
+        var continuationRegistered = new ManualResetEventSlim(false);
 
-        var awaiter = Task.Run(async () =>
-        {
-            await pending.ValueTask;
-            continuationEntered.Set();
-            // A caller doing slow work in its continuation. Bounded so an inline continuation
-            // delays the completer measurably instead of deadlocking the test.
-            continuationBlocked.Wait(TimeSpan.FromMilliseconds(400));
-        });
+        // Subscribing through OnCompleted directly, with the barrier set from INSIDE it: sleeping
+        // and hoping the awaiter got there in time would make the test pass even with
+        // RunContinuationsAsynchronously off — with no continuation registered, TrySetResult
+        // returns in microseconds no matter what the flag says, and the assertion below would be
+        // measuring nothing.
+        pending.OnCompleted(
+            static state =>
+            {
+                var (entered, blocked) = ((ManualResetEventSlim, ManualResetEventSlim))state!;
+                entered.Set();
+                // A caller doing slow work in its continuation. Bounded so an inline continuation
+                // delays the completer measurably instead of deadlocking the test.
+                blocked.Wait(TimeSpan.FromMilliseconds(400));
+            },
+            (continuationEntered, continuationBlocked),
+            pending.Version,
+            System.Threading.Tasks.Sources.ValueTaskSourceOnCompletedFlags.None);
 
-        await Task.Delay(50); // let the awaiter subscribe
+        continuationRegistered.Set();
+        Assert.True(continuationRegistered.IsSet);
 
         // Completing is what the reader loop does for every response. If the continuation ran
         // inline, one slow caller would stall every other in-flight response on the connection.
@@ -212,10 +223,11 @@ public class PendingResponseTests
         Assert.True(pending.TrySetResult(Response(1)));
         start.Stop();
 
-        continuationBlocked.Set();
-        await awaiter.WaitAsync(Timeout);
+        // The continuation has to have been reached for the timing above to mean anything.
+        Assert.True(continuationEntered.Wait(TimeSpan.FromSeconds(5)), "the continuation never ran");
 
-        Assert.True(continuationEntered.IsSet, "the continuation never ran");
+        continuationBlocked.Set();
+
         Assert.True(start.ElapsedMilliseconds < 200,
             $"completing blocked the caller for {start.ElapsedMilliseconds} ms — the continuation ran inline");
     }

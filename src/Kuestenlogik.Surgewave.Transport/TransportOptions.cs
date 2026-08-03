@@ -43,6 +43,23 @@ public sealed class TransportOptions
     public int ReceiveBufferSize { get; init; } = 65536;
 
     /// <summary>
+    /// How long a request frame may take to reach the peer before the connection is considered
+    /// dead. Default: 30 seconds. <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> disables
+    /// the deadline.
+    ///
+    /// <para><b>Why a deadline is needed at all.</b> An in-flight socket send cannot be cancelled —
+    /// the cancellation token is only observed before a write starts. So when a peer stops draining
+    /// its receive buffer, the write blocks and the caller's own timeout has no effect: it waits
+    /// forever on a connection that will never make progress. Tearing the socket down is the only
+    /// thing that releases such a write, which is what this deadline does (#117).</para>
+    ///
+    /// <para>It is a connection-level backstop, not a request timeout: a peer that has not accepted
+    /// a single frame within this window is gone, whereas a slow-but-progressing peer is normal and
+    /// must not be disconnected.</para>
+    /// </summary>
+    public TimeSpan WriteTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Custom server certificate validation callback for QUIC/TLS connections.
     /// When set, overrides the default validation logic (including TrustAllCertificates).
     /// </summary>
