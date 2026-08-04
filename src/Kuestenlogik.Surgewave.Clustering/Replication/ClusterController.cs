@@ -423,8 +423,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
     private Task TryBecomeControllerAsync(CancellationToken ct)
     {
-        // Simple strategy: lowest broker ID becomes controller
-        var lowestBrokerId = _clusterState.Brokers.Keys.Min();
+        // Simple strategy: the lowest LIVE broker ID becomes controller. Liveness matters because
+        // this also runs as the re-election after the previous controller was declared dead — and a
+        // dead broker stays in Brokers (outside Raft nothing removes it), so an unfiltered minimum
+        // re-elects the corpse and the cluster is left without a controller for good: every repair
+        // path (leader election, ISR shrink, topic creation) returns early on a non-controller.
+        var lowestBrokerId = LowestEligibleControllerId();
 
         if (_config.BrokerId == lowestBrokerId)
         {
@@ -439,6 +443,39 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Lowest broker id that may hold the controller role, skipping brokers the heartbeat monitor
+    /// has declared dead.
+    /// </summary>
+    private int LowestEligibleControllerId()
+    {
+        var lowest = int.MaxValue;
+
+        foreach (var brokerId in _clusterState.Brokers.Keys)
+        {
+            if (brokerId < lowest && IsEligibleForController(brokerId))
+                lowest = brokerId;
+        }
+
+        // Brokers is normally non-empty (it contains us), but never elect nobody.
+        return lowest == int.MaxValue ? _config.BrokerId : lowest;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="brokerId"/> may be elected controller. Only brokers actively known to
+    /// be dead are excluded — an absent health record means "not observed yet", which is the normal
+    /// state during startup for every peer, and excluding those would make each broker elect itself.
+    /// </summary>
+    private bool IsEligibleForController(int brokerId)
+    {
+        // We know we are alive. Asking the heartbeat manager about ourselves would answer "dead":
+        // it tracks peers only and never seeds a health record for the local broker.
+        if (brokerId == _config.BrokerId)
+            return true;
+
+        return _heartbeatManager?.GetBrokerHealth(brokerId) is not { IsAlive: false };
     }
 
     private async Task ControllerLoopAsync(CancellationToken ct)
@@ -1036,7 +1073,13 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     _controllerTask = Task.Run(() => ControllerLoopAsync(_cts!.Token), _cts!.Token);
                 }
             }
-            return;
+
+            // Taking the role does not excuse us from the work: a failure is reported exactly once,
+            // and this one was reported while we were still a follower. Returning here would leave
+            // the dead broker in every ISR with no second event to ever clean it up, so a broker
+            // promoted by this very failure falls through and handles it as controller.
+            if (!_isController)
+                return;
         }
 
         // As controller, handle the broker failure
