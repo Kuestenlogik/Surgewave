@@ -83,6 +83,13 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         return ClusterRpcStatus.None;
     }
 
+    /// <summary>
+    /// The id the controller sent for this topic, or <see cref="Guid.Empty"/> when it sent none —
+    /// which the sink reads as "unknown", never as an id.
+    /// </summary>
+    private static Guid TopicIdFor(Dictionary<string, Guid>? topicIds, string topic)
+        => topicIds is not null && topicIds.TryGetValue(topic, out var id) ? id : Guid.Empty;
+
     public async ValueTask<ClusterRpcStatus> ApplyLeaderAndIsrAsync(PartitionStatesPayload payload, CancellationToken ct = default)
     {
         using var scope = await _clusterState.AcquireControllerPushScopeAsync(ct).ConfigureAwait(false);
@@ -94,6 +101,12 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         // Learn broker endpoints BEFORE applying partition states: a BecomeFollower transition needs
         // the leader's node (host + real replication port) in cluster state to start fetching (#69).
         ApplyLiveBrokers(payload.LiveBrokers);
+
+        // Name→id as far as the controller knew it. Absent from an older controller, in which case
+        // the receiver keeps whatever id it already had (#118 follow-up).
+        var topicIds = payload.TopicIds is null or []
+            ? null
+            : payload.TopicIds.ToDictionary(entry => entry.Topic, entry => entry.TopicId, StringComparer.Ordinal);
 
         foreach (var (tp, state) in payload.Entries)
         {
@@ -111,12 +124,12 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
                 if (state.LeaderBrokerId == _localBrokerId)
                 {
-                    await _replicaManager.BecomeLeaderAsync(tp, state.LeaderEpoch, ct).ConfigureAwait(false);
+                    await _replicaManager.BecomeLeaderAsync(tp, state.LeaderEpoch, ct, TopicIdFor(topicIds, tp.Topic)).ConfigureAwait(false);
                     LogBecameLeader(tp.Topic, tp.Partition, state.LeaderEpoch);
                 }
                 else if (state.Replicas.Contains(_localBrokerId))
                 {
-                    await _replicaManager.BecomeFollowerAsync(tp, state.LeaderBrokerId, state.LeaderEpoch, ct).ConfigureAwait(false);
+                    await _replicaManager.BecomeFollowerAsync(tp, state.LeaderBrokerId, state.LeaderEpoch, ct, TopicIdFor(topicIds, tp.Topic)).ConfigureAwait(false);
                     LogBecameFollower(tp.Topic, tp.Partition, state.LeaderBrokerId, state.LeaderEpoch);
                 }
                 else

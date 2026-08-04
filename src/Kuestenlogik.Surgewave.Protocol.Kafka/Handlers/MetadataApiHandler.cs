@@ -204,6 +204,9 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                         topic,
                         _config.DefaultNumPartitions,
                         _config.DefaultReplicationFactor,
+                        // An auto-created topic has no client-supplied configuration, so there is
+                        // nothing to carry here — unlike CreateTopics, which does (#118 follow-up).
+                        config: null,
                         cancellationToken);
 
                     if (!success)

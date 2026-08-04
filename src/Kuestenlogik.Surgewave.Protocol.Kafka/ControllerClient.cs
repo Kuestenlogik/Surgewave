@@ -136,7 +136,10 @@ public sealed partial class ControllerClient : IDisposable, IControllerReplicaRp
             var request = new LeaderAndIsrRequest
             {
                 ApiKey = ApiKey.LeaderAndIsr,
-                ApiVersion = 4, // v4+ is flexible
+                // v5 carries the topic id, which a broker needs to answer for a topic it only
+                // hosts a replica of: without it the id is lost and a promoted broker cannot map an
+                // assignment back to a topic (#118 follow-up). v4+ is flexible either way.
+                ApiVersion = 5,
                 CorrelationId = Interlocked.Increment(ref _correlationId),
                 ClientId = $"surgewave-controller-{_config.BrokerId}",
                 ControllerId = _config.BrokerId,

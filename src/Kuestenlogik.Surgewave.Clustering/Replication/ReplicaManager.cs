@@ -120,7 +120,12 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// <summary>
     /// Called when this broker becomes leader for a partition.
     /// </summary>
-    public async Task BecomeLeaderAsync(TopicPartition tp, int leaderEpoch, CancellationToken ct)
+    /// <param name="topicId">
+    /// The cluster-wide topic id when the caller knows it. Optional because not every inter-broker
+    /// path carries it: an older controller on the Kafka wire sends no id at all, and a caller that
+    /// passes <see cref="Guid.Empty"/> falls back to whatever the cluster state already knows.
+    /// </param>
+    public async Task BecomeLeaderAsync(TopicPartition tp, int leaderEpoch, CancellationToken ct, Guid topicId = default)
     {
         var replica = GetOrCreateLocalReplica(tp);
 
@@ -148,7 +153,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         // Clear stale follower LEO tracking from previous leadership
         _followerLeos.TryRemove(tp, out _);
 
-        RegisterAssignedTopic(tp);
+        RegisterAssignedTopic(tp, topicId);
 
         // Recover high watermark from log
         var log = _logManager.GetOrCreateLog(tp);
@@ -161,7 +166,8 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// <summary>
     /// Called when this broker becomes follower for a partition.
     /// </summary>
-    public async Task BecomeFollowerAsync(TopicPartition tp, int leaderId, int leaderEpoch, CancellationToken ct)
+    /// <inheritdoc cref="BecomeLeaderAsync" path="/param[@name='topicId']"/>
+    public async Task BecomeFollowerAsync(TopicPartition tp, int leaderId, int leaderEpoch, CancellationToken ct, Guid topicId = default)
     {
         var replica = GetOrCreateLocalReplica(tp);
 
@@ -183,7 +189,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         var log = _logManager.GetOrCreateLog(tp);
         replica.LogEndOffset = log.HighWatermark;
 
-        RegisterAssignedTopic(tp);
+        RegisterAssignedTopic(tp, topicId);
 
         // Start fetching from leader
         _replicaFetcher?.StartFetching(tp, leaderId);
@@ -204,8 +210,16 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// <para>Called from both transitions on purpose — the Kafka wire and the native inter-broker
     /// service both arrive here, so neither needs to know about topic metadata.</para>
     /// </summary>
-    private void RegisterAssignedTopic(TopicPartition tp)
+    private void RegisterAssignedTopic(TopicPartition tp, Guid topicId)
     {
+        // A controller that does not send the id leaves it empty; the cluster state may still know
+        // it from an earlier metadata push. Never mint one here — an id this broker invented would
+        // answer id lookups with something no other broker recognises under that id.
+        if (topicId == Guid.Empty)
+        {
+            topicId = _clusterState.GetTopic(tp.Topic)?.TopicId ?? Guid.Empty;
+        }
+
         // The controller's view of the topic, which is the best this broker has: every partition of
         // it that has been pushed so far. A partition index is 0-based, so the highest one seen
         // bounds the count from below — and EnsureTopicMetadata only ever raises it.
@@ -227,13 +241,27 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         if (highestPartition < tp.Partition)
             highestPartition = tp.Partition;
 
-        // TopicId is deliberately left empty: neither inter-broker path carries it down to here, and
-        // a locally invented id would answer id lookups with something no other broker recognises.
         _logManager.EnsureTopicMetadata(
             tp.Topic,
-            Guid.Empty,
+            topicId,
             highestPartition + 1,
             (short)Math.Max(replicaCount, 1));
+
+        // Seed the cluster state too, so this broker can still name the topic's id after it becomes
+        // controller itself: the id it sends out on LeaderAndIsr is sourced from there, and a broker
+        // that only ever hosted replicas has never been told to add the topic.
+        if (topicId != Guid.Empty && _clusterState.GetTopic(tp.Topic) is null)
+        {
+            _clusterState.AddTopic(new Kuestenlogik.Surgewave.Core.Models.TopicMetadata
+            {
+                Name = tp.Topic,
+                TopicId = topicId,
+                PartitionCount = highestPartition + 1,
+                ReplicationFactor = (short)Math.Max(replicaCount, 1),
+                Config = [],
+                CreatedAt = DateTime.UtcNow
+            });
+        }
     }
 
     /// <summary>

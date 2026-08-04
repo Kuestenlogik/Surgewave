@@ -253,6 +253,16 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
                 timeout: TimeSpan.FromSeconds(60), output: _output),
             "the follower never learned all partitions of the topic");
 
+        var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
+        // Leadership only transfers to an ISR member: without this wait GracefulShutdownAsync finds
+        // no eligible leader, logs it and moves on, and the partition is left leaderless. It passes
+        // in isolation because the ISR forms quickly — under a loaded suite it does not.
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => leader.ClusterState!.GetIsrSnapshot(tp).Contains(2),
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the follower never joined the ISR, so leadership could not transfer");
+
         await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20));
         await leader.DisposeAsync();
         _leaderDisposed = true;
@@ -275,6 +285,108 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.Equal(
             Enumerable.Range(0, PartitionCount).ToList(),
             advertised.Partitions.Select(p => p.PartitionId).OrderBy(id => id).ToList());
+    }
+
+    [Fact(Timeout = 180_000)]
+    public async Task PromotedBroker_KeepsTheTopicId_SoAssignmentsCanStillBeResolved()
+    {
+        // The half of #118 that was left open: a broker learns a topic's identity from nowhere —
+        // replication creates the partition log directly — so the promoted broker used to answer
+        // metadata with an id it had invented (or none at all), and a consumer that maps an
+        // assignment back by topic id could not.
+        var leader = _leader!;
+        var follower = _follower!;
+        var topic = $"issue118id-{Guid.NewGuid():N}";
+
+        using (var admin = new AdminClientBuilder(
+            new AdminClientConfig { BootstrapServers = leader.BootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([
+                new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 2 }
+            ]);
+        }
+
+        var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
+
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => follower.ClusterState!.GetPartitionState(tp) is not null,
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the follower never learned the partition");
+
+        var originalId = leader.ClusterState!.GetTopic(topic)?.TopicId ?? Guid.Empty;
+        Assert.NotEqual(Guid.Empty, originalId);
+
+        // The id has to reach the follower over whichever inter-broker wire this cluster settled on.
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => follower.LogManager.GetTopicMetadata(topic)?.TopicId == originalId,
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            $"the follower never learned the topic id (got {follower.LogManager.GetTopicMetadata(topic)?.TopicId}, expected {originalId})");
+
+        // Leadership only transfers to an ISR member: without this wait GracefulShutdownAsync finds
+        // no eligible leader, logs it and moves on, and the partition is left leaderless. It passes
+        // in isolation because the ISR forms quickly — under a loaded suite it does not.
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => leader.ClusterState!.GetIsrSnapshot(tp).Contains(2),
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the follower never joined the ISR, so leadership could not transfer");
+
+        await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20));
+        await leader.DisposeAsync();
+        _leaderDisposed = true;
+
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => follower.ClusterState!.GetPartitionState(tp)?.LeaderBrokerId == 2,
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the surviving broker never took leadership");
+
+        // Same id after promotion, and resolvable by id — that is what a next-gen consumer needs to
+        // map its assignment back to a topic name.
+        Assert.Equal(originalId, follower.LogManager.GetTopicMetadata(topic)?.TopicId);
+        Assert.Equal(topic, follower.LogManager.GetTopicMetadataById(originalId)?.Name);
+    }
+
+    [Fact(Timeout = 180_000)]
+    public async Task ClusteredCreateTopics_KeepsTheClientsConfiguration()
+    {
+        // Not a transport gap at all: in cluster mode the config never reached the controller,
+        // because IClusterTopicCreator.CreateTopicAsync had no parameter for it. The client was told
+        // the settings had been applied — the response echoes them back — while they were dropped
+        // between the handler and the controller (#118 follow-up).
+        var leader = _leader!;
+        var topic = $"issue118cfg-{Guid.NewGuid():N}";
+
+        using var admin = new AdminClientBuilder(
+            new AdminClientConfig { BootstrapServers = leader.BootstrapServers }).Build();
+
+        await admin.CreateTopicsAsync([
+            new TopicSpecification
+            {
+                Name = topic,
+                NumPartitions = 1,
+                ReplicationFactor = 2,
+                Configs = new Dictionary<string, string>
+                {
+                    ["cleanup.policy"] = "compact",
+                    ["segment.bytes"] = "1048576"
+                }
+            }
+        ]);
+
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => leader.ClusterState!.GetTopic(topic) is not null,
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the controller never registered the topic");
+
+        var stored = leader.ClusterState!.GetTopic(topic)!;
+        _output.WriteLine($"controller stored config: [{string.Join(", ", stored.Config.Select(kv => $"{kv.Key}={kv.Value}"))}]");
+
+        Assert.Equal("compact", stored.Config["cleanup.policy"]);
+        Assert.Equal("1048576", stored.Config["segment.bytes"]);
     }
 
     private async Task<SurgewaveRuntime> BuildBrokerAsync(int brokerId, params string[] clusterNodes)

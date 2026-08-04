@@ -15,7 +15,18 @@ public interface IClusterTopicCreator
     /// <summary>
     /// Creates a topic with the specified configuration, distributing replicas across cluster nodes.
     /// </summary>
-    Task<bool> CreateTopicAsync(string topic, int partitionCount, short replicationFactor, CancellationToken ct);
+    /// <param name="config">
+    /// The topic's configuration as the client sent it (segment size, cleanup policy, retention, …),
+    /// or <see langword="null"/> when the caller has none — an auto-created topic, for instance.
+    /// This used to be missing from the signature, so every clustered <c>CreateTopics</c> silently
+    /// dropped the client's settings while reporting success (#118 follow-up).
+    /// </param>
+    Task<bool> CreateTopicAsync(
+        string topic,
+        int partitionCount,
+        short replicationFactor,
+        Dictionary<string, string>? config,
+        CancellationToken ct);
 
     /// <summary>
     /// Whether this broker is currently the controller and can create topics.
@@ -530,7 +541,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Create a new topic with partition and replica assignment.
     /// </summary>
-    public async Task<bool> CreateTopicAsync(string topic, int partitionCount, short replicationFactor, CancellationToken ct)
+    public async Task<bool> CreateTopicAsync(
+        string topic,
+        int partitionCount,
+        short replicationFactor,
+        Dictionary<string, string>? config,
+        CancellationToken ct)
     {
         if (!_isController)
         {
@@ -541,21 +557,26 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // When Raft is enabled, propose through Raft log for replication
         if (_config.UseRaftConsensus && _raftNode != null)
         {
-            return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, ct);
+            return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, ct);
         }
 
         // Legacy mode: apply directly
-        return await CreateTopicDirectAsync(topic, partitionCount, replicationFactor, ct);
+        return await CreateTopicDirectAsync(topic, partitionCount, replicationFactor, config, ct);
     }
 
     /// <summary>
     /// Create topic via Raft consensus - proposes to Raft log and waits for commit.
     /// </summary>
-    private async Task<bool> CreateTopicViaRaftAsync(string topic, int partitionCount, short replicationFactor, CancellationToken ct)
+    private async Task<bool> CreateTopicViaRaftAsync(
+        string topic,
+        int partitionCount,
+        short replicationFactor,
+        Dictionary<string, string>? config,
+        CancellationToken ct)
     {
         // Propose TopicCreated command with newly generated TopicId
         var topicId = Guid.NewGuid();
-        var command = new TopicCreatedCommand(topic, topicId, partitionCount, replicationFactor, null);
+        var command = new TopicCreatedCommand(topic, topicId, partitionCount, replicationFactor, config);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.TopicCreatedCommand);
 
         var index = await _raftNode!.ProposeAsync(MetadataCommandType.TopicCreated, data, ct);
@@ -602,11 +623,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     var isLeader = replicas[0] == brokerId;
                     if (isLeader)
                     {
-                        await _replicaManager.BecomeLeaderAsync(tp, 1, ct);
+                        await _replicaManager.BecomeLeaderAsync(tp, 1, ct, topicId);
                     }
                     else
                     {
-                        await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct);
+                        await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct, topicId);
                     }
                 }
             }
@@ -619,7 +640,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Create topic directly (legacy mode without Raft).
     /// </summary>
-    private async Task<bool> CreateTopicDirectAsync(string topic, int partitionCount, short replicationFactor, CancellationToken ct)
+    private async Task<bool> CreateTopicDirectAsync(
+        string topic,
+        int partitionCount,
+        short replicationFactor,
+        Dictionary<string, string>? config,
+        CancellationToken ct)
     {
         // Create topic metadata
         var topicMetadata = new TopicMetadata
@@ -628,7 +654,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             TopicId = Guid.NewGuid(),
             PartitionCount = partitionCount,
             ReplicationFactor = replicationFactor,
-            Config = new Dictionary<string, string>(),
+            Config = config is null ? [] : new Dictionary<string, string>(config),
             CreatedAt = DateTime.UtcNow
         };
         _clusterState.AddTopic(topicMetadata);
@@ -636,7 +662,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // Broadcast topic creation to all brokers
         if (_metadataUpdateClient != null)
         {
-            var topicCmd = new TopicCreatedCommand(topic, topicMetadata.TopicId, partitionCount, replicationFactor, null);
+            var topicCmd = new TopicCreatedCommand(topic, topicMetadata.TopicId, partitionCount, replicationFactor, topicMetadata.Config);
             var topicData = JsonSerializer.SerializeToUtf8Bytes(topicCmd, ClusteringJsonContext.Default.TopicCreatedCommand);
             await _metadataUpdateClient.BroadcastMetadataUpdateAsync(MetadataCommandType.TopicCreated, topicData, ct);
         }
@@ -677,11 +703,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     var isLeader = replicas[0] == brokerId;
                     if (isLeader)
                     {
-                        await _replicaManager.BecomeLeaderAsync(tp, 1, ct);
+                        await _replicaManager.BecomeLeaderAsync(tp, 1, ct, topicMetadata.TopicId);
                     }
                     else
                     {
-                        await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct);
+                        await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct, topicMetadata.TopicId);
                     }
                 }
             }
