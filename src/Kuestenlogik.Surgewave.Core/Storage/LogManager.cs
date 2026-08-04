@@ -415,6 +415,66 @@ public sealed class LogManager : IDisposable
     }
 
     /// <summary>
+    /// Records that a topic created elsewhere in the cluster exists here, so this broker can answer
+    /// for it without inventing one (#118).
+    ///
+    /// <para><b>Why a broker can hold data for a topic it does not know.</b> Replication creates the
+    /// partition log directly through <see cref="GetOrCreateLog"/> and registers no metadata — a
+    /// follower therefore serves a partition whose topic <see cref="GetTopicMetadata"/> reports as
+    /// unknown. The moment that broker is promoted, a client metadata request takes the auto-create
+    /// branch and the topic is conjured from broker defaults: the wrong partition count, the wrong
+    /// replication factor, none of the topic's configuration.</para>
+    ///
+    /// <para><b>What this does and does not claim.</b> It fills in what the controller's assignment
+    /// actually proves: the topic exists and has at least this many partitions. The count only ever
+    /// grows — a later assignment naming a higher partition raises it, nothing lowers it — because a
+    /// broker may be told about its own replicas before it hears about the rest of the topic. It
+    /// creates no partition logs; those still appear when replication or a produce needs them. And
+    /// it never touches a topic that is already registered locally: a real
+    /// <see cref="CreateTopicAsync"/> carries the topic's configuration, this does not.</para>
+    /// </summary>
+    /// <param name="topicId">
+    /// The cluster-wide topic id if the caller knows it, otherwise <see cref="Guid.Empty"/>. Only a
+    /// non-empty id is entered into the id→name map: a fabricated one would answer id lookups with
+    /// a topic the rest of the cluster does not recognise under that id.
+    /// </param>
+    public void EnsureTopicMetadata(string topicName, Guid topicId, int partitionCount, short replicationFactor)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (partitionCount <= 0)
+        {
+            return;
+        }
+
+        var metadata = _topics.AddOrUpdate(
+            topicName,
+            _ => new TopicMetadata
+            {
+                Name = topicName,
+                TopicId = topicId,
+                PartitionCount = partitionCount,
+                ReplicationFactor = replicationFactor,
+                Config = new Dictionary<string, string>(),
+                CreatedAt = DateTime.UtcNow
+            },
+            (_, known) =>
+            {
+                if (partitionCount > known.PartitionCount)
+                {
+                    known.PartitionCount = partitionCount;
+                }
+
+                return known;
+            });
+
+        if (topicId != Guid.Empty && metadata.TopicId == topicId)
+        {
+            _topicIdToName[topicId] = topicName;
+        }
+    }
+
+    /// <summary>
     /// Get topic metadata by name
     /// </summary>
     public TopicMetadata? GetTopicMetadata(string topicName)

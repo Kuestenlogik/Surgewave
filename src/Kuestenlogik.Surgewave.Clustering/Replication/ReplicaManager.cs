@@ -148,6 +148,8 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         // Clear stale follower LEO tracking from previous leadership
         _followerLeos.TryRemove(tp, out _);
 
+        RegisterAssignedTopic(tp);
+
         // Recover high watermark from log
         var log = _logManager.GetOrCreateLog(tp);
         replica.LogEndOffset = log.HighWatermark;
@@ -181,10 +183,57 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         var log = _logManager.GetOrCreateLog(tp);
         replica.LogEndOffset = log.HighWatermark;
 
+        RegisterAssignedTopic(tp);
+
         // Start fetching from leader
         _replicaFetcher?.StartFetching(tp, leaderId);
 
         LogBecameFollower(tp.Topic, tp.Partition, leaderId, leaderEpoch);
+    }
+
+    /// <summary>
+    /// Tells the local <see cref="LogManager"/> that this topic exists, using what the controller's
+    /// assignment proves about it (#118).
+    ///
+    /// <para>Without this a broker hosts a replica while its own metadata says the topic is unknown,
+    /// because replication creates the partition log directly and registers nothing. That only stays
+    /// invisible until the broker is promoted: the next client metadata request auto-creates the
+    /// topic from broker defaults, and the partition count it advertises disagrees with the rest of
+    /// the cluster.</para>
+    ///
+    /// <para>Called from both transitions on purpose — the Kafka wire and the native inter-broker
+    /// service both arrive here, so neither needs to know about topic metadata.</para>
+    /// </summary>
+    private void RegisterAssignedTopic(TopicPartition tp)
+    {
+        // The controller's view of the topic, which is the best this broker has: every partition of
+        // it that has been pushed so far. A partition index is 0-based, so the highest one seen
+        // bounds the count from below — and EnsureTopicMetadata only ever raises it.
+        var highestPartition = -1;
+        var replicaCount = 0;
+
+        foreach (var (knownPartition, state) in _clusterState.PartitionStates)
+        {
+            if (!string.Equals(knownPartition.Topic, tp.Topic, StringComparison.Ordinal))
+                continue;
+
+            if (knownPartition.Partition > highestPartition)
+                highestPartition = knownPartition.Partition;
+
+            if (state.Replicas.Count > replicaCount)
+                replicaCount = state.Replicas.Count;
+        }
+
+        if (highestPartition < tp.Partition)
+            highestPartition = tp.Partition;
+
+        // TopicId is deliberately left empty: neither inter-broker path carries it down to here, and
+        // a locally invented id would answer id lookups with something no other broker recognises.
+        _logManager.EnsureTopicMetadata(
+            tp.Topic,
+            Guid.Empty,
+            highestPartition + 1,
+            (short)Math.Max(replicaCount, 1));
     }
 
     /// <summary>

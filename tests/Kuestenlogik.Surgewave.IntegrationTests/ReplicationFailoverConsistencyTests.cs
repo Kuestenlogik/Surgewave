@@ -225,6 +225,58 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             consumed.Select(r => BitConverter.ToInt32(r.Message.Value)).ToList());
     }
 
+    [Fact(Timeout = 180_000)]
+    public async Task PromotedBroker_AdvertisesTheTopicsRealShape_NotBrokerDefaults()
+    {
+        // #118. A broker that only ever hosted replicas has the partition logs but no topic
+        // metadata of its own — replication creates the logs directly and registers nothing. Once
+        // it is promoted, a client metadata request used to take the auto-create branch and invent
+        // the topic from broker defaults: a three-partition topic came back as one.
+        var leader = _leader!;
+        var follower = _follower!;
+        var topic = $"issue118-{Guid.NewGuid():N}";
+        const int PartitionCount = 3;
+
+        using (var admin = new AdminClientBuilder(
+            new AdminClientConfig { BootstrapServers = leader.BootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([
+                new TopicSpecification { Name = topic, NumPartitions = PartitionCount, ReplicationFactor = 2 }
+            ]);
+        }
+
+        // The follower has to have been told about the partitions before it can report them.
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => Enumerable.Range(0, PartitionCount).All(p =>
+                    follower.ClusterState!.GetPartitionState(new SwTopicPartition { Topic = topic, Partition = p }) is not null),
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the follower never learned all partitions of the topic");
+
+        await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20));
+        await leader.DisposeAsync();
+        _leaderDisposed = true;
+
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => follower.ClusterState!.GetPartitionState(new SwTopicPartition { Topic = topic, Partition = 0 })?.LeaderBrokerId == 2,
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "the surviving broker never took leadership");
+
+        using var promotedAdmin = new AdminClientBuilder(
+            new AdminClientConfig { BootstrapServers = follower.BootstrapServers }).Build();
+        var metadata = promotedAdmin.GetMetadata(topic, TimeSpan.FromSeconds(30));
+
+        var advertised = Assert.Single(metadata.Topics);
+        _output.WriteLine($"promoted broker advertises {advertised.Partitions.Count} partition(s) for {topic}");
+
+        // Before the fix this was 1 — Surgewave:DefaultNumPartitions — for a topic created with 3.
+        Assert.Equal(PartitionCount, advertised.Partitions.Count);
+        Assert.Equal(
+            Enumerable.Range(0, PartitionCount).ToList(),
+            advertised.Partitions.Select(p => p.PartitionId).OrderBy(id => id).ToList());
+    }
+
     private async Task<SurgewaveRuntime> BuildBrokerAsync(int brokerId, params string[] clusterNodes)
         => await SurgewaveRuntime.CreateBuilder()
             .WithBrokerId(brokerId)
