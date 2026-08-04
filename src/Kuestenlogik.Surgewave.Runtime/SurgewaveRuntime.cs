@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Net;
 using System.Net.Sockets;
 using Kuestenlogik.Surgewave.Broker;
@@ -144,6 +145,14 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     /// Whether this broker is currently the controller (only valid when EnableCluster = true).
     /// </summary>
     public bool IsController => _clusterController?.IsController ?? false;
+
+    /// <summary>
+    /// Health of the peer brokers as seen by this broker's failure detector — the input to
+    /// controller re-election and ISR shrinking. Empty until the first peer is observed; never
+    /// contains this broker itself.
+    /// </summary>
+    public IReadOnlyDictionary<int, BrokerHealthState> PeerHealth =>
+        _heartbeatManager?.AllBrokerHealth ?? ReadOnlyDictionary<int, BrokerHealthState>.Empty;
 
     /// <summary>
     /// Whether this broker is the Raft leader (only valid when UseRaftConsensus = true).
