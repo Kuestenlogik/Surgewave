@@ -144,6 +144,19 @@ public sealed class LogManager : IDisposable
         for (int i = 0; i < partitionCount; i++)
         {
             var topicPartition = new TopicPartition { Topic = topicName, Partition = i };
+
+            // Never replace a log that already exists. A broker can be holding records for this
+            // partition long before anything creates the topic locally: a follower's replication
+            // brings the log into being through GetOrCreateLog without ever registering topic
+            // metadata, so after that broker is promoted the first client metadata request
+            // auto-creates the topic here. Overwriting the entry would swap a log holding every
+            // replicated record for an empty one — the data is not deleted, just unreachable, and
+            // the partition silently comes back empty (#97).
+            if (_logs.ContainsKey(topicPartition))
+            {
+                continue;
+            }
+
             IPartitionLog log;
             if (metadata.CleanupPolicy == CleanupPolicy.Ephemeral)
             {
@@ -155,7 +168,17 @@ public sealed class LogManager : IDisposable
                 var segmentBytes = GetSegmentBytesFromConfig(metadata.Config);
                 log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes);
             }
-            _logs[topicPartition] = log;
+
+            // Lost the race against a concurrent creator: drop the log we just built rather than
+            // leaking its handles, and keep whichever one got in first.
+            // Lost the race against a concurrent creator: drop the log we just built rather than
+            // leaking its handles, and keep whichever one got in first.
+            // Lost the race against a concurrent creator: drop the log we just built rather than
+            // leaking its handles, and keep whichever one got in first.
+            if (!_logs.TryAdd(topicPartition, log))
+            {
+                log.Dispose();
+            }
         }
 
         _metadataPersistence.Save(_topics);
