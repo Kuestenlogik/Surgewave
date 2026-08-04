@@ -111,7 +111,7 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
                 if (_clusterTopicCreator != null && _clusterTopicCreator.IsController)
                 {
                     var success = await _clusterTopicCreator.CreateTopicAsync(
-                        topic.Name, numPartitions, replicationFactor, cancellationToken);
+                        topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
 
                     if (!success)
                     {

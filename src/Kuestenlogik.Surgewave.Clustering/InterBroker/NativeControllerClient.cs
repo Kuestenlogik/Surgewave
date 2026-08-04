@@ -68,7 +68,7 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
             .Select(kvp => SendFrameAsync(
                 kvp.Key,
                 SurgewaveOpCode.InterBrokerLeaderAndIsr,
-                new PartitionStatesPayload(_config.BrokerId, controllerEpoch, liveBrokers, kvp.Value),
+                new PartitionStatesPayload(_config.BrokerId, controllerEpoch, liveBrokers, kvp.Value, SnapshotTopicIds(kvp.Value)),
                 ct));
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -85,13 +85,38 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
             return;
 
         var payload = new PartitionStatesPayload(
-            _config.BrokerId, _clusterState.ControllerEpoch, SnapshotLiveBrokers(), partitions);
+            _config.BrokerId, _clusterState.ControllerEpoch, SnapshotLiveBrokers(), partitions, SnapshotTopicIds(partitions));
 
         var tasks = _clusterState.Brokers.Values
             .Where(b => b.BrokerId != _config.BrokerId)
             .Select(b => SendFrameAsync(b.BrokerId, SurgewaveOpCode.InterBrokerUpdateMetadata, payload, ct));
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Name→id for the topics named in <paramref name="entries"/>, as far as the controller knows
+    /// them. A receiving broker has no other way to learn a topic's identity for a partition it only
+    /// replicates, and without it a promoted broker cannot map an assignment back to a topic id
+    /// (#118 follow-up). Topics whose id the controller does not know are simply left out — the
+    /// receiver then keeps whatever it had rather than being handed an empty id.
+    /// </summary>
+    private IReadOnlyList<(string Topic, Guid TopicId)> SnapshotTopicIds(
+        IReadOnlyList<(TopicPartition Tp, PartitionState State)> entries)
+    {
+        var seen = new Dictionary<string, Guid>(StringComparer.Ordinal);
+
+        foreach (var (tp, _) in entries)
+        {
+            if (seen.ContainsKey(tp.Topic))
+                continue;
+
+            var topicId = _clusterState.GetTopic(tp.Topic)?.TopicId ?? Guid.Empty;
+            if (topicId != Guid.Empty)
+                seen[tp.Topic] = topicId;
+        }
+
+        return [.. seen.Select(kvp => (kvp.Key, kvp.Value))];
     }
 
     /// <summary>

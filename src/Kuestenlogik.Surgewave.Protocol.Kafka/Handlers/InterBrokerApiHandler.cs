@@ -117,10 +117,19 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
 
         var partitionErrors = new List<LeaderAndIsrResponse.LeaderAndIsrPartitionError>();
 
+        // v5 changed the response from a flat partition list to a topic-keyed one, so the results
+        // have to be grouped as well — a v5 response built from the flat list alone would carry an
+        // empty topics array and silently drop every per-partition outcome.
+        var topicResults = new List<LeaderAndIsrResponse.LeaderAndIsrTopicError>(request.TopicStates.Count);
+
         // Process topic states
         foreach (var topicState in request.TopicStates)
         {
             var topicName = topicState.TopicName ?? string.Empty;
+            // Carried since v5. An older controller sends Guid.Empty, which the sink treats as
+            // "not known yet" rather than as an id.
+            var topicId = topicState.TopicId;
+            var topicPartitionResults = new List<LeaderAndIsrResponse.LeaderAndIsrPartitionResult>(topicState.PartitionStates.Count);
 
             foreach (var partitionState in topicState.PartitionStates)
             {
@@ -143,6 +152,11 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                             PartitionIndex = partitionState.PartitionIndex,
                             ErrorCode = ErrorCode.None
                         });
+                        topicPartitionResults.Add(new LeaderAndIsrResponse.LeaderAndIsrPartitionResult
+                        {
+                            PartitionIndex = partitionState.PartitionIndex,
+                            ErrorCode = ErrorCode.None
+                        });
                         continue;
                     }
 
@@ -150,13 +164,13 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                     if (partitionState.Leader == _config.BrokerId)
                     {
                         // This broker is the leader
-                        await _replicaManager.BecomeLeaderAsync(tp, partitionState.LeaderEpoch, ct);
+                        await _replicaManager.BecomeLeaderAsync(tp, partitionState.LeaderEpoch, ct, topicId);
                         LogBecameLeader(topicName, partitionState.PartitionIndex, partitionState.LeaderEpoch);
                     }
                     else if (partitionState.Replicas.Contains(_config.BrokerId))
                     {
                         // This broker is a follower
-                        await _replicaManager.BecomeFollowerAsync(tp, partitionState.Leader, partitionState.LeaderEpoch, ct);
+                        await _replicaManager.BecomeFollowerAsync(tp, partitionState.Leader, partitionState.LeaderEpoch, ct, topicId);
                         LogBecameFollower(topicName, partitionState.PartitionIndex, partitionState.Leader, partitionState.LeaderEpoch);
                     }
                     else
@@ -178,7 +192,18 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                     PartitionIndex = partitionState.PartitionIndex,
                     ErrorCode = errorCode
                 });
+                topicPartitionResults.Add(new LeaderAndIsrResponse.LeaderAndIsrPartitionResult
+                {
+                    PartitionIndex = partitionState.PartitionIndex,
+                    ErrorCode = errorCode
+                });
             }
+
+            topicResults.Add(new LeaderAndIsrResponse.LeaderAndIsrTopicError
+            {
+                TopicId = topicId,
+                PartitionErrors = topicPartitionResults
+            });
         }
 
         return new LeaderAndIsrResponse
@@ -186,7 +211,8 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
             ErrorCode = ErrorCode.None,
-            PartitionErrors = partitionErrors
+            PartitionErrors = partitionErrors,
+            Topics = topicResults
         };
     }
 

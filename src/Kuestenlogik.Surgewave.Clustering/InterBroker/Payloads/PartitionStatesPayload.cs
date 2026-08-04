@@ -34,13 +34,38 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 /// drop an unrelated partition's update that happened to arrive with a lower number.
 /// </para>
 /// </summary>
+/// <param name="TopicIds">
+/// Name→id for the topics named in <paramref name="Entries"/>, appended after them (#118 follow-up).
+/// A broker that only hosts replicas learns a topic's identity from nowhere else: replication
+/// creates the partition log directly, so without this the promoted broker cannot map an assignment
+/// back to a topic id. Empty when the sender does not know the ids — the receiver then keeps
+/// whatever it already had rather than inventing one.
+/// <para>
+/// The section is appended rather than woven into the entries so that it costs nothing in a mixed
+/// cluster: an older receiver stops decoding after the entries and ignores the trailing bytes (the
+/// native server does not assert full consumption), and a newer receiver reads the section only if
+/// bytes remain. That is why no protocol level gates this field.
+/// </para>
+/// </param>
 public readonly record struct PartitionStatesPayload(
     int ControllerId,
     int ControllerEpoch,
     IReadOnlyList<LiveBrokerSpec> LiveBrokers,
-    IReadOnlyList<(TopicPartition Tp, PartitionState State)> Entries)
+    IReadOnlyList<(TopicPartition Tp, PartitionState State)> Entries,
+    IReadOnlyList<(string Topic, Guid TopicId)>? TopicIds = null)
     : ISerializablePayload<PartitionStatesPayload>
 {
+    /// <summary>Bytes one topic-id entry occupies at minimum: 2-byte name length + 16-byte id.</summary>
+    private const int MinTopicIdBytes = 18;
+
+    // ToByteArray rather than a stackalloc span: the span cannot escape into a ref-struct writer,
+    // and this is the control plane — one 16-byte array per topic per push is not a hot path.
+    private static void WriteTopicId(ref SurgewavePayloadWriter writer, Guid topicId)
+        => writer.WriteBytes(topicId.ToByteArray());
+
+    private static void WriteTopicId(IPayloadWriter writer, Guid topicId)
+        => writer.WriteBytes(topicId.ToByteArray());
+
     // Conservative lower bounds on the bytes one entry occupies. Used to reject a bogus/hostile
     // count before pre-allocating — the native receive server (#60 Inc4) is the first path that
     // feeds this decoder untrusted network bytes.
@@ -79,7 +104,25 @@ public readonly record struct PartitionStatesPayload(
             var state = InterBrokerWire.ReadState(ref reader, tp);
             entries.Add((tp, state));
         }
-        return new(controllerId, controllerEpoch, brokers, entries);
+
+        // Trailing topic-id section. Absent from a sender that predates it, which is the whole point
+        // of putting it last: nothing to read, nothing to fail on.
+        List<(string, Guid)>? topicIds = null;
+        if (reader.Remaining >= 4)
+        {
+            var topicIdCount = reader.ReadInt32();
+            if (topicIdCount < 0 || topicIdCount > reader.Remaining / MinTopicIdBytes)
+                throw new InvalidDataException($"Corrupt PartitionStates payload: topic-id count {topicIdCount} exceeds {reader.Remaining} remaining bytes");
+
+            topicIds = new List<(string, Guid)>(topicIdCount);
+            for (var i = 0; i < topicIdCount; i++)
+            {
+                var name = reader.ReadString() ?? string.Empty;
+                topicIds.Add((name, new Guid(reader.ReadRaw(16))));
+            }
+        }
+
+        return new(controllerId, controllerEpoch, brokers, entries, topicIds);
     }
 
     public void Write(ref SurgewavePayloadWriter writer)
@@ -101,6 +144,14 @@ public readonly record struct PartitionStatesPayload(
         {
             InterBrokerWire.Write(ref writer, tp);
             InterBrokerWire.WriteState(ref writer, state);
+        }
+
+        var topicIds = TopicIds ?? [];
+        writer.WriteInt32(topicIds.Count);
+        foreach (var (topic, topicId) in topicIds)
+        {
+            writer.WriteString(topic);
+            WriteTopicId(ref writer, topicId);
         }
     }
 
@@ -124,15 +175,25 @@ public readonly record struct PartitionStatesPayload(
             InterBrokerWire.Write(writer, tp);
             InterBrokerWire.WriteState(writer, state);
         }
+
+        var topicIds = TopicIds ?? [];
+        writer.WriteInt32(topicIds.Count);
+        foreach (var (topic, topicId) in topicIds)
+        {
+            writer.WriteString(topic);
+            WriteTopicId(writer, topicId);
+        }
     }
 
     public int EstimateSize()
     {
-        var size = 4 + 4 + 4 + 4; // controllerId + epoch + brokerCount + entryCount
+        var size = 4 + 4 + 4 + 4 + 4; // controllerId + epoch + brokerCount + entryCount + topicIdCount
         foreach (var b in LiveBrokers)
             size += 4 + (2 + b.Host.Length * 3) + 4 + 4 + 2 + (2 + (b.Rack?.Length ?? 0) * 3);
         foreach (var (tp, state) in Entries)
             size += InterBrokerWire.SizeOf(tp) + InterBrokerWire.SizeOfState(state);
+        foreach (var (topic, _) in TopicIds ?? [])
+            size += 2 + topic.Length * 3 + 16; // name length prefix + worst-case UTF-8 + the id
         return size;
     }
 }

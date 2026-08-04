@@ -465,6 +465,16 @@ public sealed class LogManager : IDisposable
                     known.PartitionCount = partitionCount;
                 }
 
+                // Late-bind the id. A broker can learn that it hosts a replica before it learns the
+                // topic's identity — an older controller does not send the id at all — and without
+                // this the first empty id would be permanent, because TopicId is init-only and the
+                // entry is never rewritten. An id that is already known is never swapped for a
+                // different one: that would leave the id→name map pointing at two topics.
+                if (known.TopicId == Guid.Empty && topicId != Guid.Empty)
+                {
+                    return known with { TopicId = topicId };
+                }
+
                 return known;
             });
 
