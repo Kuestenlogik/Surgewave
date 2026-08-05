@@ -57,7 +57,32 @@ public sealed class PartitionState
     /// <summary>
     /// High watermark - highest offset acknowledged by all ISR.
     /// </summary>
-    public long HighWatermark { get; set; }
+    public long HighWatermark
+    {
+        get => Volatile.Read(ref _highWatermark);
+        set => Volatile.Write(ref _highWatermark, value);
+    }
+
+    private long _highWatermark;
+
+    /// <summary>
+    /// Advances the high watermark to <paramref name="candidate"/> if that is higher, and reports
+    /// whether it moved. Several follower fetches recompute the watermark concurrently, and a
+    /// read-compare-write would let a lower value from a slower thread land last — the watermark
+    /// must never go backwards, because consumers and produce waiters both treat it as durable.
+    /// </summary>
+    public bool TryAdvanceHighWatermark(long candidate)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _highWatermark);
+            if (candidate <= current)
+                return false;
+
+            if (Interlocked.CompareExchange(ref _highWatermark, candidate, current) == current)
+                return true;
+        }
+    }
 
     /// <summary>
     /// Log start offset - earliest available offset.

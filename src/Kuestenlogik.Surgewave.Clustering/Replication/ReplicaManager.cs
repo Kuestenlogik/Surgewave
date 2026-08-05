@@ -401,7 +401,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         var hadPrev = followerLeos.TryGetValue(followerId, out var prev);
 
         // Check if follower is caught up
-        var leaderLeo = replica.LogEndOffset;
+        var leaderLeo = LeaderLogEndOffset(tp, replica);
         var lag = leaderLeo - fetchOffset;
 
         bool isrChanged = false;
@@ -476,6 +476,22 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// This leader's real log end offset.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PartitionReplica.LogEndOffset"/> is only written when this broker becomes leader
+    /// or follower, and — on a leader — never again: producer appends go straight to the log and
+    /// the field stays at the promotion offset. Reading it as "the leader's LEO" made the follower
+    /// lag come out as zero or negative forever, so no follower could ever be found lagging, and it
+    /// pinned the high watermark to the offset the partition had when leadership was won. The log
+    /// itself is the only thing that knows. <c>GetLog</c>, not <c>GetOrCreateLog</c>: this runs
+    /// concurrently with StopReplica, and materialising a log for a partition this broker no longer
+    /// hosts would resurrect it.
+    /// </remarks>
+    private long LeaderLogEndOffset(TopicPartition tp, PartitionReplica replica)
+        => _logManager.GetLog(tp)?.NextOffset ?? replica.LogEndOffset;
+
+    /// <summary>
     /// Update the high watermark based on ISR acknowledgments.
     /// High watermark = min(LEO of all ISR replicas)
     /// </summary>
@@ -490,13 +506,16 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             return;
 
         // Calculate high watermark as minimum LEO across all ISR replicas
-        var leaderLeo = replica.LogEndOffset;
+        var leaderLeo = LeaderLogEndOffset(tp, replica);
         var minLeo = leaderLeo;
 
         // Get follower LEOs for this partition
         if (_followerLeos.TryGetValue(tp, out var followerLeos))
         {
-            foreach (var isrBrokerId in partitionState.Isr)
+            // A snapshot, not the live list: the ISR is mutated by the controller apply path and by
+            // this broker's own shrink/grow while this loop runs, and enumerating it directly throws
+            // "Collection was modified" on the follower-fetch path.
+            foreach (var isrBrokerId in _clusterState.GetIsrSnapshot(tp))
             {
                 // Skip leader (already included as leaderLeo)
                 if (isrBrokerId == _config.BrokerId)
@@ -522,15 +541,12 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             minLeo = partitionState.HighWatermark;
         }
 
-        var newHw = minLeo;
-
-        if (newHw > partitionState.HighWatermark)
+        if (partitionState.TryAdvanceHighWatermark(minLeo))
         {
-            partitionState.HighWatermark = newHw;
-            replica.HighWatermark = newHw;
+            replica.HighWatermark = minLeo;
 
             // Complete pending produce requests waiting for this HW
-            CompletePendingAcks(tp, newHw);
+            CompletePendingAcks(tp, minLeo);
         }
     }
 
@@ -597,7 +613,18 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         }
     }
 
-    private void CheckIsrForPartition(TopicPartition tp)
+    /// <summary>
+    /// Periodic ISR maintenance for a partition this broker leads: the leader belongs in its own
+    /// ISR, and a follower that has stopped reporting has to leave it.
+    /// </summary>
+    /// <remarks>
+    /// The lag-based shrink in <see cref="UpdateFollowerFetchPosition"/> is driven by an INCOMING
+    /// fetch, so it can only ever catch a follower that is slow but alive. A follower that dies
+    /// stops fetching altogether and would stay in the ISR forever — which also pins the high
+    /// watermark, because a member that never reports contributes a LEO of 0. Silence is what this
+    /// check is for.
+    /// </remarks>
+    internal void CheckIsrForPartition(TopicPartition tp)
     {
         var partitionState = _clusterState.GetPartitionState(tp);
         if (partitionState == null)
@@ -608,7 +635,49 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         {
             _clusterState.AddToIsr(tp, _config.BrokerId);
         }
+
+        var followerLeos = _followerLeos.GetOrAdd(tp, _ => new ConcurrentDictionary<int, (long, DateTimeOffset)>());
+        var now = DateTimeOffset.UtcNow;
+        var shrank = false;
+
+        foreach (var isrBrokerId in _clusterState.GetIsrSnapshot(tp))
+        {
+            if (isrBrokerId == _config.BrokerId)
+                continue;
+
+            // No record yet means this follower has not been observed since we started leading —
+            // not that it is dead. Start its clock here instead of evicting it, so a replica that
+            // is still coming up gets the same grace window as one that fell silent.
+            if (!followerLeos.TryGetValue(isrBrokerId, out var state))
+            {
+                followerLeos[isrBrokerId] = (0L, now);
+                continue;
+            }
+
+            if (now - state.LastUpdate <= ReplicaLagTimeMax)
+                continue;
+
+            if (_clusterState.RemoveFromIsr(tp, isrBrokerId))
+            {
+                _metrics?.RecordReplicaLeftIsr(tp.Topic, tp.Partition);
+                shrank = true;
+                LogFollowerExpiredFromIsr(tp.Topic, tp.Partition, isrBrokerId,
+                    (long)(now - state.LastUpdate).TotalMilliseconds);
+            }
+        }
+
+        if (shrank)
+        {
+            NotifyIsrChanged(tp, partitionState.LeaderEpoch);
+
+            // The watermark was held down by the member that just left; let it move now rather than
+            // at the next fetch, which for a partition whose only follower died may never come.
+            UpdateHighWatermark(tp);
+        }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Removed silent follower {BrokerId} from ISR for {Topic}-{Partition} (no fetch for {ElapsedMs}ms)")]
+    private partial void LogFollowerExpiredFromIsr(string topic, int partition, int brokerId, long elapsedMs);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "ReplicaManager started for broker {BrokerId}")]
     private partial void LogReplicaManagerStarted(int brokerId);
