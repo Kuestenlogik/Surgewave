@@ -20,6 +20,7 @@ using Kuestenlogik.Surgewave.Coordination.Streams;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Observability;
+using Kuestenlogik.Surgewave.Core.Replication;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Plugins;
 using Kuestenlogik.Surgewave.Protocol;
@@ -77,23 +78,31 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
         RegisterSasl(services, configuration);
 
         // ── Request handlers (IKafkaRequestHandler) ──────────────────────────────
-        services.AddSingleton<IKafkaRequestHandler>(sp => new DataApiHandler(
-            sp.GetRequiredService<IBrokerConfigView>(),
-            sp.GetRequiredService<LogManager>(),
-            sp.GetRequiredService<IProduceTransactionCoordinator>(),
-            sp.GetRequiredService<IQuotaManager>(),
-            sp.GetRequiredService<RecordBatchSerializer>(),
-            sp.GetService<IAuthorizer>(),
-            sp.GetService<IDeduplicationManager>(),
-            sp.GetService<IDelayIndex>(),
-            sp.GetService<ITtlIndex>(),
-            sp.GetService<IBrokerMetrics>(),
-            sp.GetRequiredService<ILogger<DataApiHandler>>(),
-            sp.GetService<IBandwidthQuota>(),
-            sp.GetService<SurgewaveBrokerObservability>(),
-            coldStartProfiler: sp.GetService<IColdStartProfiler>(),
-            partitionAppender: sp.GetService<IPartitionAppender>(),
-            disaggregatedReader: sp.GetService<IDisaggregatedSegmentReader>()));
+        services.AddSingleton<IKafkaRequestHandler>(sp =>
+        {
+            var dataApiHandler = new DataApiHandler(
+                sp.GetRequiredService<IBrokerConfigView>(),
+                sp.GetRequiredService<LogManager>(),
+                sp.GetRequiredService<IProduceTransactionCoordinator>(),
+                sp.GetRequiredService<IQuotaManager>(),
+                sp.GetRequiredService<RecordBatchSerializer>(),
+                sp.GetService<IAuthorizer>(),
+                sp.GetService<IDeduplicationManager>(),
+                sp.GetService<IDelayIndex>(),
+                sp.GetService<ITtlIndex>(),
+                sp.GetService<IBrokerMetrics>(),
+                sp.GetRequiredService<ILogger<DataApiHandler>>(),
+                sp.GetService<IBandwidthQuota>(),
+                sp.GetService<SurgewaveBrokerObservability>(),
+                coldStartProfiler: sp.GetService<IColdStartProfiler>(),
+                partitionAppender: sp.GetService<IPartitionAppender>(),
+                disaggregatedReader: sp.GetService<IDisaggregatedSegmentReader>());
+
+            // Resolved through the neutral Core contract, so this stays a Kafka plugin with no edge
+            // to Clustering; the host registers whichever implementation it has (#122).
+            dataApiHandler.SetCommitGate(sp.GetService<IPartitionCommitGate>());
+            return dataApiHandler;
+        });
 
         services.AddSingleton<IKafkaRequestHandler>(sp =>
         {

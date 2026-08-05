@@ -556,6 +556,10 @@ builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>(),
     sp.GetRequiredService<BrokerMetrics>(),
     sp.GetService<IControllerReplicaRpc>()));
+// #122 — the durability gate behind acks=all, registered through the neutral Core contract so the
+// Kafka plugin can resolve it without an edge to Clustering.
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(sp =>
+    new ReplicaCommitGate(sp.GetRequiredService<ClusterState>()));
 builder.Services.AddSingleton(sp => new ClusterController(
     sp.GetRequiredService<ILogger<ClusterController>>(),
     sp.GetRequiredService<ClusterState>(),

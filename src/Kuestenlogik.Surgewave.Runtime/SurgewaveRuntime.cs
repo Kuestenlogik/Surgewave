@@ -64,6 +64,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     // Handler references for cluster wiring
     private TopicAdminHandler? _topicAdminHandler;
     private MetadataApiHandler? _metadataApiHandler;
+    private DataApiHandler? _dataApiHandler;
     // Kept so the inter-broker handler (registered after the broker is up)
     // can share the same coordinator instance for WriteTxnMarkers (#69).
     // Owned and disposed by SurgewaveBroker (see the CA2000 note above), so
@@ -316,9 +317,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             var topicAdminLogger = _loggerFactory.CreateLogger<TopicAdminHandler>();
             _topicAdminHandler = new TopicAdminHandler(config, _logManager, _quotaManager, auditLogger: null, topicAdminLogger);
             _metadataApiHandler = new MetadataApiHandler(config, _logManager, metadataApiLogger);
+            // Held as a field: the durability gate it needs is built later, once clustering exists.
+            _dataApiHandler = new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, dataApiLogger, partitionAppender: _options.PartitionAppender, disaggregatedReader: _options.DisaggregatedReader);
             IKafkaRequestHandler[] handlers =
             [
-                new DataApiHandler(config, _logManager, transactionCoordinator, _quotaManager, recordBatchSerializer, aclAuthorizer: null, deduplicationManager: null, delayIndex: null, ttlIndex: null, _metrics, dataApiLogger, partitionAppender: _options.PartitionAppender, disaggregatedReader: _options.DisaggregatedReader),
+                _dataApiHandler,
                 _metadataApiHandler,
                 _topicAdminHandler,
                 new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
@@ -489,6 +492,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             clusteringConfig.DataDirectory, _loggerFactory.CreateLogger<ControllerEpochStore>());
         _clusterState.PrimeControllerEpochFloor(controllerEpochStore.Load());
         _clusterState.OnControllerEpochAdvanced = controllerEpochStore.Save;
+
+        // #122 — acks=all is refused rather than silently downgraded once a partition is short of
+        // in-sync replicas. Wired here because the gate needs the cluster state, which is built
+        // after the request handlers.
+        _dataApiHandler?.SetCommitGate(new ReplicaCommitGate(_clusterState));
 
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);
