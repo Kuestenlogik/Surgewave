@@ -9,6 +9,7 @@ using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Observability;
 using Kuestenlogik.Surgewave.Core.Pipeline;
+using Kuestenlogik.Surgewave.Core.Replication;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Core.Storage.Indexing;
 using Kuestenlogik.Surgewave.Core.Util;
@@ -42,6 +43,54 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
     private readonly IPartitionAppender _partitionAppender;
     private readonly IDisaggregatedSegmentReader? _disaggregatedReader;
     private readonly ILogger<DataApiHandler> _logger;
+
+    private IPartitionCommitGate? _commitGate;
+
+    /// <summary>
+    /// Supplies the durability gate consulted for acks=all. Left unset on a broker without
+    /// replication, where every write a partition accepts is as durable as that broker gets.
+    /// </summary>
+    public void SetCommitGate(IPartitionCommitGate? commitGate) => _commitGate = commitGate;
+
+    /// <summary>
+    /// Kafka defines acks as -1, 0 or 1; anything else is a malformed request and nothing is
+    /// written. Kept out of <c>ProduceRequest.ReadFrom</c> deliberately — the parse path is
+    /// benchmark-gated and this is a protocol decision, not a decoding one.
+    /// </summary>
+    private static ProduceResponse InvalidAcksResponse(ProduceRequest request)
+    {
+        var responses = new List<ProduceResponse.TopicProduceResponse>(request.TopicData.Count);
+
+        foreach (var topicData in request.TopicData)
+        {
+            var partitionResponses = new List<ProduceResponse.PartitionProduceResponse>(topicData.PartitionData.Count);
+            foreach (var partitionData in topicData.PartitionData)
+            {
+                partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                {
+                    Index = partitionData.Index,
+                    ErrorCode = ErrorCode.InvalidRequiredAcks,
+                    BaseOffset = -1,
+                    LogAppendTimeMs = -1
+                });
+            }
+
+            responses.Add(new ProduceResponse.TopicProduceResponse
+            {
+                Name = topicData.Name ?? string.Empty,
+                TopicId = topicData.TopicId,
+                PartitionResponses = partitionResponses
+            });
+        }
+
+        return new ProduceResponse
+        {
+            CorrelationId = request.CorrelationId,
+            ApiVersion = request.ApiVersion,
+            Responses = responses,
+            ThrottleTimeMs = 0
+        };
+    }
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
     [
@@ -142,6 +191,16 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
     private async Task<ProduceResponse> HandleProduceAsync(ProduceRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
     {
+        // The acks decision is made ONCE per request, not per partition: acks=1 and acks=0 must pay
+        // no more than this comparison on a field the parser wrote microseconds ago, and must then
+        // run exactly the code they ran before. `commitGate` stays null for them, so nothing in the
+        // partition loop is dereferenced.
+        var acks = request.RequiredAcks;
+        if ((uint)(acks + 1) > 2)
+            return InvalidAcksResponse(request);
+
+        var commitGate = acks == -1 ? _commitGate : null;
+
         var responses = new List<ProduceResponse.TopicProduceResponse>(request.TopicData.Count);
 
         // Calculate total bytes to produce for quota check (inline loop avoids LINQ closure allocations)
@@ -238,6 +297,23 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         Topic = topic,
                         Partition = partitionData.Index
                     };
+
+                    // Durability admission, BEFORE the idempotence validation below — that call
+                    // advances the producer's sequence, and advancing it for a batch we then refuse
+                    // to write poisons the producer: its retry carries the same sequence and comes
+                    // back as a non-retriable DuplicateSequenceNumber. Refusing here means the write
+                    // did not happen at all, which is exactly what the client must be told.
+                    if (commitGate is not null && !commitGate.CanAdmitDurableWrite(topicPartition))
+                    {
+                        partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                        {
+                            Index = partitionData.Index,
+                            ErrorCode = ErrorCode.NotEnoughReplicas,
+                            BaseOffset = -1,
+                            LogAppendTimeMs = -1
+                        });
+                        continue;
+                    }
 
                     // Extract idempotence info and validate if present
                     var (producerId, producerEpoch, baseSequence, lastOffsetDelta) =
