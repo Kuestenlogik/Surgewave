@@ -243,7 +243,11 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
             var correlationId = Interlocked.Increment(ref _correlationId);
             var requestBytes = SerializeHeartbeatRequest(request, correlationId);
 
-            await using var stream = client.GetStream();
+            // NOT disposed here: NetworkStream owns the socket, so disposing it every round would
+            // close the connection we just cached in _connections — leaving a dead TcpClient behind
+            // that the next round replaces without disposing. That is a reconnect plus a leaked
+            // handle per peer per interval. The client is owned by _connections and disposed there.
+            var stream = client.GetStream();
 
             // Set timeout for the operation
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

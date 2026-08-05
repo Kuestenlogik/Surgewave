@@ -819,6 +819,21 @@ var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 if (app.Services.GetService<IControllerReplicaRpc>() is { } controllerReplicaRpc)
     clusterController.SetControllerClient(controllerReplicaRpc);
 
+// #121 — the failure detector. Without it ClusterController._heartbeatManager is null, and since
+// HandleBrokerFailedAsync is reachable ONLY from HeartbeatManager.OnBrokerFailed, the shipped broker
+// never shrank an ISR on failure, never elected a leader away from a dead broker, and never replaced
+// a dead controller — the embedded runtime has wired this since day one, the real process never did.
+// It has to be this detector rather than the native lifecycle heartbeat: that one runs follower ->
+// controller only (NativeBrokerLifecycleClient.ResolveController returns null on the controller), so
+// it structurally cannot observe the controller's own death, which is the case that strands a
+// cluster. Disposed via ApplicationStopping below, so CA2000 does not apply.
+#pragma warning disable CA2000
+var heartbeatManager = new HeartbeatManager(
+    app.Services.GetRequiredService<ILogger<HeartbeatManager>>(), clusterState, clusteringConfig);
+#pragma warning restore CA2000
+clusterController.SetHeartbeatManager(heartbeatManager);
+replicationServer.SetHeartbeatManager(heartbeatManager);
+
 // #72 Inc4 — controller-epoch high-water: prime the epoch from the node-local persisted floor so a
 // RESTARTED broker elects (and mints composed broker epochs) strictly above every reign it already
 // observed, and persist every strict advance (elections and fence-passing pushes). Wired BEFORE the
@@ -1050,11 +1065,14 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
         // Echte Broker-Liste aus dem ClusterState statt hartkodiertem
         // Single-Broker-Eintrag; im Single-Node-Betrieb registriert der
         // ClusterController diesen Broker selbst.
+        // IsAlive was hardcoded true because nothing in this process knew any better. With the
+        // failure detector wired (#121) it can answer honestly — and must, since a dead broker now
+        // stays in Brokers while its health record says otherwise.
         var brokers = clusterState.Brokers.Values
             .Select(b => new BrokerInfoDto(
                 b.BrokerId, b.Host, b.Port,
                 IsController: b.BrokerId == clusterState.ControllerId,
-                IsAlive: true,
+                IsAlive: heartbeatManager.IsBrokerAlive(b.BrokerId),
                 b.Rack,
                 PeerTransport: clusteringConfig.InterBrokerTransport))
             .OrderBy(b => b.BrokerId)
@@ -1528,10 +1546,16 @@ await clusterController.StartAsync(CancellationToken.None);
 await replicaManager.StartAsync(CancellationToken.None);
 await replicationServer.StartAsync(CancellationToken.None);
 
+// #121 — started after the controller, so the health map is seeded from a cluster state that
+// already knows the configured peers. With no peers it idles: the send loop skips self and finds
+// nothing else.
+await heartbeatManager.StartAsync(CancellationToken.None);
+
 // #60 Inc6b — start the native lifecycle loop (registers with the controller + heartbeats). Stopped
 // on ApplicationStopping so it no longer heartbeats over the connection pool during teardown.
 await lifecycleLoop.StartAsync(app.Lifetime.ApplicationStopping);
 app.Lifetime.ApplicationStopping.Register(() => lifecycleLoop.DisposeAsync().AsTask().GetAwaiter().GetResult());
+app.Lifetime.ApplicationStopping.Register(() => heartbeatManager.DisposeAsync().AsTask().GetAwaiter().GetResult());
 
 logger.LogInformation("Replication components started (Controller: {IsController})", clusterController.IsController);
 
