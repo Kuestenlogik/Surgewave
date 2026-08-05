@@ -149,7 +149,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     /// <summary>
     /// Health of the peer brokers as seen by this broker's failure detector — the input to
     /// controller re-election and ISR shrinking. Empty until the first peer is observed; never
-    /// contains this broker itself.
+    /// contains this broker itself, which is why it is not the place to ask whether the local
+    /// broker is alive (<c>HeartbeatManager.IsBrokerAlive</c> answers that one directly).
     /// </summary>
     public IReadOnlyDictionary<int, BrokerHealthState> PeerHealth =>
         _heartbeatManager?.AllBrokerHealth ?? ReadOnlyDictionary<int, BrokerHealthState>.Empty;

@@ -74,10 +74,19 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
     public IReadOnlyDictionary<int, BrokerHealthState> AllBrokerHealth => _brokerHealth;
 
     /// <summary>
-    /// Check if a broker is currently alive.
+    /// Check if a broker is currently alive. The local broker always is: we are running.
     /// </summary>
+    /// <remarks>
+    /// The health map deliberately holds peers only — a record for ourselves would be timed out by
+    /// <see cref="CheckBrokerHealthAsync"/> and reported as our own failure — so the local id has to
+    /// be answered here instead of looked up. Without it every caller asking "is this replica alive"
+    /// about a replica that happens to be us gets "no", which is never true and is exactly wrong at
+    /// the moments that matter: the local broker is the one candidate whose liveness is certain.
+    /// A peer with no record still answers false: not observed is not the same as known alive.
+    /// </remarks>
     public bool IsBrokerAlive(int brokerId) =>
-        _brokerHealth.TryGetValue(brokerId, out var state) && state.IsAlive;
+        brokerId == _config.BrokerId ||
+        (_brokerHealth.TryGetValue(brokerId, out var state) && state.IsAlive);
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
