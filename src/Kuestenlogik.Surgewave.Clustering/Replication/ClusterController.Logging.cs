@@ -58,6 +58,9 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Warning, Message = "Controller broker {BrokerId} failed, attempting re-election")]
     private partial void LogControllerFailed(int brokerId);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Stepped down as controller: broker {BrokerId} holds the role now")]
+    private partial void LogSteppedDownAsController(int brokerId);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Removed broker {BrokerId} from ISR for {Topic}-{Partition}")]
     private partial void LogRemovedFromIsr(string topic, int partition, int brokerId);
 

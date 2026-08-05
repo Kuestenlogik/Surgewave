@@ -34,6 +34,10 @@ public sealed class BrokerBootSmokeTests
     // Fires only once app.RunAsync() actually binds Kestrel — also catches a TLS/dev-cert bind failure.
     private const string AppStartedLine = "Application started. Press Ctrl+C to shut down.";
 
+    // HeartbeatManager.StartAsync's own line. Present only if the shipped host constructs and starts
+    // the failure detector — which until #121 it did not.
+    private const string HeartbeatManagerStartedLine = "Heartbeat manager started";
+
     [Fact(Timeout = 180_000)]
     public async Task Broker_BootsToReady_WithConnectEnabled()
     {
@@ -119,6 +123,17 @@ public sealed class BrokerBootSmokeTests
             await Task.WhenAny(appStarted.Task, exited.Task, Task.Delay(TimeSpan.FromSeconds(20)));
             Assert.True(appStarted.Task.IsCompletedSuccessfully,
                 $"Broker reached readiness but Kestrel did not bind ('{AppStartedLine}' never appeared).\n{Dump(log)}");
+
+            // #121 — the same class of gap this test exists for, one layer down: the failure
+            // detector was wired in the embedded runtime only, so the shipped process could never
+            // shrink an ISR on failure, elect away from a dead broker, or replace a dead controller
+            // (HandleBrokerFailedAsync is reachable only from HeartbeatManager.OnBrokerFailed).
+            // What the behaviour does once wired is covered by ControllerFailoverTests against the
+            // embedded runtime; only a real process boot can show it is wired HERE.
+            lock (log)
+            {
+                Assert.Contains(HeartbeatManagerStartedLine, log.ToString(), StringComparison.Ordinal);
+            }
         }
         finally
         {

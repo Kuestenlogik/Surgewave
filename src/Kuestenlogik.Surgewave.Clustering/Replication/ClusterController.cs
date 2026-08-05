@@ -185,6 +185,15 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // Parse cluster nodes from config
         await InitializeClusterNodesAsync();
 
+        // Legacy mode has no way to learn it has been replaced: _isController is only ever cleared
+        // on the Raft paths, so once a broker wins the lowest-id election it believes it is the
+        // controller forever. That was unreachable while nothing could elect a second one — a
+        // failure detector makes it reachable, and a broker that keeps serving topic creation and
+        // leader elections against its own state while another broker does the same is a split view
+        // with no reconciliation path. Raft is excluded: there the leader watch owns the role.
+        if (!_config.UseRaftConsensus)
+            _clusterState.OnControllerChanged = OnControllerReplaced;
+
         if (_config.UseRaftConsensus && _raftNode != null)
         {
             // Raft mode: start Raft node and watch for leadership changes
@@ -443,6 +452,20 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Stand down when an accepted push names someone else as controller. The controller loop is
+    /// left to notice on its own turn: every controller-only action already guards on
+    /// <c>_isController</c>, so a demoted broker's loop finds nothing to do.
+    /// </summary>
+    private void OnControllerReplaced(int newControllerId)
+    {
+        if (newControllerId == _config.BrokerId || !_isController)
+            return;
+
+        _isController = false;
+        LogSteppedDownAsController(newControllerId);
     }
 
     /// <summary>
@@ -1066,8 +1089,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         if (!_isController)
         {
-            // Check if the failed broker was the controller
-            if (_clusterState.ControllerId == failedBrokerId)
+            // Check if the failed broker was the controller. Never in Raft mode: there the leader
+            // watch owns the role, and running the lowest-id election here would both contradict
+            // Raft and start a SECOND ControllerLoopAsync next to the one the watch already owns.
+            if (!_config.UseRaftConsensus && _clusterState.ControllerId == failedBrokerId)
             {
                 LogControllerFailed(failedBrokerId);
                 await TryBecomeControllerAsync(CancellationToken.None);

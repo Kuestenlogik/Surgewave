@@ -60,12 +60,14 @@ public sealed class ClusterState
     public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch, ControllerPushWire? observedWire)
     {
         bool advanced;
+        int previousControllerId;
         lock (_stateLock)
         {
             if (controllerEpoch < ControllerEpoch)
                 return false;
 
             advanced = controllerEpoch > ControllerEpoch;
+            previousControllerId = ControllerId;
             ControllerEpoch = controllerEpoch;
             ControllerId = controllerId;
 
@@ -85,8 +87,22 @@ public sealed class ClusterState
         // readers, and a missed write only shrinks the restart floor (best-effort by contract).
         if (advanced)
             OnControllerEpochAdvanced?.Invoke(controllerEpoch);
+
+        // Also outside the lock: this is how a broker learns it has been REPLACED as controller.
+        // The push carries a controller id that passed the epoch fence, so it is authoritative —
+        // and outside Raft nothing else ever tells a controller to stand down.
+        if (controllerId != previousControllerId)
+            OnControllerChanged?.Invoke(controllerId);
+
         return true;
     }
+
+    /// <summary>
+    /// Raised when an accepted controller push names a different controller than the one this broker
+    /// believed in — including the case where that used to be this broker. Not raised by
+    /// <see cref="BecomeController"/>: winning an election is not being told about someone else.
+    /// </summary>
+    public Action<int>? OnControllerChanged { get; set; }
 
     /// <summary>
     /// #72 Inc4 — invoked OUTSIDE the state lock after every STRICT controller-epoch advance
