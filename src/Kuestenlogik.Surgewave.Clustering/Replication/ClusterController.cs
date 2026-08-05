@@ -470,11 +470,15 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// </summary>
     private bool IsEligibleForController(int brokerId)
     {
-        // We know we are alive. Asking the heartbeat manager about ourselves would answer "dead":
-        // it tracks peers only and never seeds a health record for the local broker.
+        // Our own liveness is certain and is not up for lookup: a stray health record for the local
+        // id (ProcessHeartbeat keys on whatever id the sender claims) must not be able to take us
+        // out of our own election.
         if (brokerId == _config.BrokerId)
             return true;
 
+        // Deliberately not IsBrokerAlive for peers: that answers false for a peer with no health
+        // record yet, which during startup is every peer. Eligibility asks the weaker question —
+        // is this broker KNOWN to be dead — so an unobserved peer still counts.
         return _heartbeatManager?.GetBrokerHealth(brokerId) is not { IsAlive: false };
     }
 
