@@ -254,9 +254,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// returns the neutral <c>ProduceSequenceStatus</c> — the Kafka Produce handler maps it to a
     /// wire <c>ErrorCode</c> at the boundary (b2).
     /// </summary>
-    public ProduceSequenceStatus ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
+    public ProduceSequenceCheck ValidateProduceBatch(
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition)
     {
-        return _producerStateManager.ValidateSequence(producerId, epoch, baseSequence, topicPartition);
+        return _producerStateManager.ValidateSequence(producerId, epoch, baseSequence, lastOffsetDelta, topicPartition);
+    }
+
+    public void CommitProduceBatch(
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta,
+        TopicPartition topicPartition, long baseOffset)
+    {
+        _producerStateManager.CommitSequence(
+            producerId, epoch, baseSequence, lastOffsetDelta, topicPartition, baseOffset);
     }
 
     /// <summary>

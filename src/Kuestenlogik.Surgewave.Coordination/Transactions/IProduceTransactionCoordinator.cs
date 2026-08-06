@@ -15,11 +15,32 @@ namespace Kuestenlogik.Surgewave.Coordination.Transactions;
 public interface IProduceTransactionCoordinator
 {
     /// <summary>
-    /// Validates a produce batch for idempotence (sequence number validation). Returns the
-    /// neutral <see cref="ProduceSequenceStatus"/>; the Kafka Produce handler maps it to a
-    /// wire error code at the boundary.
+    /// Validates a produce batch for idempotence WITHOUT recording it. Returns the neutral
+    /// <see cref="ProduceSequenceCheck"/>; the Kafka Produce handler maps it to a wire error code
+    /// at the boundary.
     /// </summary>
-    ProduceSequenceStatus ValidateProduceBatch(long producerId, short epoch, int baseSequence, TopicPartition topicPartition);
+    /// <remarks>
+    /// Validation is deliberately free of side effects, and <see cref="CommitProduceBatch"/> is what
+    /// advances the producer's sequence — because a batch can still be refused after this call
+    /// (durability admission, quota, a corrupt payload, a failed append). Advancing the sequence for
+    /// a batch that is never written strands the producer: its retry carries the same sequence, is
+    /// then a duplicate of something that does not exist, and the error is fatal.
+    /// </remarks>
+    /// <param name="lastOffsetDelta">
+    /// The batch's last-offset delta, i.e. record count minus one. The producer's next batch starts
+    /// at <c>baseSequence + lastOffsetDelta + 1</c>, so a broker that assumes one record per batch
+    /// rejects every multi-record producer's second batch as out of order.
+    /// </param>
+    ProduceSequenceCheck ValidateProduceBatch(
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition);
+
+    /// <summary>
+    /// Records a batch that was actually appended, so a retransmit of it can be recognised and
+    /// answered with <paramref name="baseOffset"/>.
+    /// </summary>
+    void CommitProduceBatch(
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta,
+        TopicPartition topicPartition, long baseOffset);
 
     /// <summary>
     /// Records a transactional batch being written (produce path) so the Last Stable Offset

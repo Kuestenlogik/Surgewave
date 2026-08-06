@@ -39,7 +39,7 @@ public sealed class ProducerStateManager
         var result = new List<ActiveProducerInfo>();
         foreach (var ps in _producers.Values)
         {
-            var lastSeq = ps.GetLastSequence(partition);
+            var lastSeq = ps.GetLastWritten(partition)?.LastSequence ?? KafkaConstants.Producer.NoSequence;
             var hasTxn = ps.TransactionPartitions.Contains(partition);
             if (lastSeq == KafkaConstants.Producer.NoSequence && !hasTxn) continue;
 
@@ -134,58 +134,78 @@ public sealed class ProducerStateManager
     }
 
     /// <summary>
-    /// Validates a produce request's sequence number for idempotent delivery.
+    /// Validates a produce request's sequence number for idempotent delivery, WITHOUT recording it.
+    /// <see cref="CommitSequence"/> does the recording, once the batch is actually in the log.
     /// </summary>
-    public ProduceSequenceStatus ValidateSequence(long producerId, short epoch, int baseSequence, TopicPartition topicPartition)
+    public ProduceSequenceCheck ValidateSequence(
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition)
     {
         if (producerId == KafkaConstants.Producer.NoProducerId)
         {
             // Non-idempotent producer - no validation needed
-            return ProduceSequenceStatus.Ok;
+            return ProduceSequenceCheck.Ok;
         }
 
         if (!_producers.TryGetValue(producerId, out var state))
         {
-            // Unknown producer - accept but track
-            var newState = new ProducerState(producerId, epoch);
-            _producers[producerId] = newState;
-            newState.UpdateSequence(topicPartition, baseSequence);
-            return ProduceSequenceStatus.Ok;
+            // Unknown producer - accept; it is registered when the batch lands.
+            return ProduceSequenceCheck.Ok;
         }
 
         // Validate epoch
         if (epoch != state.Epoch)
         {
-            return epoch < state.Epoch
+            return ProduceSequenceCheck.Failed(epoch < state.Epoch
                 ? ProduceSequenceStatus.InvalidProducerEpoch
-                : ProduceSequenceStatus.UnknownProducerId;
+                : ProduceSequenceStatus.UnknownProducerId);
         }
 
         // Validate sequence
-        var lastSequence = state.GetLastSequence(topicPartition);
-        if (lastSequence == KafkaConstants.Producer.NoSequence)
+        var written = state.GetLastWritten(topicPartition);
+        if (written is null)
         {
             // First batch for this partition - accept any sequence
-            state.UpdateSequence(topicPartition, baseSequence);
-            return ProduceSequenceStatus.Ok;
+            return ProduceSequenceCheck.Ok;
         }
 
-        var expectedSequence = (lastSequence + 1) & int.MaxValue; // Wrap around
+        // The producer numbers RECORDS, not batches: the batch that follows one spanning sequences
+        // [first..last] starts at last + 1.
+        var expectedSequence = (written.Value.LastSequence + 1) & int.MaxValue;
         if (baseSequence == expectedSequence)
         {
-            // Expected sequence - accept
-            state.UpdateSequence(topicPartition, baseSequence);
-            return ProduceSequenceStatus.Ok;
+            return ProduceSequenceCheck.Ok;
         }
 
-        if (baseSequence == lastSequence)
+        if (baseSequence == written.Value.FirstSequence)
         {
-            // Duplicate - reject silently (or return specific error)
-            return ProduceSequenceStatus.DuplicateSequence;
+            // The producer resent a batch we already have — the ordinary outcome of an
+            // acknowledgement that never arrived. Hand back where it landed the first time.
+            return ProduceSequenceCheck.Duplicate(written.Value.BaseOffset);
         }
 
         // Out of order
-        return ProduceSequenceStatus.OutOfOrderSequence;
+        return ProduceSequenceCheck.Failed(ProduceSequenceStatus.OutOfOrderSequence);
+    }
+
+    /// <summary>
+    /// Records a batch that has been appended, so a retransmit is recognisable and answerable with
+    /// the offset it originally landed at.
+    /// </summary>
+    /// <remarks>
+    /// Only the most recent batch per partition is remembered. Kafka keeps the last five, which
+    /// tolerates a producer with several requests in flight retrying an older one; this recognises
+    /// the immediately preceding batch, which is the case that a single in-flight request produces.
+    /// </remarks>
+    public void CommitSequence(
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta,
+        TopicPartition topicPartition, long baseOffset)
+    {
+        if (producerId == KafkaConstants.Producer.NoProducerId)
+            return;
+
+        var state = _producers.GetOrAdd(producerId, id => new ProducerState(id, epoch));
+        var lastSequence = (baseSequence + Math.Max(lastOffsetDelta, 0)) & int.MaxValue;
+        state.RecordWritten(topicPartition, baseSequence, lastSequence, baseOffset);
     }
 
     /// <summary>
@@ -335,7 +355,7 @@ public sealed class ProducerStateManager
         public TransactionState TransactionState { get; set; } = TransactionState.Empty;
         public HashSet<TopicPartition> TransactionPartitions { get; } = new();
 
-        private readonly ConcurrentDictionary<TopicPartition, int> _lastSequences = new();
+        private readonly ConcurrentDictionary<TopicPartition, WrittenBatch> _lastWritten = new();
 
         public ProducerState(long producerId, short epoch)
         {
@@ -343,21 +363,18 @@ public sealed class ProducerStateManager
             Epoch = epoch;
         }
 
-        public int GetLastSequence(TopicPartition partition)
-        {
-            return _lastSequences.TryGetValue(partition, out var seq)
-                ? seq
-                : KafkaConstants.Producer.NoSequence;
-        }
+        public WrittenBatch? GetLastWritten(TopicPartition partition)
+            => _lastWritten.TryGetValue(partition, out var written) ? written : null;
 
-        public void UpdateSequence(TopicPartition partition, int sequence)
-        {
-            _lastSequences[partition] = sequence;
-        }
+        public void RecordWritten(TopicPartition partition, int firstSequence, int lastSequence, long baseOffset)
+            => _lastWritten[partition] = new WrittenBatch(firstSequence, lastSequence, baseOffset);
 
         public void ClearSequences()
         {
-            _lastSequences.Clear();
+            _lastWritten.Clear();
         }
+
+        /// <summary>The last batch this producer actually got into the log for a partition.</summary>
+        public readonly record struct WrittenBatch(int FirstSequence, int LastSequence, long BaseOffset);
     }
 }

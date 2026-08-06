@@ -45,9 +45,9 @@ public sealed class DescribeProducersTests
         var (pid, epoch) = psm.AllocateProducerId();
         var orders = new TopicPartition { Topic = "orders", Partition = 0 };
 
-        // ValidateSequence updates the per-partition last-seq state on success.
-        var result = psm.ValidateSequence(pid, epoch, baseSequence: 0, orders);
-        Assert.Equal(ProduceSequenceStatus.Ok, result);
+        // A produce batch is listed once it has actually been written (#122): validation itself
+        // records nothing, so this is what a landed batch looks like.
+        psm.CommitSequence(pid, epoch, baseSequence: 0, lastOffsetDelta: 0, orders, baseOffset: 0);
 
         var producers = psm.GetActiveProducersForPartition(orders);
 
@@ -89,8 +89,8 @@ public sealed class DescribeProducersTests
         var orders = new TopicPartition { Topic = "orders", Partition = 0 };
         var payments = new TopicPartition { Topic = "payments", Partition = 0 };
 
-        psm.ValidateSequence(pidA, epA, baseSequence: 0, orders);
-        psm.ValidateSequence(pidB, epB, baseSequence: 0, payments);
+        psm.CommitSequence(pidA, epA, baseSequence: 0, lastOffsetDelta: 0, orders, baseOffset: 0);
+        psm.CommitSequence(pidB, epB, baseSequence: 0, lastOffsetDelta: 0, payments, baseOffset: 0);
 
         var ordersProducers = psm.GetActiveProducersForPartition(orders);
         var paymentsProducers = psm.GetActiveProducersForPartition(payments);
@@ -107,7 +107,7 @@ public sealed class DescribeProducersTests
         var (coordinator, psm, _) = TestFixture.Build();
         var (pid, epoch) = psm.AllocateProducerId();
         var orders = new TopicPartition { Topic = "orders", Partition = 1 };
-        psm.ValidateSequence(pid, epoch, baseSequence: 5, orders);
+        psm.CommitSequence(pid, epoch, baseSequence: 5, lastOffsetDelta: 0, orders, baseOffset: 5);
 
         // The DTO wire-shape mapping lives in the adapter now (#59), so drive the request through it.
         var handler = new TransactionApiHandler(coordinator, NullLogger<TransactionApiHandler>.Instance);

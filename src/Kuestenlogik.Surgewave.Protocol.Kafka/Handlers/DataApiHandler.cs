@@ -321,17 +321,35 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
                     if (producerId != KafkaConstants.Producer.NoProducerId)
                     {
-                        var validationStatus = _transactionCoordinator.ValidateProduceBatch(
-                            producerId, producerEpoch, baseSequence, topicPartition);
+                        var check = _transactionCoordinator.ValidateProduceBatch(
+                            producerId, producerEpoch, baseSequence, lastOffsetDelta, topicPartition);
 
-                        if (validationStatus != ProduceSequenceStatus.Ok)
+                        // A retransmit of a batch we already wrote is answered with SUCCESS and the
+                        // offset it landed at, which is the whole point of idempotent delivery: the
+                        // producer sent it twice because it never saw the first acknowledgement, and
+                        // a duplicate-sequence error would be fatal to it. Only a batch we cannot
+                        // place at all is an error.
+                        if (check.Status == ProduceSequenceStatus.DuplicateSequence &&
+                            check.DuplicateBaseOffset >= 0)
+                        {
+                            partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                            {
+                                Index = partitionData.Index,
+                                ErrorCode = ErrorCode.None,
+                                BaseOffset = check.DuplicateBaseOffset,
+                                LogAppendTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                            });
+                            continue;
+                        }
+
+                        if (check.Status != ProduceSequenceStatus.Ok)
                         {
                             // Map the neutral sequence-validation status to the Kafka wire
                             // error code at the protocol boundary (part-c TxnErrorStatus pattern).
                             partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                             {
                                 Index = partitionData.Index,
-                                ErrorCode = validationStatus switch
+                                ErrorCode = check.Status switch
                                 {
                                     ProduceSequenceStatus.InvalidProducerEpoch => ErrorCode.InvalidProducerEpoch,
                                     ProduceSequenceStatus.UnknownProducerId => ErrorCode.UnknownProducerId,
@@ -404,6 +422,17 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     var produceRecordCount = RecordHeaderParser.ParseBatchHeader(recordsToAppend.Span).RecordCount;
                     var baseOffset = await _partitionAppender.AppendBatchAsync(
                         topicPartition, recordsToAppend, produceRecordCount, cancellationToken);
+
+                    // The batch is in the log — only NOW does the producer's sequence advance. Doing
+                    // it during validation would strand an idempotent producer whenever anything
+                    // between the two refused the write (durability admission, quota, a corrupt
+                    // payload, a failing append): its retry would collide with a sequence recorded
+                    // for a batch that was never written.
+                    if (producerId != KafkaConstants.Producer.NoProducerId)
+                    {
+                        _transactionCoordinator.CommitProduceBatch(
+                            producerId, producerEpoch, baseSequence, lastOffsetDelta, topicPartition, baseOffset);
+                    }
 
                     // Register hash after successful write (deduplication)
                     _deduplicationManager?.Register(topicPartition, recordsToAppend.Span, baseOffset);
