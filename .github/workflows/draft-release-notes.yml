@@ -114,7 +114,6 @@ jobs:
             HIGHLIGHTS=$(echo "$ISSUES_JSON" | jq -r '
               def bucket(labels):
                 ( (labels | map(select(.name | startswith("area:")) | .name | sub("area:"; ""))[0])
-                  // (labels | map(select(.name | startswith("kind:")) | .name | sub("kind:"; ""))[0])
                   // "misc" );
               [ .[] | { bucket: bucket(.labels), entry: "- #\(.number) \(.title)" } ]
               | group_by(.bucket)

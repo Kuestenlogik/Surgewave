@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // sync-project.mjs — idempotent sync of `roadmap`-labelled issues into
-// the Bowire Project board. Reads every open issue with the
+// the Surgewave Project board. Reads every open issue with the
 // `roadmap` label, looks each one up in the Project, attaches the
 // missing ones, and applies the Status / Area / Track / Priority /
-// Kind / Milestone field values from a per-title mapping table.
+// Milestone field values from a per-title mapping table.
 //
 // Safe to re-run after a rate-limit reset, after manual edits in the
 // Project UI, and after new roadmap items get filed: anything already
@@ -53,38 +53,39 @@ async function gh(query, vars = {}) {
 // isn't here get attached to the project but no field values (manual
 // UI triage takes over). Entries whose title doesn't exist in the repo
 // yet are created via REST. milestone is set on creation; labels are
-// derived from area/track/kind/priority.
+// derived from area/track. The work's nature (bug / task / feature) is
+// carried by the native issue type, not by a label.
 const ROADMAP_URL_BASE = `https://github.com/${ORG}/${REPO}/blob/main/ROADMAP.md`;
 function trackedBody(anchor, desc) {
     return `${desc}\n\nTracked in [\`ROADMAP.md\`](${ROADMAP_URL_BASE}#${anchor}) — the narrative there carries the full design rationale + the per-bullet checkboxes. This issue exists for board-level Status / Area / Track / Milestone tracking.`;
 }
 const MAPPING = {
-    "G1 — Native non-.NET clients (Python, Go, Rust)":                       { status: "Backlog", area: "multi",       kind: "feature", priority: "P1" },
-    "G3 — Public benchmarks on identical hardware":                          { status: "Next up", area: "broker",      track: "performance",         kind: "feature", priority: "P1" },
-    "G4 — Real Jepsen run":                                                  { status: "Backlog", area: "clustering",  track: "cluster-correctness", kind: "feature", priority: "P2" },
-    "G12 — Cluster-linking-grade geo-replication":                           { status: "Backlog", area: "clustering",  kind: "feature", priority: "P2" },
-    "G15 — CLI polish (remaining)":                                          { status: "Backlog", area: "cli",         kind: "debt",    priority: "P2" },
-    "G17 — Flink connector":                                                 { status: "Backlog", area: "connect",     kind: "feature", priority: "P3" },
-    "G18 — AI primitives as default-bundled Apache-2.0 plugin":              { status: "Next up", area: "ai",          track: "ai-pipelines",        kind: "feature", priority: "P1" },
-    "G21 — Disaggregated compute/storage mode":                              { status: "Backlog", area: "storage",     kind: "feature", priority: "P1" },
-    "G23 — Pipeline-as-code (C# DSL)":                                       { status: "Backlog", area: "streams",     kind: "feature", priority: "P2" },
-    "G24 — Lineage-driven impact analysis":                                  { status: "Backlog", area: "schema",      kind: "feature", priority: "P2" },
-    "G25 — Vector type as first-class schema primitive":                     { status: "Backlog", area: "schema",      track: "ai-pipelines",        kind: "feature", priority: "P1" },
-    "G26 — AI pipeline cost tracking":                                       { status: "Backlog", area: "ai",          track: "ai-pipelines",        kind: "feature", priority: "P1" },
-    "G28 — Leader-reelection latency after broker shutdown":                 { status: "Next up", area: "clustering",  track: "cluster-correctness", kind: "bug",     priority: "P2" },
-    "Plugin SDK B — Schema-validation as build task":                        { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", kind: "feature", priority: "P2" },
-    "Plugin SDK C — surgewave plugin scaffold + dotnet new templates":       { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", kind: "feature", priority: "P2" },
-    "Plugin SDK D — surgewave sdk install --version X.Y.Z":                  { status: "Next up", area: "plugin-sdk",  track: "plugin-distribution", kind: "feature", priority: "P1" },
-    "Plugin SDK E — Roslyn analysers (SRWV-prefix rules)":                   { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", kind: "feature", priority: "P2" },
-    "Plugin SDK F — Sample plugin reference repo":                           { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", kind: "feature", priority: "P2" },
-    "Operator wizard — surgewave setup (interactive CLI)":                   { status: "Backlog", area: "cli",         kind: "feature", priority: "P2" },
-    "Operator wizard — Browser variant in Control UI":                       { status: "Backlog", area: "control",     kind: "feature", priority: "P2" },
-    "Operator wizard — Plugin marketplace dependency graph":                 { status: "Backlog", area: "plugin-sdk",  kind: "feature", priority: "P2" },
-    "QUIC transport benchmark on real LAN/WAN":                              { status: "Backlog", area: "broker",      track: "transport",           kind: "feature", priority: "P2" },
-    "QUIC retransmit statistics":                                            { status: "Backlog", area: "observability", track: "transport",         kind: "debt",    priority: "P3" },
-    "Branch protection for external PRs":                                    { status: "Backlog", area: "multi",       kind: "debt",    priority: "P2" },
-    "Getting-started video (5-minute demo)":                                 { status: "Backlog", area: "docs",        kind: "docs",    priority: "P2" },
-    "Control UI license page":                                               { status: "Backlog", area: "control",     kind: "feature", priority: "P2" },
+    "G1 — Native non-.NET clients (Python, Go, Rust)":                       { status: "Backlog", area: "multi",       priority: "P1" },
+    "G3 — Public benchmarks on identical hardware":                          { status: "Next up", area: "broker",      track: "performance",         priority: "P1" },
+    "G4 — Real Jepsen run":                                                  { status: "Backlog", area: "clustering",  track: "cluster-correctness", priority: "P2" },
+    "G12 — Cluster-linking-grade geo-replication":                           { status: "Backlog", area: "clustering",  priority: "P2" },
+    "G15 — CLI polish (remaining)":                                          { status: "Backlog", area: "cli",         priority: "P2" },
+    "G17 — Flink connector":                                                 { status: "Backlog", area: "connect",     priority: "P3" },
+    "G18 — AI primitives as default-bundled Apache-2.0 plugin":              { status: "Next up", area: "ai",          track: "ai-pipelines",        priority: "P1" },
+    "G21 — Disaggregated compute/storage mode":                              { status: "Backlog", area: "storage",     priority: "P1" },
+    "G23 — Pipeline-as-code (C# DSL)":                                       { status: "Backlog", area: "streams",     priority: "P2" },
+    "G24 — Lineage-driven impact analysis":                                  { status: "Backlog", area: "schema",      priority: "P2" },
+    "G25 — Vector type as first-class schema primitive":                     { status: "Backlog", area: "schema",      track: "ai-pipelines",        priority: "P1" },
+    "G26 — AI pipeline cost tracking":                                       { status: "Backlog", area: "ai",          track: "ai-pipelines",        priority: "P1" },
+    "G28 — Leader-reelection latency after broker shutdown":                 { status: "Next up", area: "clustering",  track: "cluster-correctness", priority: "P2" },
+    "Plugin SDK B — Schema-validation as build task":                        { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", priority: "P2" },
+    "Plugin SDK C — surgewave plugin scaffold + dotnet new templates":       { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", priority: "P2" },
+    "Plugin SDK D — surgewave sdk install --version X.Y.Z":                  { status: "Next up", area: "plugin-sdk",  track: "plugin-distribution", priority: "P1" },
+    "Plugin SDK E — Roslyn analysers (SRWV-prefix rules)":                   { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", priority: "P2" },
+    "Plugin SDK F — Sample plugin reference repo":                           { status: "Backlog", area: "plugin-sdk",  track: "plugin-distribution", priority: "P2" },
+    "Operator wizard — surgewave setup (interactive CLI)":                   { status: "Backlog", area: "cli",         priority: "P2" },
+    "Operator wizard — Browser variant in Control UI":                       { status: "Backlog", area: "control",     priority: "P2" },
+    "Operator wizard — Plugin marketplace dependency graph":                 { status: "Backlog", area: "plugin-sdk",  priority: "P2" },
+    "QUIC transport benchmark on real LAN/WAN":                              { status: "Backlog", area: "broker",      track: "transport",           priority: "P2" },
+    "QUIC retransmit statistics":                                            { status: "Backlog", area: "observability", track: "transport",         priority: "P3" },
+    "Branch protection for external PRs":                                    { status: "Backlog", area: "multi",       priority: "P2" },
+    "Getting-started video (5-minute demo)":                                 { status: "Backlog", area: "docs",        priority: "P2" },
+    "Control UI license page":                                               { status: "Backlog", area: "control",     priority: "P2" },
 };
 
 // 1. Fetch project metadata (id + fields + options)
@@ -152,7 +153,7 @@ console.log(`Found ${issues.length} \`roadmap\`-labelled issues in ${ORG}/${REPO
 
 // 2b. Create any MAPPING entries that have a `body` set but no matching
 // open issue yet. REST POST /repos/owner/repo/issues; labels derived
-// from area/track/kind plus the "roadmap" marker; milestone by title.
+// from area/track plus the "roadmap" marker; milestone by title.
 const issueTitles = new Set(issues.map((i) => i.title));
 const milestonesQ = `query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) { milestones(first: 25, states: OPEN) { nodes { number title } } }
@@ -163,7 +164,7 @@ const milestoneByTitle = Object.fromEntries(
 
 for (const [title, m] of Object.entries(MAPPING)) {
     if (!m.body || issueTitles.has(title)) continue;
-    const labels = ["roadmap", `area:${m.area}`, `kind:${m.kind}`];
+    const labels = ["roadmap", `area:${m.area}`];
     if (m.track) labels.push(`track:${m.track}`);
     const payload = { title, body: m.body, labels };
     if (m.milestone && milestoneByTitle[m.milestone]) payload.milestone = milestoneByTitle[m.milestone];
@@ -206,7 +207,7 @@ for (const issue of issues) {
     }
     const map = MAPPING[issue.title];
     if (!map) { unmapped++; continue; }
-    for (const [fieldName, optionName] of [["Status", map.status], ["Area", map.area], ["Track", map.track], ["Priority", map.priority], ["Kind", map.kind]]) {
+    for (const [fieldName, optionName] of [["Status", map.status], ["Area", map.area], ["Track", map.track], ["Priority", map.priority]]) {
         if (!optionName) continue;
         const f = FIELDS[fieldName];
         const oid = f?.options?.[optionName];
