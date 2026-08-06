@@ -23,6 +23,9 @@ public class DlqManagerTests : IAsyncLifetime, IDisposable
             MaxRetries = 3,
             RetryBackoffMs = 100,
             TopicSuffix = ".DLQ",
+            // Opt-in since #126. These tests exercise the routing path, which needs a destination;
+            // that the DEFAULT is off is covered separately.
+            AutoCreateTopics = true,
             CleanupIntervalMs = 600_000, // Long interval so cleanup doesn't interfere
             EntryMaxAgeMs = 300_000
         };
@@ -126,6 +129,32 @@ public class DlqManagerTests : IAsyncLifetime, IDisposable
         var dlqMetadata = _logManager.GetTopicMetadata(dlqTopicName);
         Assert.NotNull(dlqMetadata);
         Assert.Equal(dlqTopicName, dlqMetadata.Name);
+    }
+
+    [Fact]
+    public async Task DlqTopic_NotCreatedWhenAutoCreateIsOff()
+    {
+        // The default posture (#126): a cluster where topics are declared does not get one created
+        // behind the operator's back. The record is not routed, and that is reported rather than
+        // swallowed — the alternative is an unowned topic on defaults nobody chose.
+        var config = new DlqManagerConfig
+        {
+            Enabled = true,
+            MaxRetries = 1,
+            RetryBackoffMs = 0,
+            TopicSuffix = ".DLQ",
+            CleanupIntervalMs = 600_000,
+            EntryMaxAgeMs = 300_000
+        };
+        Assert.False(config.AutoCreateTopics, "auto-creation must be off unless asked for");
+
+        using var manager = new DlqManager(
+            config, _logManager, delayIndex: null, metrics: null, NullLogger<DlqManager>.Instance);
+
+        for (var i = 0; i <= config.MaxRetries; i++)
+            await manager.HandleNackAsync("test-topic", 0, 0);
+
+        Assert.Null(_logManager.GetTopicMetadata(config.GetDlqTopicName("test-topic")));
     }
 
     [Fact]
