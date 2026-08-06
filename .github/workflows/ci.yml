@@ -18,6 +18,12 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_NOLOGO: true
+  # Degree of parallelism for the parallel test lane. Set to 1 to make that
+  # lane strictly sequential again — that restores today's behaviour without
+  # reverting anything else. 3 rather than 4: the runner has 4 vCPU and each
+  # testhost additionally parallelises test collections internally, so one core
+  # is left for the agent and log streaming.
+  PARALLEL_LANE_DOP: 3
 
 permissions:
   contents: read
@@ -56,24 +62,105 @@ jobs:
       - name: Build
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=$VERSION -p:SourceRevisionId=$(git rev-parse HEAD)
 
-      - name: Test
-        # -m:1 = MSBuild seriellisiert die test-Assemblies (sonst
-        # Port-/Process-Exhaustion auf dem Linux-Runner durch parallel
-        # hochgezogene in-process broker).
-        #
-        # --blame-hang-timeout / --blame-hang-dump-type: wenn ein Test
-        # 5 min keinen Output produziert, dumpt xUnit einen Full-Memory-
-        # Dump und beendet den Test-Host. Damit failt CI fail-fast statt
-        # bis zum 6h Workflow-Timeout zu blockieren — und der Dump
-        # landet als Artefakt fuer Thread-Trace-Analyse.
-        #
-        # KEIN --settings coverlet.runsettings: die Datei enthaelt nur die
-        # Collector-Konfiguration, und der XPlat-Collector laeuft schon durch
-        # ihre blosse Anwesenheit an — auch ohne --collect. Dieser Job hat die
-        # so erzeugten 45 cobertura-Dateien aber nie ausgewertet; Coverage ist
-        # ausschliesslich Sache von coverage.yml. Gemessener Preis der
-        # Instrumentierung: Test-Step 20:28 mit gegen 12:08 ohne.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal -m:1 --blame-hang-timeout 300s --blame-hang-dump-type full
+      # Test assemblies are split into two lanes. The allowlist below is the
+      # ONLY hardcoded list; the serial lane is computed as "everything else",
+      # so a newly added test project lands in the serial lane automatically
+      # and can never silently end up in no lane at all.
+      #
+      # Deleting one line from PARALLEL_PROJECTS moves that assembly back to
+      # the serial lane — per-assembly rollback, one line.
+      - name: Compute test lanes
+        run: |
+          set -euo pipefail
+
+          # Each of these was audited for: no host/broker startup, no port
+          # binding, no subprocess, no fixed shared path, no process-wide state
+          # mutation, and — the subtle one — no assertion on elapsed wall clock.
+          # An assembly that merely runs fast is NOT sufficient: anything with a
+          # timing upper bound flakes under a co-runner and belongs in serial.
+          PARALLEL_PROJECTS="
+            tests/Kuestenlogik.Surgewave.Analyzers.Tests/Kuestenlogik.Surgewave.Analyzers.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Api.GraphQL.Tests/Kuestenlogik.Surgewave.Api.GraphQL.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Api.Grpc.Tests/Kuestenlogik.Surgewave.Api.Grpc.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Benchmarks.Comparison.Tests/Kuestenlogik.Surgewave.Benchmarks.Comparison.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Build.Tests/Kuestenlogik.Surgewave.Build.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Cdc.Tests/Kuestenlogik.Surgewave.Cdc.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Tests/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Control.Tests/Kuestenlogik.Surgewave.Control.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Edge.Tests/Kuestenlogik.Surgewave.Edge.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Gateway.Tests/Kuestenlogik.Surgewave.Gateway.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Linq.Tests/Kuestenlogik.Surgewave.Linq.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Marketplace.Tests/Kuestenlogik.Surgewave.Marketplace.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Plugins.Marketplace.Tests/Kuestenlogik.Surgewave.Plugins.Marketplace.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Plugins.Tests/Kuestenlogik.Surgewave.Plugins.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Protocol.Amqp.Tests/Kuestenlogik.Surgewave.Protocol.Amqp.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Protocol.Kafka.Tests/Kuestenlogik.Surgewave.Protocol.Kafka.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Protocol.Native.Tests/Kuestenlogik.Surgewave.Protocol.Native.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Protocol.WebSocket.Tests/Kuestenlogik.Surgewave.Protocol.WebSocket.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Runtime.Tests/Kuestenlogik.Surgewave.Runtime.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Schema.Registry.Tests/Kuestenlogik.Surgewave.Schema.Registry.Tests.csproj
+            tests/Kuestenlogik.Surgewave.SourceGenerators.Tests/Kuestenlogik.Surgewave.SourceGenerators.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Storage.Tiering.Tests/Kuestenlogik.Surgewave.Storage.Tiering.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Streams.Linq.Tests/Kuestenlogik.Surgewave.Streams.Linq.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Tests/Kuestenlogik.Surgewave.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Tool.Tests/Kuestenlogik.Surgewave.Tool.Tests.csproj
+            tests/Kuestenlogik.Surgewave.Wasm.Tests/Kuestenlogik.Surgewave.Wasm.Tests.csproj
+          "
+
+          # '*Tests.csproj' matches exactly the test projects; the shared
+          # helper libraries end in 'Testing.csproj' and are not caught.
+          grep -oE 'Path="[^"]*Tests\.csproj"' Kuestenlogik.Surgewave.slnx \
+            | sed -E 's/^Path="//; s/"$//' | sort -u > lane-all.txt
+          printf '%s\n' $PARALLEL_PROJECTS | sed '/^$/d' | sort -u > lane-parallel.txt
+
+          # A typo in the allowlist would otherwise point at nothing and the
+          # assembly would quietly run in neither lane. Fail loudly instead.
+          MISSING=$(comm -23 lane-parallel.txt lane-all.txt || true)
+          if [ -n "$MISSING" ]; then
+            echo "::error::Parallel lane references projects that are not in the solution:"
+            echo "$MISSING"
+            exit 1
+          fi
+
+          comm -13 lane-parallel.txt lane-all.txt > lane-serial.txt
+
+          gen_slnx() {
+            { echo '<Solution>'
+              while read -r p; do printf '  <Project Path="%s" />\n' "$p"; done < "$2"
+              echo '</Solution>'
+            } > "$1"
+          }
+          gen_slnx lane-parallel.slnx lane-parallel.txt
+          gen_slnx lane-serial.slnx   lane-serial.txt
+
+          echo "parallel lane: $(wc -l < lane-parallel.txt) assemblies"
+          echo "serial lane:   $(wc -l < lane-serial.txt) assemblies"
+          echo "total:         $(wc -l < lane-all.txt) assemblies"
+          echo "--- serial lane ---"; cat lane-serial.txt
+
+      # Parallel lane runs first: it finishes in ~2 min, so a trivial breakage
+      # is reported early instead of after the full serial run.
+      #
+      # blame: shorter window and a mini dump on purpose. The slowest assembly
+      # in this lane measures 34 s, so 300 s of silence would be pathological —
+      # and three concurrent FULL memory dumps would saturate the runner's disk
+      # and starve the remaining testhosts, which is self-reinforcing.
+      - name: Test (parallel lane)
+        run: |
+          dotnet test lane-parallel.slnx -c Release --no-build -v minimal \
+            -m:${PARALLEL_LANE_DOP} \
+            --blame-hang-timeout 120s --blame-hang-dump-type mini
+
+      # Serial lane: behaviour identical to before. -m:1 stays, verbatim.
+      # This lane holds everything that starts in-process brokers on random
+      # ports, binds real loopback sockets, spawns subprocesses, or asserts on
+      # elapsed time. It must NEVER run concurrently with the lane above on the
+      # same VM — hence two sequential steps, not two background processes.
+      - name: Test (serial lane)
+        run: |
+          dotnet test lane-serial.slnx -c Release --no-build -v normal \
+            -m:1 \
+            --blame-hang-timeout 300s --blame-hang-dump-type full
 
       - name: Upload hang dumps
         if: failure()
