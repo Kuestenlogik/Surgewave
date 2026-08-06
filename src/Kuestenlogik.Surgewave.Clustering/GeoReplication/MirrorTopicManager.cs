@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Clustering.GeoReplication;
@@ -69,7 +70,7 @@ public sealed partial class MirrorTopicManager
     {
         if (!_mirrorTopics.TryGetValue(topic, out var state))
         {
-            _logger.LogWarning("Topic {Topic} is not a mirror topic", topic);
+            _logger.LogWarning("Topic {Topic} is not a mirror topic", LogSanitizer.Sanitize(topic));
             return false;
         }
 
@@ -116,7 +117,7 @@ public sealed partial class MirrorTopicManager
     {
         if (!_mirrorTopics.TryGetValue(topic, out _))
         {
-            _logger.LogWarning("Topic {Topic} is not a mirror topic", topic);
+            _logger.LogWarning("Topic {Topic} is not a mirror topic", LogSanitizer.Sanitize(topic));
             return Task.FromResult(false);
         }
 

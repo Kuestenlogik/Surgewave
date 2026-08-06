@@ -89,6 +89,14 @@ public sealed class TrustStoreServiceTests : IDisposable
     [InlineData("with\\backslash")]
     [InlineData("")]
     [InlineData("a b")]        // space disallowed
+    // CodeQL cs/log-forging #94-#96: the allow-list used `^...$`, and in .NET `$`
+    // also matches immediately before a single trailing newline — so "alice\n"
+    // passed validation and split the log record it was written into.
+    [InlineData("alice\n")]
+    [InlineData("alice\r\n")]
+    [InlineData("\nalice")]
+    [InlineData("ali\nce")]
+    [InlineData("alice\r")]
     public void Generate_InvalidName_Throws(string keyName)
     {
         Assert.ThrowsAny<ArgumentException>(() => _svc.Generate(keyName));

@@ -21,7 +21,11 @@ public sealed partial class TrustStoreService
 
     private static readonly Regex KeyNamePattern = MyKeyNameRegex();
 
-    [GeneratedRegex(@"^[A-Za-z0-9._\-]{1,128}$", RegexOptions.CultureInvariant)]
+    // \A and \z, not ^ and $: in .NET, `$` also matches immediately before a
+    // single trailing newline, so "alice\n" passed the allow-list and reached
+    // both the log sinks in TrustedKeysRestApi (record-splitting, CWE-117) and
+    // the file name on disk. \z anchors at the very end of the input.
+    [GeneratedRegex(@"\A[A-Za-z0-9._\-]{1,128}\z", RegexOptions.CultureInvariant)]
     private static partial Regex MyKeyNameRegex();
 
     private readonly string _trustedKeysDir;

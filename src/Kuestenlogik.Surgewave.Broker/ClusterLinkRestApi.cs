@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Kuestenlogik.Surgewave.Clustering.GeoReplication;
 
 namespace Kuestenlogik.Surgewave.Broker;
@@ -126,11 +125,14 @@ public static class ClusterLinkRestApi
         // abfangen, statt sie erst still in der Topic-Discovery scheitern zu lassen.
         try
         {
-            _ = new Regex(config.TopicFilter);
+            // Same factory the discovery sink uses, so a filter accepted here cannot
+            // fail — or hang — later inside ClusterLinkManager, where the exception
+            // would be swallowed and replication would go quiet.
+            _ = TopicFilterPattern.Compile(config.TopicFilter);
         }
         catch (ArgumentException ex)
         {
-            return Results.BadRequest(new { message = $"topicFilter is not a valid regex: {ex.Message}" });
+            return Results.BadRequest(new { message = $"topicFilter rejected: {ex.Message}" });
         }
 
         if (linkManager.GetLinkStatusOrNull(config.LinkId) is not null)

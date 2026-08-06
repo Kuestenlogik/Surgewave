@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Plugins.Packaging;
 using Kuestenlogik.Surgewave.Plugins.Packaging.Hosting;
 
@@ -85,7 +86,8 @@ public static class TrustedKeysRestApi
             {
                 await using var stream = file.OpenReadStream();
                 var info = await svc.UploadAsync(name, stream);
-                logger.LogInformation("Trusted key '{Name}' uploaded ({Fingerprint})", info.Name, info.Fingerprint);
+                logger.LogInformation("Trusted key '{Name}' uploaded ({Fingerprint})",
+                    LogSanitizer.Sanitize(info.Name), info.Fingerprint);
                 return Results.Ok(new
                 {
                     name = info.Name,
@@ -119,7 +121,7 @@ public static class TrustedKeysRestApi
             {
                 var removed = svc.Delete(name);
                 if (!removed) return Results.NotFound(new { error = $"No trusted key named '{name}'." });
-                logger.LogInformation("Trusted key '{Name}' deleted", name);
+                logger.LogInformation("Trusted key '{Name}' deleted", LogSanitizer.Sanitize(name));
                 return Results.Ok(new { name, deleted = true });
             }
             catch (ArgumentException ex)
@@ -136,7 +138,8 @@ public static class TrustedKeysRestApi
             try
             {
                 var pair = svc.Generate(req.Name);
-                logger.LogInformation("Generated trusted key '{Name}' ({Fingerprint})", pair.KeyName, pair.Fingerprint);
+                logger.LogInformation("Generated trusted key '{Name}' ({Fingerprint})",
+                    LogSanitizer.Sanitize(pair.KeyName), pair.Fingerprint);
                 return Results.Ok(new
                 {
                     name = pair.KeyName,
