@@ -5,6 +5,7 @@ using Kuestenlogik.Surgewave.Broker.Quotas;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
+using Kuestenlogik.Surgewave.Core.Configuration;
 using Kuestenlogik.Surgewave.Core.Exceptions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Observability;
@@ -43,6 +44,21 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
     private readonly IPartitionAppender _partitionAppender;
     private readonly IDisaggregatedSegmentReader? _disaggregatedReader;
     private readonly ILogger<DataApiHandler> _logger;
+
+    /// <summary>
+    /// Ceiling for decompressing a producer-supplied batch, taken from what the topic will accept.
+    /// </summary>
+    /// <remarks>
+    /// The bound belongs to the destination, not to a constant: a batch that could not be stored is
+    /// not worth expanding in order to read a header out of it. Only reached on topics with TTL or
+    /// delayed delivery enabled — an ordinary produce never decompresses at all.
+    /// </remarks>
+    private long MaxDecompressedBytes(TopicMetadata? topicMetadata)
+        => topicMetadata is null
+            ? DefaultMaxDecompressedBytes
+            : ConfigParser.GetMaxMessageBytes(topicMetadata.Config, DefaultMaxDecompressedBytes);
+
+    private const long DefaultMaxDecompressedBytes = 1024 * 1024;
 
     private IPartitionCommitGate? _commitGate;
 
@@ -440,7 +456,8 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // Extract and index delayed delivery headers (if enabled for this topic)
                     if (_delayIndex != null && IsDelayDeliveryEnabled(topic))
                     {
-                        var deliverAtMs = DelayHeaderParser.ExtractDeliverAtTimestamp(partitionData.Records.Span);
+                        var deliverAtMs = DelayHeaderParser.ExtractDeliverAtTimestamp(
+                            partitionData.Records.Span, MaxDecompressedBytes(topicMetadata));
                         if (deliverAtMs.HasValue)
                         {
                             _delayIndex.RecordDelayedBatch(topicPartition, baseOffset, deliverAtMs.Value);
@@ -450,7 +467,8 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // Extract and index TTL headers (if enabled for this topic)
                     if (_ttlIndex != null && IsTtlEnabled(topic))
                     {
-                        var expiryMs = TtlHeaderParser.ExtractExpiryTimestamp(partitionData.Records.Span);
+                        var expiryMs = TtlHeaderParser.ExtractExpiryTimestamp(
+                            partitionData.Records.Span, MaxDecompressedBytes(topicMetadata));
                         if (expiryMs.HasValue)
                         {
                             _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, expiryMs.Value);

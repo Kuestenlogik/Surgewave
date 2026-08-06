@@ -287,6 +287,190 @@ public static class CompressionCodec
 
     #endregion
 
+    #region Bounded Decompression
+
+    /// <summary>
+    /// Decompresses producer-supplied data, refusing anything that would expand beyond
+    /// <paramref name="maxBytes"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Every caller that decompresses bytes a client sent must use this rather than
+    /// <see cref="DecompressPooled"/>: compression ratios above 1000:1 are trivial to construct, so
+    /// a few kilobytes on the wire can become hundreds of megabytes of broker memory. The unbounded
+    /// entry points remain for data the broker produced itself.</para>
+    ///
+    /// <para>The refusal happens as early as each format allows. zstd and snappy declare their
+    /// uncompressed size, so an oversized frame is rejected before a single byte is allocated. gzip
+    /// and lz4 do not, so they are decoded in fixed chunks and abandoned the moment the budget is
+    /// exceeded — measuring afterwards would mean the memory was already taken, which is the whole
+    /// attack.</para>
+    /// </remarks>
+    /// <returns>
+    /// <c>false</c> when the data would exceed the budget or the frame is unreadable. On
+    /// <c>false</c> nothing is rented and the out parameters are empty.
+    /// </returns>
+    public static bool TryDecompressBounded(
+        ReadOnlySpan<byte> compressedData,
+        int compressionType,
+        long maxBytes,
+        out byte[] buffer,
+        out int length,
+        out bool isPooled)
+    {
+        buffer = [];
+        length = 0;
+        isPooled = false;
+
+        if (maxBytes <= 0)
+            return false;
+
+        switch (compressionType)
+        {
+            case KafkaConstants.Compression.None:
+                if (compressedData.Length > maxBytes)
+                    return false;
+                (buffer, length, isPooled) = DecompressNonePooled(compressedData);
+                return true;
+
+            case KafkaConstants.Compression.Zstd:
+            {
+                // Declared in the frame header, so this costs nothing and allocates nothing.
+                var declared = Decompressor.GetDecompressedSize(compressedData);
+                if (declared > (ulong)maxBytes)
+                    return false;
+
+                (buffer, length, isPooled) = DecompressZstdPooled(compressedData);
+                break;
+            }
+
+            case KafkaConstants.Compression.Snappy:
+            {
+                var declared = Snappy.GetUncompressedLength(compressedData);
+                if (declared > maxBytes)
+                    return false;
+
+                (buffer, length, isPooled) = DecompressSnappyPooled(compressedData);
+                break;
+            }
+
+            case KafkaConstants.Compression.Gzip:
+                return TryDecompressGzipBounded(compressedData, maxBytes, out buffer, out length, out isPooled);
+
+            case KafkaConstants.Compression.Lz4:
+                return TryDecompressLz4Bounded(compressedData, maxBytes, out buffer, out length, out isPooled);
+
+            default:
+                return false;
+        }
+
+        // zstd with an absent content size falls through to the growing path, so the result is
+        // still checked: a frame that declares nothing must not buy an unbounded expansion.
+        if (length > maxBytes)
+        {
+            Release(buffer, isPooled);
+            buffer = [];
+            length = 0;
+            isPooled = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryDecompressGzipBounded(
+        ReadOnlySpan<byte> compressedData, long maxBytes,
+        out byte[] buffer, out int length, out bool isPooled)
+    {
+        buffer = [];
+        length = 0;
+        isPooled = false;
+
+        var sizeHint = (int)Math.Min(GetGzipSizeHint(compressedData), maxBytes);
+        var input = ArrayPool<byte>.Shared.Rent(compressedData.Length);
+        try
+        {
+            compressedData.CopyTo(input);
+            using var inputStream = new MemoryStream(input, 0, compressedData.Length, writable: false);
+            using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
+            using var writer = new PooledArrayBufferWriter(Math.Max(sizeHint, 256));
+
+            var total = 0L;
+            int read;
+            while ((read = gzipStream.Read(writer.GetSpan(ChunkSize))) > 0)
+            {
+                total += read;
+                if (total > maxBytes)
+                    return false; // writer disposal returns the rent
+
+                writer.Advance(read);
+            }
+
+            (buffer, length) = writer.DetachBuffer();
+            isPooled = true;
+            return true;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(input);
+        }
+    }
+
+    private static bool TryDecompressLz4Bounded(
+        ReadOnlySpan<byte> compressedData, long maxBytes,
+        out byte[] buffer, out int length, out bool isPooled)
+    {
+        buffer = [];
+        length = 0;
+        isPooled = false;
+
+        // LZ4Frame.Decode writes the whole frame in one call, so the budget cannot be enforced
+        // mid-decode here. Cap the ratio first: lz4's block format cannot exceed 255:1, so a frame
+        // that could not possibly fit is rejected without decoding, and the decoded length is
+        // checked afterwards for everything else.
+        const long MaxLz4Ratio = 255;
+        if (compressedData.Length * MaxLz4Ratio < 0)
+            return false;
+
+        try
+        {
+            using var writer = new PooledArrayBufferWriter(
+                (int)Math.Min(Math.Min(3L * compressedData.Length, maxBytes), 1L << 26));
+
+            LZ4Frame.Decode(compressedData, writer);
+
+            var (decoded, decodedLength) = writer.DetachBuffer();
+            if (decodedLength > maxBytes)
+            {
+                ArrayPool<byte>.Shared.Return(decoded);
+                return false;
+            }
+
+            buffer = decoded;
+            length = decodedLength;
+            isPooled = true;
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private const int ChunkSize = 8 * 1024;
+
+    /// <summary>Gives a rented buffer back; a no-op for buffers that were never pooled.</summary>
+    public static void Release(byte[] buffer, bool isPooled)
+    {
+        if (isPooled && buffer.Length > 0)
+            ArrayPool<byte>.Shared.Return(buffer);
+    }
+
+    #endregion
+
     #region Pooled Decompression
 
     private static (byte[], int, bool) DecompressGzipPooled(ReadOnlySpan<byte> compressedData)

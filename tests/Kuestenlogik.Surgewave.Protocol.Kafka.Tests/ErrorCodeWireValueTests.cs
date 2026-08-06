@@ -36,7 +36,7 @@ public sealed class ErrorCodeWireValueTests
     [InlineData(ErrorCode.OffsetOutOfRange, 1)]
     [InlineData(ErrorCode.CorruptMessage, 2)]
     [InlineData(ErrorCode.UnknownTopicOrPartition, 3)]
-    [InlineData(ErrorCode.NotLeaderOrFollower, 6)]
+    [InlineData(ErrorCode.NotLeaderForPartition, 6)]
     [InlineData(ErrorCode.RequestTimedOut, 7)]
     public void ErrorCode_HasItsKafkaWireValue(ErrorCode code, short expected)
     {
