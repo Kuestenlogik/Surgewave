@@ -12,11 +12,11 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | Field | Values | Used for |
 |---|---|---|
 | **Status** | `Backlog` · `Next up` · `In progress` · `In review` · `Done` | Kanban swim-lane |
-| **Milestone** *(built-in)* | `v1.x` · `v2.0` · *(unset)* | Version-targeting — the same Milestone the GitHub issue carries. Unset = backlog (rendered as "Later" in `ROADMAP.md`); no dedicated "Later" milestone, since it would be redundant with the unset state. |
-| **Area** | `workbench` · `cli` · `security` · `mcp` · `plugin-sdk` · `mock` · `docs` · `site` · `bootcamp` · `multi` | Component filter |
-| **Track** | `auth` · `protocols` · `marketing-ia` · `observability` · `security-tiers` · `bootcamp-content` · `none` | Multi-phase initiatives that span releases |
-| **Effort** | `XS` · `S` · `M` · `L` · `XL` | T-shirt estimate |
-| **Priority** | `P0` · `P1` · `P2` · `P3` | Triage |
+| **Milestone** *(built-in)* | the repo's open milestones (`v0.5` … `v1.0`) · *(unset)* | Version-targeting — the same Milestone the GitHub issue carries. Unset = backlog (rendered as "Later" in `ROADMAP.md`); no dedicated "Later" milestone, since it would be redundant with the unset state. Note `generate-roadmap.mjs` renders anything outside its `MILESTONE_ORDER` list under "Later" too. |
+| **Area** | `broker` · `clustering` · `protocol` · `storage` · `security` · `streams` · `connect` · `schema` · `ai` · `cli` · `control` · `observability` · `plugin-sdk` · `docs` · `site` · `multi` | Component filter |
+| **Track** | `kafka-compat` · `performance` · `ai-pipelines` · `cluster-correctness` · `transport` · `plugin-distribution` | Multi-phase initiatives that span releases |
+| **Project Effort** | `Low` · `Medium` · `High` | Sizing |
+| **Effort**, **Priority** | *(fields exist but carry no options)* | Unused today. `sync-project.mjs` still tries to set `Priority`, which is where its `!! Missing option Priority=P1` warnings come from — either add the options or drop them from the script. |
 | **Type** *(native issue field, not a board field)* | `Bug` · `Task` · `Feature` | What it is. Set on the issue itself (org-level GitHub issue types), searchable as `type:Bug`. Replaced the former `kind:*` label family and the board's `Kind` field — do not re-create either. |
 
 ## Recommended views
