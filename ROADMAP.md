@@ -16,6 +16,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.5 — AI-friendly broker
 
+- [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `area:connect`
+- [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
 - [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `area:schema`
 - [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `area:schema` `track:ai-pipelines`
 
@@ -25,15 +27,13 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `area:clustering` `track:cluster-correctness`
 - [#7](https://github.com/Kuestenlogik/Surgewave/issues/7) **G12 — Cluster-linking-grade geo-replication** `area:clustering`
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
+- [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 
 ### Later
 
-- [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `area:connect`
-- [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
-- [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
 - [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
