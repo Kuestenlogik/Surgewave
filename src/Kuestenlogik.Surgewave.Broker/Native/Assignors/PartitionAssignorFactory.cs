@@ -17,14 +17,29 @@ public static class PartitionAssignorFactory
         ["cooperative-sticky"] = new CooperativeStickyAssignor()
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    public static IPartitionAssignor GetAssignor(string name)
-    {
-        if (Assignors.TryGetValue(name, out var assignor))
-            return assignor;
+    /// <summary>The assignor used when a client expresses no preference.</summary>
+    public const string DefaultAssignorName = "range";
 
-        // Default to range if unknown
-        return Assignors["range"];
-    }
+    /// <summary>
+    /// Looks up an assignor by name. Returns <c>false</c> for a name this broker does not have,
+    /// rather than substituting one.
+    /// </summary>
+    /// <remarks>
+    /// Substituting was the previous behaviour and it is the wrong answer to a client that asked
+    /// for something specific: it keeps its own assumptions about which partitions move on a
+    /// rebalance, so the mismatch surfaces as unexplained reassignment instead of an error. The
+    /// caller decides what to do — the group path answers UnsupportedAssignor.
+    /// </remarks>
+    public static bool TryGetAssignor(string name, out IPartitionAssignor assignor)
+        => Assignors.TryGetValue(name, out assignor!);
+
+    /// <summary>
+    /// Looks up an assignor, falling back to <see cref="DefaultAssignorName"/>. Only for callers
+    /// with no client to answer — anything driven by a request must use
+    /// <see cref="TryGetAssignor"/> and report the unknown name.
+    /// </summary>
+    public static IPartitionAssignor GetAssignor(string name)
+        => Assignors.TryGetValue(name, out var assignor) ? assignor : Assignors[DefaultAssignorName];
 
     public static IReadOnlyList<string> AvailableStrategies => Assignors.Keys.ToList();
 }

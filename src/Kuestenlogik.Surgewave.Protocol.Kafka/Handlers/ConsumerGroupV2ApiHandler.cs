@@ -105,6 +105,7 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
         ConsumerGroupFenceStatus.UnknownMember => ErrorCode.UnknownMemberId,
         ConsumerGroupFenceStatus.StaleEpoch => ErrorCode.StaleMemberEpoch,
         ConsumerGroupFenceStatus.FencedEpoch => ErrorCode.FencedMemberEpoch,
+        ConsumerGroupFenceStatus.UnsupportedAssignor => ErrorCode.UnsupportedAssignor,
         // NotAV2Group is offset-path only; never reaches the heartbeat response.
         _ => ErrorCode.None,
     };

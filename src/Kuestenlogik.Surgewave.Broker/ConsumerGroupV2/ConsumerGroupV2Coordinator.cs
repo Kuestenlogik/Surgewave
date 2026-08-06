@@ -82,6 +82,13 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
                 return fenceResult;
             }
 
+            // #127: an assignor this broker does not have is answered, not substituted — and
+            // answered before ApplyInitMetadata, so a refused request leaves no trace on the group.
+            if (TryValidateAssignor(command, out var assignorRejection))
+            {
+                return assignorRejection;
+            }
+
             // KIP-955: the founding member's first heartbeat seeds group-level metadata
             // (assignor preference and rebalance timeout). Later heartbeats can adjust
             // the rebalance timeout downward but cannot push it back up — a slow member
@@ -302,16 +309,46 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     {
         if (string.IsNullOrEmpty(serverAssignor)) return false;
 
-        // PartitionAssignorFactory.GetAssignor falls back to "range" for unknown names;
-        // re-check the canonical name so we only treat real changes as a recompute.
-        var resolved = PartitionAssignorFactory.GetAssignor(serverAssignor).Name;
-        if (string.Equals(resolved, group.AssignorName, StringComparison.OrdinalIgnoreCase))
+        // An unknown name never reaches this point — the heartbeat rejects it before any mutation.
+        if (!PartitionAssignorFactory.TryGetAssignor(serverAssignor, out var assignor))
         {
             return false;
         }
 
-        group.AssignorName = resolved;
+        // Compare the canonical name so only a real change counts as a recompute.
+        if (string.Equals(assignor.Name, group.AssignorName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        group.AssignorName = assignor.Name;
         group.GroupEpoch++;
+        return true;
+    }
+
+    /// <summary>
+    /// Refuses a heartbeat that asks for a server assignor this broker does not have.
+    /// </summary>
+    /// <remarks>
+    /// The previous behaviour substituted the default. That is the wrong answer to a client which
+    /// asked for something specific: it keeps its own expectations about which partitions move on a
+    /// rebalance, so the substitution surfaces later as unexplained reassignment rather than as an
+    /// error anyone can act on. Checked BEFORE any group state is touched, like the epoch fence
+    /// above — a request the broker will not honour must not advance the group.
+    /// </remarks>
+    private static bool TryValidateAssignor(
+        ConsumerHeartbeatCommand command,
+        out ConsumerHeartbeatResult rejection)
+    {
+        rejection = null!;
+
+        if (string.IsNullOrEmpty(command.ServerAssignor))
+            return false;
+
+        if (PartitionAssignorFactory.TryGetAssignor(command.ServerAssignor, out _))
+            return false;
+
+        rejection = FenceResult(command, ConsumerGroupFenceStatus.UnsupportedAssignor);
         return true;
     }
 

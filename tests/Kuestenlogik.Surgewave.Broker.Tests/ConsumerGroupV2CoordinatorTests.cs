@@ -182,17 +182,21 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_UnknownServerAssignor_KeepsRangeAsDefault()
+    public void Heartbeat_UnknownServerAssignor_IsRefused()
     {
+        // Was Heartbeat_UnknownServerAssignor_KeepsRangeAsDefault, which pinned the substitution as
+        // if it were the contract. It is not (#127): a client that asked for a specific assignor and
+        // silently got another keeps its own expectations about which partitions move on a
+        // rebalance, so the mismatch surfaces as unexplained reassignment instead of an error.
         var first = SendHeartbeat("g6", "c1", [TopicA], serverAssignor: "does-not-exist");
 
-        var describe = _coordinator.Describe(["g6"]);
+        Assert.Equal(ConsumerGroupFenceStatus.UnsupportedAssignor, first.Status);
+        Assert.Empty(first.Assignment);
 
-        var group = Assert.Single(describe);
-        // PartitionAssignorFactory falls back to "range" for unknown names; the coordinator
-        // uses that canonical name so the group does not flip back and forth on every heartbeat.
-        Assert.Equal("range", group.AssignorName);
-        Assert.NotEmpty(first.Assignment);
+        // And nothing was assigned behind the client's back.
+        var group = Assert.Single(_coordinator.Describe(["g6"]));
+        Assert.Equal("range", group.AssignorName); // untouched default, not the requested name
+        Assert.Empty(group.Members);
     }
 
     [Fact]
