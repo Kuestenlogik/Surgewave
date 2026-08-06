@@ -986,6 +986,32 @@ public sealed class RestApiAuthConfig
     /// </summary>
     public string[] AnonymousPathPrefixes { get; set; } = ["/health", "/metrics", "/sd-targets"];
 
+    /// <summary>
+    /// Allow mutating calls to <see cref="PrivilegedWritePathPrefixes"/> from
+    /// non-loopback clients while <see cref="Enabled"/> is false. Default: false.
+    /// </summary>
+    /// <remarks>
+    /// Those endpoints grant privilege rather than merely exposing state: the
+    /// trust store decides which signing keys a plugin package may carry, and the
+    /// repository list decides where packages come from. With auth off they are
+    /// therefore restricted to loopback, which keeps a single-host deployment
+    /// working. Set this to true only when the management surface is reachable
+    /// solely by trusted operators — running Control on a separate host without
+    /// enabling REST auth is the usual reason.
+    /// </remarks>
+    public bool AllowUnauthenticatedRemoteWrites { get; set; } = false;
+
+    /// <summary>
+    /// Path prefixes whose mutating requests are loopback-only while
+    /// <see cref="Enabled"/> is false. Reads are unaffected.
+    /// </summary>
+    public string[] PrivilegedWritePathPrefixes { get; set; } =
+    [
+        "/api/plugins/trusted-keys",
+        "/api/plugins/repositories",
+        "/api/cluster-links",
+    ];
+
     /// <summary>Require HTTPS for OIDC metadata retrieval. Default: true.</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
 

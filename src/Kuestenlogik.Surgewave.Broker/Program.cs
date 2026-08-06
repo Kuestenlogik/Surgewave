@@ -787,6 +787,12 @@ var logManager = app.Services.GetRequiredService<LogManager>();
 // REST auth gate must sit ahead of the endpoint mappings below (#37).
 app.UseSurgewaveRestApiAuth(config.Security.RestApiAuth, config.Security.OAuth2, logger);
 
+// Second, narrower gate for the case the one above stands down: with auth
+// disabled (the default), writes to the privilege-granting management
+// endpoints — plugin trust store, package repositories, cluster links — are
+// accepted from loopback only. See GHSA-2fv9-qr54-gjhp.
+app.UseSurgewavePrivilegedWriteGuard(config.Security.RestApiAuth, logger);
+
 // Apply SIMD configuration from appsettings
 SimdBigEndian.MinBatchSize = config.SimdBatchThreshold;
 

@@ -82,6 +82,45 @@ The broker's plugin-install endpoint runs the same verifier. Configure it via
 With `RequireSignedPackages=true`, unsigned uploads are rejected. Signed-but-untrusted uploads
 are rejected regardless of the flag.
 
+### Who may change the trust store
+
+Verification is only as strong as the list of keys it trusts. Writing to that list —
+`POST /api/plugins/trusted-keys/upload`, `/generate`, `DELETE /api/plugins/trusted-keys/{name}` —
+is therefore treated as a privilege-granting operation, as is repointing the package feed via
+`/api/plugins/repositories`. Anyone who can add a key can have a package of their own pass
+verification.
+
+Broker REST authentication is **opt-in** (`Surgewave:Security:RestApiAuth:Enabled`, default
+`false`). While it is off, those writes are accepted from **loopback only**; a remote caller gets
+`403`. Reads are unaffected, so Control's read-only views keep working from anywhere.
+
+| Configuration | Trust-store writes from localhost | …from another host |
+|---|---|---|
+| `RestApiAuth:Enabled=true` | allowed with a valid token + `RequiredRole` | allowed with a valid token + `RequiredRole` |
+| Default (auth off) | allowed | **403** |
+| Auth off + `AllowUnauthenticatedRemoteWrites=true` | allowed | allowed (unauthenticated) |
+
+Run Control on a separate host without enabling auth and you need the opt-out:
+
+```json
+{
+  "Surgewave": {
+    "Security": {
+      "RestApiAuth": {
+        "AllowUnauthenticatedRemoteWrites": true
+      }
+    }
+  }
+}
+```
+
+Prefer enabling `RestApiAuth` over setting that flag. The set of guarded prefixes is configurable
+via `RestApiAuth:PrivilegedWritePathPrefixes`.
+
+> **Behind a reverse proxy**, the check sees the proxy's address. If the proxy runs on the same
+> host, every request looks local and the gate stops protecting anything — enable `RestApiAuth`,
+> or configure forwarded-headers processing so the peer address is the real client.
+
 The CLI install command accepts the same flags:
 
 ```bash
