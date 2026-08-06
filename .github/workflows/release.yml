@@ -181,10 +181,16 @@ jobs:
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.VERSION }}
 
       - name: Test
-        # IntegrationTests (multi-broker replication, sasl-roundtrip, …) are
-        # excluded from the release-tag run because they bring up real TCP
-        # cluster topology and are flakier on the GitHub-Actions runner than
-        # on bare-metal CI. They still run on every push to main via ci.yml.
+        # NOTE: this runs the FULL solution, IntegrationTests included. An
+        # earlier version of this comment claimed they were excluded as being
+        # flaky on GitHub-Actions runners, but the command below carries no
+        # --filter and never did the excluding. Corrected rather than
+        # "restored": gating a release on fewer tests than main is a decision
+        # to take deliberately, not to reinstate from a stale comment.
+        # If the exclusion is wanted, do it by project path — a name filter
+        # like FullyQualifiedName!~IntegrationTests also catches
+        # Cli.IntegrationTests, RaftIntegrationTests and
+        # AmqpQueueViewIntegrationTests.
         #
         # -m:1: Assemblies seriell (siehe ci.yml).
         # --blame-hang-timeout + dump-type: fail-fast bei hängendem Test,
