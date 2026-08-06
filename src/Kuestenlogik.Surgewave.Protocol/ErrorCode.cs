@@ -60,8 +60,15 @@ public enum ErrorCode : short
     InvalidRequest = 42,
     UnsupportedForMessageFormat = 43,
 
+    /// <summary>Request parameters do not satisfy the configured policy.</summary>
+    PolicyViolation = 44,
+
     // Transaction and idempotent producer errors
-    OutOfOrderSequenceNumber = 44,
+    // 45, not 44: this used to be numbered one too low, which put it on POLICY_VIOLATION's code and
+    // left 45 unused. An idempotent producer that broke its sequence was told its request violated
+    // a policy — both are fatal to the client, so nothing hung, but the diagnosis was wrong and any
+    // client branching on 45 never saw it.
+    OutOfOrderSequenceNumber = 45,
     DuplicateSequenceNumber = 46,
     InvalidProducerEpoch = 47,
     InvalidTxnState = 48,
