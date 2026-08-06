@@ -8,7 +8,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Next up
 
-### Later
+### v1.0 — first stable
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `area:broker` `track:performance`
 
@@ -24,6 +24,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `area:multi`
 - [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `area:clustering` `track:cluster-correctness`
 - [#7](https://github.com/Kuestenlogik/Surgewave/issues/7) **G12 — Cluster-linking-grade geo-replication** `area:clustering`
+- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
+- [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 
 ### Later
 
@@ -31,7 +33,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
-- [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
@@ -41,7 +42,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
 - [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
 - [#63](https://github.com/Kuestenlogik/Surgewave/issues/63) **Embedded Bowire host: share Kuestenlogik.Surgewave ALC prefix + register SDK services in DI** 
-- [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
 - [#119](https://github.com/Kuestenlogik/Surgewave/issues/119) **bug(clustering): topic configuration never reaches brokers that only host replicas** 
