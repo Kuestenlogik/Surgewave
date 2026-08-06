@@ -16,13 +16,13 @@ Surgewave uses a unified plugin system for extending the broker with enterprise 
 
 ```bash
 # Install from .swpkg file
-surgewave plugin install path/to/plugin.swpkg
+surgewave plugins install path/to/plugin.swpkg
 
 # List installed plugins
-surgewave plugin list
+surgewave plugins list
 
 # Uninstall
-surgewave plugin uninstall <plugin-id>
+surgewave plugins uninstall <plugin-id>
 ```
 
 ## Kafka is a plugin, too

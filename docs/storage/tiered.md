@@ -22,9 +22,9 @@ flowchart LR
 
 | Provider | Repository | Installation |
 |----------|------------|--------------|
-| AWS S3 | Surgewave.Storage.Tiering.S3 | `surgewave plugin install Kuestenlogik.Surgewave.Storage.Tiering.S3-x.y.z.swpkg` |
-| Azure Blob | Surgewave.Storage.Tiering.Azure | `surgewave plugin install Kuestenlogik.Surgewave.Storage.Tiering.Azure-x.y.z.swpkg` |
-| GCP Cloud Storage | Surgewave.Storage.Tiering.Gcp | `surgewave plugin install Kuestenlogik.Surgewave.Storage.Tiering.Gcp-x.y.z.swpkg` |
+| AWS S3 | Surgewave.Storage.Tiering.S3 | `surgewave plugins install Kuestenlogik.Surgewave.Storage.Tiering.S3-x.y.z.swpkg` |
+| Azure Blob | Surgewave.Storage.Tiering.Azure | `surgewave plugins install Kuestenlogik.Surgewave.Storage.Tiering.Azure-x.y.z.swpkg` |
+| GCP Cloud Storage | Surgewave.Storage.Tiering.Gcp | `surgewave plugins install Kuestenlogik.Surgewave.Storage.Tiering.Gcp-x.y.z.swpkg` |
 
 See each provider's repository for configuration and usage documentation.
 

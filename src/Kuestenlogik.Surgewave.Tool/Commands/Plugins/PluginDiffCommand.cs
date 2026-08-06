@@ -9,7 +9,7 @@ namespace Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 
 /// <summary>
 /// Compare an installed plugin against a candidate <c>.swpkg</c> file
-/// (surgewave plugin diff &lt;id&gt; &lt;package.swpkg&gt;).
+/// (surgewave plugins diff &lt;id&gt; &lt;package.swpkg&gt;).
 ///
 /// <para>
 /// Surfaces the operationally interesting differences before an upgrade:
@@ -26,7 +26,7 @@ public class PluginDiffCommand : CommandBase
 
     private readonly Argument<string> _idArg = new("id")
     {
-        Description = "Plugin ID currently installed (as listed by 'surgewave plugin list')",
+        Description = "Plugin ID currently installed (as listed by 'surgewave plugins list')",
     };
 
     private readonly Argument<string> _packageArg = new("package")

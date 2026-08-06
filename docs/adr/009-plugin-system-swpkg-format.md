@@ -58,7 +58,7 @@ Plugins whose `RequiresLicense` is `true` are checked against the optional `ILic
 ## Consequences
 
 - **Zero compile-time enterprise dependencies** in the broker. `Program.cs` references only community packages.
-- **Hot-installable plugins** via `surgewave plugin install path/to/plugin.swpkg`. The CLI extracts the archive, validates the manifest, and copies assemblies to the plugin directory.
+- **Hot-installable plugins** via `surgewave plugins install path/to/plugin.swpkg`. The CLI extracts the archive, validates the manifest, and copies assemblies to the plugin directory.
 - **Dependency isolation** prevents version conflicts between plugins (e.g., two plugins requiring different Newtonsoft.Json versions).
 - **Collectible load contexts** allow plugin unloading, but in practice unload is best done via broker restart to avoid GC root leaks.
 - **Reflection-based discovery** adds a small startup cost (assembly scanning), but runs once and results are cached for the broker lifetime.

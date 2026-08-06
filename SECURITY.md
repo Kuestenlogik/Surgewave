@@ -54,7 +54,7 @@ In scope:
 - The `Kuestenlogik.Surgewave*` packages and the `surgewave` CLI tool
 - The Surgewave broker (`Kuestenlogik.Surgewave.Broker`) and Control UI (`Kuestenlogik.Surgewave.Control`)
 - The Kafka wire-protocol implementation (`Kuestenlogik.Surgewave.Protocol.Kafka`) and other built-in protocols
-- The plugin install / load surface (`surgewave plugin install`, ALC isolation, `.swpkg` package handling)
+- The plugin install / load surface (`surgewave plugins install`, ALC isolation, `.swpkg` package handling)
 - The published OCI container image at `ghcr.io/kuestenlogik/surgewave`
 - The release artefacts (MSI / DEB / RPM / Homebrew / winget)
 

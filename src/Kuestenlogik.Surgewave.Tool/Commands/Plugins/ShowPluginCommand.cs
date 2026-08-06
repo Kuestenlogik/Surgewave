@@ -7,7 +7,7 @@ using Spectre.Console;
 namespace Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 
 /// <summary>
-/// Inspect a single installed plugin (surgewave plugin show &lt;id&gt;).
+/// Inspect a single installed plugin (surgewave plugins show &lt;id&gt;).
 ///
 /// <para>
 /// Renders the plugin's manifest fields, the bundled <c>pluginsettings.json</c>
@@ -22,7 +22,7 @@ public class ShowPluginCommand : CommandBase
 
     private readonly Argument<string> _idArg = new("id")
     {
-        Description = "Plugin ID (as listed by 'surgewave plugin list')",
+        Description = "Plugin ID (as listed by 'surgewave plugins list')",
     };
 
     private readonly Option<string> _directoryOpt = new("--directory", "-d")

@@ -81,9 +81,9 @@ Surgewave has a plugin system for extending the broker. See the [Plugin Developm
 3. Implement a plugin interface (`IBrokerPlugin`, `IProtocolPlugin`, `IStorageEnginePlugin`, `ISourceNode`, `ISinkNode`, etc.)
 4. Create `plugin.json` manifest in the project root (see *Plugin manifest* below)
 5. Optionally create `pluginsettings.json` next to it for your recommended config defaults
-6. Pack: `dotnet publish -c Release -p:SurgewavePackPlugin=true` (or `surgewave plugin pack --project .`)
-7. Install: `surgewave plugin install <plugin-id>-<version>.swpkg`
-8. Inspect: `surgewave plugin show <plugin-id>` and `surgewave config view appsettings.json --explain`
+6. Pack: `dotnet publish -c Release -p:SurgewavePackPlugin=true` (or `surgewave plugins pack --project .`)
+7. Install: `surgewave plugins install <plugin-id>-<version>.swpkg`
+8. Inspect: `surgewave plugins show <plugin-id>` and `surgewave config view appsettings.json --explain`
 
 ### Plugin manifest (`plugin.json`)
 
@@ -119,7 +119,7 @@ tier 3 — environment variables + command-line args
 ```
 
 User values always win, but plugin defaults take effect immediately after
-`surgewave plugin install` — no manual config editing required. Example: an MQTT
+`surgewave plugins install` — no manual config editing required. Example: an MQTT
 plugin can ship recommended `Port`, `MaxClients` and `TopicPrefix` values; the
 operator only needs to set `Enabled: true` to start the adapter.
 
@@ -144,10 +144,10 @@ public sealed class MyPluginConfig : IValidatableConfig
 ```bash
 # Pack and install in one go
 dotnet publish -c Release -p:SurgewavePackPlugin=true
-surgewave plugin install artifacts/pub/packages/my-plugin-1.0.0.swpkg --force
+surgewave plugins install artifacts/pub/packages/my-plugin-1.0.0.swpkg --force
 
 # Inspect what was installed (manifest, assemblies, bundled defaults)
-surgewave plugin show my-org.my-plugin
+surgewave plugins show my-org.my-plugin
 
 # Verify your plugin's config defaults merge correctly with the broker's appsettings
 surgewave config view path/to/broker/appsettings.json --explain

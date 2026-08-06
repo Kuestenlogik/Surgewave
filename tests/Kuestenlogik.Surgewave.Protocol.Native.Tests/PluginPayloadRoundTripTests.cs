@@ -8,7 +8,7 @@ namespace Kuestenlogik.Surgewave.Protocol.Native.Tests;
 /// Coverage-push batch — plugin-registry payloads (GetPlugin, InstallPlugin,
 /// plus the shared <see cref="PluginInfoPayload"/> /
 /// <see cref="PluginDependencyPayload"/> / <see cref="InstalledPackageInfoPayload"/>
-/// building blocks). These back the <c>surgewave plugin install</c> /
+/// building blocks). These back the <c>surgewave plugins install</c> /
 /// <c>surgewave plugin get</c> CLI and the Control-UI's marketplace tab.
 ///
 /// PluginInfoPayload is the shape-heaviest payload in the namespace:

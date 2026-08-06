@@ -113,7 +113,7 @@ time as a defence-in-depth measure against archive escape.
 Install a plugin:
 
 ```bash
-surgewave plugin install kuestenlogik.surgewave.protocol.mqtt-0.1.0.swpkg
+surgewave plugins install kuestenlogik.surgewave.protocol.mqtt-0.1.0.swpkg
 ```
 
 The `.swpkg` is extracted to `plugins/kuestenlogik.surgewave.protocol.mqtt/`, including the
@@ -164,13 +164,13 @@ Other useful commands:
 
 ```bash
 # List installed plugins
-surgewave plugin list
+surgewave plugins list
 
 # Inspect manifest, assemblies, total size, bundled defaults
-surgewave plugin show kuestenlogik.surgewave.protocol.mqtt
+surgewave plugins show kuestenlogik.surgewave.protocol.mqtt
 
 # Print just the plugin's bundled defaults (pipe-friendly)
-surgewave plugin defaults kuestenlogik.surgewave.protocol.mqtt | jq .Surgewave.Mqtt
+surgewave plugins defaults kuestenlogik.surgewave.protocol.mqtt | jq .Surgewave.Mqtt
 
 # Validate the merged config (broker + plugin defaults) against IValidatableConfig types
 surgewave config validate appsettings.json
