@@ -31,7 +31,7 @@ services:
     volumes:
       - surgewave-data:/app/data
       - surgewave-logs:/app/logs
-      # Shared plugin volume. Plugins installed via 'surgewave plugin install' land here
+      # Shared plugin volume. Plugins installed via 'surgewave plugins install' land here
       # along with their pluginsettings.json defaults. The broker layers these defaults
       # into IConfiguration at startup (lowest priority — appsettings.json wins).
       - surgewave-plugins:/app/plugins

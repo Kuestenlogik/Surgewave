@@ -63,7 +63,7 @@ Surgewave publishes NuGet packages to GitHub Packages on every push to main (pre
 ### Building .swpkg files
 ```bash
 # Single plugin
-surgewave plugin pack --project src/MyPlugin/
+surgewave plugins pack --project src/MyPlugin/
 
 # Via MSBuild (if Kuestenlogik.Surgewave.Sdk is referenced — auto-pack on publish)
 dotnet publish src/MyPlugin/ -c Release
@@ -71,9 +71,9 @@ dotnet publish src/MyPlugin/ -c Release
 
 ### Installing .swpkg files
 ```bash
-surgewave plugin install path/to/plugin.swpkg
-surgewave plugin install plugins/                    # all in directory
-surgewave plugin install plugins/**                  # recursive
+surgewave plugins install path/to/plugin.swpkg
+surgewave plugins install plugins/                    # all in directory
+surgewave plugins install plugins/**                  # recursive
 ```
 
 ## Building & Publishing

@@ -8,7 +8,7 @@ rewriting clients.
 ## Installation
 
 ```bash
-surgewave plugin install kuestenlogik.surgewave.protocol.amqp-<version>.swpkg
+surgewave plugins install kuestenlogik.surgewave.protocol.amqp-<version>.swpkg
 ```
 
 ## Configuration
@@ -68,7 +68,7 @@ vhost `/`, and routes messages into Surgewave topics.
 ## Operations
 
 ```bash
-surgewave plugin show kuestenlogik.surgewave.protocol.amqp
+surgewave plugins show kuestenlogik.surgewave.protocol.amqp
 surgewave config view appsettings.json --explain
 surgewave config validate appsettings.json
 ```

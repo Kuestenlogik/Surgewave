@@ -65,8 +65,8 @@ public sealed class FooSourceNode : ISourceNode
 
 ```bash
 dotnet build -c Release
-surgewave plugin pack --project . --output artifacts/pkg/
-surgewave plugin install artifacts/pkg/Acme.Surgewave.Connector.Foo-1.0.0.swpkg
+surgewave plugins pack --project . --output artifacts/pkg/
+surgewave plugins install artifacts/pkg/Acme.Surgewave.Connector.Foo-1.0.0.swpkg
 ```
 
 ## Plugin Types
@@ -155,7 +155,7 @@ Every `.swpkg` package must contain a `plugin.json` at its root. Full field refe
 | `dependencies` | No | External NuGet dependencies as `{ "PackageName": "Version" }` |
 | `surgewaveDependencies` | No | Dependencies on other Surgewave plugins. Supports version constraints: exact (`1.0.0`), range (`>=1.0.0`), caret (`^1.0.0` = same major), tilde (`~1.0.0` = same major.minor). |
 | `minRuntimeVersion` | No | Minimum Surgewave runtime version required |
-| `sha256` | No | Package checksum (auto-populated by `surgewave plugin pack`) |
+| `sha256` | No | Package checksum (auto-populated by `surgewave plugins pack`) |
 | `$schema` | No | JSON Schema URL for editor auto-complete |
 
 ## Building and Packaging
@@ -172,10 +172,10 @@ dotnet tool install -g Kuestenlogik.Surgewave.Tool
 dotnet build -c Release
 
 # Pack into .swpkg
-surgewave plugin pack --project src/MyPlugin/ --output artifacts/pkg/
+surgewave plugins pack --project src/MyPlugin/ --output artifacts/pkg/
 
 # Options
-surgewave plugin pack --project src/MyPlugin/ --output artifacts/pkg/ --configuration Release --manifest path/to/custom-manifest.json
+surgewave plugins pack --project src/MyPlugin/ --output artifacts/pkg/ --configuration Release --manifest path/to/custom-manifest.json
 ```
 
 The `pack` command:
@@ -249,73 +249,73 @@ The `assemblies` array in the manifest controls which DLLs are scanned for `IPlu
 ### Install from local file
 
 ```bash
-surgewave plugin install MyPlugin-1.0.0.swpkg
+surgewave plugins install MyPlugin-1.0.0.swpkg
 ```
 
 ### Install all plugins in a directory
 
 ```bash
-surgewave plugin install artifacts/plugins/
+surgewave plugins install artifacts/plugins/
 ```
 
 ### Recursive install (all .swpkg files in subdirectories)
 
 ```bash
-surgewave plugin install artifacts/**
+surgewave plugins install artifacts/**
 ```
 
 ### Install from a configured plugin source
 
 ```bash
 # Add a source first
-surgewave plugin source add myregistry https://registry.example.com --type http
+surgewave plugins source add myregistry https://registry.example.com --type http
 
 # Install by package ID
-surgewave plugin install Acme.Surgewave.Connector.Foo --source myregistry
+surgewave plugins install Acme.Surgewave.Connector.Foo --source myregistry
 ```
 
 ### Install from NuGet
 
 ```bash
-surgewave plugin install Acme.Surgewave.Connector.Foo --from-nuget
-surgewave plugin install Acme.Surgewave.Connector.Foo --from-nuget --version 1.2.0
+surgewave plugins install Acme.Surgewave.Connector.Foo --from-nuget
+surgewave plugins install Acme.Surgewave.Connector.Foo --from-nuget --version 1.2.0
 ```
 
 ### Install from URL
 
 ```bash
-surgewave plugin install --from-url https://releases.example.com/MyPlugin-1.0.0.swpkg
+surgewave plugins install --from-url https://releases.example.com/MyPlugin-1.0.0.swpkg
 ```
 
 ### Dependency resolution
 
 ```bash
 # Install with automatic dependency resolution (default)
-surgewave plugin install Acme.Surgewave.Connector.Foo --from-nuget
+surgewave plugins install Acme.Surgewave.Connector.Foo --from-nuget
 
 # Skip dependency resolution
-surgewave plugin install Acme.Surgewave.Connector.Foo --from-nuget --no-deps
+surgewave plugins install Acme.Surgewave.Connector.Foo --from-nuget --no-deps
 
 # Preview what would be installed
-surgewave plugin install Acme.Surgewave.Connector.Foo --from-nuget --dry-run
+surgewave plugins install Acme.Surgewave.Connector.Foo --from-nuget --dry-run
 ```
 
 ### List installed plugins
 
 ```bash
-surgewave plugin list
+surgewave plugins list
 ```
 
 ### Uninstall
 
 ```bash
-surgewave plugin uninstall Acme.Surgewave.Connector.Foo
+surgewave plugins uninstall Acme.Surgewave.Connector.Foo
 ```
 
 ### Force overwrite
 
 ```bash
-surgewave plugin install MyPlugin-1.0.0.swpkg --force
+surgewave plugins install MyPlugin-1.0.0.swpkg --force
 ```
 
 ## Example: Creating a Source Connector
@@ -659,13 +659,13 @@ public async Task LogManager_writes_and_reads()
 
 ```bash
 # Publish to a local directory-based registry
-surgewave plugin publish MyPlugin-1.0.0.swpkg --registry-path ./registry
+surgewave plugins publish MyPlugin-1.0.0.swpkg --registry-path ./registry
 
 # Publish to a named registry from configuration
-surgewave plugin publish MyPlugin-1.0.0.swpkg --registry my-local-registry
+surgewave plugins publish MyPlugin-1.0.0.swpkg --registry my-local-registry
 
 # Overwrite an existing version
-surgewave plugin publish MyPlugin-1.0.0.swpkg --registry-path ./registry --force
+surgewave plugins publish MyPlugin-1.0.0.swpkg --registry-path ./registry --force
 ```
 
 ### NuGet feed
@@ -679,7 +679,7 @@ dotnet nuget push MyPlugin.1.0.0.nupkg --source https://api.nuget.org/v3/index.j
 Then consumers install with:
 
 ```bash
-surgewave plugin install MyPlugin --from-nuget
+surgewave plugins install MyPlugin --from-nuget
 ```
 
 ### GitHub Releases
@@ -687,7 +687,7 @@ surgewave plugin install MyPlugin --from-nuget
 Attach the `.swpkg` file to a GitHub Release, then install via URL:
 
 ```bash
-surgewave plugin install --from-url https://github.com/acme/surgewave-connector-foo/releases/download/v1.0.0/Acme.Surgewave.Connector.Foo-1.0.0.swpkg
+surgewave plugins install --from-url https://github.com/acme/surgewave-connector-foo/releases/download/v1.0.0/Acme.Surgewave.Connector.Foo-1.0.0.swpkg
 ```
 
 ### Plugin sources
@@ -696,13 +696,13 @@ Configure reusable plugin sources for your team:
 
 ```bash
 # Add a plugin source
-surgewave plugin source add company-registry https://registry.internal.example.com --type http
+surgewave plugins source add company-registry https://registry.internal.example.com --type http
 
 # Search available plugins
-surgewave plugin search --source company-registry "postgres"
+surgewave plugins search --source company-registry "postgres"
 
 # Install from source by ID
-surgewave plugin install Acme.Surgewave.Connector.Foo --source company-registry
+surgewave plugins install Acme.Surgewave.Connector.Foo --source company-registry
 ```
 
 ## Best Practices
@@ -731,4 +731,4 @@ surgewave plugin install Acme.Surgewave.Connector.Foo --source company-registry
 
 - Follow semantic versioning. Breaking config changes require a major version bump.
 - Use `surgewaveDependencies` to declare dependencies on other Surgewave plugins with version constraints (`^1.0.0` for compatible, `~1.2.0` for patch-level, `>=1.0.0` for minimum).
-- The `--dry-run` flag on `surgewave plugin install --from-nuget` shows the full dependency tree before installing.
+- The `--dry-run` flag on `surgewave plugins install --from-nuget` shows the full dependency tree before installing.

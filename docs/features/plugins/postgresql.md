@@ -8,7 +8,7 @@ the materialised-view subsystem in `Kuestenlogik.Surgewave.Streams.Sql.Materiali
 ## Installation
 
 ```bash
-surgewave plugin install kuestenlogik.surgewave.protocol.postgresql-<version>.swpkg
+surgewave plugins install kuestenlogik.surgewave.protocol.postgresql-<version>.swpkg
 ```
 
 ## Configuration
@@ -82,7 +82,7 @@ and store the password as a secret (env var with
 ## Operations
 
 ```bash
-surgewave plugin show kuestenlogik.surgewave.protocol.postgresql
+surgewave plugins show kuestenlogik.surgewave.protocol.postgresql
 surgewave config view appsettings.json --explain
 surgewave config validate appsettings.json
 ```

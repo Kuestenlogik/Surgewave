@@ -89,7 +89,7 @@ internal sealed class ConfigValidateCommand : Command
     /// Runs the same validation logic as the <c>surgewave config validate</c> CLI command,
     /// returning the same exit-code semantics (0 = all clean, 1 = at least one section
     /// failed or the file could not be loaded). Exposed so other commands (e.g.
-    /// <c>surgewave plugin install --validate-config</c>) can chain validation onto their
+    /// <c>surgewave plugins install --validate-config</c>) can chain validation onto their
     /// own workflows without re-implementing the merge / discover / validate pipeline.
     /// Defaults to text output; chained callers typically want text.
     /// </summary>

@@ -17,7 +17,7 @@ defaults via `pluginsettings.json`, and is enabled with a single
 ## Installing
 
 ```bash
-surgewave plugin install kuestenlogik.surgewave.protocol.mqtt-0.1.0.swpkg
+surgewave plugins install kuestenlogik.surgewave.protocol.mqtt-0.1.0.swpkg
 ```
 
 Each `.swpkg` extracts to `plugins/<id>/` and bundles a `pluginsettings.json`
@@ -39,8 +39,8 @@ the plugin's `pluginsettings.json`. Override individual fields in
 ## Inspecting
 
 ```bash
-surgewave plugin show kuestenlogik.surgewave.protocol.mqtt          # manifest, assemblies, defaults
-surgewave plugin defaults kuestenlogik.surgewave.protocol.mqtt      # just the defaults JSON
+surgewave plugins show kuestenlogik.surgewave.protocol.mqtt          # manifest, assemblies, defaults
+surgewave plugins defaults kuestenlogik.surgewave.protocol.mqtt      # just the defaults JSON
 surgewave config view appsettings.json --explain      # source per leaf
 surgewave config validate appsettings.json            # check the merged config
 ```

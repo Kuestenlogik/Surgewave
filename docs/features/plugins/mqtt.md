@@ -7,7 +7,7 @@ any standard MQTT client (mosquitto, Eclipse Paho, ESP32 firmware, ...).
 ## Installation
 
 ```bash
-surgewave plugin install kuestenlogik.surgewave.protocol.mqtt-<version>.swpkg
+surgewave plugins install kuestenlogik.surgewave.protocol.mqtt-<version>.swpkg
 ```
 
 ## Configuration
@@ -72,7 +72,7 @@ MQTT-sourced topics are recognisable.
 
 ```bash
 # Inspect the installed plugin
-surgewave plugin show kuestenlogik.surgewave.protocol.mqtt
+surgewave plugins show kuestenlogik.surgewave.protocol.mqtt
 
 # View the effective MQTT config
 surgewave config view appsettings.json --explain

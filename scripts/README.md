@@ -123,5 +123,5 @@ dotnet run --project src/Kuestenlogik.Surgewave.Control --urls "http://localhost
 dotnet pack Kuestenlogik.Surgewave.slnx -c Release
 
 # Install a plugin via the CLI
-surgewave plugin install path/to/plugin.swpkg
+surgewave plugins install path/to/plugin.swpkg
 ```

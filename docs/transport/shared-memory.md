@@ -7,5 +7,5 @@ The Shared Memory transport provides ultra-low latency inter-process communicati
 ## Installation
 
 ```bash
-surgewave plugin install Kuestenlogik.Surgewave.Transport-x.y.z.swpkg
+surgewave plugins install Kuestenlogik.Surgewave.Transport-x.y.z.swpkg
 ```

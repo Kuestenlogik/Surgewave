@@ -7,5 +7,5 @@ The Arrow storage engine provides columnar storage optimized for analytics workl
 ## Installation
 
 ```bash
-surgewave plugin install Kuestenlogik.Surgewave.Storage.Arrow-x.y.z.swpkg
+surgewave plugins install Kuestenlogik.Surgewave.Storage.Arrow-x.y.z.swpkg
 ```

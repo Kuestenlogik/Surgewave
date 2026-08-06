@@ -21,7 +21,7 @@
     "name": {
       "type": "string",
       "minLength": 1,
-      "description": "Human-readable display name. Shown in 'surgewave plugin list' and the Surgewave Control UI."
+      "description": "Human-readable display name. Shown in 'surgewave plugins list' and the Surgewave Control UI."
     },
     "version": {
       "type": "string",
@@ -31,7 +31,7 @@
     },
     "description": {
       "type": "string",
-      "description": "Short, one-paragraph description of what the plugin does. Shown in 'surgewave plugin show', the marketplace listing and the Control UI plugin browser."
+      "description": "Short, one-paragraph description of what the plugin does. Shown in 'surgewave plugins show', the marketplace listing and the Control UI plugin browser."
     },
     "authors": {
       "type": "array",
@@ -63,7 +63,7 @@
     "dependencies": {
       "type": "object",
       "additionalProperties": { "type": "string" },
-      "description": "External NuGet package dependencies, keyed by package id with a version specifier. These are not resolved automatically — they document the assumptions of the plugin and are surfaced by 'surgewave plugin show'."
+      "description": "External NuGet package dependencies, keyed by package id with a version specifier. These are not resolved automatically — they document the assumptions of the plugin and are surfaced by 'surgewave plugins show'."
     },
     "surgewaveDependencies": {
       "type": "array",
@@ -73,7 +73,7 @@
     "sha256": {
       "type": "string",
       "pattern": "^[a-fA-F0-9]{64}$",
-      "description": "Optional integrity hash of the .swpkg file. When present, 'surgewave plugin install' verifies the package matches before extracting."
+      "description": "Optional integrity hash of the .swpkg file. When present, 'surgewave plugins install' verifies the package matches before extracting."
     },
     "assemblies": {
       "type": "array",

@@ -9,7 +9,7 @@ listener.
 ## Installation
 
 ```bash
-surgewave plugin install kuestenlogik.surgewave.protocol.websocket-<version>.swpkg
+surgewave plugins install kuestenlogik.surgewave.protocol.websocket-<version>.swpkg
 ```
 
 ## Configuration
@@ -76,7 +76,7 @@ endpoint on the broker. Configure the listening URL in
 ## Operations
 
 ```bash
-surgewave plugin show kuestenlogik.surgewave.protocol.websocket
+surgewave plugins show kuestenlogik.surgewave.protocol.websocket
 surgewave config view appsettings.json --explain
 surgewave config validate appsettings.json
 ```

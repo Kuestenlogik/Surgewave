@@ -163,7 +163,7 @@ tier 3 (highest) — environment variables + command-line args
 ```
 
 User values in `appsettings.json` always win, but plugin authors can ship recommended
-defaults that take effect immediately after `surgewave plugin install` — no manual config
+defaults that take effect immediately after `surgewave plugins install` — no manual config
 editing required. The discovery side (`PluginPackageManager.EnumerateInstalledPluginSettingsFiles`)
 reads each plugin's `plugin.json` to find the declared settings filename, so the
 manifest is the single source of truth and plugins can pick any filename without the

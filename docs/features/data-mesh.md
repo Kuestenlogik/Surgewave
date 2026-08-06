@@ -7,5 +7,5 @@ The Data Mesh feature provides data catalog, domain ownership, and data product 
 ## Installation
 
 ```bash
-surgewave plugin install Kuestenlogik.Surgewave.Governance-x.y.z.swpkg
+surgewave plugins install Kuestenlogik.Surgewave.Governance-x.y.z.swpkg
 ```

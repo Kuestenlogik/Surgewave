@@ -114,17 +114,17 @@ the output directory.
 ## 6. Install the plugin
 
 ```bash
-surgewave plugin install MySurgewavePlugin-1.0.0.swpkg -d ./plugins --force
+surgewave plugins install MySurgewavePlugin-1.0.0.swpkg -d ./plugins --force
 ```
 
 ## 7. Inspect what was installed
 
 ```bash
 # Full details: manifest, assemblies, bundled defaults
-surgewave plugin show my-org.my-plugin -d ./plugins
+surgewave plugins show my-org.my-plugin -d ./plugins
 
 # Just the defaults (pipe-friendly)
-surgewave plugin defaults my-org.my-plugin -d ./plugins
+surgewave plugins defaults my-org.my-plugin -d ./plugins
 
 # Generate a copy-paste-ready config section with Enabled=true
 surgewave config init --plugin my-org.my-plugin -d ./plugins
@@ -171,13 +171,13 @@ When you publish a new version:
 dotnet publish -c Release -p:SurgewavePackPlugin=true
 
 # Preview what changed vs. the installed version
-surgewave plugin diff my-org.my-plugin path/to/new-package.swpkg -d ./plugins
+surgewave plugins diff my-org.my-plugin path/to/new-package.swpkg -d ./plugins
 
 # Install the upgrade (--force overwrites the old version)
-surgewave plugin install new-package.swpkg -d ./plugins --force
+surgewave plugins install new-package.swpkg -d ./plugins --force
 
 # Optionally validate immediately
-surgewave plugin install new-package.swpkg -d ./plugins --force --validate-config path/to/appsettings.json
+surgewave plugins install new-package.swpkg -d ./plugins --force --validate-config path/to/appsettings.json
 ```
 
 ## What's next
@@ -188,7 +188,7 @@ surgewave plugin install new-package.swpkg -d ./plugins --force --validate-confi
   background services)
 - Implement `IProtocolPlugin` instead of `IBrokerPlugin` if your plugin provides a
   new wire protocol (TCP listener on a separate port)
-- Ship the plugin via the Surgewave Marketplace (`surgewave plugin publish`)
+- Ship the plugin via the Surgewave Marketplace (`surgewave plugins publish`)
 
 ## Reference
 

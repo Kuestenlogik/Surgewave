@@ -15,7 +15,7 @@ namespace Kuestenlogik.Surgewave.Schema.Registry.Plugin;
 
 /// <summary>
 /// Standalone <see cref="IBrokerPlugin"/> for the Schema Registry — installable
-/// via <c>surgewave plugin install schema-registry.swpkg</c>. No compile-time dependency
+/// via <c>surgewave plugins install schema-registry.swpkg</c>. No compile-time dependency
 /// on the Broker project. Reads configuration directly from <see cref="IConfiguration"/>.
 /// </summary>
 public sealed class SchemaRegistryBrokerPlugin : IBrokerPlugin

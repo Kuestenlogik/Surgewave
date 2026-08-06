@@ -8,10 +8,10 @@ namespace Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 
 /// <summary>
 /// Print just the bundled <c>pluginsettings.json</c> of an installed plugin
-/// (surgewave plugin defaults &lt;id&gt;).
+/// (surgewave plugins defaults &lt;id&gt;).
 ///
 /// <para>
-/// This is a focused subset of <c>surgewave plugin show</c> for the common
+/// This is a focused subset of <c>surgewave plugins show</c> for the common
 /// "what defaults does this plugin contribute to my broker config?" question.
 /// The output is the literal JSON content of the plugin's settings file —
 /// suitable for piping into <c>jq</c>, copying into a user appsettings.json
@@ -24,7 +24,7 @@ public class PluginDefaultsCommand : CommandBase
 
     private readonly Argument<string> _idArg = new("id")
     {
-        Description = "Plugin ID (as listed by 'surgewave plugin list')",
+        Description = "Plugin ID (as listed by 'surgewave plugins list')",
     };
 
     private readonly Option<string> _directoryOpt = new("--directory", "-d")

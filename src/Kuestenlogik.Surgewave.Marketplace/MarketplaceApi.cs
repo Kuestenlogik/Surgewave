@@ -74,7 +74,7 @@ public static class MarketplaceApi
         // Bundled defaults — answers 'what configuration defaults does this version
         // ship?'. The endpoint reads the .swpkg's plugin.json to find the configured
         // pluginSettings filename, extracts that file, and returns it as JSON.
-        // Pairs with the operator-side 'surgewave plugin diff' CLI command and lets
+        // Pairs with the operator-side 'surgewave plugins diff' CLI command and lets
         // the marketplace UI render a side-by-side defaults preview when an upgrade
         // is available — without re-downloading the package.
         api.MapGet("/packages/{id}/{version}/defaults", async (string id, string version, CancellationToken ct) =>
