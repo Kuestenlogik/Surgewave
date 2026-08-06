@@ -17,7 +17,7 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | **Track** | `auth` · `protocols` · `marketing-ia` · `observability` · `security-tiers` · `bootcamp-content` · `none` | Multi-phase initiatives that span releases |
 | **Effort** | `XS` · `S` · `M` · `L` · `XL` | T-shirt estimate |
 | **Priority** | `P0` · `P1` · `P2` · `P3` | Triage |
-| **Kind** | `feature` · `bug` · `debt` · `docs` · `rfc` | What it is |
+| **Type** *(native issue field, not a board field)* | `Bug` · `Task` · `Feature` | What it is. Set on the issue itself (org-level GitHub issue types), searchable as `type:Bug`. Replaced the former `kind:*` label family and the board's `Kind` field — do not re-create either. |
 
 ## Recommended views
 
@@ -47,14 +47,14 @@ The board ships with the default *All items* view. The four views below mirror h
 ### 🐛 Bugs
 
 - **Layout**: Table
-- **Filter**: `Kind` = `bug`
+- **Filter**: `type:Bug`
 - **Sort by**: `Priority` ↑ then `Status` ↑
 - **Use for**: Triage backlog, regardless of milestone
 
 ## Conventions
 
 - **One field per concept**: `Milestone` is the *when*, `Track` is the *grouped initiative across releases*, `Area` is the *component*. They overlap deliberately — Milestone is enforced (the bar for shipping), Track is editorial (Auth Phase A / B / C).
-- **Labels duplicate fields on purpose**: GitHub issue search needs labels (`is:open label:area:security`). Project filters need fields. The two are kept in sync so an issue is findable from either side.
+- **`area:*` / `track:*` labels duplicate board fields on purpose**: GitHub issue search needs labels (`is:open label:area:security`). Project filters need fields. Those two families are kept in sync so an issue is findable from either side. This does *not* extend to the nature of the work — that is the native issue **Type** (`type:Bug`), which exists exactly once and must not be mirrored back into a label.
 - **`roadmap` label** flags items that are tracked on the board. Throwaway bug reports don't need it.
 - **`community-vote` label** marks feature requests where reactions on the issue are read as priority signal. Don't comment "+1" — react with 👍.
 - **PRs close issues via `Closes #N`** so Status flips to `Done` automatically and the item drops off the active views.

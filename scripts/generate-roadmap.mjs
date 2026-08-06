@@ -200,9 +200,7 @@ function fmtIssue(item) {
     const area = fieldValue(item, "Area");
     const track = fieldValue(item, "Track");
     const priority = fieldValue(item, "Priority");
-    const kind = fieldValue(item, "Kind");
     const tags = [];
-    if (kind) tags.push(`\`kind:${kind}\``);
     if (area) tags.push(`\`area:${area}\``);
     if (track && track !== "none") tags.push(`\`track:${track}\``);
     if (priority) tags.push(`\`${priority}\``);

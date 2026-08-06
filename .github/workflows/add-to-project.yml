@@ -33,17 +33,13 @@ jobs:
   add-to-project:
     name: Attach to Project board
     runs-on: ubuntu-latest
-    # Run on items carrying any of our typed labels — roadmap items,
-    # bugs, and feature requests all land on the board so the Bugs
-    # view + Roadmap view see them. Items without any kind:* / roadmap
-    # label stay off the board until someone explicitly promotes them.
+    # Board membership is driven by the `roadmap` label alone. The native
+    # issue TYPE (Bug / Task / Feature) replaced the kind:* label family,
+    # so the old kind:bug / kind:feature / kind:concept clauses matched
+    # nothing and were removed. Items stay off the board until someone
+    # explicitly promotes them with `roadmap`.
     if: |
-      (github.event.issue && (
-        contains(github.event.issue.labels.*.name, 'roadmap') ||
-        contains(github.event.issue.labels.*.name, 'kind:bug') ||
-        contains(github.event.issue.labels.*.name, 'kind:feature') ||
-        contains(github.event.issue.labels.*.name, 'kind:concept')
-      )) ||
+      (github.event.issue && contains(github.event.issue.labels.*.name, 'roadmap')) ||
       (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'roadmap'))
     steps:
       - uses: actions/add-to-project@v2
