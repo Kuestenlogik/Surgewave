@@ -121,13 +121,19 @@ public class ProducerStateManagerTests
 
     // ── Sequence number validation ───────────────────────────────────────────
 
+    // Validation no longer records anything (#122): a batch can still be refused after it, so the
+    // sequence advances in CommitSequence once the batch is in the log. These helpers keep the
+    // tests reading as "the producer sent this batch and it landed".
+    private void Wrote(long id, short epoch, int baseSequence, TopicPartition tp, long baseOffset, int recordCount = 1)
+        => _manager.CommitSequence(id, epoch, baseSequence, recordCount - 1, tp, baseOffset);
+
     [Fact]
     public void ValidateSequence_NoProducerId_ReturnsNone()
     {
-        var error = _manager.ValidateSequence(
-            KafkaConstants.Producer.NoProducerId, 0, 0, Tp0);
+        var check = _manager.ValidateSequence(
+            KafkaConstants.Producer.NoProducerId, 0, 0, 0, Tp0);
 
-        Assert.Equal(ProduceSequenceStatus.Ok, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
 
     [Fact]
@@ -135,9 +141,9 @@ public class ProducerStateManagerTests
     {
         var (id, _) = _manager.AllocateProducerId();
 
-        var error = _manager.ValidateSequence(id, epoch: 0, baseSequence: 42, Tp0);
+        var check = _manager.ValidateSequence(id, epoch: 0, baseSequence: 42, lastOffsetDelta: 0, Tp0);
 
-        Assert.Equal(ProduceSequenceStatus.Ok, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
 
     [Fact]
@@ -145,23 +151,37 @@ public class ProducerStateManagerTests
     {
         var (id, _) = _manager.AllocateProducerId();
 
-        // Record seq 0
-        _manager.ValidateSequence(id, 0, 0, Tp0);
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0);
         // Next expected: 1
-        var error = _manager.ValidateSequence(id, 0, 1, Tp0);
+        var check = _manager.ValidateSequence(id, 0, 1, lastOffsetDelta: 0, Tp0);
 
-        Assert.Equal(ProduceSequenceStatus.Ok, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
 
     [Fact]
-    public void ValidateSequence_DuplicateSequence_ReturnsDuplicateError()
+    public void ValidateSequence_MultiRecordBatch_ExpectsTheNextRecordSequence()
+    {
+        // The producer numbers records: after a batch spanning 0..2 the next batch starts at 3.
+        var (id, _) = _manager.AllocateProducerId();
+
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0, recordCount: 3);
+
+        Assert.Equal(ProduceSequenceStatus.Ok,
+            _manager.ValidateSequence(id, 0, 3, lastOffsetDelta: 2, Tp0).Status);
+        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence,
+            _manager.ValidateSequence(id, 0, 1, lastOffsetDelta: 2, Tp0).Status);
+    }
+
+    [Fact]
+    public void ValidateSequence_Duplicate_ReportsTheOffsetItLandedAt()
     {
         var (id, _) = _manager.AllocateProducerId();
 
-        _manager.ValidateSequence(id, 0, 0, Tp0);
-        var error = _manager.ValidateSequence(id, 0, 0, Tp0); // repeat seq 0
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 17);
+        var check = _manager.ValidateSequence(id, 0, 0, lastOffsetDelta: 0, Tp0); // repeat seq 0
 
-        Assert.Equal(ProduceSequenceStatus.DuplicateSequence, error);
+        Assert.Equal(ProduceSequenceStatus.DuplicateSequence, check.Status);
+        Assert.Equal(17, check.DuplicateBaseOffset);
     }
 
     [Fact]
@@ -169,23 +189,23 @@ public class ProducerStateManagerTests
     {
         var (id, _) = _manager.AllocateProducerId();
 
-        _manager.ValidateSequence(id, 0, 0, Tp0); // sets last to 0
-        var error = _manager.ValidateSequence(id, 0, 5, Tp0); // skipped 1-4
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0); // last sequence is 0
+        var check = _manager.ValidateSequence(id, 0, 5, lastOffsetDelta: 0, Tp0); // skipped 1-4
 
-        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence, error);
+        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence, check.Status);
     }
 
     [Fact]
     public void ValidateSequence_WrongEpoch_ReturnsEpochError()
     {
         var (id, _) = _manager.AllocateProducerId();
-        _manager.ValidateSequence(id, 0, 0, Tp0);
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0);
 
-        // Request with future epoch (unknown producer registers new state)
-        var error = _manager.ValidateSequence(id, epoch: 99, baseSequence: 0, Tp0);
+        // Request with future epoch
+        var check = _manager.ValidateSequence(id, epoch: 99, baseSequence: 0, lastOffsetDelta: 0, Tp0);
 
         // Future epoch is treated as UnknownProducerId
-        Assert.Equal(ProduceSequenceStatus.UnknownProducerId, error);
+        Assert.Equal(ProduceSequenceStatus.UnknownProducerId, check.Status);
     }
 
     [Fact]
@@ -193,23 +213,25 @@ public class ProducerStateManagerTests
     {
         var (id, _) = _manager.AllocateProducerId();
 
-        // Track seq on Tp0
-        _manager.ValidateSequence(id, 0, 0, Tp0);
-        _manager.ValidateSequence(id, 0, 1, Tp0);
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0);
+        Wrote(id, 0, baseSequence: 1, Tp0, baseOffset: 1);
 
         // Tp1 starts fresh – seq 0 is fine
-        var error = _manager.ValidateSequence(id, 0, 0, Tp1);
+        var check = _manager.ValidateSequence(id, 0, 0, lastOffsetDelta: 0, Tp1);
 
-        Assert.Equal(ProduceSequenceStatus.Ok, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
 
     [Fact]
-    public void ValidateSequence_UnknownProducer_CreatesStateAndAccepts()
+    public void ValidateSequence_UnknownProducer_AcceptsWithoutRegistering()
     {
-        // Unknown producer should be accepted and tracked
-        var error = _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, Tp0);
+        // Accepted, but NOT recorded: registration happens when the batch lands, so a producer whose
+        // first batch is refused does not leave state behind that its retry would collide with.
+        var check = _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, lastOffsetDelta: 0, Tp0);
 
-        Assert.Equal(ProduceSequenceStatus.Ok, error);
+        Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
+        Assert.Equal(ProduceSequenceStatus.Ok,
+            _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, lastOffsetDelta: 0, Tp0).Status);
     }
 
     // ── Transaction lifecycle ────────────────────────────────────────────────
@@ -354,7 +376,7 @@ public class ProducerStateManagerTests
     public void UpdateEpoch_ClearsSequencesAndResets()
     {
         var (id, epoch) = _manager.AllocateProducerId();
-        _manager.ValidateSequence(id, epoch, 0, Tp0);
+        Wrote(id, epoch, baseSequence: 0, Tp0, baseOffset: 0);
         _manager.BeginTransaction(id, epoch);
         _manager.AddPartitionToTransaction(id, epoch, Tp0);
 
@@ -366,8 +388,8 @@ public class ProducerStateManagerTests
         Assert.Empty(partitions);
 
         // After epoch reset, seq 0 should be accepted again
-        var seqError = _manager.ValidateSequence(id, epoch: 7, baseSequence: 0, Tp0);
-        Assert.Equal(ProduceSequenceStatus.Ok, seqError);
+        var seqCheck = _manager.ValidateSequence(id, epoch: 7, baseSequence: 0, lastOffsetDelta: 0, Tp0);
+        Assert.Equal(ProduceSequenceStatus.Ok, seqCheck.Status);
     }
 
     [Fact]
