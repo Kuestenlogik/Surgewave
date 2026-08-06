@@ -160,7 +160,30 @@ function classify(items) {
 // "Later" milestone (not scheduled and no milestone both mean "not
 // committed"). Rendered as "Later" so readers see the same heading
 // they're used to.
-const MILESTONE_ORDER = ["v0.2", "v0.3", "v0.4", "v0.5", "v1.0", null];
+//
+// The order is derived from the milestones actually present rather than from a
+// hardcoded list. That list was the bug: it stopped at v0.5/v1.0, so every issue
+// on v0.6…v0.9 fell through into the `null` bucket and rendered under "Later",
+// indistinguishable from genuinely unscheduled work — and silently, because
+// nothing warned about an unlisted milestone.
+function compareMilestoneVersions(a, b) {
+    const key = (v) => {
+        const [core, pre] = String(v).replace(/^v/, "").split("-");
+        const nums = core.split(".").map((n) => Number.parseInt(n, 10));
+        while (nums.length < 3) nums.push(0);
+        // Trailing 1 vs 0 makes a release sort after its own pre-releases,
+        // e.g. v0.4.0 after v0.4.0-rc.1.
+        return [...nums.map((n) => (Number.isNaN(n) ? -1 : n)), pre ? 0 : 1];
+    };
+    const ka = key(a);
+    const kb = key(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+        const d = (ka[i] ?? 0) - (kb[i] ?? 0);
+        if (d !== 0) return d;
+    }
+    // Milestones that aren't `vX.Y` at all still get a stable, repeatable order.
+    return String(a).localeCompare(String(b));
+}
 
 // Cache of milestone title → theme so the second section that
 // references the same milestone doesn't re-parse. Populated as
@@ -180,16 +203,24 @@ function parseMilestoneTitle(title) {
 }
 
 function byMilestone(items) {
-    const map = new Map(MILESTONE_ORDER.map((m) => [m, []]));
+    const map = new Map();
     for (const item of items) {
         const { version, theme } = parseMilestoneTitle(item.content.milestone?.title);
         if (version && !MILESTONE_THEMES.has(version)) {
             MILESTONE_THEMES.set(version, theme);
         }
-        const key = MILESTONE_ORDER.includes(version) ? version : null;
+        const key = version ?? null;
+        if (!map.has(key)) map.set(key, []);
         map.get(key).push(item);
     }
-    return map;
+    // Ascending by version, `null` (no milestone) always last. Returned as an
+    // ordered Map so render() can iterate it directly: a second, separately
+    // maintained order list is exactly what drifted out of sync before.
+    return new Map([...map.entries()].sort(([a], [b]) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return compareMilestoneVersions(a, b);
+    }));
 }
 
 function fmtIssue(item) {
@@ -223,8 +254,7 @@ function render(groups) {
         lines.push(`## ${status}`);
         lines.push("");
         const byMs = byMilestone(items);
-        for (const ms of MILESTONE_ORDER) {
-            const slice = byMs.get(ms) ?? [];
+        for (const [ms, slice] of byMs) {
             if (slice.length === 0) continue;
             // `null` bucket = no milestone assigned — render as "Later"
             // so the section reads naturally for the offline view.
