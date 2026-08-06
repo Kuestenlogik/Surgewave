@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Transport;
 using Microsoft.Extensions.Logging;
 
@@ -249,12 +250,28 @@ public sealed partial class ClusterLinkManager : IAsyncDisposable
         try
         {
             var remoteTopics = await link.GetRemoteTopicsAsync(ct);
-            var topicFilter = new Regex(link.Config.TopicFilter);
+            var topicFilter = TopicFilterPattern.Compile(link.Config.TopicFilter);
             var excludes = new HashSet<string>(link.Config.TopicExcludes);
 
             foreach (var remoteTopic in remoteTopics)
             {
-                if (!topicFilter.IsMatch(remoteTopic.Name))
+                bool matches;
+                try
+                {
+                    matches = topicFilter.IsMatch(remoteTopic.Name);
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    // The topic name comes off the remote's metadata response, so a
+                    // hostile peer could otherwise pair a backtracking filter with a
+                    // pathological name and wedge this loop for every link.
+                    _logger.LogWarning(
+                        "Cluster link {LinkId}: topic filter timed out on remote topic {Topic}, skipping it",
+                        LogSanitizer.Sanitize(link.Config.LinkId), LogSanitizer.Sanitize(remoteTopic.Name));
+                    continue;
+                }
+
+                if (!matches)
                     continue;
                 if (excludes.Contains(remoteTopic.Name))
                     continue;

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Buffers.Binary;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Transport;
 using Microsoft.Extensions.Logging;
 
@@ -48,7 +49,8 @@ public sealed class ClusterLink : IAsyncDisposable
                 _connection = await _peerTransport.ConnectAsync(host, port, ct);
                 State = ClusterLinkState.Active;
                 ErrorMessage = null;
-                _logger.LogInformation("Cluster link {LinkId} connected to {Remote}", LinkId, _config.RemoteBootstrapServers);
+                _logger.LogInformation("Cluster link {LinkId} connected to {Remote}",
+                    LogSanitizer.Sanitize(LinkId), LogSanitizer.Sanitize(_config.RemoteBootstrapServers));
                 return;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -60,7 +62,7 @@ public sealed class ClusterLink : IAsyncDisposable
                 if (attempt < maxRetries)
                 {
                     _logger.LogWarning(ex, "Cluster link {LinkId} connection attempt {Attempt} failed, retrying in {DelayMs}ms",
-                        LinkId, attempt, delayMs);
+                        LogSanitizer.Sanitize(LinkId), attempt, delayMs);
                     await Task.Delay(delayMs, ct);
                     delayMs *= 2;
                 }
@@ -68,7 +70,8 @@ public sealed class ClusterLink : IAsyncDisposable
                 {
                     State = ClusterLinkState.Error;
                     ErrorMessage = ex.Message;
-                    _logger.LogError(ex, "Cluster link {LinkId} failed to connect after {MaxRetries} attempts", LinkId, maxRetries);
+                    _logger.LogError(ex, "Cluster link {LinkId} failed to connect after {MaxRetries} attempts",
+                        LogSanitizer.Sanitize(LinkId), maxRetries);
                     throw;
                 }
             }

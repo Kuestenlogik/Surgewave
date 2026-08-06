@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Plugins.Repository;
 
 namespace Kuestenlogik.Surgewave.Broker.Plugins;
@@ -36,7 +37,8 @@ public static class RepositoriesRestApi
             try
             {
                 var added = store.Add(entry);
-                logger.LogInformation("Repository '{Name}' added ({Type} {Source})", added.Name, added.Type, added.Source);
+                logger.LogInformation("Repository '{Name}' added ({Type} {Source})",
+                    LogSanitizer.Sanitize(added.Name), added.Type, LogSanitizer.Sanitize(added.Source));
                 return Results.Created($"/api/plugins/repositories/{added.Name}", added);
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -48,7 +50,7 @@ public static class RepositoriesRestApi
             try
             {
                 var updated = store.Update(name, entry);
-                logger.LogInformation("Repository '{Name}' updated", updated.Name);
+                logger.LogInformation("Repository '{Name}' updated", LogSanitizer.Sanitize(updated.Name));
                 return Results.Ok(updated);
             }
             catch (KeyNotFoundException) { return Results.NotFound(new { error = $"No repository named '{name}'." }); }
@@ -61,7 +63,7 @@ public static class RepositoriesRestApi
             {
                 var removed = store.Remove(name);
                 if (!removed) return Results.NotFound(new { error = $"No repository named '{name}'." });
-                logger.LogInformation("Repository '{Name}' deleted", name);
+                logger.LogInformation("Repository '{Name}' deleted", LogSanitizer.Sanitize(name));
                 return Results.Ok(new { name, deleted = true });
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }

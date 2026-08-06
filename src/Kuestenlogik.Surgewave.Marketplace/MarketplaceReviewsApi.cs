@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Core.Util;
 using Kuestenlogik.Surgewave.Marketplace.Models;
 using Kuestenlogik.Surgewave.Marketplace.Services;
 
@@ -46,7 +47,8 @@ public static class MarketplaceReviewsApi
             try
             {
                 var saved = await reviews.SubmitReviewAsync(bound, ct);
-                logger.LogInformation("Review submitted for {ConnectorId} by {Author} ({Rating}*)", saved.ConnectorId, saved.Author, saved.Rating);
+                logger.LogInformation("Review submitted for {ConnectorId} by {Author} ({Rating}*)",
+                    LogSanitizer.Sanitize(saved.ConnectorId), LogSanitizer.Sanitize(saved.Author), saved.Rating);
                 return Results.Created($"/api/v1/packages/{id}/reviews/{saved.Id}", saved);
             }
             catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { error = ex.Message }); }
