@@ -178,7 +178,7 @@ public class DelayedDeliveryTests : IDisposable
         var deliverAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 30_000;
         var batch = CreateBatchWithDeliverAtHeader(deliverAt);
 
-        var extracted = DelayHeaderParser.ExtractDeliverAtTimestamp(batch);
+        var extracted = DelayHeaderParser.ExtractDeliverAtTimestamp(batch, maxDecompressedBytes: 1024 * 1024);
 
         Assert.NotNull(extracted);
         Assert.Equal(deliverAt, extracted.Value);

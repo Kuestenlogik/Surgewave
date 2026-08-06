@@ -35,7 +35,7 @@ public class TtlTests : IDisposable
         var ttlMs = 60_000L;
         var batch = CreateBatchWithTtlHeader(ttlMs);
 
-        var extracted = TtlHeaderParser.ExtractExpiryTimestamp(batch);
+        var extracted = TtlHeaderParser.ExtractExpiryTimestamp(batch, maxDecompressedBytes: 1024 * 1024);
 
         Assert.NotNull(extracted);
         // Expiry = baseTimestamp + ttlMs; baseTimestamp is set to UtcNow in the builder
@@ -124,7 +124,7 @@ public class TtlTests : IDisposable
         // Here we verify that TtlHeaderParser returns null for a batch without TTL header,
         // which triggers the default TTL path in the handler.
         var batchWithoutTtl = CreateBatchWithOffset(0);
-        var extracted = TtlHeaderParser.ExtractExpiryTimestamp(batchWithoutTtl);
+        var extracted = TtlHeaderParser.ExtractExpiryTimestamp(batchWithoutTtl, maxDecompressedBytes: 1024 * 1024);
         Assert.Null(extracted);
 
         // And verify the TTL index can track the default expiry

@@ -30,7 +30,12 @@ public static class DelayHeaderParser
     /// Scans all records in the batch for surgewave-deliver-at-ms or surgewave-deliver-after-ms headers.
     /// Returns null if no delay headers are found.
     /// </summary>
-    public static long? ExtractDeliverAtTimestamp(ReadOnlySpan<byte> recordBatch)
+    /// <param name="maxDecompressedBytes">
+    /// Ceiling on the decompressed records section. The batch is producer-supplied, so an unbounded
+    /// expansion here is a memory DoS for the cost of a few kilobytes on the wire; a batch that
+    /// exceeds the budget is skipped rather than parsed.
+    /// </param>
+    public static long? ExtractDeliverAtTimestamp(ReadOnlySpan<byte> recordBatch, long maxDecompressedBytes)
     {
         if (recordBatch.Length <= KafkaConstants.RecordBatch.HeaderSize)
             return null;
@@ -39,7 +44,7 @@ public static class DelayHeaderParser
         var compressionType = CompressionCodec.GetCompressionTypeFromBatch(recordBatch);
         if (compressionType != KafkaConstants.Compression.None)
         {
-            return ExtractFromCompressedBatch(recordBatch, compressionType);
+            return ExtractFromCompressedBatch(recordBatch, compressionType, maxDecompressedBytes);
         }
 
         return ExtractFromUncompressedBatch(recordBatch);
@@ -73,39 +78,47 @@ public static class DelayHeaderParser
         return maxDeliverAt;
     }
 
-    private static long? ExtractFromCompressedBatch(ReadOnlySpan<byte> recordBatch, int compressionType)
+    private static long? ExtractFromCompressedBatch(
+        ReadOnlySpan<byte> recordBatch, int compressionType, long maxDecompressedBytes)
     {
-        // Decompress records section and parse
         var recordsCompressed = recordBatch[KafkaConstants.RecordBatch.HeaderSize..];
-        byte[] decompressed;
+
+        // Bounded, and from a span: the old path handed a full copy of the records section to an
+        // unbounded decompressor, once per produce request on a delay-enabled topic.
+        if (!CompressionCodec.TryDecompressBounded(
+                recordsCompressed, compressionType, maxDecompressedBytes,
+                out var decompressed, out var decompressedLength, out var isPooled))
+        {
+            return null; // Too large or undecodable — skip delay parsing
+        }
+
         try
         {
-            decompressed = CompressionCodec.Decompress(recordsCompressed.ToArray(), compressionType);
-        }
-        catch
-        {
-            return null; // Can't decompress — skip delay parsing
-        }
+            var records = decompressed.AsSpan(0, decompressedLength);
+            var recordCount = CompressionCodec.GetRecordCount(recordBatch);
+            var baseTimestamp = BinaryPrimitives.ReadInt64BigEndian(
+                recordBatch.Slice(KafkaConstants.RecordBatch.BaseTimestampOffset, 8));
 
-        var recordCount = CompressionCodec.GetRecordCount(recordBatch);
-        var baseTimestamp = BinaryPrimitives.ReadInt64BigEndian(
-            recordBatch.Slice(KafkaConstants.RecordBatch.BaseTimestampOffset, 8));
+            long? maxDeliverAt = null;
+            var offset = 0;
 
-        long? maxDeliverAt = null;
-        var offset = 0;
-
-        for (var i = 0; i < recordCount && offset < decompressed.Length; i++)
-        {
-            var deliverAt = ParseRecordForDeliverAt(decompressed, ref offset, baseTimestamp);
-            if (deliverAt.HasValue)
+            for (var i = 0; i < recordCount && offset < records.Length; i++)
             {
-                maxDeliverAt = maxDeliverAt.HasValue
-                    ? Math.Max(maxDeliverAt.Value, deliverAt.Value)
-                    : deliverAt.Value;
+                var deliverAt = ParseRecordForDeliverAt(records, ref offset, baseTimestamp);
+                if (deliverAt.HasValue)
+                {
+                    maxDeliverAt = maxDeliverAt.HasValue
+                        ? Math.Max(maxDeliverAt.Value, deliverAt.Value)
+                        : deliverAt.Value;
+                }
             }
-        }
 
-        return maxDeliverAt;
+            return maxDeliverAt;
+        }
+        finally
+        {
+            CompressionCodec.Release(decompressed, isPooled);
+        }
     }
 
     /// <summary>

@@ -20,10 +20,22 @@ public static class RecordBatchBrowser
     private const int HeaderSize = 61;
 
     /// <summary>
+    /// Default ceiling on a decompressed batch. Generous, because these are browsing surfaces and a
+    /// legitimate large batch should still be readable — but finite, because the alternative is
+    /// letting a stored record decide how much memory the broker spends when someone views it.
+    /// </summary>
+    public const long DefaultMaxDecompressedBytes = 64L * 1024 * 1024;
+
+    /// <summary>
     /// Decodes all records of a single v2 record batch, decompressing when needed.
     /// </summary>
     /// <param name="batch">One record batch, starting at the base offset field.</param>
-    public static RecordBatchBrowseResult Parse(ReadOnlySpan<byte> batch)
+    /// <param name="maxDecompressedBytes">
+    /// Ceiling on the decompressed records section; a batch that exceeds it is reported as
+    /// undecodable rather than expanded (#134).
+    /// </param>
+    public static RecordBatchBrowseResult Parse(
+        ReadOnlySpan<byte> batch, long maxDecompressedBytes = DefaultMaxDecompressedBytes)
     {
         if (batch.Length < HeaderSize)
         {
@@ -64,8 +76,17 @@ public static class RecordBatchBrowser
             int length;
             if (CompressionCodec.IsSupported(compressionType))
             {
-                bool isPooled;
-                (buffer, length, isPooled) = CompressionCodec.DecompressPooled(recordsSection, compressionType);
+                // Bounded (#134). These bytes came from a producer and are being expanded on demand
+                // by whoever browses the topic — the message browser, the SQL surface, the sampler.
+                // A batch stored earlier is therefore a bomb that detonates when someone looks at
+                // it, so the ceiling belongs here and not only on the produce path.
+                if (!CompressionCodec.TryDecompressBounded(
+                        recordsSection, compressionType, maxDecompressedBytes,
+                        out buffer, out length, out var isPooled))
+                {
+                    return Undecodable(compressionType, recordCount, baseOffset, firstTimestamp);
+                }
+
                 pooled = isPooled ? buffer : null;
             }
             else
