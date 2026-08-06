@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only supersede PR runs. Pushes to main must never be cancelled — the job
+  # publishes NuGet packages at the end, and a half-finished publish is worse
+  # than a redundant run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -59,7 +66,14 @@ jobs:
         # Dump und beendet den Test-Host. Damit failt CI fail-fast statt
         # bis zum 6h Workflow-Timeout zu blockieren — und der Dump
         # landet als Artefakt fuer Thread-Trace-Analyse.
-        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --settings coverlet.runsettings -m:1 --blame-hang-timeout 300s --blame-hang-dump-type full
+        #
+        # KEIN --settings coverlet.runsettings: die Datei enthaelt nur die
+        # Collector-Konfiguration, und der XPlat-Collector laeuft schon durch
+        # ihre blosse Anwesenheit an — auch ohne --collect. Dieser Job hat die
+        # so erzeugten 45 cobertura-Dateien aber nie ausgewertet; Coverage ist
+        # ausschliesslich Sache von coverage.yml. Gemessener Preis der
+        # Instrumentierung: Test-Step 20:28 mit gegen 12:08 ohne.
+        run: dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal -m:1 --blame-hang-timeout 300s --blame-hang-dump-type full
 
       - name: Upload hang dumps
         if: failure()
