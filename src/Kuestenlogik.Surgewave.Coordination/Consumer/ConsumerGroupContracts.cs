@@ -17,6 +17,15 @@ public enum ConsumerGroupFenceStatus
     FencedEpoch,
     /// <summary>Not a KIP-848 group — offset path only; caller falls through to the classic coordinator (wire UnknownTopicOrPartition sentinel).</summary>
     NotAV2Group,
+    /// <summary>
+    /// The client asked for a server assignor this broker does not have (wire UnsupportedAssignor).
+    /// </summary>
+    /// <remarks>
+    /// Answering instead of substituting: a client that asked for sticky and silently got range
+    /// keeps its own assumptions about which partitions move on a rebalance, and the mismatch shows
+    /// up as unexplained reassignment rather than as an error anyone can act on.
+    /// </remarks>
+    UnsupportedAssignor,
 }
 
 /// <summary>Neutral describe status.</summary>
