@@ -32,6 +32,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### Later
 
+- [#19](https://github.com/Kuestenlogik/Surgewave/issues/19) **Plugin SDK E — Roslyn analysers (SRWV-prefix rules)** `area:plugin-sdk` `track:plugin-distribution`
+- [#23](https://github.com/Kuestenlogik/Surgewave/issues/23) **Operator wizard — Plugin marketplace dependency graph** `area:plugin-sdk`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
