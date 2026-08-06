@@ -26,9 +26,14 @@ public sealed record DlqRecord
     public byte[]? OriginalKey { get; init; }
 
     /// <summary>
-    /// Original message value.
+    /// Original message value, or null when the payload was deliberately not copied.
     /// </summary>
-    public required byte[] OriginalValue { get; init; }
+    /// <remarks>
+    /// Callers may always supply it; whether it is PERSISTED is the router's decision, governed by
+    /// <c>DlqConfig.CopyRecordValue</c>. Keeping the policy in one place means a caller cannot leak
+    /// a payload into the DLQ topic by accident.
+    /// </remarks>
+    public byte[]? OriginalValue { get; init; }
 
     /// <summary>
     /// Original message timestamp.

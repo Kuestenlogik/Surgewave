@@ -40,8 +40,9 @@ public sealed class DlqRouter : IDlqRouter
             // Ensure DLQ topic exists (cached check)
             await EnsureDlqTopicExistsAsync(dlqTopic, cancellationToken);
 
-            // Serialize and produce
-            var serialized = DlqRecordSerializer.Serialize(record);
+            // Serialize and produce. The payload-copy decision happens HERE, not at the call site:
+            // a caller that hands us the value must not thereby cause it to be stored.
+            var serialized = DlqRecordSerializer.Serialize(ApplyCopyPolicy(record));
             await _producer.ProduceAsync(dlqTopic, record.OriginalKey, serialized, cancellationToken);
 
             _logger?.LogWarning(
@@ -79,11 +80,37 @@ public sealed class DlqRouter : IDlqRouter
         return successCount;
     }
 
+    /// <summary>
+    /// Strips what must not be copied. The key is deliberately kept: it is the routing and
+    /// compaction key, and a DLQ record that cannot be correlated back to its subject is of little
+    /// use. Value and headers are the parts that carry payload.
+    /// </summary>
+    private DlqRecord ApplyCopyPolicy(DlqRecord record)
+    {
+        if (_config.CopyRecordValue)
+            return record;
+
+        if (record.OriginalValue is null && record.OriginalHeaders is null)
+            return record;
+
+        return record with { OriginalValue = null, OriginalHeaders = null };
+    }
+
     private async Task EnsureDlqTopicExistsAsync(string dlqTopic, CancellationToken cancellationToken)
     {
         // Fast path: already ensured
         if (_ensuredTopics.ContainsKey(dlqTopic))
         {
+            return;
+        }
+
+        if (!_config.AutoCreateTopics)
+        {
+            // Creating a topic nobody declared is the operator's call, not ours. Producing into a
+            // topic that does not exist fails loudly, which is the intended outcome.
+            _logger?.LogDebug(
+                "DLQ topic {DlqTopic} not created: automatic creation is disabled", dlqTopic);
+            _ensuredTopics[dlqTopic] = true;
             return;
         }
 

@@ -26,7 +26,9 @@ public static class DlqRecordSerializer
             OriginalPartition = record.OriginalPartition,
             OriginalOffset = record.OriginalOffset,
             OriginalKey = record.OriginalKey != null ? Convert.ToBase64String(record.OriginalKey) : null,
-            OriginalValue = Convert.ToBase64String(record.OriginalValue),
+            // Absent when the payload was deliberately not copied — the field is simply omitted
+            // rather than encoded as an empty string, so a consumer can tell "not kept" from "empty".
+            OriginalValue = record.OriginalValue != null ? Convert.ToBase64String(record.OriginalValue) : null,
             OriginalTimestamp = record.OriginalTimestamp,
             OriginalHeaders = record.OriginalHeaders?.ToDictionary(
                 kvp => kvp.Key,
@@ -59,7 +61,7 @@ public static class DlqRecordSerializer
             OriginalPartition = dto.OriginalPartition,
             OriginalOffset = dto.OriginalOffset,
             OriginalKey = dto.OriginalKey != null ? Convert.FromBase64String(dto.OriginalKey) : null,
-            OriginalValue = Convert.FromBase64String(dto.OriginalValue),
+            OriginalValue = dto.OriginalValue != null ? Convert.FromBase64String(dto.OriginalValue) : null,
             OriginalTimestamp = dto.OriginalTimestamp,
             OriginalHeaders = dto.OriginalHeaders?.ToDictionary(
                 kvp => kvp.Key,
@@ -85,7 +87,8 @@ public static class DlqRecordSerializer
         public required int OriginalPartition { get; set; }
         public required long OriginalOffset { get; set; }
         public string? OriginalKey { get; set; }
-        public required string OriginalValue { get; set; }
+        /// <summary>Null when the payload was deliberately not copied (DlqConfig.CopyRecordValue).</summary>
+        public string? OriginalValue { get; set; }
         public DateTimeOffset OriginalTimestamp { get; set; }
         public Dictionary<string, string>? OriginalHeaders { get; set; }
         public required string ExceptionType { get; set; }

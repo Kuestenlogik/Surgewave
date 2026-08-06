@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
+using Kuestenlogik.Surgewave.Core.Configuration;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
@@ -147,38 +148,59 @@ public sealed class DlqManager : IDisposable
     {
         var dlqTopicName = _config.GetDlqTopicName(topic);
 
-        // Ensure DLQ topic exists (auto-create)
         var dlqMetadata = _logManager.GetTopicMetadata(dlqTopicName);
         if (dlqMetadata == null)
         {
+            if (!_config.AutoCreateTopics)
+            {
+                // Refusing to route is the lesser evil: creating a topic nobody declared leaves a
+                // cluster with an unowned topic on defaults nobody chose. Loud, not silent.
+                _logger.LogError(
+                    "Cannot route {Topic}:{Partition}:{Offset} to DLQ: topic {DlqTopic} does not exist " +
+                    "and automatic creation is disabled",
+                    topic, partition, offset, dlqTopicName);
+                return;
+            }
+
             try
             {
                 var config = new Dictionary<string, string>
                 {
                     ["cleanup.policy"] = "delete",
-                    ["retention.ms"] = (7 * 24 * 60 * 60 * 1000L).ToString()
+                    ["retention.ms"] = _config.RetentionMs.ToString()
                 };
 
                 await _logManager.CreateTopicAsync(
                     dlqTopicName,
-                    partitionCount: 1,
+                    partitionCount: _config.DlqPartitionCount,
                     replicationFactor: 1,
                     config: config,
                     cancellationToken);
 
                 _logger.LogInformation("Auto-created DLQ topic: {DlqTopic}", dlqTopicName);
+                dlqMetadata = _logManager.GetTopicMetadata(dlqTopicName);
             }
             catch (InvalidOperationException)
             {
                 // Topic already exists (race condition) -- that's fine
+                dlqMetadata = _logManager.GetTopicMetadata(dlqTopicName);
             }
         }
+
+        // Bound the read by what the DESTINATION accepts, not by a constant: the record length is
+        // producer-controlled, and reading more than the DLQ topic could ever store is work thrown
+        // away at best.
+        var maxRecordBytes = dlqMetadata is null
+            ? _config.MaxRecordBytes
+            : (int)Math.Min(
+                ConfigParser.GetMaxMessageBytes(dlqMetadata.Config, _config.MaxRecordBytes),
+                int.MaxValue);
 
         // Read original message data
         var tp = new TopicPartition { Topic = topic, Partition = partition };
         try
         {
-            var batches = await _logManager.ReadBatchesAsync(tp, offset, maxBytes: 1024 * 1024, cancellationToken);
+            var batches = await _logManager.ReadBatchesAsync(tp, offset, maxRecordBytes, cancellationToken);
             if (batches.Count > 0)
             {
                 var dlqTp = new TopicPartition { Topic = dlqTopicName, Partition = 0 };

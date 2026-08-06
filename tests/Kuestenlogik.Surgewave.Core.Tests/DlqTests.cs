@@ -20,10 +20,14 @@ public sealed class DlqTests
         Assert.True(config.Enabled);
         Assert.Equal(3, config.MaxRetries);
         Assert.Equal(1000, config.RetryBackoffMs);
-        Assert.Equal(".DLQ", config.TopicSuffix);
         Assert.True(config.IncludeStackTrace);
         Assert.Equal(1, config.DlqPartitionCount);
         Assert.Equal(604800000L, config.RetentionMs); // 7 days
+
+        // #126 — the naming default moved from a ".DLQ" suffix to a "dlq." prefix, so the DLQ
+        // topics form a namespace one ACL can cover. The suffix stays available and unset.
+        Assert.Equal("dlq.", config.TopicPrefix);
+        Assert.Null(config.TopicSuffix);
     }
 
     [Theory]
@@ -268,6 +272,9 @@ public sealed class DlqTests
         var bytes = DlqRecordSerializer.Serialize(record);
         var deserialized = DlqRecordSerializer.Deserialize(bytes);
 
+        // Empty is not the same as absent (#126): a zero-length payload round-trips as a zero-length
+        // payload, while a payload that was deliberately not copied comes back null.
+        Assert.NotNull(deserialized.OriginalValue);
         Assert.Empty(deserialized.OriginalValue);
     }
 
@@ -301,7 +308,7 @@ public sealed class DlqTests
 
         Assert.True(result);
         Assert.Single(producer.ProducedMessages);
-        Assert.Equal("orders.DLQ", producer.ProducedMessages[0].Topic);
+        Assert.Equal("dlq.orders", producer.ProducedMessages[0].Topic);
     }
 
     [Fact]
@@ -327,7 +334,8 @@ public sealed class DlqTests
     [Fact]
     public async Task DlqRouter_EnsuresTopicExistsOnce()
     {
-        var config = new DlqConfig();
+        // Auto-creation is opt-in since #126; with it on, the ensure is still cached per topic.
+        var config = new DlqConfig { AutoCreateTopics = true };
         var producer = new FakeDlqProducer();
         var router = new DlqRouter(config, producer);
 
@@ -337,7 +345,7 @@ public sealed class DlqTests
 
         // EnsureTopicExists should only be called once (cached)
         var call = Assert.Single(producer.EnsureTopicCalls);
-        Assert.Equal("orders.DLQ", call.Topic);
+        Assert.Equal("dlq.orders", call.Topic);
     }
 
     [Fact]
