@@ -122,7 +122,25 @@ jobs:
             exit 1
           fi
 
-          comm -13 lane-parallel.txt lane-all.txt > lane-serial.txt
+          comm -13 lane-parallel.txt lane-all.txt > lane-serial-all.txt
+
+          # IntegrationTests runs in the integration-tests job on its own runner.
+          # Measured at ~10 min it is more than half the serial lane, and a
+          # separate VM takes it off this job's critical path entirely.
+          #
+          # Matched as a full line against the exact project path, NOT by name:
+          # a substring or FullyQualifiedName filter would also swallow
+          # Cli.IntegrationTests, RaftIntegrationTests and
+          # AmqpQueueViewIntegrationTests, which is the mistake coverage.yml
+          # makes today.
+          INTEGRATION_PROJECT="tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj"
+          if ! grep -qxF "$INTEGRATION_PROJECT" lane-serial-all.txt; then
+            echo "::error::Expected $INTEGRATION_PROJECT in the serial lane but it is not there."
+            echo "::error::Most likely it was renamed or moved. Update the path here AND in the integration-tests job — otherwise it silently runs twice, or not at all."
+            exit 1
+          fi
+          grep -vxF "$INTEGRATION_PROJECT" lane-serial-all.txt > lane-serial.txt
+          echo "moved to its own job: $INTEGRATION_PROJECT"
 
           gen_slnx() {
             { echo '<Solution>'
@@ -186,3 +204,66 @@ jobs:
       - name: Publish to GitHub Packages
         if: github.event_name == 'push'
         run: dotnet nuget push "artifacts/packages/*.nupkg" --source "https://nuget.pkg.github.com/Kuestenlogik/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+
+  # IntegrationTests on its own runner. Deliberately NOT `needs: build`: it
+  # builds for itself and starts at t=0, so it runs alongside the build job
+  # instead of queueing behind it.
+  #
+  # Sharing the build output instead was measured and rejected: a single test
+  # output directory is ~350 MB (of which ~275 MB is runtimes/ — the native
+  # RocksDB/SQLite/Wasmtime binaries copied into every test project), so the
+  # upload/download would cost more minutes than the split saves, and the
+  # consumer could only start after the producer finished building anyway.
+  # Building the closure of one test project here is ~2:30 against ~10 min of
+  # test time. The cost is runner minutes, which are free on a public repo.
+  #
+  # Its own VM also means no port or CPU interference with the two lanes — the
+  # whole reason those assemblies are serial in the first place.
+  integration-tests:
+    name: Integration tests (own runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.*.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # Only this project's dependency closure — not CLI, Control, Marketplace
+      # or the samples, which the solution-wide build in the other job covers.
+      # Restore and build are separate steps mirroring the build job, because
+      # --configfile is a restore option and dotnet build does not take it.
+      - name: Restore
+        run: dotnet restore tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj --configfile nuget.config
+
+      - name: Build
+        run: dotnet build tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj -c Release --no-restore
+
+      # -m:1 and the 300 s/full blame settings are unchanged from the serial
+      # lane: this assembly brings up real multi-broker topology on random
+      # ports, and a full memory dump is the diagnostic that matters when it
+      # hangs.
+      - name: Test
+        run: |
+          dotnet test tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
+            -c Release --no-build -v normal -m:1 \
+            --blame-hang-timeout 300s --blame-hang-dump-type full
+
+      - name: Upload hang dumps
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-integration-${{ github.run_id }}
+          path: |
+            **/TestResults/**/*.dmp
+            **/TestResults/**/Sequence*
+          if-no-files-found: ignore
+          retention-days: 7
