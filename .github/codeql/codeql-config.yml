@@ -1,0 +1,18 @@
+# CodeQL configuration for the advanced setup in .github/workflows/codeql.yml.
+#
+# Keyed by language on purpose: the matrix also analyses javascript-typescript
+# and actions, and this pack extends codeql/csharp-all, which is meaningless
+# there. The `packs` *input* on the init action would apply to every matrix leg
+# and is documented as single-language only — hence the config file.
+packs:
+  csharp:
+    # Declares Kuestenlogik.Surgewave.Core.Util.LogSanitizer.Sanitize as a
+    # barrier for the log-injection taint kind, so cs/log-forging stops
+    # reporting call sites that route the value through it.
+    #
+    # Source lives in .github/codeql/models/ in this repo; the published copy is
+    # what the analysis consumes, because the action resolves packs by name only
+    # (scope/name[@version]) and has no local-path form. Re-publish with
+    # `codeql pack publish` from that directory after editing the model, and
+    # bump the version in its qlpack.yml.
+    - kuestenlogik/surgewave-log-sanitizer

@@ -1,0 +1,7 @@
+name: kuestenlogik/surgewave-log-sanitizer
+version: 0.0.1
+library: true
+extensionTargets:
+  codeql/csharp-all: '*'
+dataExtensions:
+  - '**/*.model.yml'
