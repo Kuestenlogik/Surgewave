@@ -1,0 +1,24 @@
+# Declares Kuestenlogik.Surgewave.Core.Util.LogSanitizer.Sanitize as a barrier
+# for the log-injection taint kind (CWE-117, query cs/log-forging).
+#
+# Why this is needed at all: Sanitize has an allocation-free fast path that
+# returns the *original* reference when the input contains nothing to replace
+# (LogSanitizer.cs, "if (i == input.Length) return input;"). CodeQL follows that
+# return and propagates taint — correctly, as far as dataflow can see. It cannot
+# know that the branch is only taken when the string provably holds no control
+# character. Removing the fast path would silence the scanner at the cost of an
+# allocation on every logged value, which is the wrong trade on a hot path.
+#
+# Verified with CodeQL 2.26.1 against a minimal reproducer: with the fast path
+# and without this model, both the raw and the sanitised log call are flagged;
+# with this model, only the raw one is. The barrier is precise, not a blanket
+# suppression.
+#
+# Columns: namespace, type, subtypes, name, signature, ext, output, kind, provenance
+extensions:
+  - addsTo:
+      pack: codeql/csharp-all
+      extensible: barrierModel
+    data:
+      - ["Kuestenlogik.Surgewave.Core.Util", "LogSanitizer", false, "Sanitize", "(System.String)", "", "ReturnValue", "log-injection", "manual"]
+      - ["Kuestenlogik.Surgewave.Core.Util", "LogSanitizer", false, "Sanitize", "(System.Object)", "", "ReturnValue", "log-injection", "manual"]
