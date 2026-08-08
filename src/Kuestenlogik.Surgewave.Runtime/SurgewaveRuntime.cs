@@ -496,7 +496,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // #122 — acks=all is refused rather than silently downgraded once a partition is short of
         // in-sync replicas. Wired here because the gate needs the cluster state, which is built
         // after the request handlers.
-        _dataApiHandler?.SetCommitGate(new ReplicaCommitGate(_clusterState));
+        _dataApiHandler?.SetCommitGate(new ReplicaCommitGate(_clusterState, _replicaManager));
 
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);

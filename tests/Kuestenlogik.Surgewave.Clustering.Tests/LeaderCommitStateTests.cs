@@ -108,6 +108,58 @@ public sealed class LeaderCommitStateTests
         Assert.Contains(Follower, state.GetIsrSnapshot(tp));
     }
 
+    [Fact]
+    public async Task Gate_LeaderIsTheOnlyInSyncReplica_DoesNotBlock()
+    {
+        // Nobody to wait for: the leader's own append IS the commit. Waiting here would hang until
+        // the producer's timeout on a watermark that nothing else can advance.
+        var (rm, lm, state) = NewLeader(out var tp);
+        state.UpdateIsr(tp, [Leader]);
+        var gate = new ReplicaCommitGate(state, rm);
+
+        await lm.AppendBatchAsync(tp, CreateValidBatch(0, 5), BatchCrcMode.Validate, CancellationToken.None);
+
+        var committed = await gate.WaitForDurableCommitAsync(
+            tp, committedThroughOffset: 5, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        Assert.True(committed);
+    }
+
+    [Fact]
+    public async Task Gate_FollowerCatchesUp_ReleasesTheProducer()
+    {
+        var (rm, lm, state) = NewLeader(out var tp);
+        var gate = new ReplicaCommitGate(state, rm);
+
+        await lm.AppendBatchAsync(tp, CreateValidBatch(0, 5), BatchCrcMode.Validate, CancellationToken.None);
+
+        var waiting = gate.WaitForDurableCommitAsync(
+            tp, committedThroughOffset: 5, TimeSpan.FromSeconds(5), CancellationToken.None).AsTask();
+
+        // The whole point: the batch is on the LEADER, and the producer is still waiting.
+        Assert.False(waiting.IsCompleted);
+
+        rm.UpdateFollowerFetchPosition(tp, Follower, fetchOffset: 5);
+
+        Assert.True(await waiting);
+    }
+
+    [Fact]
+    public async Task Gate_FollowerNeverAcks_TimesOutInsteadOfClaimingDurability()
+    {
+        var (rm, lm, state) = NewLeader(out var tp);
+        var gate = new ReplicaCommitGate(state, rm);
+
+        await lm.AppendBatchAsync(tp, CreateValidBatch(0, 5), BatchCrcMode.Validate, CancellationToken.None);
+
+        // The follower keeps its ISR seat but never fetches — admission would still say yes, which
+        // is exactly why admission alone is not durability.
+        var committed = await gate.WaitForDurableCommitAsync(
+            tp, committedThroughOffset: 5, TimeSpan.FromMilliseconds(200), CancellationToken.None);
+
+        Assert.False(committed);
+    }
+
     private static (ReplicaManager Rm, LogManager Lm, ClusterState State) NewLeader(out TopicPartition tp)
     {
         var config = new ClusteringConfig { BrokerId = Leader, Host = "localhost", Port = 9092 };
