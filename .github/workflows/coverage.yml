@@ -1,10 +1,41 @@
 name: Code Coverage
 
 on:
+  # The two path lists are duplicated on purpose: the Actions workflow parser
+  # does not support YAML anchors/aliases, so a &anchor / *alias pair here would
+  # be rejected. Keep them in sync by hand.
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'samples/**'
+      - '**/*.csproj'
+      - 'Directory.*.props'
+      - 'Directory.*.targets'
+      - 'Kuestenlogik.Surgewave.slnx'
+      - 'coverlet.runsettings'
+      - '.github/workflows/coverage.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'samples/**'
+      - '**/*.csproj'
+      - 'Directory.*.props'
+      - 'Directory.*.targets'
+      - 'Kuestenlogik.Surgewave.slnx'
+      - 'coverlet.runsettings'
+      - '.github/workflows/coverage.yml'
+  workflow_dispatch:
+
+# Safe to filter by path here: main carries no branch protection, so this is not
+# a required status check. On a protected branch a paths filter would leave the
+# check pending — not skipped — and block the merge.
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -45,6 +76,44 @@ jobs:
       - name: Build
         run: dotnet build --no-restore -c Release
 
+      # IntegrationTests is excluded from coverage: it brings up real
+      # multi-broker topology, and under instrumentation it is both the slowest
+      # assembly by far and the most timing-sensitive.
+      #
+      # Excluded by exact project path via a generated solution, NOT by test
+      # name. The previous `--filter "FullyQualifiedName!~IntegrationTests"`
+      # matched on the fully-qualified name, so it also silently excluded
+      # Cli.IntegrationTests, RaftIntegrationTests and
+      # AmqpQueueViewIntegrationTests — three assemblies that were missing from
+      # the reported figure without anyone asking for that.
+      #
+      # Expect the reported coverage to MOVE when this lands: those three are
+      # measured again for the first time. The direction should be upward (more
+      # tests, same production code), but treat the first post-merge number as
+      # the new baseline rather than comparing it to older runs.
+      - name: Compute coverage solution
+        run: |
+          set -euo pipefail
+          EXCLUDE="tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj"
+
+          grep -oE 'Path="[^"]*Tests\.csproj"' Kuestenlogik.Surgewave.slnx \
+            | sed -E 's/^Path="//; s/"$//' | sort -u > coverage-all.txt
+
+          if ! grep -qxF "$EXCLUDE" coverage-all.txt; then
+            echo "::error::$EXCLUDE is not in the solution — renamed or moved?"
+            echo "::error::Fix the path here, otherwise IntegrationTests silently runs under coverage again."
+            exit 1
+          fi
+          grep -vxF "$EXCLUDE" coverage-all.txt > coverage-projects.txt
+
+          { echo '<Solution>'
+            while read -r p; do printf '  <Project Path="%s" />\n' "$p"; done < coverage-projects.txt
+            echo '</Solution>'
+          } > coverage.slnx
+
+          echo "assemblies under coverage: $(wc -l < coverage-projects.txt) of $(wc -l < coverage-all.txt)"
+          echo "excluded: $EXCLUDE"
+
       - name: Run tests with coverage
         # -m:1: Test-Assemblies SERIELL, konsistent mit ci.yml/release.yml.
         # Hinweis: Die 0%-Coverage von Core/Clustering/Protocol.Kafka lag NICHT an
@@ -55,11 +124,10 @@ jobs:
         # vstest.datacollector.*-Logs pruefen (Coverlet loggt Instrumentierungs-
         # Fehler NUR dorthin, nie auf die Konsole).
         run: |
-          dotnet test Kuestenlogik.Surgewave.slnx -c Release --no-build -m:1 \
+          dotnet test coverage.slnx -c Release --no-build -m:1 \
             --collect:"XPlat Code Coverage" \
             --results-directory artifacts/coverage/raw \
             --settings coverlet.runsettings \
-            --filter "FullyQualifiedName!~IntegrationTests" \
             --verbosity minimal
 
       - name: Generate coverage report
