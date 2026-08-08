@@ -23,6 +23,10 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
 
     private readonly ConcurrentDictionary<int, LeaderConnection> _leaderConnections = new();
     private readonly ConcurrentDictionary<TopicPartition, FetchState> _fetchStates = new();
+    private readonly ConcurrentDictionary<int, LeaderFetchGate> _leaderGates = new();
+
+    /// <summary>Upper bound on the per-leader backoff, so a peer that comes back is picked up promptly.</summary>
+    private static readonly TimeSpan MaxLeaderBackoff = TimeSpan.FromSeconds(30);
 
     private CancellationTokenSource? _cts;
     private Task? _fetchLoopTask;
@@ -114,12 +118,29 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
                     .GroupBy(s => s.LeaderId)
                     .ToList();
 
-                // Fetch from each leader in parallel
-                var fetchTasks = partitionsByLeader
-                    .Select(g => FetchFromLeaderAsync(g.Key, g.ToList(), ct))
-                    .ToList();
+                // Each leader is dispatched on its own schedule and NOT awaited here. The previous
+                // shape awaited Task.WhenAll over every leader, which made the round only as fast as
+                // its slowest peer: a dead leader burns three connection attempts with backoff
+                // inside that await, and every healthy leader on this broker stopped replicating for
+                // the duration. Replication lag from an unrelated partition is not something a
+                // follower should inherit.
+                //
+                // Concurrency stays bounded by the per-leader gate rather than by the join: at most
+                // one fetch is in flight per leader, and a failing leader is backed off so it stops
+                // paying the connection cost every 500 ms.
+                var now = DateTimeOffset.UtcNow;
+                foreach (var group in partitionsByLeader)
+                {
+                    var gate = _leaderGates.GetOrAdd(group.Key, static _ => new LeaderFetchGate());
 
-                await Task.WhenAll(fetchTasks);
+                    if (now < gate.NextAttemptUtc)
+                        continue;
+
+                    if (!gate.TryEnter())
+                        continue;
+
+                    _ = FetchFromLeaderGuardedAsync(group.Key, group.ToList(), gate, ct);
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -133,13 +154,41 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
         }
     }
 
-    private async Task FetchFromLeaderAsync(int leaderId, List<FetchState> partitions, CancellationToken ct)
+    /// <summary>
+    /// Runs one leader's fetch, then releases its gate and records whether it worked.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately fire-and-forget from the loop's point of view — see the comment there. It cannot
+    /// leak an exception, because <see cref="FetchFromLeaderAsync"/> swallows everything and reports
+    /// through its return value instead.
+    /// </remarks>
+    private async Task FetchFromLeaderGuardedAsync(
+        int leaderId, List<FetchState> partitions, LeaderFetchGate gate, CancellationToken ct)
+    {
+        try
+        {
+            if (await FetchFromLeaderAsync(leaderId, partitions, ct).ConfigureAwait(false))
+            {
+                gate.RecordSuccess();
+                return;
+            }
+
+            gate.RecordFailure(FetchInterval, MaxLeaderBackoff);
+        }
+        finally
+        {
+            gate.Exit();
+        }
+    }
+
+    /// <summary>Returns false when this leader could not be reached or the fetch threw.</summary>
+    private async Task<bool> FetchFromLeaderAsync(int leaderId, List<FetchState> partitions, CancellationToken ct)
     {
         try
         {
             var connection = await GetOrCreateConnectionAsync(leaderId, ct);
             if (connection == null)
-                return;
+                return false;
 
             // Build fetch request
             var fetchRequest = BuildFetchRequest(partitions);
@@ -150,6 +199,7 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
 
             // Process response
             await ProcessFetchResponseAsync(partitions, response, ct);
+            return true;
         }
         catch (Exception ex)
         {
@@ -160,6 +210,45 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
             {
                 await conn.DisposeAsync();
             }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Per-leader admission and backoff for the fetch loop.
+    /// </summary>
+    /// <remarks>
+    /// Two jobs. <see cref="TryEnter"/> keeps at most one fetch in flight per leader, which is what
+    /// lets the loop dispatch without awaiting — a slow peer occupies its own gate instead of the
+    /// whole round. The backoff then stops a peer that is simply gone from paying three connection
+    /// attempts every fetch interval.
+    /// </remarks>
+    internal sealed class LeaderFetchGate
+    {
+        private int _inFlight;
+        private int _consecutiveFailures;
+
+        public DateTimeOffset NextAttemptUtc { get; private set; } = DateTimeOffset.MinValue;
+
+        public bool TryEnter() => Interlocked.CompareExchange(ref _inFlight, 1, 0) == 0;
+
+        public void Exit() => Volatile.Write(ref _inFlight, 0);
+
+        public void RecordSuccess()
+        {
+            _consecutiveFailures = 0;
+            NextAttemptUtc = DateTimeOffset.MinValue;
+        }
+
+        public void RecordFailure(TimeSpan fetchInterval, TimeSpan maxBackoff)
+        {
+            // Capped at 2^6 so the shift cannot overflow the multiplier on a long-dead peer.
+            var failures = Math.Min(++_consecutiveFailures, 6);
+            var delayMs = Math.Min(
+                fetchInterval.TotalMilliseconds * (1 << failures),
+                maxBackoff.TotalMilliseconds);
+            NextAttemptUtc = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(delayMs);
         }
     }
 
