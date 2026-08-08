@@ -560,6 +560,22 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Drops a registration that will never be awaited because the producer's timeout elapsed.
+    /// </summary>
+    /// <remarks>
+    /// Without this the entry would sit in the partition's table until the high watermark happened
+    /// to pass it — which, for the very case that produces timeouts (followers gone), is never. The
+    /// waiter is abandoned, so this is purely about not accumulating dead registrations.
+    /// </remarks>
+    public void CancelPendingAck(TopicPartition tp, long offset, TaskCompletionSource<bool> tcs)
+    {
+        if (_pendingAcks.TryGetValue(tp, out var pending))
+        {
+            pending.Remove(offset, tcs);
+        }
+    }
+
+    /// <summary>
     /// Complete pending acks up to the given offset.
     /// </summary>
     private void CompletePendingAcks(TopicPartition tp, long upToOffset)
@@ -716,6 +732,23 @@ internal sealed class PendingProduceAcks
                 _pending[offset] = list;
             }
             list.Add(tcs);
+        }
+    }
+
+    public void Remove(long offset, TaskCompletionSource<bool> tcs)
+    {
+        lock (_lock)
+        {
+            if (!_pending.TryGetValue(offset, out var list))
+            {
+                return;
+            }
+
+            list.Remove(tcs);
+            if (list.Count == 0)
+            {
+                _pending.Remove(offset);
+            }
         }
     }
 

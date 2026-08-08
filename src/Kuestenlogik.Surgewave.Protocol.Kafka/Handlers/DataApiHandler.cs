@@ -217,6 +217,12 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
         var commitGate = acks == -1 ? _commitGate : null;
 
+        // Collected across ALL topics and awaited once at the end, not per partition inside the
+        // loop. Awaiting inline would serialise replication latency over the partitions of a
+        // request, turning a 5 ms round trip into 5 ms x partition count. Stays null for
+        // acks=0/1, so those pay one null check.
+        List<PendingDurableCommit>? durabilityWaits = null;
+
         var responses = new List<ProduceResponse.TopicProduceResponse>(request.TopicData.Count);
 
         // Calculate total bytes to produce for quota check (inline loop avoids LINQ closure allocations)
@@ -503,6 +509,20 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         LogAppendTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                     });
 
+                    // acks=all: the record is in the LEADER's log, which is not what the producer
+                    // asked for. Note where it has to get to, and hold the success answer until the
+                    // in-sync replicas have it (or the request times out). The offset is exclusive
+                    // — base + count — because the high watermark counts the next offset to commit.
+                    if (commitGate is not null)
+                    {
+                        durabilityWaits ??= [];
+                        durabilityWaits.Add(new PendingDurableCommit(
+                            partitionResponses,
+                            partitionResponses.Count - 1,
+                            topicPartition,
+                            baseOffset + produceRecordCount));
+                    }
+
                     // Surface the produce event on the observability
                     // bus. The HasSubscribers gate is critical — without
                     // it we would allocate a SurgewaveBrokerEvent for every
@@ -584,6 +604,12 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             });
         }
 
+        if (durabilityWaits is not null)
+        {
+            await AwaitDurableCommitsAsync(durabilityWaits, commitGate!, request.TimeoutMs, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // Record produced bytes for quota tracking (after successful produce)
         _quotaManager.RecordProducedBytes(clientId, totalBytes);
 
@@ -595,6 +621,77 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             ThrottleTimeMs = throttleTimeMs
         };
     }
+
+    /// <summary>
+    /// A write that is in the leader's log and still owes the producer proof that the in-sync
+    /// replicas have it. Holds the response slot so the verdict can be written back in place —
+    /// <c>TopicProduceResponse.PartitionResponses</c> keeps the very list instance built during the
+    /// partition loop, so patching the entry patches the response.
+    /// </summary>
+    private readonly record struct PendingDurableCommit(
+        List<ProduceResponse.PartitionProduceResponse> Bucket,
+        int Index,
+        TopicPartition Partition,
+        long CommittedThroughOffset);
+
+    /// <summary>
+    /// Waits for every acks=all write of one request concurrently, and downgrades the ones that did
+    /// not replicate in time to <see cref="ErrorCode.NotEnoughReplicasAfterAppend"/>.
+    /// </summary>
+    /// <remarks>
+    /// That error code is the honest one: unlike <see cref="ErrorCode.NotEnoughReplicas"/>, which
+    /// means the write never happened, it tells the producer the append DID happen but replication
+    /// was not confirmed — so a retry may duplicate unless the producer is idempotent. Reporting
+    /// success here instead is the bug this method exists to fix.
+    /// </remarks>
+    private static async Task AwaitDurableCommitsAsync(
+        List<PendingDurableCommit> waits,
+        IPartitionCommitGate commitGate,
+        int requestTimeoutMs,
+        CancellationToken cancellationToken)
+    {
+        // A producer may send timeout 0 ("no bound"); clamp to something finite so a dead follower
+        // cannot pin the connection's request pipeline indefinitely.
+        var timeout = requestTimeoutMs > 0
+            ? TimeSpan.FromMilliseconds(requestTimeoutMs)
+            : DefaultDurabilityWaitTimeout;
+
+        var tasks = new Task<bool>[waits.Count];
+        for (var i = 0; i < waits.Count; i++)
+        {
+            var w = waits[i];
+            tasks[i] = commitGate
+                .WaitForDurableCommitAsync(w.Partition, w.CommittedThroughOffset, timeout, cancellationToken)
+                .AsTask();
+        }
+
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        for (var i = 0; i < waits.Count; i++)
+        {
+            if (results[i])
+                continue;
+
+            var w = waits[i];
+            var original = w.Bucket[w.Index];
+
+            // PartitionProduceResponse is a class, not a record, so this is a rebuild rather than a
+            // `with`. BaseOffset goes to -1: the batch is in the leader's log at the offset we were
+            // about to report, but telling the producer an offset alongside an error would invite
+            // it to treat the write as placed.
+            w.Bucket[w.Index] = new ProduceResponse.PartitionProduceResponse
+            {
+                Index = original.Index,
+                ErrorCode = ErrorCode.NotEnoughReplicasAfterAppend,
+                BaseOffset = -1,
+                LogAppendTimeMs = original.LogAppendTimeMs,
+                LogStartOffset = original.LogStartOffset,
+                CurrentLeader = original.CurrentLeader
+            };
+        }
+    }
+
+    private static readonly TimeSpan DefaultDurabilityWaitTimeout = TimeSpan.FromSeconds(30);
 
     private async Task<FetchResponse> HandleFetchAsync(FetchRequest request, ConnectionState connectionState, CancellationToken cancellationToken)
     {
