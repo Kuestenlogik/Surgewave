@@ -177,6 +177,64 @@ public sealed class ProduceDurabilityAdmissionTests : IDisposable
         Assert.Equal(ErrorCode.None, FirstPartition(response).ErrorCode);
     }
 
+    [Fact]
+    public async Task AcksAll_AdmittedButNeverReplicated_IsNotReportedAsSuccess()
+    {
+        // The core of #122. Admission passing only means enough replicas were in sync when we
+        // looked; it says nothing about the batch having reached them. Before this, the producer
+        // was told None the moment the LEADER's append returned.
+        _gate.Admit = true;
+        _gate.Commit = false;
+
+        var response = await ProduceAsync(acks: -1);
+
+        Assert.Equal(ErrorCode.NotEnoughReplicasAfterAppend, FirstPartition(response).ErrorCode);
+        Assert.Equal(-1, FirstPartition(response).BaseOffset);
+
+        // ...AfterAppend, not NotEnoughReplicas: the write DID happen. Saying otherwise would
+        // invite a non-idempotent producer to retry into a duplicate.
+        Assert.NotNull(_logManager.GetLog(new TopicPartition { Topic = Topic, Partition = 0 }));
+    }
+
+    [Fact]
+    public async Task AcksAll_WaitsForTheOffsetPastTheBatch_NotItsLastRecord()
+    {
+        // The off-by-one that would quietly halve the guarantee. The high watermark counts the next
+        // offset to be committed, so a single-record batch at base offset 0 is replicated once the
+        // watermark reaches 1. Waiting for 0 would release the producer while that one record is
+        // still only on the leader — precisely the bug, one record narrower.
+        var response = await ProduceAsync(acks: -1);
+
+        Assert.Equal(ErrorCode.None, FirstPartition(response).ErrorCode);
+        Assert.Equal(1, _gate.WaitCalls);
+        Assert.Equal(1, _gate.LastWaitOffset);
+    }
+
+    [Theory]
+    [InlineData((short)0)]
+    [InlineData((short)1)]
+    public async Task WeakerAcks_DoNotWaitForReplication(short acks)
+    {
+        // The hot path stays untouched: a producer that asked for leader-only durability must not
+        // pay a replication wait, and the gate is not consulted at all.
+        _gate.Commit = false;
+
+        var response = await ProduceAsync(acks);
+
+        Assert.Equal(ErrorCode.None, FirstPartition(response).ErrorCode);
+        Assert.Equal(0, _gate.WaitCalls);
+    }
+
+    [Fact]
+    public async Task AcksAll_BoundsTheWaitByTheRequestTimeout()
+    {
+        // The producer's own timeout governs how long it is willing to wait, rather than some
+        // broker-side constant it cannot see.
+        await ProduceAsync(acks: -1);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(30_000), _gate.LastWaitTimeout);
+    }
+
     private Task<ProduceResponse> ProduceAsync(
         short acks, long producerId = -1, int baseSequence = -1)
         => ProduceRawAsync(acks, CreateBatch(producerId, baseSequence));
@@ -245,10 +303,27 @@ public sealed class ProduceDurabilityAdmissionTests : IDisposable
         public bool Admit { get; set; } = true;
         public int Calls { get; private set; }
 
+        public bool Commit { get; set; } = true;
+        public int WaitCalls { get; private set; }
+        public long LastWaitOffset { get; private set; } = -1;
+        public TimeSpan LastWaitTimeout { get; private set; } = TimeSpan.MinValue;
+
         public bool CanAdmitDurableWrite(in TopicPartition partition)
         {
             Calls++;
             return Admit;
+        }
+
+        public ValueTask<bool> WaitForDurableCommitAsync(
+            TopicPartition partition,
+            long committedThroughOffset,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
+        {
+            WaitCalls++;
+            LastWaitOffset = committedThroughOffset;
+            LastWaitTimeout = timeout;
+            return ValueTask.FromResult(Commit);
         }
     }
 }
