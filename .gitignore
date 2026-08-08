@@ -456,3 +456,5 @@ plugins/
 !src/Kuestenlogik.Surgewave.Broker/Plugins/**
 !tests/**/Commands/Plugins/
 !tests/**/Commands/Plugins/**
+coverage.slnx
+coverage-*.txt
