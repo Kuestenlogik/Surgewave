@@ -300,6 +300,30 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             {
                 try
                 {
+                    // Kafka permits exactly ONE record batch per partition in a produce request and
+                    // enforces it at parse time — ProduceRequest.validateRecords throws
+                    // InvalidRecordException("only allowed to contain exactly one record batch per
+                    // partition") before any per-partition handling runs. Refusing here, first,
+                    // mirrors that placement.
+                    //
+                    // Until now such a section fell through to the append, where the validating CRC
+                    // is computed over the WHOLE section and cannot match the first batch's CRC
+                    // field, so the producer was told CorruptMessage. That answer blames transport
+                    // for a request the protocol does not permit, and it sent anyone debugging it
+                    // looking for a network fault. Nothing was ever written — the refusal was
+                    // correct, only its reason was wrong.
+                    if (!IsSingleRecordBatch(partitionData.Records.Span))
+                    {
+                        partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                        {
+                            Index = partitionData.Index,
+                            ErrorCode = ErrorCode.InvalidRecord,
+                            BaseOffset = -1,
+                            LogAppendTimeMs = -1
+                        });
+                        continue;
+                    }
+
                     // Check for unsupported compression before storing
                     var compressionType = CompressionCodec.GetCompressionTypeFromBatch(partitionData.Records.Span);
                     if (!CompressionCodec.IsSupported(compressionType))
@@ -620,6 +644,30 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             Responses = responses,
             ThrottleTimeMs = throttleTimeMs
         };
+    }
+
+    /// <summary>
+    /// Whether <paramref name="section"/> holds exactly one Kafka v2 RecordBatch and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two integer reads, no walk over the records. This sits on the produce hot path, where
+    /// the answer is "yes" for every conforming client, so it must not cost a pass over the batch:
+    /// the first batch's own length field already says whether anything follows it.</para>
+    ///
+    /// <para>Written as a subtraction rather than <c>12 + batchLength == section.Length</c> on
+    /// purpose — the addition overflows for a hostile length near <see cref="int.MaxValue"/>, and
+    /// the subtraction cannot. A section too short to hold a header, or one whose first batch
+    /// overruns it, is not a single batch either and is refused the same way.</para>
+    /// </remarks>
+    private static bool IsSingleRecordBatch(ReadOnlySpan<byte> section)
+    {
+        if (section.Length < KafkaConstants.RecordBatch.HeaderSize)
+            return false;
+
+        // Layout: BaseOffset int64 @0, BatchLength int32 @8 counting every byte after itself.
+        var batchLength = BinaryPrimitives.ReadInt32BigEndian(section.Slice(8, 4));
+
+        return batchLength >= 0 && section.Length - 12 == batchLength;
     }
 
     /// <summary>

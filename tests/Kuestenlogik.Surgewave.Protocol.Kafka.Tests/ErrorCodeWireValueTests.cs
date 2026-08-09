@@ -31,6 +31,13 @@ public sealed class ErrorCodeWireValueTests
     [InlineData(ErrorCode.NotEnoughReplicas, 19)]
     [InlineData(ErrorCode.NotEnoughReplicasAfterAppend, 20)]
     [InlineData(ErrorCode.InvalidRequiredAcks, 21)]
+    // The second instance of exactly the defect this file was written for: SnapshotNotFound sat on
+    // 87, which is Kafka's INVALID_RECORD, while 98 — the real SNAPSHOT_NOT_FOUND — was unused. The
+    // Raft snapshot-fetch path put 87 on the wire, so every Kafka-compatible client decoded "this
+    // record failed validation" from a response about a missing snapshot. Uncaught because neither
+    // code was listed here.
+    [InlineData(ErrorCode.InvalidRecord, 87)]
+    [InlineData(ErrorCode.SnapshotNotFound, 98)]
     // And the everyday ones, so a careless renumbering anywhere in the block is caught.
     [InlineData(ErrorCode.None, 0)]
     [InlineData(ErrorCode.OffsetOutOfRange, 1)]
