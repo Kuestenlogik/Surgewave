@@ -16,21 +16,28 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
-/// A produce request's records field may carry several record batches for one partition — the Kafka
-/// protocol concatenates them, exactly as the replication fetch response does.
+/// A produce request carries exactly ONE record batch per partition, and a section with more is
+/// refused as <see cref="ErrorCode.InvalidRecord"/>.
 ///
-/// <para>On the replication path, appending such a section as one blob was #92/#93: the receiver
-/// ended up with a single batch carrying one CRC over the concatenation. The produce path has the
-/// same shape — <c>RecordHeaderParser.ParseBatchHeader</c> reads only the FIRST header before the
-/// whole section is handed to a single append — so the question is whether it has the same defect.
-/// It does not: the validating append (#85) computes the CRC over the entire section, that cannot
-/// match the first batch's CRC field, and the write is refused.</para>
+/// <para>This file previously recorded the opposite belief — that a multi-batch section is legal
+/// Kafka and that refusing it rejects valid client traffic. It is not. Kafka enforces the single
+/// batch at parse time: <c>ProduceRequest.validateRecords</c> throws
+/// <c>InvalidRecordException("Produce requests with version N are only allowed to contain exactly
+/// one record batch per partition")</c> when the iterator still has an element after the first, and
+/// its own producer cannot build such a section. Surgewave refusing it is correct behaviour.</para>
 ///
-/// <para><b>What these tests pin is the safety property, not the ideal.</b> Nothing is merged, no
-/// batch is stored with a CRC describing other batches' bytes, and nothing is half-written. The
-/// broker refusing a legal multi-batch section is a separate, tracked gap — a producer that sends
-/// one is told its data is corrupt when it is not. Should that gap be closed, these tests must be
-/// rewritten to assert three stored batches; they must NOT be relaxed into accepting a merge.</para>
+/// <para>What was wrong was the reason given. The section used to fall through to the append, where
+/// the validating CRC (#85) is computed over the whole concatenation and cannot match the first
+/// batch's CRC field, so the producer was told <c>CorruptMessage</c> — transport corruption — for a
+/// request the protocol simply does not permit. Now the refusal is explicit and carries Kafka's own
+/// code.</para>
+///
+/// <para><b>The safety property still holds and is still what these tests pin:</b> nothing is
+/// merged, no batch is stored with a CRC describing other batches' bytes, and nothing is
+/// half-written. On the replication path that same shape WAS real corruption (#92/#93); here it
+/// never reached the log. Do not relax these tests into accepting a merge, and do not "fix" the
+/// refusal by making the broker store multi-batch sections: that would be a deliberate protocol
+/// superset reachable only by hand-crafted traffic, on the hottest path in the broker.</para>
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class ProduceMultiBatchSectionTests : IDisposable
@@ -73,7 +80,7 @@ public sealed class ProduceMultiBatchSectionTests : IDisposable
     }
 
     [Fact]
-    public async Task MultiBatchSection_IsRefusedRatherThanMergedIntoOneBatch()
+    public async Task MultiBatchSection_IsRefusedAsInvalidRecord()
     {
         var section = Concat(
             CreateValidBatch(baseOffset: 0, recordCount: 1),
@@ -82,8 +89,36 @@ public sealed class ProduceMultiBatchSectionTests : IDisposable
 
         var response = await ProduceAsync(section);
 
-        // The #92 outcome would be ErrorCode.None plus one stored batch whose CRC covers all three.
-        Assert.Equal(ErrorCode.CorruptMessage, response.Responses[0].PartitionResponses[0].ErrorCode);
+        // Kafka's own code for this, and NOT CorruptMessage: every batch here carries a correct CRC
+        // over its own bytes. Blaming transport for a protocol violation is what sent people
+        // looking for a network fault that was not there. The #92 outcome — ErrorCode.None plus one
+        // stored batch whose CRC covers all three — remains the thing that must never happen.
+        Assert.Equal(ErrorCode.InvalidRecord, response.Responses[0].PartitionResponses[0].ErrorCode);
+        Assert.Equal(-1, response.Responses[0].PartitionResponses[0].BaseOffset);
+    }
+
+    [Fact]
+    public async Task SectionTooShortForAHeader_IsRefusedAsInvalidRecord()
+    {
+        // Kafka: "must have at least one record batch per partition" — also InvalidRecord. Before,
+        // this reached the header parsers and came back as a generic Unknown.
+        var response = await ProduceAsync(new byte[20]);
+
+        Assert.Equal(ErrorCode.InvalidRecord, response.Responses[0].PartitionResponses[0].ErrorCode);
+    }
+
+    [Fact]
+    public async Task SectionWhoseFirstBatchOverrunsIt_IsRefusedAsInvalidRecord()
+    {
+        // A length field claiming more bytes than the section holds. The single-batch test is a
+        // comparison, not a bounds check, so this must fail it rather than slip through as "one
+        // batch" and be handed to the append.
+        var batch = CreateValidBatch(baseOffset: 0, recordCount: 1);
+        BinaryPrimitives.WriteInt32BigEndian(batch.AsSpan(8, 4), batch.Length * 4);
+
+        var response = await ProduceAsync(batch);
+
+        Assert.Equal(ErrorCode.InvalidRecord, response.Responses[0].PartitionResponses[0].ErrorCode);
     }
 
     [Fact]

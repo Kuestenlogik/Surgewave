@@ -105,8 +105,20 @@ public enum ErrorCode : short
     NoReassignmentInProgress = 85,
     GroupSubscribedToTopic = 86,
 
+    /// <summary>
+    /// The record failed broker-side validation and was rejected. Kafka's INVALID_RECORD.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="CorruptMessage"/>, which means the bytes did not survive transport:
+    /// this one means well-formed bytes the broker will not accept. Kafka uses it for, among other
+    /// things, a produce request carrying more than one record batch per partition
+    /// (ProduceRequest.validateRecords: "only allowed to contain exactly one record batch per
+    /// partition").
+    /// </remarks>
+    InvalidRecord = 87,
+
     // KRaft errors
-    SnapshotNotFound = 87,
+    SnapshotNotFound = 98,
 
     // KIP-554 SCRAM credential management
     ResourceNotFound = 91,

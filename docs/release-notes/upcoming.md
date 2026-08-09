@@ -15,7 +15,37 @@ the moment the first 0.5 work lands.>
 
 ## Fixes
 
-<!-- Grouped notable fixes. -->
+### A multi-batch produce section is refused as `InvalidRecord`, not `CorruptMessage` (#125)
+
+A produce request carries exactly one record batch per partition — Kafka enforces it at parse time
+and its own producer cannot build anything else. Surgewave already refused such a section, but by
+accident: it reached the append, whose CRC is computed over the whole concatenation and cannot
+match the first batch's CRC field, so the answer was `CorruptMessage` (2). That blames transport
+for a request the protocol does not permit, and it sent anyone debugging it looking for a network
+fault that was not there.
+
+The refusal is now explicit and carries Kafka's own code, `InvalidRecord` (87). A section too short
+to hold a batch header, or one whose first batch overruns it, is refused the same way instead of
+surfacing as a generic `Unknown`. Nothing about accepted traffic changes: the check is two integer
+reads on the produce path, and for a conforming single-batch request the answer is immediate.
+
+## Breaking changes
+
+### `SnapshotNotFound` moves from error code 87 to 98 (wire-visible)
+
+Surgewave's `SnapshotNotFound` was numbered 87, which is Kafka's `INVALID_RECORD`; the real
+`SNAPSHOT_NOT_FOUND` is 98 and was unused. The Raft snapshot-fetch path put 87 on the wire, so a
+Kafka-compatible client decoded "this record failed validation on the broker" from a response about
+a missing snapshot.
+
+`SnapshotNotFound` is now 98 and `InvalidRecord` occupies 87, matching
+`org.apache.kafka.common.protocol.Errors`.
+
+**Rolling upgrades:** brokers of mixed versions disagree about what 87 means on the Raft
+fetch-snapshot path for the duration of the roll. The exchange is broker-to-broker and the code is
+informational there — a follower that cannot get a snapshot retries either way — so the practical
+effect is a misleading log line during the window, not a stall. Upgrading all brokers in one roll
+avoids it entirely.
 
 ## Breaking changes
 
