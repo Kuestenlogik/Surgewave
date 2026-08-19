@@ -6,7 +6,7 @@ namespace Kuestenlogik.Surgewave.Schema.Registry.Handlers;
 /// <summary>
 /// Extension methods for registering Protobuf schema handler.
 /// </summary>
-public static class ServiceCollectionExtensions
+public static class ProtobufServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the Protobuf schema handler to the service collection.

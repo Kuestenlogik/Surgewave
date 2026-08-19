@@ -1,11 +1,10 @@
 using Amazon.S3;
-using Kuestenlogik.Surgewave.Runtime;
 using Kuestenlogik.Surgewave.Storage.Engine;
 
 namespace Kuestenlogik.Surgewave.Storage.Engine.S3;
 
 /// <summary>
-/// Extension methods for configuring S3 primary storage on SurgewaveRuntimeBuilder.
+/// Extension methods for configuring S3 primary storage on any storage-configurable runtime builder.
 /// </summary>
 public static class S3StorageExtensions
 {
@@ -16,26 +15,30 @@ public static class S3StorageExtensions
     /// <param name="builder">The builder.</param>
     /// <param name="bucketName">S3 bucket name.</param>
     /// <param name="prefix">Object key prefix (default: "surgewave").</param>
-    public static SurgewaveRuntimeBuilder WithS3Storage(
-        this SurgewaveRuntimeBuilder builder,
+    public static TBuilder WithS3Storage<TBuilder>(
+        this TBuilder builder,
         string bucketName,
         string prefix = "surgewave")
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => S3LogSegmentFactory.Create(bucketName, prefix));
+        builder.UseStorage(() => S3LogSegmentFactory.Create(bucketName, prefix));
+        return builder;
     }
 
     /// <summary>
     /// Configure S3 as primary storage with custom client factory.
     /// </summary>
-    public static SurgewaveRuntimeBuilder WithS3Storage(
-        this SurgewaveRuntimeBuilder builder,
+    public static TBuilder WithS3Storage<TBuilder>(
+        this TBuilder builder,
         Func<IAmazonS3> clientFactory,
         string bucketName,
         string prefix = "surgewave",
         ISurgewaveBufferPool? bufferPool = null)
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => S3LogSegmentFactory.Create(
+        builder.UseStorage(() => S3LogSegmentFactory.Create(
             clientFactory, bucketName, prefix, bufferPool));
+        return builder;
     }
 
     /// <summary>
@@ -47,15 +50,17 @@ public static class S3StorageExtensions
     /// <param name="prefix">Object key prefix.</param>
     /// <param name="accessKey">Access key (default: "test").</param>
     /// <param name="secretKey">Secret key (default: "test").</param>
-    public static SurgewaveRuntimeBuilder WithS3StorageLocalStack(
-        this SurgewaveRuntimeBuilder builder,
+    public static TBuilder WithS3StorageLocalStack<TBuilder>(
+        this TBuilder builder,
         string endpoint,
         string bucketName,
         string prefix = "surgewave",
         string accessKey = "test",
         string secretKey = "test")
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => S3LogSegmentFactory.CreateForLocalStack(
+        builder.UseStorage(() => S3LogSegmentFactory.CreateForLocalStack(
             endpoint, bucketName, prefix, accessKey, secretKey));
+        return builder;
     }
 }

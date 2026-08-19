@@ -6,7 +6,7 @@ namespace Kuestenlogik.Surgewave.Schema.Registry.Handlers;
 /// <summary>
 /// Extension methods for registering JSON schema handler.
 /// </summary>
-public static class ServiceCollectionExtensions
+public static class JsonServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the JSON schema handler to the service collection.

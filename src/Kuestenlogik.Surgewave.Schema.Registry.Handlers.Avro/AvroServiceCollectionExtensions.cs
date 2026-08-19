@@ -6,7 +6,7 @@ namespace Kuestenlogik.Surgewave.Schema.Registry.Handlers;
 /// <summary>
 /// Extension methods for registering Avro schema handler.
 /// </summary>
-public static class ServiceCollectionExtensions
+public static class AvroServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the Avro schema handler to the service collection.

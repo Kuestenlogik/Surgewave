@@ -1,10 +1,9 @@
-using Kuestenlogik.Surgewave.Runtime;
 using Kuestenlogik.Surgewave.Storage.Engine;
 
 namespace Kuestenlogik.Surgewave.Storage.Engine.RocksDb;
 
 /// <summary>
-/// Extension methods for configuring RocksDB storage on SurgewaveRuntimeBuilder.
+/// Extension methods for configuring RocksDB storage on any storage-configurable runtime builder.
 /// </summary>
 public static class RocksDbStorageExtensions
 {
@@ -12,16 +11,22 @@ public static class RocksDbStorageExtensions
     /// Configure RocksDB storage with default settings.
     /// LSM-Tree based storage optimized for write-heavy workloads.
     /// </summary>
-    public static SurgewaveRuntimeBuilder WithRocksDbStorage(this SurgewaveRuntimeBuilder builder)
+    public static TBuilder WithRocksDbStorage<TBuilder>(
+        this TBuilder builder)
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => RocksDbLogSegmentFactory.Create());
+        builder.UseStorage(() => RocksDbLogSegmentFactory.Create());
+        return builder;
     }
 
     /// <summary>
     /// Configure RocksDB storage with a custom buffer pool.
     /// </summary>
-    public static SurgewaveRuntimeBuilder WithRocksDbStorage(this SurgewaveRuntimeBuilder builder, ISurgewaveBufferPool bufferPool)
+    public static TBuilder WithRocksDbStorage<TBuilder>(
+        this TBuilder builder, ISurgewaveBufferPool bufferPool)
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => RocksDbLogSegmentFactory.Create(bufferPool));
+        builder.UseStorage(() => RocksDbLogSegmentFactory.Create(bufferPool));
+        return builder;
     }
 }
