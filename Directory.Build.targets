@@ -1,7 +1,32 @@
 <Project>
-  <!-- Auto-generate NuGet packages on build (only for packable projects).
-       Evaluated in targets so IsPackable from csproj and SDK is already resolved. -->
-  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+  <!-- Packing is NOT part of building. Opt in per invocation with -p:PackOnBuild=true.
+
+       Every place that actually wants packages already asks for them explicitly, and passes the
+       no-build switch, so it only needs the build OUTPUT and never a build that also packed:
+         .github/workflows/ci.yml       (dotnet pack, no-build)
+         .github/workflows/release.yml  (dotnet pack, no-build)
+         scripts/build.ps1              (dotnet build, then dotnet pack with no-build)
+
+       Leaving GeneratePackageOnBuild on made every build in the repo pack a .nupkg for each of
+       ~40 packable projects: the inner loop, every `dotnet test` (which builds its references),
+       every IDE build, and any FOREIGN build we do not control.
+
+       Measured on the benchmark project's closure, no-incremental Release:
+         PackOnBuild=true   125.2 s
+         PackOnBuild=false   88.1 s
+       Per project the cost is inside the noise, which is why it went unnoticed; across the
+       closure it is ~30 %. It also decided a threshold: BenchmarkDotNet compiles a generated
+       project referencing the benchmark assembly under a 120 s build budget, and 125 > 120 > 88.
+       Local benchmarking was impossible repo-wide, with nothing but an empty "Build Error" to
+       show for it (the real reason only appears in the BDN log file).
+
+       It also couples compiling to packaging: a metadata-only problem (bad version, missing icon)
+       fails a plain `dotnet build` even though the code compiles. See the SemVer note in ci.yml's
+       "Determine version" step for a case that already cost time.
+
+       Matches the sibling repos. Bowire does not set this property at all and packs explicitly in
+       ci.yml:145 and release.yml:168. -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false' AND '$(PackOnBuild)' == 'true'">
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
