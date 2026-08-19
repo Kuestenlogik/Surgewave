@@ -3,7 +3,11 @@
   <PropertyGroup>
     <Description>Surgewave Schema Registry — standalone Confluent-compatible REST service</Description>
     <AssemblyName>surgewave-schema-registry</AssemblyName>
-    <PackageTags>surgewave;schema-registry;confluent;standalone;avro;protobuf;json</PackageTags>
+    <!-- A host, like Control, Gateway and Marketplace: it is started, not referenced. It ships
+         through scripts/publish.ps1 and the container image, and nothing in or out of this repo
+         can take a dependency on an Exe. It carried PackageTags and would have been published as
+         a library nobody can consume; it never actually reached nuget.org. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

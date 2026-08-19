@@ -39,6 +39,25 @@
     <PublishDir>$(ArtifactsPath)pub\$(MSBuildProjectName)\$(Configuration)\</PublishDir>
   </PropertyGroup>
 
+  <!-- Was gehoert auf nuget.org?
+       Ein Projekt ist paketierbar, solange es etwas ist, das jemand REFERENZIEREN kann. Das ist
+       der Default, und er ist richtig: Libraries, Plugins und das dotnet-Tool gehen alle ueber
+       NuGet raus - Plugins ausdruecklich auch: `surgewave plugins install` laedt ein Plugin mit
+       der Option `from-nuget` von einem konfigurierten Feed.
+
+       Genau eine Kategorie faellt raus: HOSTS. Ein Exe- bzw. Web-SDK-Projekt, das gestartet und
+       nicht referenziert wird, laesst sich nicht konsumieren - ein Paket davon waere eine ID, die
+       niemand sinnvoll installieren kann. Diese Projekte setzen `IsPackable=false` und werden
+       ueber scripts/publish.ps1 und das Container-Image ausgeliefert: Broker(*), Control, Gateway,
+       Marketplace, Connect.Worker, Schema.Registry.App.
+
+       (*) Broker ist die Ausnahme und bleibt paketierbar: Runtime und Hosting - beide oeffentlich
+       und extern konsumiert - referenzieren es, weil die Broker-Logik heute im Exe-Projekt liegt
+       statt in einer Library. Solange das so ist, wuerde IsPackable=false dort das publizierte
+       Runtime-Paket unaufloesbar machen.
+
+       Beim Anlegen eines neuen Projekts also nur die Frage: Host oder nicht? -->
+
   <!-- Generate XML documentation for packable projects (API reference) -->
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
