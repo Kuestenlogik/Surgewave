@@ -300,6 +300,24 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
             {
                 try
                 {
+                    // The bytes exactly as the producer sent them.
+                    //
+                    // Named because after the record transform below there are TWO buffers in this
+                    // scope, and every call site silently picks one:
+                    //
+                    //   producerRecords  — what the CLIENT sent. Use for anything about the
+                    //                      client's payload: dedup hashing, idempotence identity,
+                    //                      the declared compression codec.
+                    //   recordsToAppend  — what goes INTO THE LOG. Use for anything describing
+                    //                      stored records: offsets, record counts, delay/TTL
+                    //                      indexing.
+                    //
+                    // Kafka has no equivalent hazard: it has no broker-side transform at all, and
+                    // where LogValidator does rewrite bytes it returns them as ValidationResult
+                    // while the original stays private to the validator, so nothing downstream can
+                    // pick wrong. Ours can, and three call sites did until #125.
+                    var producerRecords = partitionData.Records;
+
                     // Kafka permits exactly ONE record batch per partition in a produce request and
                     // enforces it at parse time — ProduceRequest.validateRecords throws
                     // InvalidRecordException("only allowed to contain exactly one record batch per
@@ -312,7 +330,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // for a request the protocol does not permit, and it sent anyone debugging it
                     // looking for a network fault. Nothing was ever written — the refusal was
                     // correct, only its reason was wrong.
-                    if (!IsSingleRecordBatch(partitionData.Records.Span))
+                    if (!IsSingleRecordBatch(producerRecords.Span))
                     {
                         partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                         {
@@ -325,7 +343,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     }
 
                     // Check for unsupported compression before storing
-                    var compressionType = CompressionCodec.GetCompressionTypeFromBatch(partitionData.Records.Span);
+                    var compressionType = CompressionCodec.GetCompressionTypeFromBatch(producerRecords.Span);
                     if (!CompressionCodec.IsSupported(compressionType))
                     {
                         partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
@@ -363,7 +381,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
                     // Extract idempotence info and validate if present
                     var (producerId, producerEpoch, baseSequence, lastOffsetDelta) =
-                        CompressionCodec.GetIdempotenceInfo(partitionData.Records.Span);
+                        CompressionCodec.GetIdempotenceInfo(producerRecords.Span);
 
                     if (producerId != KafkaConstants.Producer.NoProducerId)
                     {
@@ -413,7 +431,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // Content-based deduplication check (if enabled for this topic)
                     if (_deduplicationManager != null && IsDeduplicationEnabled(topic))
                     {
-                        var dedupResult = _deduplicationManager.CheckDuplicate(topicPartition, partitionData.Records.Span);
+                        var dedupResult = _deduplicationManager.CheckDuplicate(topicPartition, producerRecords.Span);
                         if (dedupResult.IsDuplicate)
                         {
                             _metrics?.RecordDeduplication(topic, partitionData.Index);
@@ -434,7 +452,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // payload. Returning null from the pipeline drops the batch
                     // silently — the producer sees success with the next-in-line
                     // base offset, but no records actually land.
-                    var recordsToAppend = partitionData.Records;
+                    var recordsToAppend = producerRecords;
                     if (_recordTransform is { } transform && transform.HasBinding(topic))
                     {
                         var transformed = await transform.TransformAsync(topic, recordsToAppend, cancellationToken)
@@ -480,14 +498,26 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             producerId, producerEpoch, baseSequence, lastOffsetDelta, topicPartition, baseOffset);
                     }
 
-                    // Register hash after successful write (deduplication)
-                    _deduplicationManager?.Register(topicPartition, recordsToAppend.Span, baseOffset);
+                    // Register hash after successful write (deduplication).
+                    //
+                    // Hashes producerRecords, NOT recordsToAppend: CheckDuplicate above reads
+                    // the producer's incoming bytes (deliberately, so a duplicate costs no WASM
+                    // transform), so the hash registered here has to describe the same bytes or the
+                    // two ends never meet. They did not: on a transform-bound topic the check
+                    // hashed the incoming payload while the registration hashed the transformed
+                    // one, so no retransmit could ever match and dedup was silently inert for
+                    // exactly the topics that do the most work per record.
+                    _deduplicationManager?.Register(topicPartition, producerRecords.Span, baseOffset);
 
                     // Extract and index delayed delivery headers (if enabled for this topic)
                     if (_delayIndex != null && IsDelayDeliveryEnabled(topic))
                     {
+                        // recordsToAppend, not producerRecords: this index maps baseOffset
+                        // to a delivery time, and what lives at baseOffset is what was appended. A
+                        // transform that rewrites or drops headers made the index describe records
+                        // the log does not hold.
                         var deliverAtMs = DelayHeaderParser.ExtractDeliverAtTimestamp(
-                            partitionData.Records.Span, MaxDecompressedBytes(topicMetadata));
+                            recordsToAppend.Span, MaxDecompressedBytes(topicMetadata));
                         if (deliverAtMs.HasValue)
                         {
                             _delayIndex.RecordDelayedBatch(topicPartition, baseOffset, deliverAtMs.Value);
@@ -497,8 +527,10 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // Extract and index TTL headers (if enabled for this topic)
                     if (_ttlIndex != null && IsTtlEnabled(topic))
                     {
+                        // Same reasoning as the delay index above: the expiry belongs to the
+                        // records that were actually stored at baseOffset.
                         var expiryMs = TtlHeaderParser.ExtractExpiryTimestamp(
-                            partitionData.Records.Span, MaxDecompressedBytes(topicMetadata));
+                            recordsToAppend.Span, MaxDecompressedBytes(topicMetadata));
                         if (expiryMs.HasValue)
                         {
                             _ttlIndex.RecordTtlBatch(topicPartition, baseOffset, expiryMs.Value);
@@ -512,18 +544,18 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     }
 
                     // Track transactional batches for LSO calculation
-                    if (CompressionCodec.IsTransactional(partitionData.Records.Span) &&
-                        !CompressionCodec.IsControlBatch(partitionData.Records.Span))
+                    if (CompressionCodec.IsTransactional(producerRecords.Span) &&
+                        !CompressionCodec.IsControlBatch(producerRecords.Span))
                     {
                         _transactionCoordinator.RecordTransactionalBatch(topicPartition, producerId, baseOffset);
                     }
 
-                    RecordBatchStored(topic, partitionData.Index, baseOffset, partitionData.Records.Length);
+                    RecordBatchStored(topic, partitionData.Index, baseOffset, producerRecords.Length);
 
                     // Record produce metrics
-                    var recordCount = CompressionCodec.GetRecordCount(partitionData.Records.Span);
-                    _metrics?.RecordProduce(topic, partitionData.Index, recordCount, partitionData.Records.Length, 0);
-                    _coldStartProfiler?.RecordProduce(topic, recordCount, partitionData.Records.Length);
+                    var recordCount = CompressionCodec.GetRecordCount(producerRecords.Span);
+                    _metrics?.RecordProduce(topic, partitionData.Index, recordCount, producerRecords.Length, 0);
+                    _coldStartProfiler?.RecordProduce(topic, recordCount, producerRecords.Length);
 
                     partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                     {
