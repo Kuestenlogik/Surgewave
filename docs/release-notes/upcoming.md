@@ -31,6 +31,28 @@ reads on the produce path, and for a conforming single-batch request the answer 
 
 ## Breaking changes
 
+### The broker is now a library; the server moved to `Broker.App`
+
+`Kuestenlogik.Surgewave.Broker` used to be the runnable server *and* the engine in one
+executable project — and because the published `Runtime` and `Hosting` packages reference it,
+every embedded-broker consumer transitively compiled against the whole host: ASP.NET REST APIs,
+gRPC server, OpenTelemetry, JWT auth, Bowire, and ~40 projects behind them.
+
+The project is now split along the framework line. `Kuestenlogik.Surgewave.Broker` is a plain
+library holding the engine — topics, partitions, coordinators, quotas, dedup, TTL/delay, the
+native control plane — with no ASP.NET, gRPC, or OTel anywhere in its closure. The server lives
+in the new unpackaged host project `src/Kuestenlogik.Surgewave.Broker.App` (`Program.cs`, REST
+APIs, startup wiring, the built-in AutoTuning/CruiseControl/AdaptiveCompression plugins), still
+building the same `surgewave-broker` binary and container image.
+
+What changes for consumers of the NuGet package: the assembly inside
+`Kuestenlogik.Surgewave.Broker` is now named `Kuestenlogik.Surgewave.Broker.dll` instead of
+`surgewave-broker.dll`, and the host-only types (REST APIs, `Program`) are no longer in it.
+Namespaces are unchanged — code that embeds the broker through `Runtime`/`Hosting` recompiles
+without edits. What changes for operators: `dotnet run --project src/Kuestenlogik.Surgewave.Broker`
+becomes `dotnet run --project src/Kuestenlogik.Surgewave.Broker.App`; published artifacts,
+binary name, ports, and configuration are identical.
+
 ### `SnapshotNotFound` moves from error code 87 to 98 (wire-visible)
 
 Surgewave's `SnapshotNotFound` was numbered 87, which is Kafka's `INVALID_RECORD`; the real

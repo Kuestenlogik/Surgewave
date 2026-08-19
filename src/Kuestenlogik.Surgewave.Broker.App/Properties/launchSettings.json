@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Kuestenlogik.Surgewave.Broker": {
+    "Kuestenlogik.Surgewave.Broker.App": {
       "commandName": "Project",
       "launchBrowser": true,
       "environmentVariables": {

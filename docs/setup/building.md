@@ -62,10 +62,10 @@ Fastest way to get started. No publish step required, uses the Debug/Release bui
 
 ```bash
 # Broker only
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 
 # Broker + Control UI
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 dotnet run --project src/Kuestenlogik.Surgewave.Control --urls "http://localhost:5050"
 ```
 

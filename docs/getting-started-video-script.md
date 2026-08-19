@@ -13,7 +13,7 @@
 **Voiceover:** "Starting Surgewave takes one command. No ZooKeeper, no Java, no complex config."
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 **Screen:** Terminal showing broker startup with ports (9092, 9093, 1883, 5050)
@@ -154,7 +154,7 @@ Assistant: Generated SQL: SELECT * FROM orders WHERE amount > 100
 ```bash
 git clone https://github.com/Kuestenlogik/Surgewave
 cd Surgewave
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 # Open http://localhost:5050
 ```
 

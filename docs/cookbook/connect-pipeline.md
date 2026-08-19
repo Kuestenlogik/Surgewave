@@ -22,7 +22,7 @@ Data integration with Surgewave Connect — source connectors, transforms, sink 
 Start the broker with Connect enabled:
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- \
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- \
   --Surgewave:Connect:Enabled=true \
   --Surgewave:Connect:PluginsDirectory="C:/path/to/plugins"
 ```

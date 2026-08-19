@@ -45,7 +45,7 @@ if (-not $SkipPublish) {
 
     # Publish Broker (self-contained, win-x64)
     Write-Host "[2/5] Publishing Surgewave Broker..." -ForegroundColor Yellow
-    dotnet publish "$RepoRoot/src/Kuestenlogik.Surgewave.Broker" `
+    dotnet publish "$RepoRoot/src/Kuestenlogik.Surgewave.Broker.App" `
         -c $Configuration `
         -r win-x64 `
         --self-contained `

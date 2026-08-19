@@ -192,7 +192,7 @@ try {
     # installierten Connectoren sucht (statt im Standard <CWD>/plugins).
     $brokerPluginsArg = Join-Path $repoRoot ".tmp/broker-plugins"
     $brokerProc = Start-Process -FilePath dotnet `
-        -ArgumentList @('run', '--project', 'src/Kuestenlogik.Surgewave.Broker', '--no-build', '-c', 'Release', '--', "--Surgewave:Connect:PluginsDirectory=$brokerPluginsArg") `
+        -ArgumentList @('run', '--project', 'src/Kuestenlogik.Surgewave.Broker.App', '--no-build', '-c', 'Release', '--', "--Surgewave:Connect:PluginsDirectory=$brokerPluginsArg") `
         -WorkingDirectory $repoRoot `
         -PassThru `
         -RedirectStandardOutput $brokerLog `

@@ -114,7 +114,7 @@ dotnet build Kuestenlogik.Surgewave.slnx -c Release
 dotnet test Kuestenlogik.Surgewave.slnx -v normal
 
 # Run broker from source (with PG wire + materialized views)
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- --Surgewave:PostgreSql:Enabled=true
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- --Surgewave:PostgreSql:Enabled=true
 
 # Run Control UI from source
 dotnet run --project src/Kuestenlogik.Surgewave.Control --urls "http://localhost:5050"

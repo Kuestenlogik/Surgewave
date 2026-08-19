@@ -44,7 +44,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $publishDir = Join-Path $root "artifacts" "pub"
 $allServices = @(
-    @{ Name = "Broker";      Project = "src/Kuestenlogik.Surgewave.Broker";          Container = $true  }
+    @{ Name = "Broker";      Project = "src/Kuestenlogik.Surgewave.Broker.App";          Container = $true  }
     @{ Name = "Gateway";     Project = "src/Kuestenlogik.Surgewave.Gateway";         Container = $true  }
     @{ Name = "Control";     Project = "src/Kuestenlogik.Surgewave.Control";         Container = $true  }
     @{ Name = "Marketplace"; Project = "src/Kuestenlogik.Surgewave.Marketplace";     Container = $true  }

@@ -55,7 +55,7 @@ function Write-Warning { param($Message) Write-Host "[WARN] $Message" -Foregroun
 # Get script directory and project root
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-$BrokerProject = Join-Path $ProjectRoot "src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj"
+$BrokerProject = Join-Path $ProjectRoot "src\Kuestenlogik.Surgewave.Broker.App\Kuestenlogik.Surgewave.Broker.App.csproj"
 $TestProject = Join-Path $ProjectRoot "tests\Kuestenlogik.Surgewave.Tests\Kuestenlogik.Surgewave.Tests.csproj"
 
 # Cleanup function

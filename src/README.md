@@ -98,7 +98,7 @@ Core source code for the Surgewave message broker.
 dotnet build
 
 # Build specific project
-dotnet build src/Kuestenlogik.Surgewave.Broker
+dotnet build src/Kuestenlogik.Surgewave.Broker.App
 
 # Build in release mode
 dotnet build -c Release
@@ -108,7 +108,7 @@ dotnet build -c Release
 
 ```bash
 # Start broker
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 
 # Use CLI
 dotnet run --project src/Kuestenlogik.Surgewave.Tool -- <command>

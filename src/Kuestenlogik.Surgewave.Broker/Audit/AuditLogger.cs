@@ -346,7 +346,7 @@ public sealed class AuditLogger : IAsyncDisposable, IAuditLogger
         // Filter internal topics if configured
         if (_config.Audit.ExcludeInternalTopics &&
             auditEvent.ResourceType == "topic" &&
-            auditEvent.ResourceName?.StartsWith("__") == true)
+            auditEvent.ResourceName?.StartsWith("__", StringComparison.Ordinal) == true)
         {
             return false;
         }

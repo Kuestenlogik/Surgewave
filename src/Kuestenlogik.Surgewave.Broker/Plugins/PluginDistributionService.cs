@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Kuestenlogik.Surgewave.Plugins.Packaging;
 
 namespace Kuestenlogik.Surgewave.Broker.Plugins;

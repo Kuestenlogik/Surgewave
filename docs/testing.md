@@ -72,7 +72,7 @@ dotnet test --filter "FullyQualifiedName~ConfluentKafkaCompatibility" --logger "
 **Prerequisites**: Start the Surgewave broker before running these tests:
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 ### 3. Protocol Tests
@@ -322,7 +322,7 @@ For CI pipelines, use self-contained tests that don't require external brokers:
 **Solution**: Start the Surgewave broker before running integration tests:
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 ### Test times out

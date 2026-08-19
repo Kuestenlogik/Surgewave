@@ -53,9 +53,9 @@ The matrix is generated from the same code that runs at runtime:
 - **API version ranges advertised to clients**:
   [`src/Kuestenlogik.Surgewave.Protocol.Kafka/Requests/ApiVersionsRequest.cs`](https://github.com/Kuestenlogik/Surgewave/blob/main/src/Kuestenlogik.Surgewave.Protocol.Kafka/Requests/ApiVersionsRequest.cs)
 - **Wired handler set**:
-  [`src/Kuestenlogik.Surgewave.Broker/Program.cs`](https://github.com/Kuestenlogik/Surgewave/blob/main/src/Kuestenlogik.Surgewave.Broker/Program.cs)
+  [`src/Kuestenlogik.Surgewave.Broker.App/Program.cs`](https://github.com/Kuestenlogik/Surgewave/blob/main/src/Kuestenlogik.Surgewave.Broker.App/Program.cs)
 - **Per-handler `SupportedApiKeys`**:
-  [`src/Kuestenlogik.Surgewave.Broker/Handlers/`](https://github.com/Kuestenlogik/Surgewave/tree/main/src/Kuestenlogik.Surgewave.Broker/Handlers)
+  [`src/Kuestenlogik.Surgewave.Broker.App/Handlers/`](https://github.com/Kuestenlogik/Surgewave/tree/main/src/Kuestenlogik.Surgewave.Broker.App/Handlers)
 
 When a new RPC is wired or a version is bumped, the source plus this docs
 section update in the same PR.
