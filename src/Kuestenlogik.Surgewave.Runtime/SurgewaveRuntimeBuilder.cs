@@ -1,5 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Storage.Engine;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,7 @@ namespace Kuestenlogik.Surgewave.Runtime;
 /// Fluent builder for configuring and starting a Surgewave broker runtime.
 /// Create via <see cref="SurgewaveRuntime.CreateBuilder"/>.
 /// </summary>
-public sealed class SurgewaveRuntimeBuilder
+public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
 {
     // Default Host ist die IPv4-Loopback-Adresse (statt "localhost"), weil
     // Linux getaddrinfo("localhost") gerne ::1 zuerst liefert und ein
@@ -165,6 +166,14 @@ public sealed class SurgewaveRuntimeBuilder
         _customLogSegmentFactory = () => factory;
         return this;
     }
+
+    /// <summary>
+    /// Explicit seam for the storage-engine extension packages (see
+    /// <see cref="IStorageConfigurableBuilder"/>): they live below the runtime and must not
+    /// reference it, so their fluent With*Storage() methods bind against the interface.
+    /// </summary>
+    void IStorageConfigurableBuilder.UseStorage(Func<ILogSegmentFactory> factory)
+        => WithStorage(factory);
 
     /// <summary>
     /// Sets the retention period in hours. Use -1 for infinite.

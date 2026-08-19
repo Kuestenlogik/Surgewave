@@ -1,10 +1,9 @@
-using Kuestenlogik.Surgewave.Runtime;
 using Kuestenlogik.Surgewave.Storage.Engine;
 
 namespace Kuestenlogik.Surgewave.Storage.Engine.Sqlite;
 
 /// <summary>
-/// Extension methods for configuring SQLite storage on SurgewaveRuntimeBuilder.
+/// Extension methods for configuring SQLite storage on any storage-configurable runtime builder.
 /// </summary>
 public static class SqliteStorageExtensions
 {
@@ -13,16 +12,22 @@ public static class SqliteStorageExtensions
     /// Single-file database with WAL mode, ACID transactions.
     /// Good for moderate workloads and easy backup.
     /// </summary>
-    public static SurgewaveRuntimeBuilder WithSqliteStorage(this SurgewaveRuntimeBuilder builder)
+    public static TBuilder WithSqliteStorage<TBuilder>(
+        this TBuilder builder)
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => SqliteLogSegmentFactory.Create());
+        builder.UseStorage(() => SqliteLogSegmentFactory.Create());
+        return builder;
     }
 
     /// <summary>
     /// Configure SQLite storage with a custom buffer pool.
     /// </summary>
-    public static SurgewaveRuntimeBuilder WithSqliteStorage(this SurgewaveRuntimeBuilder builder, ISurgewaveBufferPool bufferPool)
+    public static TBuilder WithSqliteStorage<TBuilder>(
+        this TBuilder builder, ISurgewaveBufferPool bufferPool)
+        where TBuilder : IStorageConfigurableBuilder
     {
-        return builder.WithStorage(() => SqliteLogSegmentFactory.Create(bufferPool));
+        builder.UseStorage(() => SqliteLogSegmentFactory.Create(bufferPool));
+        return builder;
     }
 }

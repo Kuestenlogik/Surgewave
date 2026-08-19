@@ -6,7 +6,7 @@ namespace Kuestenlogik.Surgewave.Schema.Registry.Handlers;
 /// <summary>
 /// Extension methods for registering FlatBuffers schema handler.
 /// </summary>
-public static class ServiceCollectionExtensions
+public static class FlatBuffersServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the FlatBuffers schema handler to the service collection.

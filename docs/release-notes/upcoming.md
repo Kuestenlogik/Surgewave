@@ -31,6 +31,27 @@ reads on the produce path, and for a conforming single-batch request the answer 
 
 ## Breaking changes
 
+### Storage-engine packages no longer sit on top of the broker
+
+`Kuestenlogik.Surgewave.Storage.Engine.{Lmdb,RocksDb,S3,Sqlite}` each referenced `Runtime` for
+one fluent extension file — which placed a 4-file storage engine *above* the entire broker in
+the dependency graph. The engines now bind against `IStorageConfigurableBuilder` (new, in
+`Storage.Engine`), which `SurgewaveRuntimeBuilder` implements. Call sites are source-compatible
+— `builder.WithLmdbStorage()` reads exactly as before — but the extension methods are now
+generic, so code compiled against the old packages must recompile. The engines' own closure
+shrinks from ~43 projects to their storage dependencies.
+
+Related fixes in the same sweep: the `Kuestenlogik.Surgewave.Sdk` meta-package now actually
+delivers the `.swpkg` build tasks transitively (`buildTransitive/` was missing from the Build
+package, so the tasks never imported through the meta-package) and no longer pulls
+`Testing` — and with it the whole embedded broker — into every plugin's compile closure; add
+`Kuestenlogik.Surgewave.Testing` to your test project instead. The four schema-handler
+packages (Avro/FlatBuffers/Json/Protobuf) each declared an identical
+`Handlers.ServiceCollectionExtensions` class, so in a host loading several of them a
+fully-qualified call was resolved by assembly order; they now follow the
+`{Format}ServiceCollectionExtensions` naming the other handlers already used. Extension-method
+call sites are unaffected.
+
 ### The broker is now a library; the server moved to `Broker.App`
 
 `Kuestenlogik.Surgewave.Broker` used to be the runnable server *and* the engine in one
