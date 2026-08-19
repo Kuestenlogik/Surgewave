@@ -45,7 +45,7 @@ public class DeduplicationTests : IDisposable
         var batch = CreateRecordBatch("duplicate content");
 
         // Register the batch at offset 42
-        _manager.Register(_tp, batch, 42);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, batch).ContentHash, 42);
 
         // Check again — should be detected as duplicate
         var result = _manager.CheckDuplicate(_tp, batch);
@@ -60,7 +60,7 @@ public class DeduplicationTests : IDisposable
         var batch1 = CreateRecordBatch("message A");
         var batch2 = CreateRecordBatch("message B");
 
-        _manager.Register(_tp, batch1, 10);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, batch1).ContentHash, 10);
 
         var result = _manager.CheckDuplicate(_tp, batch2);
 
@@ -73,7 +73,7 @@ public class DeduplicationTests : IDisposable
         var tp2 = new TopicPartition { Topic = "test-topic", Partition = 1 };
         var batch = CreateRecordBatch("shared content");
 
-        _manager.Register(_tp, batch, 100);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, batch).ContentHash, 100);
 
         // Same content on different partition is not a duplicate
         var result = _manager.CheckDuplicate(tp2, batch);
@@ -86,9 +86,9 @@ public class DeduplicationTests : IDisposable
     {
         Assert.Equal(0, _manager.TotalEntries);
 
-        _manager.Register(_tp, CreateRecordBatch("msg1"), 0);
-        _manager.Register(_tp, CreateRecordBatch("msg2"), 1);
-        _manager.Register(_tp, CreateRecordBatch("msg3"), 2);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, CreateRecordBatch("msg1")).ContentHash, 0);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, CreateRecordBatch("msg2")).ContentHash, 1);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, CreateRecordBatch("msg3")).ContentHash, 2);
 
         Assert.Equal(3, _manager.TotalEntries);
     }
@@ -109,15 +109,15 @@ public class DeduplicationTests : IDisposable
         var batch1 = CreateRecordBatch("entry1");
         var batch2 = CreateRecordBatch("entry2");
         var batch3 = CreateRecordBatch("entry3");
-        manager.Register(_tp, batch1, 0);
-        manager.Register(_tp, batch2, 1);
-        manager.Register(_tp, batch3, 2);
+        manager.Register(_tp, manager.CheckDuplicate(_tp, batch1).ContentHash, 0);
+        manager.Register(_tp, manager.CheckDuplicate(_tp, batch2).ContentHash, 1);
+        manager.Register(_tp, manager.CheckDuplicate(_tp, batch3).ContentHash, 2);
 
         Assert.Equal(3, manager.TotalEntries);
 
         // Register a 4th — should evict one entry to stay at capacity
         var batch4 = CreateRecordBatch("entry4");
-        manager.Register(_tp, batch4, 3);
+        manager.Register(_tp, manager.CheckDuplicate(_tp, batch4).ContentHash, 3);
 
         // After eviction, count stays at 3 (evicted 1, added 1)
         Assert.Equal(3, manager.TotalEntries);
@@ -169,7 +169,7 @@ public class DeduplicationTests : IDisposable
     {
         var batch = CreateRecordBatch("important message");
 
-        _manager.Register(_tp, batch, 777);
+        _manager.Register(_tp, _manager.CheckDuplicate(_tp, batch).ContentHash, 777);
         var result = _manager.CheckDuplicate(_tp, batch);
 
         // Client sees the original offset — idempotent produce

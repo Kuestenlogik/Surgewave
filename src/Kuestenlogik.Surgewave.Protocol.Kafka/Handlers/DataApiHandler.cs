@@ -305,17 +305,21 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // Named because after the record transform below there are TWO buffers in this
                     // scope, and every call site silently picks one:
                     //
-                    //   producerRecords  — what the CLIENT sent. Use for anything about the
-                    //                      client's payload: dedup hashing, idempotence identity,
-                    //                      the declared compression codec.
-                    //   recordsToAppend  — what goes INTO THE LOG. Use for anything describing
-                    //                      stored records: offsets, record counts, delay/TTL
-                    //                      indexing.
+                    //   producerRecords  — what the CLIENT sent. Read ONLY before the transform:
+                    //                      framing, declared codec, idempotence identity, the dedup
+                    //                      hash.
+                    //   recordsToAppend  — what goes INTO THE LOG. Everything after the transform,
+                    //                      without exception.
                     //
-                    // Kafka has no equivalent hazard: it has no broker-side transform at all, and
-                    // where LogValidator does rewrite bytes it returns them as ValidationResult
-                    // while the original stays private to the validator, so nothing downstream can
-                    // pick wrong. Ours can, and three call sites did until #125.
+                    // That is one rule, not a decision per call site, and it holds because anything
+                    // needed from the client's bytes afterwards is extracted BEFORE the transform as
+                    // a value — the producer id, the sequence, the dedup hash — never carried along
+                    // as a second buffer. The last such carry was dedup, and it was also the one
+                    // that got it wrong.
+                    //
+                    // Kafka has no equivalent hazard: no broker-side transform at all, and where
+                    // LogValidator does rewrite bytes it returns them as ValidationResult while the
+                    // original stays private to the validator, so nothing downstream can see both.
                     var producerRecords = partitionData.Records;
 
                     // Kafka permits exactly ONE record batch per partition in a produce request and
@@ -428,10 +432,17 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         }
                     }
 
-                    // Content-based deduplication check (if enabled for this topic)
+                    // Content-based deduplication check (if enabled for this topic).
+                    //
+                    // The hash is carried past the record transform instead of the bytes. That is
+                    // what removes the choice further down: the registration after the append needs
+                    // an offset, which only exists then, but it must describe the bytes checked
+                    // HERE. Passing the buffer across that gap is what made the two ends disagree.
+                    ulong dedupHash = 0;
                     if (_deduplicationManager != null && IsDeduplicationEnabled(topic))
                     {
                         var dedupResult = _deduplicationManager.CheckDuplicate(topicPartition, producerRecords.Span);
+                        dedupHash = dedupResult.ContentHash;
                         if (dedupResult.IsDuplicate)
                         {
                             _metrics?.RecordDeduplication(topic, partitionData.Index);
@@ -498,24 +509,18 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             producerId, producerEpoch, baseSequence, lastOffsetDelta, topicPartition, baseOffset);
                     }
 
-                    // Register hash after successful write (deduplication).
-                    //
-                    // Hashes producerRecords, NOT recordsToAppend: CheckDuplicate above reads
-                    // the producer's incoming bytes (deliberately, so a duplicate costs no WASM
-                    // transform), so the hash registered here has to describe the same bytes or the
-                    // two ends never meet. They did not: on a transform-bound topic the check
-                    // hashed the incoming payload while the registration hashed the transformed
-                    // one, so no retransmit could ever match and dedup was silently inert for
-                    // exactly the topics that do the most work per record.
-                    _deduplicationManager?.Register(topicPartition, producerRecords.Span, baseOffset);
+                    // Register the hash the check produced. Zero means either dedup is off for
+                    // this topic or the batch was too small to hash, and Register ignores it — so
+                    // a dedup-disabled topic no longer pays a hash pass and no longer fills a
+                    // window nobody reads, which it did before.
+                    _deduplicationManager?.Register(topicPartition, dedupHash, baseOffset);
 
                     // Extract and index delayed delivery headers (if enabled for this topic)
                     if (_delayIndex != null && IsDelayDeliveryEnabled(topic))
                     {
-                        // recordsToAppend, not producerRecords: this index maps baseOffset
-                        // to a delivery time, and what lives at baseOffset is what was appended. A
-                        // transform that rewrites or drops headers made the index describe records
-                        // the log does not hold.
+                        // This index maps baseOffset to a delivery time, and what lives at
+                        // baseOffset is what was appended — a transform that rewrites or drops
+                        // headers made the index describe records the log does not hold.
                         var deliverAtMs = DelayHeaderParser.ExtractDeliverAtTimestamp(
                             recordsToAppend.Span, MaxDecompressedBytes(topicMetadata));
                         if (deliverAtMs.HasValue)
@@ -544,18 +549,21 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     }
 
                     // Track transactional batches for LSO calculation
-                    if (CompressionCodec.IsTransactional(producerRecords.Span) &&
-                        !CompressionCodec.IsControlBatch(producerRecords.Span))
+                    // recordsToAppend from here on, without exception: everything below describes
+                    // the records that were stored at baseOffset. The last-stable-offset anchor and
+                    // the produce metrics are statements about the log, not about what arrived.
+                    if (CompressionCodec.IsTransactional(recordsToAppend.Span) &&
+                        !CompressionCodec.IsControlBatch(recordsToAppend.Span))
                     {
                         _transactionCoordinator.RecordTransactionalBatch(topicPartition, producerId, baseOffset);
                     }
 
-                    RecordBatchStored(topic, partitionData.Index, baseOffset, producerRecords.Length);
+                    RecordBatchStored(topic, partitionData.Index, baseOffset, recordsToAppend.Length);
 
                     // Record produce metrics
-                    var recordCount = CompressionCodec.GetRecordCount(producerRecords.Span);
-                    _metrics?.RecordProduce(topic, partitionData.Index, recordCount, producerRecords.Length, 0);
-                    _coldStartProfiler?.RecordProduce(topic, recordCount, producerRecords.Length);
+                    var recordCount = CompressionCodec.GetRecordCount(recordsToAppend.Span);
+                    _metrics?.RecordProduce(topic, partitionData.Index, recordCount, recordsToAppend.Length, 0);
+                    _coldStartProfiler?.RecordProduce(topic, recordCount, recordsToAppend.Length);
 
                     partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                     {
