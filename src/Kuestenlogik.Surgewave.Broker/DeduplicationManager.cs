@@ -39,26 +39,26 @@ public sealed class DeduplicationManager : IDisposable, IDeduplicationManager
     {
         var hash = RecordBatchHasher.ComputeContentHash(recordBatch);
         if (hash == 0)
-            return new DeduplicationResult(false, -1);
+            return new DeduplicationResult(false, -1, 0);
 
         var window = GetOrCreateWindow(partition);
         if (window.TryCheckDuplicate(hash, out var originalOffset))
         {
-            return new DeduplicationResult(true, originalOffset);
+            return new DeduplicationResult(true, originalOffset, hash);
         }
 
-        return new DeduplicationResult(false, -1);
+        return new DeduplicationResult(false, -1, hash);
     }
 
     /// <summary>
-    /// Register a record batch hash after successful write.
+    /// Register the hash from a preceding <see cref="CheckDuplicate"/> after a successful write.
     /// </summary>
-    public void Register(TopicPartition partition, ReadOnlySpan<byte> recordBatch, long offset)
+    public void Register(TopicPartition partition, ulong contentHash, long offset)
     {
-        var hash = RecordBatchHasher.ComputeContentHash(recordBatch);
-        if (hash == 0)
+        if (contentHash == 0)
             return;
 
+        var hash = contentHash;
         var window = GetOrCreateWindow(partition);
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         window.Register(hash, offset, nowMs);

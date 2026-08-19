@@ -162,8 +162,9 @@ public static class RecordBatchValidator
         baseOffset = -1;
         recordCount = 0;
 
-        // Need the 12-byte length prefix (baseOffset int64 + batchLength int32).
-        if (cursor < 0 || cursor + 12 > section.Length)
+        // Need the 12-byte length prefix (baseOffset int64 + batchLength int32). Written as a
+        // subtraction so a section shorter than the prefix cannot produce a bogus comparison.
+        if (cursor < 0 || cursor > section.Length - 12)
             return false;
 
         var batchLength = BinaryPrimitives.ReadInt32BigEndian(section.Slice(cursor + 8, 4));
@@ -172,14 +173,16 @@ public static class RecordBatchValidator
         if (batchLength < MinBatchHeaderSize - 12)
             return false;
 
-        var total = 12 + batchLength;
-        // Incomplete trailing batch (truncated by the remote's maxBytes) — stop cleanly.
-        if (cursor + total > section.Length)
+        // Bound BEFORE forming the total. `12 + batchLength` overflows to a negative number for a
+        // hostile length near int.MaxValue, and every caller advances its cursor by this value —
+        // a negative total walks the cursor BACKWARDS through the section. The remaining-bytes
+        // subtraction cannot overflow. Reachable input: a peer broker's fetch response.
+        if (batchLength > section.Length - cursor - 12)
             return false;
 
         baseOffset = BinaryPrimitives.ReadInt64BigEndian(section.Slice(cursor, 8));
         recordCount = BinaryPrimitives.ReadInt32BigEndian(section.Slice(cursor + 57, 4));
-        totalLength = total;
+        totalLength = 12 + batchLength;
         return true;
     }
 

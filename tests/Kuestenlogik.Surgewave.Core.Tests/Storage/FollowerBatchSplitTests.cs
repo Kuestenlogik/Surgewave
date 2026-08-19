@@ -136,6 +136,22 @@ public sealed class FollowerBatchSplitTests
         Assert.True(RecordBatchValidator.ValidateCrc(batch));
     }
 
+    [Fact]
+    public void TryReadBatchBoundary_HostileBatchLength_IsRefusedInsteadOfOverflowing()
+    {
+        // batchLength near int.MaxValue used to be added to 12 before the bound was checked, which
+        // overflows to a NEGATIVE total. Every caller advances its cursor by that value, so the
+        // scan walked BACKWARDS through the section instead of terminating. The length is now
+        // compared against the remaining bytes before the total is formed.
+        //
+        // Reachable input: this parses a peer broker's fetch response.
+        var batch = CreateValidBatch(0, 1);
+        BinaryPrimitives.WriteInt32BigEndian(batch.AsSpan(8, 4), int.MaxValue - 4);
+
+        Assert.False(RecordBatchValidator.TryReadBatchBoundary(batch, 0, out var total, out _, out _));
+        Assert.Equal(0, total);
+    }
+
     #region TryReadBatchBoundary
 
     [Fact]

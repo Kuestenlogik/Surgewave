@@ -15,6 +15,16 @@ public interface IDeduplicationManager
     /// </summary>
     DeduplicationResult CheckDuplicate(TopicPartition partition, ReadOnlySpan<byte> recordBatch);
 
-    /// <summary>Register a record batch hash after a successful write.</summary>
-    void Register(TopicPartition partition, ReadOnlySpan<byte> recordBatch, long offset);
+    /// <summary>
+    /// Register the hash from a preceding <see cref="CheckDuplicate"/> after a successful write.
+    /// </summary>
+    /// <remarks>
+    /// Takes the hash rather than the bytes on purpose. The check runs before the record transform
+    /// (so a duplicate costs no transform) while the registration runs after the append (so an
+    /// offset exists), and passing bytes across that gap meant the caller had to keep the
+    /// PRE-transform buffer alive and pick it correctly — it did not, and dedup was silently inert
+    /// on every transform-bound topic. A hash cannot be picked wrongly. It also drops a second
+    /// XxHash64 pass over the payload from the produce path.
+    /// </remarks>
+    void Register(TopicPartition partition, ulong contentHash, long offset);
 }
