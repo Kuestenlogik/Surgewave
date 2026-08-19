@@ -78,7 +78,7 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 git clone https://github.com/Kuestenlogik/Surgewave.git
 cd Surgewave
 dotnet build Kuestenlogik.Surgewave.slnx -c Release
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 For the full step-by-step guide — build, publish, and run in all variants (development, self-contained executables, Docker containers) — see [docs/setup/building.md](docs/setup/building.md).

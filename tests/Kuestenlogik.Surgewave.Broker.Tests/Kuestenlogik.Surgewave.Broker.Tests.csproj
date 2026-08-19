@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker\Kuestenlogik.Surgewave.Broker.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker.App\Kuestenlogik.Surgewave.Broker.App.csproj" />
     <!-- #59 b5 ATOMIC FLIP: Broker no longer transitively drags in Protocol.Kafka, so tests
          that exercise the Kafka handlers/dispatcher take a direct reference. -->
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj" />

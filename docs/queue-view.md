@@ -142,7 +142,7 @@ QueueView follows Surgewave's standard feature toggle pattern. Enable it via the
 or from the command line:
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- \
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- \
   --Surgewave:QueueView:Enabled=true \
   --Surgewave:Amqp:Enabled=true
 ```
@@ -395,7 +395,7 @@ docker run -d \
 ### dotnet run: Start Surgewave with AMQP and QueueView Enabled
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- \
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- \
   --Surgewave:QueueView:Enabled=true \
   --Surgewave:QueueView:VisibilityTimeout=00:00:30 \
   --Surgewave:QueueView:MaxDeliveryCount=5 \

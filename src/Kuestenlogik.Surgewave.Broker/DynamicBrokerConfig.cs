@@ -239,12 +239,12 @@ public sealed class DynamicBrokerConfig : IDynamicBrokerConfig
         var lowerName = name.ToLowerInvariant();
 
         // Numeric validations
-        if (lowerName.EndsWith(".bytes") || lowerName.EndsWith(".ms") ||
-            lowerName.EndsWith(".seconds") || lowerName.EndsWith(".hours") ||
+        if (lowerName.EndsWith(".bytes", StringComparison.Ordinal) || lowerName.EndsWith(".ms", StringComparison.Ordinal) ||
+            lowerName.EndsWith(".seconds", StringComparison.Ordinal) || lowerName.EndsWith(".hours", StringComparison.Ordinal) ||
             lowerName == "num.partitions" || lowerName == "default.replication.factor" ||
             lowerName == "min.insync.replicas" || lowerName == "max.connections.per.ip" ||
             lowerName == "num.replica.fetchers" ||
-            lowerName.EndsWith(".messages") || lowerName.EndsWith(".threads"))
+            lowerName.EndsWith(".messages", StringComparison.Ordinal) || lowerName.EndsWith(".threads", StringComparison.Ordinal))
         {
             if (!long.TryParse(value, out var numValue))
             {
@@ -271,14 +271,14 @@ public sealed class DynamicBrokerConfig : IDynamicBrokerConfig
             {
                 return $"Config '{name}' must be at least 1";
             }
-            if (lowerName.EndsWith(".bytes") && numValue < 0 && numValue != -1)
+            if (lowerName.EndsWith(".bytes", StringComparison.Ordinal) && numValue < 0 && numValue != -1)
             {
                 return $"Config '{name}' must be non-negative or -1 (unlimited)";
             }
         }
 
         // Boolean validations
-        if (lowerName.EndsWith(".enable") || lowerName.StartsWith("auto."))
+        if (lowerName.EndsWith(".enable", StringComparison.Ordinal) || lowerName.StartsWith("auto.", StringComparison.Ordinal))
         {
             if (!bool.TryParse(value, out _))
             {

@@ -35,7 +35,7 @@ Add to your broker's `appsettings.json`:
 Start the broker:
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- \
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- \
     --Surgewave:Connect:Enabled=true \
     --Surgewave:Connect:PluginsDirectory="plugins"
 ```

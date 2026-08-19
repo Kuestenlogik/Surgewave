@@ -19,7 +19,7 @@ Before running the integration tests, you need to start the Surgewave broker:
 
 ```bash
 # From the project root
-cd src/Kuestenlogik.Surgewave.Broker
+cd src/Kuestenlogik.Surgewave.Broker.App
 dotnet run
 ```
 
@@ -152,7 +152,7 @@ var config = new ProducerConfig { BootstrapServers = "surgewave-broker:9092" };
 **Solution**: Make sure the Surgewave broker is running on `localhost:9092`
 
 ```bash
-cd src/Kuestenlogik.Surgewave.Broker
+cd src/Kuestenlogik.Surgewave.Broker.App
 dotnet run
 ```
 

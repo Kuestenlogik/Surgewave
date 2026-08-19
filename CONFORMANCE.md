@@ -24,9 +24,9 @@ unsupported side of the matrix — without having to read source.
 - API version ranges advertised to clients:
   [`src/Kuestenlogik.Surgewave.Protocol.Kafka/Requests/ApiVersionsRequest.cs`](src/Kuestenlogik.Surgewave.Protocol.Kafka/Requests/ApiVersionsRequest.cs#L239-L367)
 - Wired handler set:
-  [`src/Kuestenlogik.Surgewave.Broker/Program.cs`](src/Kuestenlogik.Surgewave.Broker/Program.cs#L1144-L1162)
+  [`src/Kuestenlogik.Surgewave.Broker.App/Program.cs`](src/Kuestenlogik.Surgewave.Broker.App/Program.cs#L1144-L1162)
 - Per-handler `SupportedApiKeys`:
-  [`src/Kuestenlogik.Surgewave.Broker/Handlers/`](src/Kuestenlogik.Surgewave.Broker/Handlers/)
+  [`src/Kuestenlogik.Surgewave.Broker.App/Handlers/`](src/Kuestenlogik.Surgewave.Broker.App/Handlers/)
 
 ---
 
@@ -404,7 +404,7 @@ type or unit-test failure elsewhere.
 
 - The Kafka API matrix is generated from the same `ApiVersionsResponse.CreateDefault`
   source used at runtime and the per-handler `SupportedApiKeys` lists in
-  `src/Kuestenlogik.Surgewave.Broker/Handlers/`. When you add a handler or advertise a new
+  `src/Kuestenlogik.Surgewave.Broker.App/Handlers/`. When you add a handler or advertise a new
   version, update both the source and this document in the same PR — CI checks
   for drift.
 - Conformance test additions land alongside their RPCs and are listed in the

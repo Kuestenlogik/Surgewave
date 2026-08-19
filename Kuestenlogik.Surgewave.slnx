@@ -48,6 +48,7 @@
     <Project Path="samples/Kuestenlogik.Surgewave.Samples.StorageEngine/tests/Kuestenlogik.Surgewave.Samples.StorageEngine.Tests.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Clustering/Kuestenlogik.Surgewave.Clustering.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Broker/Kuestenlogik.Surgewave.Broker.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Broker.App/Kuestenlogik.Surgewave.Broker.App.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Runtime/Kuestenlogik.Surgewave.Runtime.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Hosting/Kuestenlogik.Surgewave.Hosting.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Client/Kuestenlogik.Surgewave.Client.csproj" />

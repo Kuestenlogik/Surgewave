@@ -9,7 +9,7 @@
 #     → loadable on any host via: docker load -i <file>.tar
 #
 # Manual per-project build:
-#   dotnet publish src/Kuestenlogik.Surgewave.Broker         -c Release /t:PublishContainer
+#   dotnet publish src/Kuestenlogik.Surgewave.Broker.App         -c Release /t:PublishContainer
 #   dotnet publish src/Kuestenlogik.Surgewave.Gateway        -c Release /t:PublishContainer
 #   dotnet publish src/Kuestenlogik.Surgewave.Control        -c Release /t:PublishContainer
 #   dotnet publish src/Kuestenlogik.Surgewave.Marketplace    -c Release /t:PublishContainer

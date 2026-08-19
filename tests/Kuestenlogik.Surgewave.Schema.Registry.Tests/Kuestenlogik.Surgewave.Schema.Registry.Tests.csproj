@@ -20,6 +20,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry\Kuestenlogik.Surgewave.Schema.Registry.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Protobuf.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Json.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Avro.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Schemaless\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Schemaless.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Bond\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Bond.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Thrift\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Thrift.csproj" />

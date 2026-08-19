@@ -324,7 +324,7 @@ public sealed class DescribeTopicOperation : IOperationHandler<DescribeTopicRequ
             TopicName = metadata.Name,
             PartitionCount = metadata.PartitionCount,
             ReplicationFactor = metadata.ReplicationFactor,
-            IsInternal = metadata.Name.StartsWith("__"),
+            IsInternal = metadata.Name.StartsWith("__", StringComparison.Ordinal),
             Partitions = partitions
         };
 

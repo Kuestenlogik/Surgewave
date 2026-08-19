@@ -118,7 +118,7 @@ EXPOSE 9092 9093
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY . .
-RUN dotnet publish src/Kuestenlogik.Surgewave.Broker/Kuestenlogik.Surgewave.Broker.csproj \
+RUN dotnet publish src/Kuestenlogik.Surgewave.Broker.App/Kuestenlogik.Surgewave.Broker.App.csproj \
     -c Release -o /app/publish
 
 FROM base AS final

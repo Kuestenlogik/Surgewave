@@ -102,7 +102,7 @@ jobs:
         env:
           V: ${{ steps.version.outputs.VERSION }}
         run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Broker  -c Release -r win-x64 --self-contained -o deployments/installer/publish/broker  -p:Version=$V
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App  -c Release -r win-x64 --self-contained -o deployments/installer/publish/broker  -p:Version=$V
           dotnet publish src/Kuestenlogik.Surgewave.Tool     -c Release -r win-x64 --self-contained -o deployments/installer/publish/cli     -p:Version=$V
           dotnet publish src/Kuestenlogik.Surgewave.Control -c Release -r win-x64 --self-contained -o deployments/installer/publish/control -p:Version=$V
           cp deployments/installer/config/appsettings.json            deployments/installer/publish/broker/
@@ -235,7 +235,7 @@ jobs:
       # registry" weil das SDK das als literalen Host nimmt.
       - name: Pre-restore Broker (multi-RID)
         run: |
-          dotnet restore src/Kuestenlogik.Surgewave.Broker \
+          dotnet restore src/Kuestenlogik.Surgewave.Broker.App \
             "-p:RuntimeIdentifiers=\"linux-x64;linux-arm64\""
 
       - name: Pre-restore Control (multi-RID)
@@ -247,7 +247,7 @@ jobs:
         env:
           V: ${{ steps.version.outputs.VERSION }}
         run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Broker \
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App \
             -c Release \
             -t:PublishContainer \
             --no-restore \
@@ -295,7 +295,7 @@ jobs:
         env:
           V: ${{ steps.version.outputs.VERSION }}
         run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Broker \
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App \
             -c Release \
             -t:PublishContainer \
             --no-restore \
@@ -325,11 +325,11 @@ jobs:
       # Self-contained Broker binaries (no .NET SDK needed on target)
       - name: Publish Broker binaries
         run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r linux-x64 --self-contained -o ./publish/surgewave-broker-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-broker-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r win-x64 --self-contained -o ./publish/surgewave-broker-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r osx-x64 --self-contained -o ./publish/surgewave-broker-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
-          dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-broker-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release -r linux-x64 --self-contained -o ./publish/surgewave-broker-linux-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release -r linux-arm64 --self-contained -o ./publish/surgewave-broker-linux-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release -r win-x64 --self-contained -o ./publish/surgewave-broker-win-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release -r osx-x64 --self-contained -o ./publish/surgewave-broker-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-broker-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
 
       # Self-contained Control UI binaries
       - name: Publish Control binaries
@@ -464,7 +464,7 @@ jobs:
             echo ""
             echo "**Container — build from source:**"
             echo '```bash'
-            echo "dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer"
+            echo "dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release /t:PublishContainer"
             echo "dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer"
             echo '```'
             echo ""

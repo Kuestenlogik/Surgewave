@@ -1502,7 +1502,14 @@ var crossTopicTxnManager = app.Services.GetService<Kuestenlogik.Surgewave.Broker
 
 // Create KV Bucket Manager (broker-native Key-Value Store)
 var kvBucketManagerLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.KeyValue.KvBucketManager>>();
+// Ownership liegt beim Host: SurgewaveBroker.DisposeAsync fasst den Manager nicht an
+// (er reicht ihn nur in den Handler-Graphen durch), also gehoert das Dispose an den
+// App-Stop. Vor dem Assembly-Split hat der Analyzer die Kette interprozedural gesehen
+// und geschwiegen; jetzt macht die Registrierung die Lebenszeit explizit.
+#pragma warning disable CA2000 // Lebenszeit = Prozess, Dispose via ApplicationStopped
 var kvBucketManager = new Kuestenlogik.Surgewave.Broker.KeyValue.KvBucketManager(logManager, kvBucketManagerLogger);
+#pragma warning restore CA2000
+app.Lifetime.ApplicationStopped.Register(kvBucketManager.Dispose);
 await kvBucketManager.RestoreFromTopicsAsync(app.Lifetime.ApplicationStopping);
 
 // Consumer-Lag-Berechnung: ein Calculator ueber dem gemeinsamen OffsetStore

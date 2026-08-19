@@ -92,14 +92,14 @@ surgewave plugins install plugins/**                  # recursive
 .\scripts\publish.ps1 -Service Broker,Control
 
 # Container images (manual, per service)
-dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer
+dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release /t:PublishContainer
 ```
 
 ### Publishable Services
 
 | Service | Container | Command |
 |---------|-----------|---------|
-| Broker | `surgewave/surgewave-broker` | `dotnet publish src/Kuestenlogik.Surgewave.Broker -c Release /t:PublishContainer` |
+| Broker | `surgewave/surgewave-broker` | `dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release /t:PublishContainer` |
 | Gateway | `surgewave/surgewave-gateway` | `dotnet publish src/Kuestenlogik.Surgewave.Gateway -c Release /t:PublishContainer` |
 | Control | `surgewave/surgewave-control` | `dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer` |
 | Marketplace | `surgewave/surgewave-marketplace` | `dotnet publish src/Kuestenlogik.Surgewave.Marketplace -c Release /t:PublishContainer` |

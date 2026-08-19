@@ -25,7 +25,7 @@ See [`python/README.md`](python/README.md) for Python gRPC setup instructions.
 
 Start the Surgewave broker:
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 ## Quick Start

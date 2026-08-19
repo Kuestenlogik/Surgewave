@@ -78,7 +78,7 @@ await producer.ProduceAsync("my-topic", new Message<string, string>
 
 ```bash
 # Start Surgewave broker
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 
 # Run sample with existing Confluent.Kafka
 dotnet run --project samples/KafkaCompatibility
@@ -208,7 +208,7 @@ if (result != null && !result.IsPartitionEOF)
 
 ```bash
 # Start Surgewave broker
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 
 # Run wrapper sample
 dotnet run --project samples/ConfluentKafkaMigration -- surgewave 1000
@@ -342,7 +342,7 @@ var description = await client.Groups.DescribeAsync("my-group");
 
 ```bash
 # Start Surgewave broker
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 
 # Run native client sample
 dotnet run --project samples/NativeClient
@@ -447,7 +447,7 @@ await surgewaveProducer.ProduceAsync("topic", message);
 **Connection refused**
 ```
 Solution: Ensure Surgewave broker is running on the specified address
-Command: dotnet run --project src/Kuestenlogik.Surgewave.Broker
+Command: dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 **Topic not found**

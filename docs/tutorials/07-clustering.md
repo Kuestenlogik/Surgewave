@@ -92,19 +92,19 @@ Open three terminals and start each broker:
 **Terminal 1:**
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- --config broker1/appsettings.json
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- --config broker1/appsettings.json
 ```
 
 **Terminal 2:**
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- --config broker2/appsettings.json
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- --config broker2/appsettings.json
 ```
 
 **Terminal 3:**
 
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker -- --config broker3/appsettings.json
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- --config broker3/appsettings.json
 ```
 
 ### Using Docker Compose

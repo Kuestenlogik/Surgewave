@@ -37,7 +37,7 @@ mounted `appsettings.json` &mdash; see
 git clone https://github.com/Kuestenlogik/Surgewave
 cd Surgewave
 dotnet build Kuestenlogik.Surgewave.slnx -c Release
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 ```
 
 ## Verifying downloads

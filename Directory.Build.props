@@ -48,13 +48,13 @@
        Genau eine Kategorie faellt raus: HOSTS. Ein Exe- bzw. Web-SDK-Projekt, das gestartet und
        nicht referenziert wird, laesst sich nicht konsumieren - ein Paket davon waere eine ID, die
        niemand sinnvoll installieren kann. Diese Projekte setzen `IsPackable=false` und werden
-       ueber scripts/publish.ps1 und das Container-Image ausgeliefert: Broker(*), Control, Gateway,
-       Marketplace, Connect.Worker, Schema.Registry.App.
+       ueber scripts/publish.ps1 und das Container-Image ausgeliefert: Broker.App, Control,
+       Gateway, Marketplace, Connect.Worker, Schema.Registry.App.
 
-       (*) Broker ist die Ausnahme und bleibt paketierbar: Runtime und Hosting - beide oeffentlich
-       und extern konsumiert - referenzieren es, weil die Broker-Logik heute im Exe-Projekt liegt
-       statt in einer Library. Solange das so ist, wuerde IsPackable=false dort das publizierte
-       Runtime-Paket unaufloesbar machen.
+       (Broker war frueher die dokumentierte Ausnahme - Exe und trotzdem paketierbar, weil die
+       Engine-Logik im Exe-Projekt lag und Runtime/Hosting sie referenzieren mussten. Seit dem
+       Engine/Host-Split ist Kuestenlogik.Surgewave.Broker eine normale Library und Broker.App
+       der Host; die Ausnahme existiert nicht mehr.)
 
        Beim Anlegen eines neuen Projekts also nur die Frage: Host oder nicht? -->
 

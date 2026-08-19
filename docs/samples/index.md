@@ -233,7 +233,7 @@ samples/FleetTracker/
 
 **Run:**
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 dotnet run --project samples/FleetTracker/FleetTracker.Generator
 dotnet run --project samples/FleetTracker/FleetTracker.Dashboard
 # Open http://localhost:5000
@@ -279,7 +279,7 @@ samples/MassFleetTracker/
 
 **Run:**
 ```bash
-dotnet run --project src/Kuestenlogik.Surgewave.Broker
+dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 dotnet run --project samples/MassFleetTracker/MassFleetTracker.Generator
 dotnet run --project samples/MassFleetTracker/MassFleetTracker.Dashboard
 # Open http://localhost:5000

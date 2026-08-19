@@ -20,7 +20,7 @@ cd Surgewave
 dotnet build -c Release
 
 # Run broker
-cd src/Kuestenlogik.Surgewave.Broker
+cd src/Kuestenlogik.Surgewave.Broker.App
 dotnet run -c Release
 ```
 
