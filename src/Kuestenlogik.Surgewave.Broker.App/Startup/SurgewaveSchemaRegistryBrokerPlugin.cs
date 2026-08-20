@@ -84,6 +84,12 @@ public sealed class SurgewaveSchemaRegistryBrokerPlugin : IBrokerPlugin
             DefaultCompatibility = compatibilityMode
         });
 
+        // Lineage-Quelle fuer die Schema-Impact-Analyse (#13): beantwortet on demand aus
+        // OffsetStore, Streams-Topologien und Connect-Pipelines, wer ein Topic liest -
+        // kein Recording, kein Hot-Path. Die Standalone-Registry hat bewusst keine.
+        services.AddSingleton<Kuestenlogik.Surgewave.Schema.Registry.Lineage.ISchemaLineageSource,
+            BrokerSchemaLineageSource>();
+
         // Built-in schema format handlers
         services.AddAvroSchemaHandler();
         services.AddJsonSchemaHandler();

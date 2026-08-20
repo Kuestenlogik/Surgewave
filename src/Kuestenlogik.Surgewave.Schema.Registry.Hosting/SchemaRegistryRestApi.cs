@@ -1,4 +1,5 @@
 using Kuestenlogik.Surgewave.Schema.Registry.Evolution;
+using Kuestenlogik.Surgewave.Schema.Registry.Lineage;
 using Kuestenlogik.Surgewave.Schema.Registry.Inference;
 using Kuestenlogik.Surgewave.Schema.Registry.Linking;
 using Kuestenlogik.Surgewave.Schema.Registry.Migration;
@@ -38,6 +39,11 @@ public static class SchemaRegistryRestApi
 
         // Register the compatibility checker (uses the handler registry)
         services.AddSingleton<CompatibilityChecker>();
+
+        // Impact-Analyse (#13): beantwortet "was bricht, wenn diese Version shippt?".
+        // Die ISchemaLineageSource ist optional - der Broker-Host registriert eine, die
+        // Standalone-Registry hat keine; das Kompatibilitaets-Urteil haengt nie an ihr.
+        services.AddSingleton<SchemaImpactAnalyzer>();
 
         services.AddOpenApi(options =>
         {
@@ -211,6 +217,13 @@ public static class SchemaRegistryRestApi
             .Produces<RegisterSchemaResponse>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+        // Surgewave-Erweiterung (#13): Pre-Deploy-Check fuer CI - volle Impact-Analyse
+        // (Kompatibilitaet + betroffene Pipelines + Downstream-Topics), ohne zu registrieren.
+        group.MapPost("/subjects/{subject}/impact", CheckImpact)
+            .WithName("CheckSchemaImpact")
+            .WithSummary("Analyze the impact of a schema change without registering it")
+            .Produces<SchemaChangeImpact>(StatusCodes.Status200OK);
 
         group.MapGet("/subjects/{subject}/versions/{version}", GetSchemaByVersion)
             .WithName("GetSchemaByVersion")
@@ -431,7 +444,10 @@ public static class SchemaRegistryRestApi
         string subject,
         RegisterSchemaRequest request,
         SchemaStore store,
-        CompatibilityChecker checker)
+        CompatibilityChecker checker,
+        SchemaImpactAnalyzer impactAnalyzer,
+        ILogger<SchemaStore> logger,
+        bool force = false)
     {
         if (string.IsNullOrEmpty(request.Schema))
         {
@@ -440,7 +456,7 @@ public static class SchemaRegistryRestApi
 
         var schemaType = ParseSchemaType(request.SchemaType);
 
-        // Validate schema
+        // Validate schema - auch mit force: ein syntaktisch kaputtes Schema hilft niemandem.
         var (isValid, error) = checker.ValidateSchema(request.Schema, schemaType);
         if (!isValid)
         {
@@ -451,22 +467,80 @@ public static class SchemaRegistryRestApi
         var compatibility = store.GetCompatibility(subject);
         var existingSchemas = store.GetSchemasForCompatibilityCheck(subject, compatibility);
 
-        if (existingSchemas.Count > 0)
+        if (existingSchemas.Count > 0 && !force)
         {
             var compatibilityResult = checker.CheckCompatibility(request.Schema, schemaType, existingSchemas, compatibility);
             if (!compatibilityResult.IsCompatible)
             {
-                return Results.Conflict(new ErrorResponse
+                // #13: nicht abstrakt "inkompatibel", sondern WER bricht - die Impact-Analyse
+                // liefert die Namen der direkten Leser und die Downstream-Topics dazu.
+                var impact = impactAnalyzer.Analyze(subject, request.Schema, schemaType);
+                var message = string.Join("; ", compatibilityResult.Messages ?? ["Schema is not compatible"]);
+                if (impact.AffectedPipelines.Count > 0)
+                {
+                    message += $" | Affected pipelines: {string.Join(", ", impact.AffectedPipelines.Select(pipeline => $"{pipeline.Name} ({pipeline.Kind})"))}";
+                }
+
+                if (impact.DownstreamTopics.Count > 0)
+                {
+                    message += $" | Downstream topics going stale: {string.Join(", ", impact.DownstreamTopics.Select(t => t.Topic))}";
+                }
+
+                message += " | Re-run with ?force=true to register anyway.";
+                return Results.Conflict(new SchemaConflictResponse
                 {
                     ErrorCode = 409,
-                    Message = string.Join("; ", compatibilityResult.Messages ?? ["Schema is not compatible"])
+                    Message = message,
+                    AffectedPipelines = impact.AffectedPipelines,
+                    DownstreamTopics = impact.DownstreamTopics,
                 });
+            }
+        }
+        else if (existingSchemas.Count > 0 && force)
+        {
+            // Notausgang fuer den Betreiber: registriert trotz Bruch, aber nie stumm.
+            var impact = impactAnalyzer.Analyze(subject, request.Schema, schemaType);
+            if (!impact.IsCompatible)
+            {
+                logger.LogWarning(
+                    "Schema for subject {Subject} registered with force=true DESPITE incompatibility. " +
+                    "Affected pipelines: {Pipelines}. Errors: {Errors}",
+                    subject,
+                    impact.AffectedPipelines.Count > 0
+                        ? string.Join(", ", impact.AffectedPipelines.Select(pipeline => pipeline.Name))
+                        : "(no lineage data)",
+                    string.Join("; ", impact.CompatibilityErrors));
             }
         }
 
         var schema = store.RegisterSchema(subject, request.Schema, schemaType, request.References?.Select(r => new SchemaReference(r.Name, r.Subject, r.Version)).ToList());
 
         return Results.Ok(new RegisterSchemaResponse { Id = schema.Id });
+    }
+
+    /// <summary>
+    /// Pre-Deploy-Check (#13): dieselbe Analyse, die das Register-Gate speist, als eigener
+    /// Endpoint fuer CI - Antwort ist immer 200, das Urteil steht im Report (compatible).
+    /// </summary>
+    private static IResult CheckImpact(
+        string subject,
+        RegisterSchemaRequest request,
+        CompatibilityChecker checker,
+        SchemaImpactAnalyzer impactAnalyzer)
+    {
+        if (string.IsNullOrEmpty(request.Schema))
+        {
+            return Results.BadRequest(new ErrorResponse { ErrorCode = 42201, Message = "Schema cannot be empty" });
+        }
+
+        var schemaType = ParseSchemaType(request.SchemaType);
+        var (isValid, error) = checker.ValidateSchema(request.Schema, schemaType);
+        if (!isValid)
+        {
+            return Results.BadRequest(new ErrorResponse { ErrorCode = 42201, Message = $"Invalid schema: {error}" });
+        }
+
+        return Results.Ok(impactAnalyzer.Analyze(subject, request.Schema, schemaType));
     }
 
     private static IResult GetSchemaByVersion(string subject, string version, SchemaStore store)

@@ -150,6 +150,36 @@ A malformed vector declaration (missing or non-positive `dim`, unknown dtype, wr
 type) is rejected at registration with error code 42201; a dim/dtype change on an existing
 field is rejected with 409 and a message naming the field and both values.
 
+## Impact Analysis
+
+An incompatible schema change does not abstractly "fail the check" — it breaks the named
+readers of the topic, and everything downstream of a broken pipeline goes stale. When the
+registry runs inside the broker, it knows those names: consumer groups from committed offsets,
+Streams applications from their submitted topologies, and Connect pipelines with their sink
+topics. A rejected registration (409) lists them:
+
+```
+Field 'id' types are incompatible | Affected pipelines: billing (consumer-group),
+enrich (pipeline) | Downstream topics going stale: enriched-orders |
+Re-run with ?force=true to register anyway.
+```
+
+For CI and pre-deploy checks, the same analysis is available without registering anything:
+
+```bash
+curl -X POST http://localhost:9093/subjects/orders-value/impact \
+  -H "Content-Type: application/json" \
+  -d '{"schema": "...", "schemaType": "AVRO"}'
+# → { "compatible": false, "affectedPipelines": [...], "downstreamTopics": [...] }
+```
+
+The response always carries the verdict in `compatible`; fail the pipeline on `false`. For
+emergencies, `POST /subjects/{subject}/versions?force=true` registers despite an
+incompatibility — the compatibility check is skipped, the impact is written to the broker log
+as a warning, and the schema format itself is still validated. In the standalone Schema
+Registry no lineage source exists; the verdict works the same and `lineageUnavailable: true`
+marks that the empty pipeline lists mean "nobody could answer", not "nobody reads this".
+
 ## REST API
 
 | Endpoint | Method | Description |
