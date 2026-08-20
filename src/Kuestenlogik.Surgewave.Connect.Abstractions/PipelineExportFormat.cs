@@ -50,6 +50,18 @@ public record PipelineExportData
     /// Connections between nodes.
     /// </summary>
     public required List<PipelineConnectionExport> Connections { get; init; }
+
+    /// <summary>
+    /// User-defined parameters referenced via <c>${param.key}</c> in node configurations.
+    /// Optional; absent in exports created before format additions.
+    /// </summary>
+    public Dictionary<string, string>? Parameters { get; init; }
+
+    /// <summary>
+    /// Schedule configuration for periodic pipeline execution.
+    /// Optional; absent in exports created before format additions.
+    /// </summary>
+    public ScheduleConfig? Schedule { get; init; }
 }
 
 /// <summary>
@@ -86,6 +98,12 @@ public record PipelineNodeExport
     /// Display label.
     /// </summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// Retry policy for this node's connector tasks.
+    /// Optional; absent in exports created before format additions.
+    /// </summary>
+    public RetryPolicy? RetryPolicy { get; init; }
 }
 
 /// <summary>
@@ -102,6 +120,12 @@ public record PipelineConnectionExport
     /// Target node ID.
     /// </summary>
     public required string TargetNodeId { get; init; }
+
+    /// <summary>
+    /// Connection type. Absent in exports created before format additions — those
+    /// deserialize as <see cref="PipelineConnectionType.Normal"/>.
+    /// </summary>
+    public PipelineConnectionType Type { get; init; }
 }
 
 /// <summary>

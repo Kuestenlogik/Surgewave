@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Pipeline-as-code DSL for Surgewave — build Connect pipelines with a fluent, typed C# API, export them as editor-compatible JSON, and publish them to a running broker. No broker required at build time.</Description>
+    <PackageTags>surgewave;pipelines;dsl;pipeline-as-code;connect;streaming</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Pipelines.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Connect.Abstractions\Kuestenlogik.Surgewave.Connect.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

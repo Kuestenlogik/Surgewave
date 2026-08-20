@@ -42,6 +42,8 @@
     <Project Path="templates/Kuestenlogik.Surgewave.Templates/Kuestenlogik.Surgewave.Templates.csproj" />
     <Project Path="samples/Kuestenlogik.Surgewave.Samples.BrokerPlugin/Kuestenlogik.Surgewave.Samples.BrokerPlugin.csproj" />
     <Project Path="samples/Kuestenlogik.Surgewave.Samples.BrokerPlugin/tests/Kuestenlogik.Surgewave.Samples.BrokerPlugin.Tests.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.PipelineAsCode/Kuestenlogik.Surgewave.Samples.PipelineAsCode.csproj" />
+    <Project Path="samples/Kuestenlogik.Surgewave.Samples.PipelineAsCode/tests/Kuestenlogik.Surgewave.Samples.PipelineAsCode.Tests.csproj" />
     <Project Path="samples/Kuestenlogik.Surgewave.Samples.ProtocolPlugin/Kuestenlogik.Surgewave.Samples.ProtocolPlugin.csproj" />
     <Project Path="samples/Kuestenlogik.Surgewave.Samples.ProtocolPlugin/tests/Kuestenlogik.Surgewave.Samples.ProtocolPlugin.Tests.csproj" />
     <Project Path="samples/Kuestenlogik.Surgewave.Samples.StorageEngine/Kuestenlogik.Surgewave.Samples.StorageEngine.csproj" />
@@ -91,6 +93,7 @@
     <Project Path="src/Kuestenlogik.Surgewave.Streams.InteractiveQueries/Kuestenlogik.Surgewave.Streams.InteractiveQueries.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Streams.InteractiveQueries.Hosting/Kuestenlogik.Surgewave.Streams.InteractiveQueries.Hosting.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Linq/Kuestenlogik.Surgewave.Linq.csproj" />
+    <Project Path="src/Kuestenlogik.Surgewave.Pipelines/Kuestenlogik.Surgewave.Pipelines.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Streams.Linq/Kuestenlogik.Surgewave.Streams.Linq.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.csproj" />
     <Project Path="src/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Streams/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Streams.csproj" />
@@ -142,6 +145,7 @@
     <Project Path="tests/Kuestenlogik.Surgewave.Cdc.Tests/Kuestenlogik.Surgewave.Cdc.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Wasm.Tests/Kuestenlogik.Surgewave.Wasm.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Linq.Tests/Kuestenlogik.Surgewave.Linq.Tests.csproj" />
+    <Project Path="tests/Kuestenlogik.Surgewave.Pipelines.Tests/Kuestenlogik.Surgewave.Pipelines.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Streams.Linq.Tests/Kuestenlogik.Surgewave.Streams.Linq.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Plugins.Tests/Kuestenlogik.Surgewave.Plugins.Tests.csproj" />
     <Project Path="tests/Kuestenlogik.Surgewave.Plugins.Repository.Tests/Kuestenlogik.Surgewave.Plugins.Repository.Tests.csproj" />

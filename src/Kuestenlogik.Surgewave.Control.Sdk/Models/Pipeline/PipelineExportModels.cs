@@ -21,6 +21,8 @@ public record PipelineExportData
     public List<PipelineNodeExport> Nodes { get; init; } = [];
     public List<PipelineConnectionExport> Connections { get; init; } = [];
     public Dictionary<string, PipelineExportData>? SubPipelines { get; init; }
+    public Dictionary<string, string>? Parameters { get; init; }
+    public ScheduleConfig? Schedule { get; init; }
 }
 
 /// <summary>
@@ -35,6 +37,7 @@ public record PipelineNodeExport
     public double Y { get; init; }
     public string? Label { get; init; }
     public string? SubPipelineId { get; init; }
+    public RetryPolicy? RetryPolicy { get; init; }
 }
 
 /// <summary>
@@ -44,6 +47,9 @@ public record PipelineConnectionExport
 {
     public string SourceNodeId { get; init; } = "";
     public string TargetNodeId { get; init; } = "";
+
+    /// <summary>Connection type as the server's numeric enum (0 = normal, 1 = error).</summary>
+    public int? Type { get; init; }
 }
 
 /// <summary>

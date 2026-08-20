@@ -719,7 +719,9 @@
 
             _pipelineName = _pipeline.Name;
             _pipelineDescription = _pipeline.Description ?? "";
-            _parameters = _pipeline.Parameters.ToList();
+            _parameters = _pipeline.Parameters?
+                .Select(kv => new PipelineParameter { Name = kv.Key, DefaultValue = kv.Value })
+                .ToList() ?? [];
             _environments = _pipeline.Environments.ToList();
             _scheduleConfig = _pipeline.Schedule;
 
@@ -1454,7 +1456,9 @@
             Connections = connections,
             Status = _pipeline?.Status ?? PipelineStatus.Draft,
             CreatedAt = _pipeline?.CreatedAt ?? DateTimeOffset.UtcNow,
-            Parameters = _parameters,
+            Parameters = _parameters.Count > 0
+                ? _parameters.ToDictionary(p => p.Name, p => p.DefaultValue)
+                : null,
             Environments = _environments,
             Schedule = _scheduleConfig
         };

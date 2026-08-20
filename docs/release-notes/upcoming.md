@@ -46,6 +46,29 @@ Producers declare it once on the .NET type — `[SurgewaveVector(768)] float[] E
 `Kuestenlogik.Surgewave.Schema.Registry.Client`) — and the Avro and JSON serdes stamp the
 annotation into the generated schema automatically.
 
+### Pipeline as code: a C# DSL next to the visual editor (#12)
+
+Connect pipelines can now be written as C# — `Pipeline.From<OrderEvent>("orders")
+.Filter(o => o.Amount > 1000).Map(...).To("orders-high-value")` — in the new
+`Kuestenlogik.Surgewave.Pipelines` package. Predicates translate into the broker's condition
+syntax at build time (`&&` becomes chained filter nodes), building needs no running broker,
+and the result is a plain definition you can unit-test and export as deterministic,
+editor-compatible JSON that diffs cleanly in git. Deployment goes through the new
+`surgewave pipelines` CLI group — `deploy` takes an export file, a compiled library (every
+`ISurgewavePipeline` implementation is discovered), or a project directory, and `--watch`
+rebuilds and redeploys on save — or programmatically through `PipelinePublisher`
+(create or replace-by-name, optional start). The visual editor stays for prototyping;
+DSL-built pipelines open there with auto-assigned layout.
+
+Two runtime gaps this surfaced are fixed as well: the orchestrator now wires processor
+nodes (Filter, Map, If, …) to their pipelines' internal connection topics — previously only
+source and sink connectors were wired, so processor chains needed hand-written topic configs —
+and the worker now actually produces the records processor nodes emit, which outside dry-run
+were buffered and dropped. Explicit topic configs always win over the automatic wiring. The
+pipeline export format additionally carries parameters, schedule, per-node retry policies,
+and connection types — error-routing edges used to flatten to normal data edges on
+export/import (older exports import unchanged).
+
 ## Fixes
 
 ### A multi-batch produce section is refused as `InvalidRecord`, not `CorruptMessage` (#125)

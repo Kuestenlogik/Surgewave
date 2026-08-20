@@ -5,6 +5,7 @@ using Kuestenlogik.Surgewave.Client.Abstractions;
 using Kuestenlogik.Surgewave.Client.Consumer;
 using Kuestenlogik.Surgewave.Connect.Dlq;
 using Kuestenlogik.Surgewave.Connect.Eos;
+using Kuestenlogik.Surgewave.Connect.Nodes;
 using Kuestenlogik.Surgewave.Core.Dlq;
 using Microsoft.Extensions.Logging;
 
@@ -274,6 +275,16 @@ public sealed class ConnectWorker : IAsyncDisposable
     /// <summary>
     /// Create and start a new connector.
     /// </summary>
+    /// <summary>
+    /// Resolves a connector class name to its <see cref="Type"/> using the configured
+    /// type resolver (plugin-aware) with a <see cref="Type.GetType(string)"/> fallback.
+    /// Returns null when the type cannot be resolved on this worker.
+    /// </summary>
+    internal Type? TryResolveConnectorType(string connectorClass)
+    {
+        return (_typeResolver != null ? _typeResolver(connectorClass) : null) ?? Type.GetType(connectorClass);
+    }
+
     public async Task<string> CreateConnectorAsync(string name, string connectorClass, IDictionary<string, string> config)
     {
         if (_connectors.ContainsKey(name))
@@ -283,14 +294,7 @@ public sealed class ConnectWorker : IAsyncDisposable
 
         _logger.LogInformation("Creating connector: {Name} ({Class})", name, connectorClass);
 
-        // Load connector type using type resolver if available, otherwise fall back to Type.GetType
-        Type? connectorType = null;
-        if (_typeResolver != null)
-        {
-            connectorType = _typeResolver(connectorClass);
-        }
-
-        connectorType ??= Type.GetType(connectorClass);
+        var connectorType = TryResolveConnectorType(connectorClass);
 
         if (connectorType == null)
         {
@@ -1035,6 +1039,12 @@ internal sealed class TaskRunner : ITaskRunner
             opts.EnableAutoCommit = false;
         });
 
+        // Processor nodes buffer their output in ProcessorTask.EmittedRecords; this producer
+        // forwards it to the emit topics after each batch. Pure sinks never need one.
+        await using var emitProducer = task is ProcessorTask
+            ? _surgewaveClient.CreateProducer<byte[]?, byte[]>()
+            : null;
+
         consumer.Subscribe(topics);
 
         var maxRetries = _dlqHandler?.Config.MaxRetries ?? _workerConfig.DlqMaxRetries;
@@ -1072,6 +1082,7 @@ internal sealed class TaskRunner : ITaskRunner
                     try
                     {
                         await task.PutAsync([record], cancellationToken);
+                        await ForwardEmittedRecordsAsync(task, emitProducer, cancellationToken);
 
                         var offsets = new Dictionary<TopicPartition, long>
                         {
@@ -1114,6 +1125,17 @@ internal sealed class TaskRunner : ITaskRunner
                             "Sink task {Connector}/{TaskId} failed after {Attempts} attempts",
                             _connectorName, TaskId, attemptCount);
                     }
+
+                    // The skipped record may have emitted before failing — discard that
+                    // output so it cannot leak into the next record's forward pass.
+                    if (task is ProcessorTask failedProcessor)
+                    {
+                        lock (failedProcessor.EmittedRecords)
+                        {
+                            failedProcessor.EmittedRecords.Clear();
+                        }
+                    }
+
                     await consumer.CommitAsync(cancellationToken);
                 }
             }
@@ -1126,6 +1148,54 @@ internal sealed class TaskRunner : ITaskRunner
                 _logger.LogError(ex, "Fatal error in sink task {Connector}/{TaskId}", _connectorName, TaskId);
                 State = TaskRunnerState.Failed;
                 await Task.Delay(5000, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Produces the records a processor node emitted while handling a batch
+    /// (<see cref="ProcessorTask.EmittedRecords"/>) — processor output never leaves the task
+    /// on its own. The buffer is snapshotted and cleared BEFORE producing: a produce failure
+    /// retries the whole record, and PutAsync re-emits deterministically, so clearing first
+    /// keeps retries from multiplying output. Runs before the offset commit (at-least-once,
+    /// matching the source path). The lock pairs with the emit sites in ProcessorConnector.
+    /// </summary>
+    internal static async Task ForwardEmittedRecordsAsync(
+        SinkTask task,
+        IProducer<byte[]?, byte[]>? producer,
+        CancellationToken cancellationToken)
+    {
+        if (task is not ProcessorTask processorTask || producer is null)
+        {
+            return;
+        }
+
+        SourceRecord[] emitted;
+        lock (processorTask.EmittedRecords)
+        {
+            if (processorTask.EmittedRecords.Count == 0)
+            {
+                return;
+            }
+
+            emitted = [.. processorTask.EmittedRecords];
+            processorTask.EmittedRecords.Clear();
+        }
+
+        foreach (var record in emitted)
+        {
+            var headers = record.Headers != null
+                ? new Dictionary<string, byte[]>(record.Headers) as IReadOnlyDictionary<string, byte[]>
+                : null;
+
+            // EmitRecordTo can pin a partition (RepartitionNode et al.) — honor it.
+            if (record.Partition is { } partition)
+            {
+                await producer.ProduceAsync(record.Topic, partition, record.Key, record.Value, headers, cancellationToken);
+            }
+            else
+            {
+                await producer.ProduceAsync(record.Topic, record.Key, record.Value, headers, cancellationToken);
             }
         }
     }

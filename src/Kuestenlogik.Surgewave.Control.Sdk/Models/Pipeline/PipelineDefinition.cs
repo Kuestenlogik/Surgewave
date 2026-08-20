@@ -10,7 +10,12 @@ public record PipelineDefinition
     public PipelineStatus Status { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; init; }
-    public List<PipelineParameter> Parameters { get; init; } = [];
+    /// <summary>
+    /// Server-side parameters are a flat key→value map (serialized as a JSON object).
+    /// The richer editor-side <see cref="PipelineParameter"/> list is client-only.
+    /// </summary>
+    public Dictionary<string, string>? Parameters { get; init; }
+
     public List<PipelineEnvironment> Environments { get; init; } = [];
     public ScheduleConfig? Schedule { get; init; }
 }
