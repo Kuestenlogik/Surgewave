@@ -19,7 +19,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `area:connect`
 - [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
 - [#13](https://github.com/Kuestenlogik/Surgewave/issues/13) **G24 — Lineage-driven impact analysis** `area:schema`
-- [#14](https://github.com/Kuestenlogik/Surgewave/issues/14) **G25 — Vector type as first-class schema primitive** `area:schema` `track:ai-pipelines`
 
 ### v0.6 — Multi-tenancy & data mesh
 
@@ -59,4 +58,4 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ---
 
-*Generated 2026-08-19 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-08-20 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
