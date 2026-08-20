@@ -1059,6 +1059,10 @@ internal sealed class TaskRunner : ITaskRunner
                 var consumeResult = await consumer.ConsumeAsync(TimeSpan.FromMilliseconds(100), cancellationToken);
                 if (consumeResult == null)
                 {
+                    // Timer-driven nodes (Deduplicate window expiry, Retry) emit without an
+                    // input record — flush those on idle ticks too, or they would wait for
+                    // the next message on a possibly quiet stream.
+                    await ForwardEmittedRecordsAsync(task, emitProducer, cancellationToken);
                     continue;
                 }
 

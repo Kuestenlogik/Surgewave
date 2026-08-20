@@ -71,6 +71,20 @@ export/import (older exports import unchanged).
 
 ## Fixes
 
+### Processor pipelines: exactly-once output, timer emissions, and real error routing (#148, #149)
+
+Three follow-ups to the pipeline-as-code work close the remaining gaps in the processor
+runtime. Under `exactly.once`, processor nodes now produce their output inside the batch
+transaction — output and consumed offsets commit atomically; previously the transactional
+sink runner never drained the emit buffer at all, so an exactly-once processor pipeline
+produced nothing. Timer-driven emissions (a Deduplicate window expiring with
+`dedup.strategy=last`, Retry backoff firing) now flush on idle consumer ticks instead of
+waiting for the next input record on a possibly quiet stream. And a record that fails JSON
+parsing in a transform node is now reported to the node's wired error output and lands in
+the dead-letter topic — before, error edges on Filter/Map/Cast/… never received anything
+because parse failures were dropped silently. Without an error connection the behavior is
+unchanged (silent drop), so existing pipelines keep their semantics.
+
 ### A multi-batch produce section is refused as `InvalidRecord`, not `CorruptMessage` (#125)
 
 A produce request carries exactly one record batch per partition — Kafka enforces it at parse time

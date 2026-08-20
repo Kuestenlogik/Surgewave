@@ -226,24 +226,20 @@ public abstract class ProcessorTask : SinkTask
         EmitRecordTo(ErrorTopic, GetKeyString(record), value, stringHeaders);
     }
 
-    protected static System.Text.Json.JsonDocument? ParseJsonValue(SinkRecord record)
+    /// <summary>
+    /// Parse the record value as JSON. Returns null (caller drops the record) on empty or
+    /// malformed input. A parse failure is reported to the error output when an error
+    /// connection is wired (<see cref="EmitError"/> is a no-op otherwise) — without this,
+    /// error edges on transform nodes would never see the records that actually failed.
+    /// </summary>
+    protected System.Text.Json.JsonDocument? ParseJsonValue(SinkRecord record)
     {
-        if (record.Value is null || record.Value.Length == 0)
-            return null;
-
-        try
-        {
-            return System.Text.Json.JsonDocument.Parse(record.Value);
-        }
-        catch
-        {
-            return null;
-        }
+        return ParseJsonValueOrError(record);
     }
 
     /// <summary>
     /// Parse JSON value or emit error record. Returns null on failure.
-    /// If ErrorTopic is configured, errors are routed there; otherwise behavior matches ParseJsonValue.
+    /// If ErrorTopic is configured, errors are routed there; otherwise the failure is silent.
     /// </summary>
     protected System.Text.Json.JsonDocument? ParseJsonValueOrError(SinkRecord record)
     {
