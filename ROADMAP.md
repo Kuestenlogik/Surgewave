@@ -17,7 +17,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 ### v0.5 — AI-friendly broker
 
 - [#9](https://github.com/Kuestenlogik/Surgewave/issues/9) **G17 — Flink connector** `area:connect`
-- [#12](https://github.com/Kuestenlogik/Surgewave/issues/12) **G23 — Pipeline-as-code (C# DSL)** `area:streams`
 
 ### v0.6 — Multi-tenancy & data mesh
 
