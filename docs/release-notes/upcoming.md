@@ -1,10 +1,11 @@
 ---
-title: <fill in before the tag — matches the v0.5 milestone theme>
+title: AI-friendly broker
 version: 0.5.0
 ---
 
-<One-sentence frame for what 0.5 is about. Replace this placeholder
-the moment the first 0.5 work lands.>
+0.5 makes Surgewave the natural home for embedding-heavy AI pipelines: schemas understand
+vectors and name exactly what an incompatible change breaks, and pipelines become
+reviewable, testable C# code — deployable from a compiled library without a running broker.
 
 ## Highlights
 
@@ -159,8 +160,6 @@ fetch-snapshot path for the duration of the roll. The exchange is broker-to-brok
 informational there — a follower that cannot get a snapshot retries either way — so the practical
 effect is a misleading log line during the window, not a stall. Upgrading all brokers in one roll
 avoids it entirely.
-
-## Breaking changes
 
 ### Kafka produce now validates the producer CRC instead of overwriting it (#85)
 
