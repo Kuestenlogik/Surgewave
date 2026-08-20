@@ -167,6 +167,34 @@ public sealed class StreamsGroupCoordinator(
     // StreamsGroupDescribe (API Key 89)
     // ─────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Alle Gruppen mit den Source-Topics ihrer Topologie — die Streams-Sicht fuer die
+    /// Schema-Impact-Analyse (#13). Sink-Topics kennt der Broker nicht: das Wire-Protokoll
+    /// traegt nur Subtopology-Sources, finale .To()-Senken bleiben clientseitig.
+    /// </summary>
+    public IReadOnlyList<(string GroupId, IReadOnlyList<string> SourceTopics)> ListApplications()
+    {
+        lock (_groupLock)
+        {
+            var result = new List<(string, IReadOnlyList<string>)>(_groups.Count);
+            foreach (var (groupId, group) in _groups)
+            {
+                if (group.Topology is null)
+                {
+                    continue;
+                }
+
+                var topics = group.Topology.Subtopologies
+                    .SelectMany(sub => sub.SourceTopics)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                result.Add((groupId, topics));
+            }
+
+            return result;
+        }
+    }
+
     public IReadOnlyList<StreamsGroupDescription> Describe(IReadOnlyList<string> groupIds)
     {
         lock (_groupLock)

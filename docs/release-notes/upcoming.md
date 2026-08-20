@@ -13,6 +13,22 @@ the moment the first 0.5 work lands.>
 <2-4 sentences>
 -->
 
+### Schema changes name what they break (#13)
+
+Schema evolution used to answer "incompatible" and leave you to guess who cares. The registry
+now walks the broker's live control-plane lineage — consumer groups from committed offsets,
+Streams applications from their submitted topologies, Connect pipelines with their sink
+topics — and a rejected registration (409) names the affected pipelines and the topics
+transitively going stale behind them. `POST /subjects/{subject}/impact` runs the same
+analysis without registering, as a CI / pre-deploy check (`compatible: false` fails the
+build); `?force=true` on the register call is the emergency override — it skips the
+compatibility gate, still validates the schema format, and writes the impact to the broker
+log as a warning.
+
+Nothing touches the produce/fetch hot path: lineage is assembled on demand from state the
+control plane already holds, and a missing or failing lineage source only shortens the name
+list — the compatibility verdict never depends on it.
+
 ### Vectors are a first-class schema primitive (#14)
 
 Embeddings now declare their shape in the schema instead of hiding in an opaque array: Avro
