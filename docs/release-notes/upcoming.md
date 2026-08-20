@@ -13,6 +13,23 @@ the moment the first 0.5 work lands.>
 <2-4 sentences>
 -->
 
+### Vectors are a first-class schema primitive (#14)
+
+Embeddings now declare their shape in the schema instead of hiding in an opaque array: Avro
+carries `"logicalType": "vector", "dim": 768` on an array of float/double, JSON Schema uses
+`"format": "vector"` with `x-vector-dim`/`x-vector-dtype`, and Protobuf annotates a repeated
+float/double field with `[(surgewave.vector).dim = 768]`. The registry validates the
+declaration at registration (42201 on a missing or non-positive dim, an unknown dtype, or the
+wrong underlying type) and enforces evolution: a vector field's dim and dtype must never
+change, and vector-ness must not appear on or disappear from an existing field — rejected as
+incompatible (409) in every mode, in both directions. That strictness is the point: 768→1536
+passes every classic type check and then silently corrupts every consumer that indexes or
+allocates against the declared dimension.
+
+Producers declare it once on the .NET type — `[SurgewaveVector(768)] float[] Embedding` (in
+`Kuestenlogik.Surgewave.Schema.Registry.Client`) — and the Avro and JSON serdes stamp the
+annotation into the generated schema automatically.
+
 ## Fixes
 
 ### A multi-batch produce section is refused as `InvalidRecord`, not `CorruptMessage` (#125)

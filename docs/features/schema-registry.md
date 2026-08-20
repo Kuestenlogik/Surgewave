@@ -104,6 +104,52 @@ surgewave schema delete-version user-value 1
 | FORWARD_TRANSITIVE | Forward with all versions |
 | FULL_TRANSITIVE | Full with all versions |
 
+## Vector Type
+
+Embeddings are a first-class schema primitive: a vector declares its dimension count and
+element dtype in the schema, and the registry enforces both across versions. A vector field's
+`dim` and `dtype` must never change, and the vector annotation itself must not appear on or
+disappear from an existing field — any of these is rejected as incompatible in **every**
+compatibility mode except `NONE`, because a dimension change passes classic type checks (it is
+still an array of float) and then silently corrupts every consumer that indexes or allocates
+against the declared dimension.
+
+Per format:
+
+```jsonc
+// Avro — logicalType on an array of float (f32) or double (f64); dim required
+{"name": "embedding", "type": {"type": "array", "items": "float", "logicalType": "vector", "dim": 768}}
+```
+
+```jsonc
+// JSON Schema — format "vector" with x-vector-dim (required) and x-vector-dtype (default f32)
+{"type": "array", "items": {"type": "number"}, "format": "vector", "x-vector-dim": 768, "x-vector-dtype": "f32"}
+```
+
+```protobuf
+// Protobuf — field option on a repeated float/double field; dtype follows the scalar type
+repeated float embedding = 2 [(surgewave.vector).dim = 768];
+```
+
+Producers using the Avro or JSON serdes declare the vector once on the .NET type; the
+generated schema carries the annotation automatically:
+
+```csharp
+using Kuestenlogik.Surgewave.Schema.Registry.Client;
+
+public sealed class DocumentChunk
+{
+    public string Text { get; set; } = "";
+
+    [SurgewaveVector(768)]
+    public float[] Embedding { get; set; } = [];
+}
+```
+
+A malformed vector declaration (missing or non-positive `dim`, unknown dtype, wrong underlying
+type) is rejected at registration with error code 42201; a dim/dtype change on an existing
+field is rejected with 409 and a message naming the field and both values.
+
 ## REST API
 
 | Endpoint | Method | Description |

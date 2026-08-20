@@ -19,6 +19,15 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
         try
         {
             _avroReader.Read(schemaString);
+
+            // Chr.Avro folgt der Avro-Spec und ignoriert unbekannte logicalTypes — die
+            // vector-Attribute (dim, Elementtyp-Regel) prüft deshalb der Roh-JSON-Inspector.
+            var inspection = AvroVectorInspector.Inspect(schemaString);
+            if (inspection.Errors.Count > 0)
+            {
+                return (false, string.Join("; ", inspection.Errors));
+            }
+
             return (true, null);
         }
         catch (Exception ex)
@@ -65,6 +74,12 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
                     var forwardErrors = CheckBackwardCompatibility(existingSchema, newSchema);
                     errors.AddRange(forwardErrors.Select(e => $"Forward compatibility error with version {existing.Version}: {e}"));
                 }
+
+                // Vector-Evolution ist in beide Richtungen brechend (dim/dtype tragen die
+                // Speicher- und Rechensemantik der Konsumenten) und läuft deshalb außerhalb
+                // des (backward, forward)-Tupels über das Roh-JSON beider Seiten.
+                errors.AddRange(CheckVectorCompatibility(newSchemaString, existing.SchemaString)
+                    .Select(e => $"Vector compatibility error with version {existing.Version}: {e}"));
             }
 
             return new CompatibilityResult(errors.Count == 0, errors.Count > 0 ? errors : null);
@@ -73,6 +88,42 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
         {
             return new CompatibilityResult(false, [$"Error parsing Avro schema: {ex.Message}"]);
         }
+    }
+
+    /// <summary>
+    /// Vergleicht die Vector-Deklarationen beider Schemas pfadweise über das Roh-JSON (der
+    /// Chr.Avro-Baum kennt unbekannte logicalTypes nicht). Regel: auf einem Feldpfad, den beide
+    /// Seiten kennen, darf sich Vector-Sein, dim und dtype nicht ändern.
+    /// </summary>
+    private static List<string> CheckVectorCompatibility(string newSchemaJson, string existingSchemaJson)
+    {
+        var errors = new List<string>();
+        var newSide = AvroVectorInspector.Inspect(newSchemaJson);
+        var oldSide = AvroVectorInspector.Inspect(existingSchemaJson);
+
+        if (newSide.Vectors.Count == 0 && oldSide.Vectors.Count == 0)
+        {
+            return errors;
+        }
+
+        foreach (var path in newSide.Vectors.Keys.Union(oldSide.Vectors.Keys))
+        {
+            // Ein Pfad, den die andere Seite gar nicht als Feld hat, ist add/remove eines
+            // Feldes — das bewertet die reguläre Record-Kompatibilität, nicht die Vector-Regel.
+            if (!newSide.FieldPaths.Contains(path) || !oldSide.FieldPaths.Contains(path))
+            {
+                continue;
+            }
+
+            var reader = newSide.Vectors.TryGetValue(path, out var r) ? r : (Vectors.VectorType?)null;
+            var writer = oldSide.Vectors.TryGetValue(path, out var w) ? w : (Vectors.VectorType?)null;
+            if (Vectors.VectorType.CheckCompatible(reader, writer) is { } error)
+            {
+                errors.Add($"Field '{path}': {error}");
+            }
+        }
+
+        return errors;
     }
 
     private static List<string> CheckBackwardCompatibility(Chr.Avro.Abstract.Schema readerSchema, Chr.Avro.Abstract.Schema writerSchema)

@@ -28,6 +28,8 @@
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Thrift\Kuestenlogik.Surgewave.Schema.Registry.Handlers.Thrift.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Handlers.CapnProto\Kuestenlogik.Surgewave.Schema.Registry.Handlers.CapnProto.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Avro.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Json\Kuestenlogik.Surgewave.Schema.Registry.Serdes.Json.csproj" />
   </ItemGroup>
 
 </Project>
