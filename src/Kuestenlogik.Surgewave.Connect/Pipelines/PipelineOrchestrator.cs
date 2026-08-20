@@ -440,6 +440,7 @@ public sealed class PipelineOrchestrator : IAsyncDisposable
 
         // Build node dependency graph
         var nodeOutputTopics = new Dictionary<string, string>();
+        var nodeOutgoingNormalCounts = new Dictionary<string, int>();
         var nodeInputTopics = new Dictionary<string, List<string>>();
         var nodeErrorOutputTopics = new Dictionary<string, string>();
 
@@ -459,6 +460,8 @@ public sealed class PipelineOrchestrator : IAsyncDisposable
             else
             {
                 nodeOutputTopics[connection.SourceNodeId] = topic;
+                nodeOutgoingNormalCounts[connection.SourceNodeId] =
+                    nodeOutgoingNormalCounts.GetValueOrDefault(connection.SourceNodeId) + 1;
             }
 
             nodeInputTopics[connection.TargetNodeId].Add(topic);
@@ -483,26 +486,12 @@ public sealed class PipelineOrchestrator : IAsyncDisposable
                 config["error.topic"] = errorTopic;
             }
 
-            // For source nodes that output to internal topics
-            if (nodeOutputTopics.TryGetValue(node.Id, out var outputTopic))
-            {
-                // Check if this is a source connector
-                var connectorType = Type.GetType(node.ConnectorType);
-                if (connectorType != null && typeof(SourceConnector).IsAssignableFrom(connectorType))
-                {
-                    config["topic"] = outputTopic;
-                }
-            }
+            var connectorType = _worker.TryResolveConnectorType(node.ConnectorType);
+            nodeOutputTopics.TryGetValue(node.Id, out var outputTopic);
+            var inputTopics = nodeInputTopics[node.Id];
+            var outgoingNormalCount = nodeOutgoingNormalCounts.GetValueOrDefault(node.Id);
 
-            // For sink nodes that read from internal topics
-            if (nodeInputTopics.TryGetValue(node.Id, out var inputTopics) && inputTopics.Count > 0)
-            {
-                var connectorType = Type.GetType(node.ConnectorType);
-                if (connectorType != null && typeof(SinkConnector).IsAssignableFrom(connectorType))
-                {
-                    config["topics"] = string.Join(",", inputTopics);
-                }
-            }
+            ApplyTopicWiring(config, connectorType, inputTopics, outputTopic, outgoingNormalCount);
 
             // Inject retry policy config keys
             if (node.RetryPolicy is { Enabled: true } retry)
@@ -551,6 +540,62 @@ public sealed class PipelineOrchestrator : IAsyncDisposable
 
         _runningPipelines[pipeline.Id] = runState;
         _logger.LogInformation("Pipeline {Id} started with {NodeCount} nodes", pipeline.Id, pipeline.Nodes.Count);
+    }
+
+    /// <summary>
+    /// Wires a node's config to the pipeline's internal connection topics based on its connector role.
+    /// Source connectors produce to their outgoing connection topic ("topic"), sink connectors consume
+    /// their incoming connection topics ("topics"). Processor nodes need both sides wired; explicit
+    /// values in the stored node config always win so manually wired pipelines keep their behavior.
+    /// A processor's "output.topic" is only wired when exactly one normal outgoing connection exists —
+    /// multi-output nodes (If/Switch/MultiOutput) route via their own node-specific topic keys.
+    /// </summary>
+    internal static void ApplyTopicWiring(
+        Dictionary<string, string> config,
+        Type? connectorType,
+        IReadOnlyList<string> inputTopics,
+        string? outputTopic,
+        int outgoingNormalCount)
+    {
+        if (connectorType == null)
+        {
+            return;
+        }
+
+        if (typeof(SourceConnector).IsAssignableFrom(connectorType))
+        {
+            if (outputTopic != null)
+            {
+                config["topic"] = outputTopic;
+            }
+
+            return;
+        }
+
+        if (typeof(SinkConnector).IsAssignableFrom(connectorType))
+        {
+            if (inputTopics.Count > 0)
+            {
+                config["topics"] = string.Join(",", inputTopics);
+            }
+
+            return;
+        }
+
+        if (!typeof(Kuestenlogik.Surgewave.Plugins.Pipeline.IProcessorNode).IsAssignableFrom(connectorType))
+        {
+            return;
+        }
+
+        if (inputTopics.Count > 0 && !config.ContainsKey("topics"))
+        {
+            config["topics"] = string.Join(",", inputTopics);
+        }
+
+        if (outputTopic != null && outgoingNormalCount == 1 && !config.ContainsKey("output.topic"))
+        {
+            config["output.topic"] = outputTopic;
+        }
     }
 
     /// <summary>

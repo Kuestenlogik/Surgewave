@@ -1,9 +1,9 @@
 # Surgewave Plugin Samples
 
 Reference implementations for the three Surgewave plugin shapes
-(broker, protocol, storage engine). Each sample is a complete,
-buildable, single-file plugin with a passing test and a per-sample
-README that walks through every authoring decision.
+(broker, protocol, storage engine) plus a pipeline-as-code library.
+Each sample is a complete, buildable project with a passing test and a
+per-sample README that walks through every authoring decision.
 
 Use these as templates when you want to copy a working starting
 point. For scaffolding from scratch use the
@@ -17,6 +17,7 @@ instead — same skeleton, fewer keystrokes.
 | [Samples.BrokerPlugin](Kuestenlogik.Surgewave.Samples.BrokerPlugin/) | `IBrokerPlugin` | Registers a request-counter hosted service that increments on every Produce/Fetch the broker handles. |
 | [Samples.ProtocolPlugin](Kuestenlogik.Surgewave.Samples.ProtocolPlugin/) | `IProtocolPlugin` | Adds an `/echo` HTTP endpoint that returns its request body unchanged. Demonstrates the HTTP-host-sharing path (`DefaultPort=0`). |
 | [Samples.StorageEngine](Kuestenlogik.Surgewave.Samples.StorageEngine/) | `IStorageEnginePlugin` | Wraps the built-in `Memory` log-segment factory under the engine name `"sample-memory"`. Smallest possible storage engine. |
+| [Samples.PipelineAsCode](Kuestenlogik.Surgewave.Samples.PipelineAsCode/) | `ISurgewavePipeline` | A Connect pipeline defined with the fluent C# DSL — built and unit-tested without a broker, deployed via `surgewave pipelines deploy`. |
 
 ## Common patterns
 

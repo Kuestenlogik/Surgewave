@@ -137,7 +137,13 @@ public abstract class ProcessorTask : SinkTask
             Headers = ConvertToByteHeaders(headers)
         };
 
-        EmittedRecords.Add(record);
+        // Timer-driven nodes (Deduplicate window expiry, Retry) emit from background
+        // threads while the worker drains the buffer — the lock pairs with
+        // ConnectWorker.ForwardEmittedRecordsAsync's snapshot-and-clear.
+        lock (EmittedRecords)
+        {
+            EmittedRecords.Add(record);
+        }
 
         if (!string.IsNullOrEmpty(_pipelineId))
             MetricsCollector?.RecordProcessed(_pipelineId, NodeId, 0);
@@ -175,7 +181,13 @@ public abstract class ProcessorTask : SinkTask
             Headers = byteHeaders.Count > 0 ? byteHeaders : null
         };
 
-        EmittedRecords.Add(record);
+        // Timer-driven nodes (Deduplicate window expiry, Retry) emit from background
+        // threads while the worker drains the buffer — the lock pairs with
+        // ConnectWorker.ForwardEmittedRecordsAsync's snapshot-and-clear.
+        lock (EmittedRecords)
+        {
+            EmittedRecords.Add(record);
+        }
 
         if (!string.IsNullOrEmpty(_pipelineId))
             MetricsCollector?.RecordProcessed(_pipelineId, NodeId, 0);

@@ -418,6 +418,46 @@ surgewave mirror delete dc1-to-dc2
 
 ---
 
+## Pipelines
+
+Deploy and manage Connect pipelines (requires `Surgewave:Connect:Enabled=true`;
+endpoint from `--broker-url` / `SURGEWAVE_BROKER_URL`, default `https://localhost:9093`).
+
+### List Pipelines
+
+```bash
+surgewave pipelines list
+```
+
+### Deploy
+
+Deploy from a pipeline export JSON, a compiled pipeline-as-code library
+(every `ISurgewavePipeline` implementation is discovered), or a project
+directory (built with the dotnet SDK first):
+
+```bash
+surgewave pipelines deploy my-pipeline.pipeline.json
+surgewave pipelines deploy bin/Debug/net10.0/MyPipelines.dll --start
+surgewave pipelines deploy ./MyPipelines/ --watch
+```
+
+| Option | Description |
+|---|---|
+| `--name <name>` | Deploy under this name (single-pipeline targets only) |
+| `--replace` | Update an existing pipeline of the same name (stops/restarts it when running) |
+| `--start` | Start after deploying |
+| `--watch`, `-w` | Redeploy on save (implies `--replace`) |
+
+### Export / Start / Stop
+
+```bash
+surgewave pipelines export <id-or-name> -o pipeline.json
+surgewave pipelines start <id-or-name>
+surgewave pipelines stop <id-or-name>
+```
+
+See the [Pipeline as Code cookbook](../cookbook/pipeline-as-code.md) for the C# DSL.
+
 ## Message Operations
 
 ### message get

@@ -639,13 +639,17 @@ public static class PipelineRestApi
                     Config = new Dictionary<string, string>(n.Config),
                     X = n.X,
                     Y = n.Y,
-                    Label = n.Label
+                    Label = n.Label,
+                    RetryPolicy = n.RetryPolicy
                 }).ToList(),
                 Connections = pipeline.Connections.Select(c => new PipelineConnectionExport
                 {
                     SourceNodeId = c.SourceNodeId,
-                    TargetNodeId = c.TargetNodeId
-                }).ToList()
+                    TargetNodeId = c.TargetNodeId,
+                    Type = c.Type
+                }).ToList(),
+                Parameters = pipeline.Parameters is null ? null : new Dictionary<string, string>(pipeline.Parameters),
+                Schedule = pipeline.Schedule
             }
         };
 
@@ -678,7 +682,8 @@ public static class PipelineRestApi
             Config = new Dictionary<string, string>(n.Config),
             X = n.X,
             Y = n.Y,
-            Label = n.Label
+            Label = n.Label,
+            RetryPolicy = n.RetryPolicy
         }).ToList();
 
         // Build ID mapping (old -> new)
@@ -695,7 +700,8 @@ public static class PipelineRestApi
             {
                 Id = Guid.NewGuid().ToString("N"),
                 SourceNodeId = idMapping[c.SourceNodeId],
-                TargetNodeId = idMapping[c.TargetNodeId]
+                TargetNodeId = idMapping[c.TargetNodeId],
+                Type = c.Type
             }).ToList();
 
         var pipeline = await orchestrator.CreateAsync(
@@ -703,7 +709,14 @@ public static class PipelineRestApi
             exportData.Description,
             nodes,
             connections,
-            cancellationToken: cancellationToken);
+            exportData.Parameters is null ? null : new Dictionary<string, string>(exportData.Parameters),
+            cancellationToken);
+
+        if (exportData.Schedule is not null)
+        {
+            await orchestrator.UpdateScheduleAsync(pipeline.Id, exportData.Schedule, cancellationToken);
+            pipeline = orchestrator.Get(pipeline.Id) ?? pipeline;
+        }
 
         return Results.Created($"/api/pipelines/{pipeline.Id}", pipeline);
     }

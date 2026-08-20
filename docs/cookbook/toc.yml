@@ -8,6 +8,8 @@
   href: streams-topology.md
 - name: Connect Pipeline
   href: connect-pipeline.md
+- name: Pipeline as Code
+  href: pipeline-as-code.md
 - name: QueueView
   href: queue-view.md
 - name: Monitoring

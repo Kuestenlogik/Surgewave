@@ -173,6 +173,8 @@
       href: cookbook/streams-topology.md
     - name: Connect Pipeline
       href: cookbook/connect-pipeline.md
+    - name: Pipeline as Code
+      href: cookbook/pipeline-as-code.md
     - name: QueueView
       href: cookbook/queue-view.md
     - name: Monitoring
