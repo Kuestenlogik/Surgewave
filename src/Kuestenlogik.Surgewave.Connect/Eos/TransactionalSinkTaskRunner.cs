@@ -4,6 +4,7 @@ using Kuestenlogik.Surgewave.Client.Consumer;
 using Kuestenlogik.Surgewave.Client.Native;
 using Kuestenlogik.Surgewave.Client.Native.Operations.Transactions;
 using Kuestenlogik.Surgewave.Connect.Dlq;
+using Kuestenlogik.Surgewave.Connect.Nodes;
 using Kuestenlogik.Surgewave.Protocol.Native;
 using Microsoft.Extensions.Logging;
 
@@ -171,6 +172,12 @@ public sealed class TransactionalSinkTaskRunner : ITaskRunner
 
         consumer.Subscribe(topics);
 
+        // Processor nodes buffer their output in ProcessorTask.EmittedRecords; this producer
+        // forwards it inside the batch transaction. Pure sinks never need one.
+        await using var emitProducer = _task is ProcessorTask
+            ? _surgewaveClient.CreateProducer<byte[]?, byte[]>()
+            : null;
+
         // Notify task of assigned partitions
         var assignedPartitions = topics
             .SelectMany(t => Enumerable.Range(0, 1).Select(p => new TopicPartition(t, p)))
@@ -197,10 +204,17 @@ public sealed class TransactionalSinkTaskRunner : ITaskRunner
                     // Process any pending batch on timeout
                     if (batchRecords.Count > 0)
                     {
-                        await ProcessBatchAsync(nativeClient, batchRecords, batchOffsets, maxRetries, retryBackoffMs, cancellationToken);
+                        await ProcessBatchAsync(nativeClient, emitProducer, batchRecords, batchOffsets, maxRetries, retryBackoffMs, cancellationToken);
                         batchRecords.Clear();
                         batchOffsets.Clear();
                     }
+                    else if (HasPendingEmissions())
+                    {
+                        // Timer-driven emissions (Deduplicate window expiry, Retry) arrive
+                        // without an input record — commit them in their own transaction.
+                        await FlushPendingEmissionsAsync(nativeClient, emitProducer, cancellationToken);
+                    }
+
                     continue;
                 }
 
@@ -222,7 +236,7 @@ public sealed class TransactionalSinkTaskRunner : ITaskRunner
                 // Process batch when full
                 if (batchRecords.Count >= batchSize)
                 {
-                    await ProcessBatchAsync(nativeClient, batchRecords, batchOffsets, maxRetries, retryBackoffMs, cancellationToken);
+                    await ProcessBatchAsync(nativeClient, emitProducer, batchRecords, batchOffsets, maxRetries, retryBackoffMs, cancellationToken);
                     batchRecords.Clear();
                     batchOffsets.Clear();
                 }
@@ -245,6 +259,7 @@ public sealed class TransactionalSinkTaskRunner : ITaskRunner
 
     private async Task ProcessBatchAsync(
         SurgewaveNativeClient nativeClient,
+        IProducer<byte[]?, byte[]>? emitProducer,
         List<SinkRecord> records,
         Dictionary<TopicPartition, long> offsets,
         int maxRetries,
@@ -263,17 +278,24 @@ public sealed class TransactionalSinkTaskRunner : ITaskRunner
                 await _task.PutAsync(records, cancellationToken);
                 await _task.FlushAsync(offsets, cancellationToken);
 
-                // Initialize transaction for transactional offset commit
+                // Initialize the batch transaction: processor output and the offset commit
+                // go into the same transaction, so they become visible atomically.
                 var txnBuilder = await nativeClient.Transactions
                     .BeginTransaction(_transactionalId)
                     .WithTimeout(TimeSpan.FromMilliseconds(_workerConfig.TransactionTimeoutMs))
                     .InitAsync(cancellationToken);
 
+                // Forward what the processor emitted for this batch (no-op for pure sinks).
+                // An aborted attempt leaves those records uncommitted; the retry's PutAsync
+                // re-emits them deterministically.
+                var producedPartitions = await ForwardEmittedRecordsAsync(emitProducer, cancellationToken);
+                await AddProducedPartitionsAsync(txnBuilder, producedPartitions, cancellationToken);
+
                 // Create offset committer and commit offsets within the transaction
                 var offsetCommitter = new SinkOffsetCommitter(nativeClient, _consumerGroupId, _logger);
                 await offsetCommitter.CommitAsync(txnBuilder, records, cancellationToken);
 
-                // Commit the transaction (offsets will be committed atomically)
+                // Commit the transaction (output and offsets become visible atomically)
                 var commitResult = await txnBuilder.CommitAsync(cancellationToken);
                 if (commitResult != SurgewaveErrorCode.None)
                 {
@@ -320,6 +342,135 @@ public sealed class TransactionalSinkTaskRunner : ITaskRunner
                 _logger.LogError(lastException,
                     "Sink task {Connector}/{TaskId} failed after {Attempts} attempts (DLQ disabled)",
                     _connectorName, TaskId, attemptCount);
+            }
+
+            // The skipped batch may have emitted before failing — discard that output so it
+            // cannot leak into the next batch's transaction.
+            if (_task is ProcessorTask failedProcessor)
+            {
+                lock (failedProcessor.EmittedRecords)
+                {
+                    failedProcessor.EmittedRecords.Clear();
+                }
+            }
+        }
+    }
+
+    private bool HasPendingEmissions()
+    {
+        if (_task is not ProcessorTask processorTask)
+        {
+            return false;
+        }
+
+        lock (processorTask.EmittedRecords)
+        {
+            return processorTask.EmittedRecords.Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// Commits timer-driven processor emissions (no consumed offsets involved) in their own
+    /// transaction, keeping the exactly-once guarantee for records that arrive without input.
+    /// </summary>
+    private async Task FlushPendingEmissionsAsync(
+        SurgewaveNativeClient nativeClient,
+        IProducer<byte[]?, byte[]>? emitProducer,
+        CancellationToken cancellationToken)
+    {
+        var txnBuilder = await nativeClient.Transactions
+            .BeginTransaction(_transactionalId)
+            .WithTimeout(TimeSpan.FromMilliseconds(_workerConfig.TransactionTimeoutMs))
+            .InitAsync(cancellationToken);
+
+        var producedPartitions = await ForwardEmittedRecordsAsync(emitProducer, cancellationToken);
+        if (producedPartitions.Count == 0)
+        {
+            return; // raced to empty — nothing to commit
+        }
+
+        await AddProducedPartitionsAsync(txnBuilder, producedPartitions, cancellationToken);
+
+        var commitResult = await txnBuilder.CommitAsync(cancellationToken);
+        if (commitResult != SurgewaveErrorCode.None)
+        {
+            throw new InvalidOperationException($"Failed to commit emission flush transaction: {commitResult}");
+        }
+    }
+
+    /// <summary>
+    /// Produces the records the processor task emitted (snapshot-and-clear, paired with the
+    /// emit-site locks in ProcessorConnector) and returns the topic→partitions map for
+    /// <see cref="AddProducedPartitionsAsync"/>. No-op for pure sink tasks.
+    /// </summary>
+    private async Task<Dictionary<string, List<int>>> ForwardEmittedRecordsAsync(
+        IProducer<byte[]?, byte[]>? producer,
+        CancellationToken cancellationToken)
+    {
+        var topicsToPartitions = new Dictionary<string, List<int>>();
+        if (_task is not ProcessorTask processorTask || producer is null)
+        {
+            return topicsToPartitions;
+        }
+
+        SourceRecord[] emitted;
+        lock (processorTask.EmittedRecords)
+        {
+            if (processorTask.EmittedRecords.Count == 0)
+            {
+                return topicsToPartitions;
+            }
+
+            emitted = [.. processorTask.EmittedRecords];
+            processorTask.EmittedRecords.Clear();
+        }
+
+        foreach (var record in emitted)
+        {
+            var headers = record.Headers != null
+                ? new Dictionary<string, byte[]>(record.Headers) as IReadOnlyDictionary<string, byte[]>
+                : null;
+
+            // EmitRecordTo can pin a partition (RepartitionNode et al.) — honor it.
+            var result = record.Partition is { } partition
+                ? await producer.ProduceAsync(record.Topic, partition, record.Key, record.Value, headers, cancellationToken)
+                : await producer.ProduceAsync(record.Topic, record.Key, record.Value, headers, cancellationToken);
+
+            if (!topicsToPartitions.TryGetValue(result.Topic, out var partitions))
+            {
+                partitions = [];
+                topicsToPartitions[result.Topic] = partitions;
+            }
+
+            if (!partitions.Contains(result.Partition))
+            {
+                partitions.Add(result.Partition);
+            }
+        }
+
+        return topicsToPartitions;
+    }
+
+    private static async Task AddProducedPartitionsAsync(
+        TransactionBuilder txnBuilder,
+        Dictionary<string, List<int>> topicsToPartitions,
+        CancellationToken cancellationToken)
+    {
+        if (topicsToPartitions.Count == 0)
+        {
+            return;
+        }
+
+        var addResult = await txnBuilder.AddPartitionsAsync(topicsToPartitions, cancellationToken);
+        foreach (var (topic, partitionResults) in addResult)
+        {
+            foreach (var partResult in partitionResults)
+            {
+                if (partResult.ErrorCode != SurgewaveErrorCode.None)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to add partition {topic}-{partResult.Partition} to transaction: {partResult.ErrorCode}");
+                }
             }
         }
     }
