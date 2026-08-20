@@ -25,7 +25,7 @@ public sealed class SchemaRegistryJsonSerializer<T> : IAsyncSerializer<T>
     public SchemaRegistryJsonSerializer(JsonSchemaSerializerConfig config)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
-        _generatedSchema = new Lazy<NJsonSchema.JsonSchema>(() => NJsonSchema.JsonSchema.FromType<T>());
+        _generatedSchema = new Lazy<NJsonSchema.JsonSchema>(() => JsonVectorSchemaAnnotator.Apply(NJsonSchema.JsonSchema.FromType<T>(), typeof(T)));
     }
 
     /// <inheritdoc />

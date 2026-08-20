@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Schema.Registry.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Schema.Registry.Client\Kuestenlogik.Surgewave.Schema.Registry.Client.csproj" />
   </ItemGroup>
 

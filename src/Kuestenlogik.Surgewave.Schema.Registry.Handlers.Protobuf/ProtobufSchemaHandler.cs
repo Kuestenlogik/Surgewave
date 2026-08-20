@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Kuestenlogik.Surgewave.Schema.Registry;
+using Kuestenlogik.Surgewave.Schema.Registry.Vectors;
 
 namespace Kuestenlogik.Surgewave.Schema.Registry.Handlers;
 
@@ -112,12 +113,72 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
                 }
             }
 
+            // Vector-Felder (#14): [(surgewave.vector).dim = N] nur auf repeated float/double.
+            foreach (var (msgName, message) in parsed.Messages)
+            {
+                foreach (var (_, field) in message.Fields)
+                {
+                    if (field.VectorError is { } vectorError)
+                    {
+                        return (false, $"Field '{msgName}.{field.Name}': {vectorError}");
+                    }
+                }
+            }
+
             return (true, null);
         }
         catch (Exception ex)
         {
             return (false, $"Failed to parse protobuf schema: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Liest die Field-Option <c>[(surgewave.vector).dim = N]</c> (#14). dtype ist durch den
+    /// Skalartyp bestimmt (float → f32, double → f64) — eine eigene dtype-Option gibt es
+    /// bewusst nicht, sie könnte dem Wire-Typ nur widersprechen.
+    /// </summary>
+    private static (VectorType? Vector, string? Error) ReadVectorOption(
+        string optionsText, string fieldType, bool isRepeated)
+    {
+        if (string.IsNullOrEmpty(optionsText))
+        {
+            return (null, null);
+        }
+
+        var match = VectorOptionRegex().Match(optionsText);
+        if (!match.Success)
+        {
+            return (null, optionsText.Contains("surgewave.vector", StringComparison.OrdinalIgnoreCase)
+                ? "malformed vector option; expected [(surgewave.vector).dim = <positive integer>]"
+                : null);
+        }
+
+        if (!isRepeated)
+        {
+            return (null, "the vector option is only valid on a repeated field");
+        }
+
+        VectorDtype dtype;
+        switch (fieldType)
+        {
+            case "float": dtype = VectorDtype.F32; break;
+            case "double": dtype = VectorDtype.F64; break;
+            default:
+                return (null, $"the vector option is only valid on float or double fields, got '{fieldType}'");
+        }
+
+        if (!long.TryParse(match.Groups[1].Value, out var dim))
+        {
+            return (null, "vector dim must be a positive integer");
+        }
+
+        if (VectorType.ValidateDim(dim) is { } dimError)
+        {
+            return (null, dimError);
+        }
+
+        return (new VectorType((int)dim, dtype), null);
     }
 
     private static ProtobufSchema ParseProtobufSchema(string schemaString)
@@ -153,13 +214,18 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
                 var name = fieldMatch.Groups[3].Value;
                 var number = int.Parse(fieldMatch.Groups[4].Value);
 
+                var (vector, vectorError) = ReadVectorOption(
+                    fieldMatch.Groups[5].Value, type, isRepeated: modifier == "repeated");
+
                 message.Fields[number] = new ProtobufField
                 {
                     Name = name,
                     Type = type,
                     Number = number,
                     IsRequired = modifier == "required",
-                    IsRepeated = modifier == "repeated"
+                    IsRepeated = modifier == "repeated",
+                    Vector = vector,
+                    VectorError = vectorError
                 };
             }
 
@@ -256,17 +322,33 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
                     }
                 }
             }
+
+            // Vector-Regel (#14): auf einer Feldnummer, die beide Seiten kennen, darf sich
+            // Vector-Sein, dim und dtype nicht aendern — in beide Richtungen brechend,
+            // deshalb unabhaengig vom (backward, forward)-Tupel.
+            foreach (var (number, newField) in newFields)
+            {
+                if (!existingFields.TryGetValue(number, out var existingField))
+                {
+                    continue;
+                }
+
+                if (VectorType.CheckCompatible(newField.Vector, existingField.Vector) is { } vectorError)
+                {
+                    errors.Add($"Vector compatibility error with version {existing.Version}: Field {number} ('{newField.Name}'): {vectorError}");
+                }
+            }
         }
 
         return new CompatibilityResult(errors.Count == 0, errors.Count > 0 ? errors : null);
     }
 
-    private static Dictionary<int, (string Name, string Type, bool Required)> ParseProtobufFields(string protoString)
+    private static Dictionary<int, (string Name, string Type, bool Required, VectorType? Vector)> ParseProtobufFields(string protoString)
     {
-        var fields = new Dictionary<int, (string Name, string Type, bool Required)>();
+        var fields = new Dictionary<int, (string Name, string Type, bool Required, VectorType? Vector)>();
 
         // Simple regex-based parsing for protobuf field definitions
-        // Format: [optional|required|repeated] type name = number;
+        // Format: [optional|required|repeated] type name = number [(options)];
         var fieldPattern = FieldPatternRegex();
 
         foreach (Match match in fieldPattern.Matches(protoString))
@@ -275,8 +357,9 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
             var type = match.Groups[2].Value;
             var name = match.Groups[3].Value;
             var number = int.Parse(match.Groups[4].Value);
+            var (vector, _) = ReadVectorOption(match.Groups[5].Value, type, isRepeated: modifier == "repeated");
 
-            fields[number] = (name, type, modifier == "required");
+            fields[number] = (name, type, modifier == "required", vector);
         }
 
         return fields;
@@ -309,8 +392,12 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
         return false;
     }
 
-    [GeneratedRegex(@"(optional|required|repeated)?\s*(\w+)\s+(\w+)\s*=\s*(\d+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(optional|required|repeated)?\s*(\w+)\s+(\w+)\s*=\s*(\d+)\s*(?:\[([^\]]*)\])?", RegexOptions.IgnoreCase)]
     private static partial Regex FieldPatternRegex();
+
+    // Field-Option [(surgewave.vector).dim = 768] — die einzige akzeptierte Schreibweise.
+    [GeneratedRegex(@"\(\s*surgewave\.vector\s*\)\s*\.\s*dim\s*=\s*(\d+)")]
+    private static partial Regex VectorOptionRegex();
 
     [GeneratedRegex(@"//[^\n]*")]
     private static partial Regex SingleLineCommentRegex();
@@ -358,6 +445,8 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
         public required int Number { get; init; }
         public bool IsRequired { get; init; }
         public bool IsRepeated { get; init; }
+        public VectorType? Vector { get; init; }
+        public string? VectorError { get; init; }
     }
 
     private sealed class ProtobufEnum

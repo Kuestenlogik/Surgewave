@@ -84,7 +84,7 @@ public sealed class SchemaRegistryAvroSerializer<T> : IAsyncSerializer<T>
         if (_schemaIdCache.TryGetValue(subject, out var cachedId))
             return cachedId;
 
-        var schemaString = _schemaWriter.Write(_schema.Value);
+        var schemaString = AvroVectorSchemaAnnotator.Annotate(_schemaWriter.Write(_schema.Value), typeof(T));
 
         if (_config.AutoRegisterSchemas)
         {
