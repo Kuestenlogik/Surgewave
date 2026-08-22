@@ -250,10 +250,19 @@ jobs:
       # from the serial lane: this assembly brings up real multi-broker topology
       # on random ports, and a full memory dump is the diagnostic that matters
       # when it hangs.
+      #
+      # NO -v normal here, unlike the lanes above. This module runs 10+ minutes
+      # and logs several brokers to the console; at that verbosity the dotnet
+      # test orchestrator holds the whole output and dies with an
+      # OutOfMemoryException before it can report a single result. The module
+      # itself is fine - the identical command completes locally, and no hang
+      # dump is ever written, so neither the tests nor the HangDump extension
+      # are involved. Failing tests are still reported; only the per-test
+      # chatter of a passing run is gone.
       - name: Test
         run: |
           dotnet test --project tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
-            -c Release --no-build -v normal --max-parallel-test-modules 1 \
+            -c Release --no-build --max-parallel-test-modules 1 \
             --hangdump --hangdump-timeout 300s --hangdump-type Full
 
       - name: Upload hang dumps
