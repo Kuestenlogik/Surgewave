@@ -246,22 +246,28 @@ jobs:
       - name: Build
         run: dotnet build tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj -c Release --no-restore
 
-      # This assembly brings up real multi-broker topology on random ports and
-      # runs 10+ minutes, and it is the one module the dotnet test orchestrator
-      # cannot finish: it reports all 155 tests passing and then dies with an
-      # OutOfMemoryException. Three things were ruled out one CI run at a time -
-      # -v normal, the live progress renderer, and the coverage collector all
-      # made no difference - which leaves the hang-dump watchdog, a second
-      # runtime started alongside a process that is already holding several
-      # brokers. So this lane runs without it and relies on the job timeout to
-      # catch a true hang. The serial lane keeps its dumps.
+      # Runs the test module directly instead of through `dotnet test`. That
+      # orchestrator cannot finish this one assembly: on every attempt it
+      # reports all 155 tests passing and then dies with an
+      # OutOfMemoryException - alternating between "Array dimensions exceeded
+      # supported range" and "Insufficient memory". Four candidates were ruled
+      # out one CI run at a time (-v normal, the live progress renderer, the
+      # coverage collector, the hang-dump watchdog), and the module itself is
+      # demonstrably fine: run directly it finishes with 155 tests, 0 failed and
+      # exit code 0 (verified locally). It is the only module long enough
+      # and chatty enough to trip it - a 10+ minute run with several brokers
+      # logging - so the other lanes keep using dotnet test.
       #
-      # The identical command completes locally, and no hang dump was ever
-      # written on CI, so neither the tests nor a dump are implicated.
+      # -longRunning surfaces a stuck test in the log, which is as close as the
+      # xunit runner gets to the hang dumps the serial lane still takes; the
+      # step timeout is the actual backstop.
       - name: Test
         timeout-minutes: 30
         run: |
-          dotnet test --project tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
-            -c Release --no-build --max-parallel-test-modules 1 \
-            --no-progress --no-ansi
+          MODULE=artifacts/bin/Kuestenlogik.Surgewave.IntegrationTests/Release/Kuestenlogik.Surgewave.IntegrationTests
+          if [ ! -x "$MODULE" ]; then
+            echo "::error::$MODULE is missing or not executable — did the artifacts layout change?"
+            exit 1
+          fi
+          "$MODULE" -longRunning 300
 
