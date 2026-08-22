@@ -251,18 +251,20 @@ jobs:
       # on random ports, and a full memory dump is the diagnostic that matters
       # when it hangs.
       #
-      # NO -v normal here, unlike the lanes above. This module runs 10+ minutes
-      # and logs several brokers to the console; at that verbosity the dotnet
-      # test orchestrator holds the whole output and dies with an
-      # OutOfMemoryException before it can report a single result. The module
-      # itself is fine - the identical command completes locally, and no hang
-      # dump is ever written, so neither the tests nor the HangDump extension
-      # are involved. Failing tests are still reported; only the per-test
-      # chatter of a passing run is gone.
+      # No -v normal, and the live progress renderer off. This module runs 10+
+      # minutes and logs several brokers to the console, and the dotnet test
+      # orchestrator dies on it with an OutOfMemoryException - first "Array
+      # dimensions exceeded supported range", then "Insufficient memory" -
+      # after every one of the 155 tests has passed. The module itself is fine:
+      # the identical command completes locally, and no hang dump is ever
+      # written, so neither the tests nor the HangDump extension are involved.
+      # What is left is the orchestrator accumulating the module's output, so
+      # both the verbosity and the renderer that retains it are turned off.
       - name: Test
         run: |
           dotnet test --project tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
             -c Release --no-build --max-parallel-test-modules 1 \
+            --no-progress --no-ansi \
             --hangdump --hangdump-timeout 300s --hangdump-type Full
 
       - name: Upload hang dumps
