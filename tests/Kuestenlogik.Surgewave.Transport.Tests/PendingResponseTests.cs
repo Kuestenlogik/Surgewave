@@ -152,10 +152,11 @@ public class PendingResponseTests
     /// The point of the pooled source (#80): a recycled correlation costs no allocation, where the
     /// previous TaskCompletionSource-per-request path allocated on every single request. Measured
     /// on one thread with the completion consumed synchronously, so nothing but the correlation
-    /// itself is on the account.
+    /// itself is on the account: the completion is committed before the await starts, so every
+    /// await below finishes inline (no suspension, no state-machine box, no thread hop).
     /// </summary>
     [Fact]
-    public void RecycledCorrelation_AllocatesNothing_UnlikeATaskCompletionSourcePerRequest()
+    public async Task RecycledCorrelation_AllocatesNothing_UnlikeATaskCompletionSourcePerRequest()
     {
         const int iterations = 1000;
         var pending = new PendingResponse();
@@ -163,14 +164,14 @@ public class PendingResponseTests
 
         // Warm up: first use JITs the paths and may allocate.
         pending.TrySetResult(response);
-        _ = pending.GetResult(pending.Version);
+        _ = await pending.ValueTask;
         pending.Reset();
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < iterations; i++)
         {
             pending.TrySetResult(response);
-            _ = pending.GetResult(pending.Version);
+            _ = await pending.ValueTask;
             pending.Reset();
         }
         var pooledBytes = GC.GetAllocatedBytesForCurrentThread() - before;

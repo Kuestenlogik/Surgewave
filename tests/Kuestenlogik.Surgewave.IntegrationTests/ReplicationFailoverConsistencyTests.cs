@@ -106,6 +106,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     [Fact(Timeout = 180_000)]
     public async Task FollowerPromotedAfterMultiBatchCatchUp_ServesCrcValidContiguousRecords()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
         var leader = _leader!;
         var follower = _follower!;
         var topic = $"issue97-{Guid.NewGuid():N}";
@@ -123,7 +124,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         _output.WriteLine("follower stalled: leader replication endpoint pointed at a dead port");
 
         await CreateReplicatedTopicAsync(leader, topic);
-        await ProduceAsync(leader, topic, MessageCount);
+        await ProduceAsync(leader, topic, MessageCount, cancellationToken);
 
         // Oracle 1: the stall held. Without this the test could pass while the follower had
         // streamed the backlog one batch per fetch — never touching the concatenated path.
@@ -137,13 +138,14 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => follower.LogManager.GetLog(tp)?.NextOffset == MessageCount,
-                timeout: TimeSpan.FromSeconds(60), pollInterval: TimeSpan.FromMilliseconds(100), output: _output),
+                timeout: TimeSpan.FromSeconds(60), pollInterval: TimeSpan.FromMilliseconds(100),
+                ct: cancellationToken, output: _output),
             $"follower never caught up (LEO {follower.LogManager.GetLog(tp)?.NextOffset} of {MessageCount})");
 
         // Oracle 2: the follower stored N separate, individually CRC-valid batches at the leader's
         // own offsets. This is the assertion #92 would fail: a whole-blob append writes one CRC
         // over the concatenation into batch 1's header, and #93 would show up as a short log.
-        var stored = await follower.LogManager.ReadBatchesAsync(tp, 0, maxBytes: 8 * 1024 * 1024);
+        var stored = await follower.LogManager.ReadBatchesAsync(tp, 0, maxBytes: 8 * 1024 * 1024, cancellationToken: cancellationToken);
         Assert.Equal(MessageCount, stored.Count);
         for (var i = 0; i < stored.Count; i++)
         {
@@ -167,12 +169,12 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => leader.ClusterState!.GetIsrSnapshot(tp).Contains(2),
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the follower never joined the ISR, so leadership could not transfer");
 
         // Explicitly, not via DisposeAsync: that path halves the configured timeout with integer
         // division and can end up with a zero-second budget for the transfer.
-        var transferred = await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20));
+        var transferred = await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20), cancellationToken);
         _output.WriteLine($"graceful shutdown transferred leadership: {transferred}");
 
         await leader.DisposeAsync();
@@ -181,7 +183,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => follower.ClusterState!.GetPartitionState(tp)?.LeaderBrokerId == 2,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the surviving broker never took leadership of the partition");
 
         Assert.Equal(MessageCount, follower.LogManager.GetLog(tp)!.NextOffset);
@@ -204,7 +206,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.Equal(MessageCount, follower.LogManager.GetLog(tp)!.NextOffset);
 
         // ── Read it back through a CRC-checking client ────────────────────────────────────────
-        var (consumed, errors) = ConsumeFromNewLeader(follower, topic);
+        var (consumed, errors) = ConsumeFromNewLeader(follower, topic, cancellationToken);
         foreach (var error in errors.Take(5))
             _output.WriteLine($"consumer error (informational): {error.Code} {error.Reason}");
 
@@ -232,6 +234,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         // metadata of its own — replication creates the logs directly and registers nothing. Once
         // it is promoted, a client metadata request used to take the auto-create branch and invent
         // the topic from broker defaults: a three-partition topic came back as one.
+        var cancellationToken = TestContext.Current.CancellationToken;
         var leader = _leader!;
         var follower = _follower!;
         var topic = $"issue118-{Guid.NewGuid():N}";
@@ -250,7 +253,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             await TestWaitHelpers.WaitForConditionAsync(
                 () => Enumerable.Range(0, PartitionCount).All(p =>
                     follower.ClusterState!.GetPartitionState(new SwTopicPartition { Topic = topic, Partition = p }) is not null),
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the follower never learned all partitions of the topic");
 
         var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
@@ -260,17 +263,17 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => leader.ClusterState!.GetIsrSnapshot(tp).Contains(2),
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the follower never joined the ISR, so leadership could not transfer");
 
-        await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20));
+        await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20), cancellationToken);
         await leader.DisposeAsync();
         _leaderDisposed = true;
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => follower.ClusterState!.GetPartitionState(new SwTopicPartition { Topic = topic, Partition = 0 })?.LeaderBrokerId == 2,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the surviving broker never took leadership");
 
         using var promotedAdmin = new AdminClientBuilder(
@@ -294,6 +297,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         // replication creates the partition log directly — so the promoted broker used to answer
         // metadata with an id it had invented (or none at all), and a consumer that maps an
         // assignment back by topic id could not.
+        var cancellationToken = TestContext.Current.CancellationToken;
         var leader = _leader!;
         var follower = _follower!;
         var topic = $"issue118id-{Guid.NewGuid():N}";
@@ -311,7 +315,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => follower.ClusterState!.GetPartitionState(tp) is not null,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the follower never learned the partition");
 
         var originalId = leader.ClusterState!.GetTopic(topic)?.TopicId ?? Guid.Empty;
@@ -321,7 +325,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => follower.LogManager.GetTopicMetadata(topic)?.TopicId == originalId,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             $"the follower never learned the topic id (got {follower.LogManager.GetTopicMetadata(topic)?.TopicId}, expected {originalId})");
 
         // Leadership only transfers to an ISR member: without this wait GracefulShutdownAsync finds
@@ -330,17 +334,17 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => leader.ClusterState!.GetIsrSnapshot(tp).Contains(2),
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the follower never joined the ISR, so leadership could not transfer");
 
-        await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20));
+        await leader.GracefulShutdownAsync(TimeSpan.FromSeconds(20), cancellationToken);
         await leader.DisposeAsync();
         _leaderDisposed = true;
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => follower.ClusterState!.GetPartitionState(tp)?.LeaderBrokerId == 2,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the surviving broker never took leadership");
 
         // Same id after promotion, and resolvable by id — that is what a next-gen consumer needs to
@@ -356,6 +360,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         // because IClusterTopicCreator.CreateTopicAsync had no parameter for it. The client was told
         // the settings had been applied — the response echoes them back — while they were dropped
         // between the handler and the controller (#118 follow-up).
+        var cancellationToken = TestContext.Current.CancellationToken;
         var leader = _leader!;
         var topic = $"issue118cfg-{Guid.NewGuid():N}";
 
@@ -379,7 +384,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => leader.ClusterState!.GetTopic(topic) is not null,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the controller never registered the topic");
 
         var stored = leader.ClusterState!.GetTopic(topic)!;
@@ -448,7 +453,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     /// broker rejects a produce aimed at a follower, and a misrouted one would self-assign offsets
     /// into the replica log.
     /// </summary>
-    private async Task ProduceAsync(SurgewaveRuntime leader, string topic, int count)
+    private async Task ProduceAsync(SurgewaveRuntime leader, string topic, int count, CancellationToken cancellationToken)
     {
         using var producer = new ProducerBuilder<Null, byte[]>(new ProducerConfig
         {
@@ -463,7 +468,8 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         {
             await producer.ProduceAsync(
                 new TopicPartition(topic, new Partition(0)),
-                new Message<Null, byte[]> { Value = BitConverter.GetBytes(i) });
+                new Message<Null, byte[]> { Value = BitConverter.GetBytes(i) },
+                cancellationToken);
         }
 
         producer.Flush(TimeSpan.FromSeconds(30));
@@ -471,7 +477,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     }
 
     private (List<ConsumeResult<Ignore, byte[]>> Consumed, List<Error> Errors) ConsumeFromNewLeader(
-        SurgewaveRuntime newLeader, string topic)
+        SurgewaveRuntime newLeader, string topic, CancellationToken cancellationToken)
     {
         var errors = new ConcurrentQueue<Error>();
 
@@ -495,7 +501,9 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         var consumed = new List<ConsumeResult<Ignore, byte[]>>();
         var deadline = DateTime.UtcNow.AddSeconds(60);
 
-        while (consumed.Count < MessageCount && DateTime.UtcNow < deadline)
+        // The token is the loop's second exit: a cancelled test leaves this poll within one 500 ms
+        // Consume rather than sitting out the remaining read budget.
+        while (consumed.Count < MessageCount && DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
         {
             try
             {

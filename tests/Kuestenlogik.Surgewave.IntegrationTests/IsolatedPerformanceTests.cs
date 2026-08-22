@@ -68,13 +68,14 @@ public class IsolatedPerformanceTests : IAsyncLifetime
     [InlineData(4)]
     public async Task ParallelProducers(int producerCount)
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
         var topic = $"perf-parallel-{producerCount}-{Guid.NewGuid():N}";
         var messagesPerProducer = 50;  // Reduced from 200 for faster test execution
         var messageSize = 512;  // Reduced from 1024
         var messageValue = new string('X', messageSize);
 
         // Wait for broker to be fully ready
-        await WaitForBrokerReady();
+        await WaitForBrokerReady(cancellationToken);
 
         var sw = Stopwatch.StartNew();
         var successCount = 0;
@@ -105,7 +106,7 @@ public class IsolatedPerformanceTests : IAsyncLifetime
                         {
                             Key = $"p{producerId}-{i}",
                             Value = messageValue
-                        });
+                        }, cancellationToken);
                         Interlocked.Increment(ref successCount);
                     }
                     catch (ProduceException<string, string>)
@@ -134,7 +135,7 @@ public class IsolatedPerformanceTests : IAsyncLifetime
         _output.WriteLine($"  Throughput: {throughputMsgs:F0} msg/sec, {throughputMB:F2} MB/sec");
 
         // Verify all messages were produced and can be consumed
-        var consumed = await ConsumeAllMessages(topic, successCount, timeoutSeconds: 30);
+        var consumed = await ConsumeAllMessages(topic, successCount, timeoutSeconds: 30, cancellationToken);
         _output.WriteLine($"  Consumed: {consumed:N0}");
 
         Assert.Equal(totalMessages, successCount);
@@ -142,7 +143,7 @@ public class IsolatedPerformanceTests : IAsyncLifetime
         Assert.Equal(successCount, consumed);
     }
 
-    private async Task WaitForBrokerReady()
+    private async Task WaitForBrokerReady(CancellationToken cancellationToken)
     {
         var config = new ProducerConfig
         {
@@ -161,17 +162,17 @@ public class IsolatedPerformanceTests : IAsyncLifetime
                 {
                     Key = "ready",
                     Value = "check"
-                });
+                }, cancellationToken);
                 return; // Broker is ready
             }
             catch
             {
-                await Task.Delay(500);
+                await Task.Delay(500, cancellationToken);
             }
         }
     }
 
-    private async Task<int> ConsumeAllMessages(string topic, int expectedCount, int timeoutSeconds)
+    private async Task<int> ConsumeAllMessages(string topic, int expectedCount, int timeoutSeconds, CancellationToken cancellationToken)
     {
         var config = new ConsumerConfig
         {
@@ -185,7 +186,10 @@ public class IsolatedPerformanceTests : IAsyncLifetime
         consumer.Subscribe(topic);
 
         var count = 0;
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        // Linked to the test's token so a timing-out test stops consuming instead of sitting out
+        // the full verification budget.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
         try
         {
@@ -198,7 +202,9 @@ public class IsolatedPerformanceTests : IAsyncLifetime
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        // The verification budget running out is expected; the test itself being cancelled is not,
+        // and has to surface rather than be reported as a count mismatch.
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
 
         consumer.Close();
         return count;

@@ -1,0 +1,28 @@
+<Project>
+  <!-- GetPathOfFileAbove includes the directory it starts from, so it has to
+       start one level up: passing tests/ would resolve to this very file. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <!--
+    Packages every test project needs, kept here so 40+ csproj files do not
+    repeat them.
+
+    coverlet.msbuild drives coverage from MSBuild and is therefore independent
+    of the test runner. It replaces coverlet.collector, which was a VSTest data
+    collector and is silently ignored now that xunit.v3 runs on
+    Microsoft.Testing.Platform. Same engine, same numbers: only the driver
+    changed, which is what keeps the coverage floor in coverage.yml meaningful.
+    Activate it with
+      dotnet test ... /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
+
+    HangDump supplies the hangdump options that took over from the VSTest blame
+    settings when the VSTest infrastructure went away.
+  -->
+  <ItemGroup>
+    <PackageReference Include="coverlet.msbuild">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
+  </ItemGroup>
+</Project>

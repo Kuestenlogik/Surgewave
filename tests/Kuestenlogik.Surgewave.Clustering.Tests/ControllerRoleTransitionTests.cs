@@ -91,7 +91,7 @@ public class ControllerRoleTransitionTests
         controller.SetHeartbeatManager(heartbeats);
         await heartbeats.StartAsync(CancellationToken.None);
 
-        Assert.True(await WaitFor(() => controller.IsController),
+        Assert.True(await WaitFor(() => controller.IsController, TestContext.Current.CancellationToken),
             "the survivor never took the role after broker 1 was declared dead");
     }
 
@@ -116,18 +116,19 @@ public class ControllerRoleTransitionTests
 
         // Assert the failure was actually detected first — otherwise "still not controller" would
         // pass for the wrong reason.
-        Assert.True(await WaitFor(() => heartbeats.GetBrokerHealth(1) is { IsAlive: false }),
+        Assert.True(
+            await WaitFor(() => heartbeats.GetBrokerHealth(1) is { IsAlive: false }, TestContext.Current.CancellationToken),
             "broker 1 was never declared dead, so this proves nothing");
         Assert.False(controller.IsController, "the legacy election ran in Raft mode");
     }
 
-    private static async Task<bool> WaitFor(Func<bool> condition)
+    private static async Task<bool> WaitFor(Func<bool> condition, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow.AddSeconds(20);
-        while (DateTime.UtcNow < deadline)
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
         {
             if (condition()) return true;
-            await Task.Delay(100);
+            await Task.Delay(100, cancellationToken);
         }
         return condition();
     }

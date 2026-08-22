@@ -41,6 +41,7 @@ public sealed class BrokerBootSmokeTests
     [Fact(Timeout = 180_000)]
     public async Task Broker_BootsToReady_WithConnectEnabled()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
         var brokerDll = ResolveBrokerDll();
         var brokerDir = Path.GetDirectoryName(brokerDll)!;
         EnsureKafkaPluginStaged(brokerDir);
@@ -112,7 +113,7 @@ public sealed class BrokerBootSmokeTests
 
             // Race readiness against an early crash and a hard timeout. An early exit is the
             // failure this test exists to catch (a plugin blew up before the broker was ready).
-            var timeout = Task.Delay(TimeSpan.FromSeconds(90));
+            var timeout = Task.Delay(TimeSpan.FromSeconds(90), cancellationToken);
             var first = await Task.WhenAny(ready.Task, exited.Task, timeout);
             if (first == exited.Task)
                 Assert.Fail($"Broker exited with code {await exited.Task} before reaching readiness.\n{Dump(log)}");
@@ -120,7 +121,7 @@ public sealed class BrokerBootSmokeTests
                 Assert.Fail($"Broker did not reach '{ReadyLine}' within 90s.\n{Dump(log)}");
 
             // Readiness reached; require the host to actually bind Kestrel shortly after.
-            await Task.WhenAny(appStarted.Task, exited.Task, Task.Delay(TimeSpan.FromSeconds(20)));
+            await Task.WhenAny(appStarted.Task, exited.Task, Task.Delay(TimeSpan.FromSeconds(20), cancellationToken));
             Assert.True(appStarted.Task.IsCompletedSuccessfully,
                 $"Broker reached readiness but Kestrel did not bind ('{AppStartedLine}' never appeared).\n{Dump(log)}");
 
@@ -137,7 +138,7 @@ public sealed class BrokerBootSmokeTests
         }
         finally
         {
-            await StopAsync(proc);
+            await StopAsync(proc, cancellationToken);
             TryDelete(dataDir);
         }
     }
@@ -208,7 +209,7 @@ public sealed class BrokerBootSmokeTests
         }
     }
 
-    private static async Task StopAsync(Process proc)
+    private static async Task StopAsync(Process proc, CancellationToken cancellationToken)
     {
         try
         {
@@ -224,7 +225,10 @@ public sealed class BrokerBootSmokeTests
                 using var kill = Process.Start(new ProcessStartInfo("/bin/kill", $"-s TERM {proc.Id}") { UseShellExecute = false });
                 kill?.WaitForExit(5_000);
             }
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            // 30s cap on a graceful exit, but abandon it at once when the test itself is being
+            // aborted — the catch below kills the tree, so teardown still terminates the broker.
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
             try { await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
         }
