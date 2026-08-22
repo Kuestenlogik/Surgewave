@@ -52,8 +52,15 @@
        der Testlauf faellt dann aus, ohne dass ein Test fehlschlaegt.
        In targets, damit IsTestProject aus dem csproj aufgeloest ist. -->
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
+  </ItemGroup>
+
+  <!-- Die Coverage-Extension bekommt nur, wer auch gemessen wird. coverage.yml
+       nimmt die IntegrationTests aus der Coverage-Solution heraus; das Projekt
+       setzt darum ExcludeFromCoverage und bleibt damit auch frei von der
+       Instrumentierung. -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true' AND '$(ExcludeFromCoverage)' != 'true'">
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
   </ItemGroup>
 
   <!--
