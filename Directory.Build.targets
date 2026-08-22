@@ -43,6 +43,19 @@
     <PreserveCompilationContext>true</PreserveCompilationContext>
   </PropertyGroup>
 
+  <!-- Microsoft.Testing.Platform-Extensions, die jedes Testprojekt braucht:
+       CodeCoverage ersetzt den "XPlat Code Coverage"-DataCollector, HangDump
+       die frueheren blame-hang-Optionen. Beide MUESSEN hier stehen und nicht
+       in tests/Directory.Build.props: die vier Sample-Testprojekte liegen unter
+       samples/<Sample>/tests/ und sehen die nur. Ohne die HangDump-Extension
+       lehnt ein Modul die hangdump-Option ab und meldet "Zero tests ran" -
+       der Testlauf faellt dann aus, ohne dass ein Test fehlschlaegt.
+       In targets, damit IsTestProject aus dem csproj aufgeloest ist. -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
+  </ItemGroup>
+
   <!--
     Surgewave Plugin Package Creation Target
     Usage: dotnet build -p:CreateSurgewavePackage=true
