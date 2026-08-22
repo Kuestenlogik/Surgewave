@@ -4,6 +4,9 @@
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
+    <!-- coverage.yml nimmt dieses Projekt aus der Coverage-Solution heraus;
+         dann braucht es die Instrumentierung auch nicht. -->
+    <ExcludeFromCoverage>true</ExcludeFromCoverage>
   </PropertyGroup>
 
   <ItemGroup>

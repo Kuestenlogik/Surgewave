@@ -122,9 +122,10 @@ jobs:
         # an die Test-App reicht statt an MSBuild - der Lauf erzeugt dann still
         # gar keinen Report.
         #
-        # Die Engine wechselt damit, also sind die Zahlen nicht mehr 1:1 mit den
-        # frueher gemessenen vergleichbar; der Floor unten ist entsprechend zu
-        # kalibrieren, sobald der erste Lauf durch ist.
+        # Die Engine wechselt damit, die Zahlen sind also nicht 1:1 mit den frueher
+        # von Coverlet gemessenen vergleichbar. Erste Messung 2026-08-22:
+        # 42 % Line / 37.8 % Branch gegen 37.7 % / 34.9 % vorher, der Floor unten
+        # behaelt damit reichlich Luft und bleibt wie er ist.
         #
         # Kein fixes --coverage-output: jedes Testprojekt schriebe sonst in
         # dieselbe Datei. Die Extension vergibt pro Projekt einen <guid>-Namen,
