@@ -243,7 +243,10 @@ public class ReplicationTests : IAsyncLifetime
     [Fact(Timeout = 120000)] // 2 minute timeout for multi-broker test on CI
     public async Task Cluster_ProduceConsume_DataReplicatedAcrossBrokers()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        // Linked to the ambient test token so the [Fact(Timeout)] above actually aborts the
+        // metadata polling below instead of letting it run out its own 2-minute budget.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
         var topicName = $"replicated-data-{Guid.NewGuid():N}";
         var messageCount = 100;
 
@@ -284,7 +287,7 @@ public class ReplicationTests : IAsyncLifetime
                 break;
             }
             _output.WriteLine($"Waiting for replicas... Topic partitions: {topic?.Partitions.Count ?? 0}, Replicas per partition: {string.Join(",", topic?.Partitions.Select(p => p.Replicas.Length) ?? [])}");
-            await Task.Delay(1000);
+            await Task.Delay(1000, cts.Token);
         }
         Assert.NotNull(topic);
         Assert.True(replicasAssigned, $"Replicas not assigned within timeout. Partitions: {topic.Partitions.Count}, Replicas per partition: {string.Join(",", topic.Partitions.Select(p => p.Replicas.Length))}");
@@ -343,7 +346,10 @@ public class ReplicationTests : IAsyncLifetime
     [Fact(Timeout = 120000, Skip = "Flaky on Linux CI — cluster-reelection-latency roadmap item")]
     public async Task Cluster_BrokerShutdown_RemainingBrokersContinue()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        // Linked to the ambient test token: the leader/broker-removal waits below poll until this
+        // token trips, so the [Fact(Timeout)] has to be part of it to abort them promptly.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
         var topicName = $"failover-test-{Guid.NewGuid():N}";
 
         // First, create topic via admin client connecting to the controller (broker 1)
@@ -453,7 +459,10 @@ public class ReplicationTests : IAsyncLifetime
     [Fact(Timeout = 150000)]
     public async Task Cluster_IsrManagement_FollowersCatchUp()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        // Linked to the ambient test token: the stabilization/leader/full-ISR waits below poll on
+        // this token, so the [Fact(Timeout)] has to be part of it to abort them promptly.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
         // This test verifies ISR (In-Sync Replicas) management
         var topicName = $"isr-test-{Guid.NewGuid():N}";
 

@@ -25,23 +25,25 @@ public sealed class KafkaGatingTests
     [Fact(Timeout = 60000)]
     public async Task NativeOnly_NativeClientWorks_KafkaClientRejected()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
         await using var runtime = await SurgewaveRuntime.CreateBuilder()
             .WithPort(0)
             .WithoutKafka()
             .WithAutoCreateTopics()
             .WithStorageEngine(StorageEngines.Memory)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
 
         var topic = $"gate-off-{Guid.NewGuid():N}";
 
         // (1) The native protocol still works over the shared listener.
         await using (var native = new SurgewaveNativeClient(runtime.Host, runtime.Port))
         {
-            await native.ConnectAsync();
-            await native.Topics.CreateAsync(topic, 1);
-            await native.Messaging.SendAsync(topic, 0, "k", "native-works");
-            var recv = await native.Messaging.ReceiveAsync(topic, 0, 0);
+            await native.ConnectAsync(cancellationToken);
+            await native.Topics.CreateAsync(topic, 1, cancellationToken: cancellationToken);
+            await native.Messaging.SendAsync(topic, 0, "k", "native-works", cancellationToken);
+            var recv = await native.Messaging.ReceiveAsync(topic, 0, 0, cancellationToken: cancellationToken);
             Assert.Equal("native-works", Assert.Single(recv.Messages).ValueString);
         }
 
@@ -65,13 +67,15 @@ public sealed class KafkaGatingTests
     [Fact(Timeout = 60000)]
     public async Task KafkaEnabledByDefault_KafkaClientWorks()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
         // Default builder = Kafka enabled — identical to today.
         await using var runtime = await SurgewaveRuntime.CreateBuilder()
             .WithPort(0)
             .WithAutoCreateTopics()
             .WithStorageEngine(StorageEngines.Memory)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
 
         var topic = $"gate-on-{Guid.NewGuid():N}";
         var producerConfig = new ProducerConfig
@@ -81,7 +85,7 @@ public sealed class KafkaGatingTests
         };
         using var producer = new ProducerBuilder<string, string>(producerConfig).Build();
 
-        var dr = await producer.ProduceAsync(topic, new Message<string, string> { Key = "k", Value = "kafka-works" });
+        var dr = await producer.ProduceAsync(topic, new Message<string, string> { Key = "k", Value = "kafka-works" }, cancellationToken);
         Assert.Equal(PersistenceStatus.Persisted, dr.Status);
         _output.WriteLine($"Kafka produce succeeded at {dr.TopicPartitionOffset}");
     }

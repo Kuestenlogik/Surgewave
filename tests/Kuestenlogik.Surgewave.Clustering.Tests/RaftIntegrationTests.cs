@@ -759,6 +759,8 @@ public class RaftIntegrationTests : IAsyncLifetime
     [Fact(Timeout = 60000)]
     public async Task RaftCluster_ThreeNodes_RaftNodesInitialized()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
         // Arrange - Start 3 brokers with Raft consensus enabled
         var broker1 = await SurgewaveRuntime.CreateBuilder()
             .WithBrokerId(1)
@@ -770,7 +772,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker1);
 
         var broker2 = await SurgewaveRuntime.CreateBuilder()
@@ -783,7 +785,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker2);
 
         var broker3 = await SurgewaveRuntime.CreateBuilder()
@@ -798,7 +800,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker3);
 
         _output.WriteLine($"3-broker Raft cluster started: ports {broker1.Port}, {broker2.Port}, {broker3.Port}");
@@ -831,6 +833,8 @@ public class RaftIntegrationTests : IAsyncLifetime
     [Fact(Timeout = 60000)]
     public async Task RaftCluster_RaftMessagesExchanged()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
         // Arrange - Start 3 brokers with Raft consensus
         // Note: Disable peer discovery timeout for tests since brokers start sequentially
         var broker1 = await SurgewaveRuntime.CreateBuilder()
@@ -844,7 +848,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker1);
 
         var broker2 = await SurgewaveRuntime.CreateBuilder()
@@ -858,7 +862,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker2);
 
         var broker3 = await SurgewaveRuntime.CreateBuilder()
@@ -874,7 +878,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker3);
 
         _output.WriteLine($"3-broker Raft cluster started: ports {broker1.Port}, {broker2.Port}, {broker3.Port}");
@@ -910,6 +914,8 @@ public class RaftIntegrationTests : IAsyncLifetime
     [Fact(Timeout = 60000)]
     public async Task RaftCluster_LeaderProposeEntry_ReplicatesToFollowers()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
         // Arrange - Start 3 brokers with Raft consensus
         // Note: Disable peer discovery timeout for tests since brokers start sequentially
         var broker1 = await SurgewaveRuntime.CreateBuilder()
@@ -923,7 +929,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker1);
 
         var broker2 = await SurgewaveRuntime.CreateBuilder()
@@ -937,7 +943,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker2);
 
         var broker3 = await SurgewaveRuntime.CreateBuilder()
@@ -953,7 +959,7 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
             .Build()
-            .StartAsync();
+            .StartAsync(cancellationToken);
         _brokers.Add(broker3);
 
         _output.WriteLine($"3-broker Raft cluster started");
@@ -969,7 +975,7 @@ public class RaftIntegrationTests : IAsyncLifetime
 
         // Act - Propose an entry on the leader
         var data = System.Text.Encoding.UTF8.GetBytes("test-metadata-command");
-        var index = await leader.RaftNode!.ProposeAsync(MetadataCommandType.Noop, data, CancellationToken.None);
+        var index = await leader.RaftNode!.ProposeAsync(MetadataCommandType.Noop, data, cancellationToken);
 
         _output.WriteLine($"Proposed entry at index {index}");
 
@@ -978,7 +984,7 @@ public class RaftIntegrationTests : IAsyncLifetime
         Assert.Equal(index, leader.RaftNode.LastLogIndex);
 
         // Wait for replication (with eventual timeout)
-        await Task.Delay(1000);
+        await Task.Delay(1000, cancellationToken);
 
         // Verify other nodes received the entry (or at least terms advanced)
         foreach (var broker in _brokers)

@@ -18,7 +18,7 @@ namespace Kuestenlogik.Surgewave.IntegrationTests;
 [Collection(nameof(BrokerSpawningCollection))]
 public sealed class ClientProtocolSelectionTests
 {
-    private static async Task<SurgewaveRuntime> StartBrokerAsync(bool kafka = true)
+    private static async Task<SurgewaveRuntime> StartBrokerAsync(CancellationToken cancellationToken, bool kafka = true)
     {
         var builder = SurgewaveRuntime.CreateBuilder()
             .WithPort(0)
@@ -26,17 +26,18 @@ public sealed class ClientProtocolSelectionTests
             .WithStorageEngine(StorageEngines.Memory);
         if (!kafka)
             builder = builder.WithoutKafka();
-        return await builder.Build().StartAsync();
+        return await builder.Build().StartAsync(cancellationToken);
     }
 
     [Fact(Timeout = 60000)]
     public async Task Auto_PicksNative_AgainstSurgewaveBroker()
     {
-        await using var runtime = await StartBrokerAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var runtime = await StartBrokerAsync(cancellationToken);
 
         await using var client = await SurgewaveClient.Create(runtime.BootstrapServers)
             .UseAutoDetect()
-            .BuildAsync();
+            .BuildAsync(cancellationToken);
 
         Assert.Equal(ProtocolType.SurgewaveNative, client.Protocol);
         Assert.True(client.IsConnected);
@@ -48,11 +49,12 @@ public sealed class ClientProtocolSelectionTests
         // Kafka disabled on the server (#58); native must still be selected. If the
         // native probe failed, Auto would fall back to Kafka and the connect would
         // be rejected — so a green result also proves native works native-only.
-        await using var runtime = await StartBrokerAsync(kafka: false);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var runtime = await StartBrokerAsync(cancellationToken, kafka: false);
 
         await using var client = await SurgewaveClient.Create(runtime.BootstrapServers)
             .UseAutoDetect()
-            .BuildAsync();
+            .BuildAsync(cancellationToken);
 
         Assert.Equal(ProtocolType.SurgewaveNative, client.Protocol);
         Assert.True(client.IsConnected);
@@ -61,11 +63,12 @@ public sealed class ClientProtocolSelectionTests
     [Fact(Timeout = 60000)]
     public async Task ForceNative_Connects()
     {
-        await using var runtime = await StartBrokerAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var runtime = await StartBrokerAsync(cancellationToken);
 
         await using var client = await SurgewaveClient.Create(runtime.BootstrapServers)
             .UseSurgewaveProtocol()
-            .BuildAsync();
+            .BuildAsync(cancellationToken);
 
         Assert.Equal(ProtocolType.SurgewaveNative, client.Protocol);
         Assert.True(client.IsConnected);
@@ -74,13 +77,14 @@ public sealed class ClientProtocolSelectionTests
     [Fact(Timeout = 60000)]
     public async Task ForceKafka_Connects_ViaSurgewaveKafkaWire()
     {
-        await using var runtime = await StartBrokerAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var runtime = await StartBrokerAsync(cancellationToken);
 
         // Forces the Kafka wire even against a Surgewave server. BuildAsync connects,
         // so a green result proves the client's own Kafka-wire path reaches the broker.
         await using var client = await SurgewaveClient.Create(runtime.BootstrapServers)
             .UseKafkaProtocol()
-            .BuildAsync();
+            .BuildAsync(cancellationToken);
 
         Assert.Equal(ProtocolType.Kafka, client.Protocol);
         Assert.True(client.IsConnected);

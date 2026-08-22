@@ -159,26 +159,26 @@ jobs:
       # Parallel lane runs first: it finishes in ~2 min, so a trivial breakage
       # is reported early instead of after the full serial run.
       #
-      # blame: shorter window and a mini dump on purpose. The slowest assembly
+      # hangdump: shorter window and a mini dump on purpose. The slowest assembly
       # in this lane measures 34 s, so 300 s of silence would be pathological —
       # and three concurrent FULL memory dumps would saturate the runner's disk
-      # and starve the remaining testhosts, which is self-reinforcing.
+      # and starve the remaining test hosts, which is self-reinforcing.
       - name: Test (parallel lane)
         run: |
-          dotnet test lane-parallel.slnx -c Release --no-build -v minimal \
-            -m:${PARALLEL_LANE_DOP} \
-            --blame-hang-timeout 120s --blame-hang-dump-type mini
+          dotnet test --solution lane-parallel.slnx -c Release --no-build -v minimal \
+            --max-parallel-test-modules ${PARALLEL_LANE_DOP} \
+            --hangdump --hangdump-timeout 120s --hangdump-type Mini
 
-      # Serial lane: behaviour identical to before. -m:1 stays, verbatim.
+      # Serial lane: behaviour identical to before, one module at a time.
       # This lane holds everything that starts in-process brokers on random
       # ports, binds real loopback sockets, spawns subprocesses, or asserts on
       # elapsed time. It must NEVER run concurrently with the lane above on the
       # same VM — hence two sequential steps, not two background processes.
       - name: Test (serial lane)
         run: |
-          dotnet test lane-serial.slnx -c Release --no-build -v normal \
-            -m:1 \
-            --blame-hang-timeout 300s --blame-hang-dump-type full
+          dotnet test --solution lane-serial.slnx -c Release --no-build -v normal \
+            --max-parallel-test-modules 1 \
+            --hangdump --hangdump-timeout 300s --hangdump-type Full
 
       - name: Upload hang dumps
         if: failure()
@@ -187,7 +187,6 @@ jobs:
           name: hang-dumps-${{ github.run_id }}
           path: |
             **/TestResults/**/*.dmp
-            **/TestResults/**/Sequence*
           if-no-files-found: ignore
           retention-days: 7
 
@@ -247,15 +246,15 @@ jobs:
       - name: Build
         run: dotnet build tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj -c Release --no-restore
 
-      # -m:1 and the 300 s/full blame settings are unchanged from the serial
-      # lane: this assembly brings up real multi-broker topology on random
-      # ports, and a full memory dump is the diagnostic that matters when it
-      # hangs.
+      # One module at a time and the 300 s/full hangdump settings are unchanged
+      # from the serial lane: this assembly brings up real multi-broker topology
+      # on random ports, and a full memory dump is the diagnostic that matters
+      # when it hangs.
       - name: Test
         run: |
-          dotnet test tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
-            -c Release --no-build -v normal -m:1 \
-            --blame-hang-timeout 300s --blame-hang-dump-type full
+          dotnet test --project tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
+            -c Release --no-build -v normal --max-parallel-test-modules 1 \
+            --hangdump --hangdump-timeout 300s --hangdump-type Full
 
       - name: Upload hang dumps
         if: failure()
@@ -264,6 +263,5 @@ jobs:
           name: hang-dumps-integration-${{ github.run_id }}
           path: |
             **/TestResults/**/*.dmp
-            **/TestResults/**/Sequence*
           if-no-files-found: ignore
           retention-days: 7

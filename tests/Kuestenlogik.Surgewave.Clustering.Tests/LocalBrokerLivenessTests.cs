@@ -132,11 +132,12 @@ public class LocalBrokerLivenessTests
 
         // The loop's interval is max(5, RebalanceCheckIntervalSeconds) seconds; give it a few
         // rounds before concluding it will never act.
+        var cancellationToken = TestContext.Current.CancellationToken;
         var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < deadline &&
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested &&
                state.GetPartitionState(tp)!.LeaderBrokerId != LocalBroker)
         {
-            await Task.Delay(200);
+            await Task.Delay(200, cancellationToken);
         }
 
         Assert.Equal(LocalBroker, state.GetPartitionState(tp)!.LeaderBrokerId);

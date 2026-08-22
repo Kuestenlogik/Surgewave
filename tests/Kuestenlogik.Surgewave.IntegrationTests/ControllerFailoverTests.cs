@@ -95,6 +95,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
     [Fact(Timeout = 180_000)]
     public async Task WhenTheControllerDies_TheSurvivorTakesTheRole()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
         var survivor = _survivor!;
 
@@ -107,7 +108,8 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => survivor.IsController,
-                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250), output: _output),
+                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
+                ct: cancellationToken, output: _output),
             "the surviving broker never became controller, so nothing in this cluster can elect a partition leader again");
     }
 
@@ -116,6 +118,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
     {
         // The operational consequence of the role not moving: topic creation is a controller
         // operation, so a cluster without one cannot even be extended, let alone repair a partition.
+        var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
         var survivor = _survivor!;
 
@@ -125,7 +128,8 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => survivor.IsController,
-                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250), output: _output),
+                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
+                ct: cancellationToken, output: _output),
             "the surviving broker never became controller");
 
         var topic = $"after-failover-{Guid.NewGuid():N}";
@@ -139,7 +143,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => survivor.ClusterState!.GetTopic(topic) is not null,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the new controller did not register the topic it was asked to create");
     }
 
@@ -150,6 +154,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         // reported exactly once, and it is reported to a broker that is not yet controller; if the
         // promotion is where the handling stops, the controller-side repair for that failure —
         // dropping the dead broker out of every ISR — never runs, and no second event ever comes.
+        var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
         var survivor = _survivor!;
         var topic = $"controller-failover-{Guid.NewGuid():N}";
@@ -166,7 +171,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => survivor.ClusterState!.GetIsrSnapshot(tp).Contains(1),
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             "the survivor never saw broker 1 in the ISR, so its removal would prove nothing");
 
         await controller.DisposeAsync();
@@ -175,13 +180,14 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => survivor.IsController,
-                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250), output: _output),
+                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
+                ct: cancellationToken, output: _output),
             "the surviving broker never became controller");
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
                 () => !survivor.ClusterState!.GetIsrSnapshot(tp).Contains(1),
-                timeout: TimeSpan.FromSeconds(60), output: _output),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             $"the dead broker is still in the ISR ({string.Join(",", survivor.ClusterState!.GetIsrSnapshot(tp))}) — " +
             "the promoted controller never processed the failure it was promoted for");
     }

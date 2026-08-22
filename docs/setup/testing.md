@@ -176,10 +176,19 @@ Tests run automatically on:
 
 ## Coverage Reports
 
+Coverage comes from Coverlet, driven by MSBuild. `coverlet.collector` was a
+VSTest data collector and is silently ignored now that xunit.v3 runs on
+Microsoft.Testing.Platform, so the switch is a `/p:` property rather than
+`--collect`.
+
 ```bash
-# Generate coverage report
-dotnet test --collect:"XPlat Code Coverage"
+# Generate coverage reports (one per test project)
+dotnet test --solution Kuestenlogik.Surgewave.slnx /p:CollectCoverage=true \
+  /p:CoverletOutputFormat=cobertura /p:CoverletOutput=./coverage.cobertura.xml
 
 # View report (requires reportgenerator)
-reportgenerator -reports:**/coverage.cobertura.xml -targetdir:coverage-report
+reportgenerator -reports:'tests/**/coverage.cobertura.xml' -targetdir:coverage-report
 ```
+
+Keep `CoverletOutput` relative: an absolute path would have every test project
+write to the same file and overwrite the others.

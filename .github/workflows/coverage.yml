@@ -14,7 +14,6 @@ on:
       - 'Directory.*.props'
       - 'Directory.*.targets'
       - 'Kuestenlogik.Surgewave.slnx'
-      - 'coverlet.runsettings'
       - '.github/workflows/coverage.yml'
   pull_request:
     branches: [main]
@@ -26,7 +25,6 @@ on:
       - 'Directory.*.props'
       - 'Directory.*.targets'
       - 'Kuestenlogik.Surgewave.slnx'
-      - 'coverlet.runsettings'
       - '.github/workflows/coverage.yml'
   workflow_dispatch:
 
@@ -115,25 +113,39 @@ jobs:
           echo "excluded: $EXCLUDE"
 
       - name: Run tests with coverage
-        # -m:1: Test-Assemblies SERIELL, konsistent mit ci.yml/release.yml.
-        # Hinweis: Die 0%-Coverage von Core/Clustering/Protocol.Kafka lag NICHT an
-        # Parallelitaet, sondern an Coverlets CecilAssemblyResolutionException beim
-        # Lesen der [LoggerMessage]-Attribute — gefixt via PreserveCompilationContext
-        # fuer Testprojekte in Directory.Build.targets. Bei erneuten 0%-Assemblies:
-        # --diag:artifacts/coverage/diag/vstest.log anhaengen und die
-        # vstest.datacollector.*-Logs pruefen (Coverlet loggt Instrumentierungs-
-        # Fehler NUR dorthin, nie auf die Konsole).
+        # Test-Assemblies SERIELL, konsistent mit ci.yml/release.yml.
+        # Coverage kommt weiterhin von Coverlet, jetzt aber MSBuild-getrieben:
+        # coverlet.collector war ein VSTest-DataCollector und wird im
+        # MTP-Modus stumm ignoriert. Gleiche Engine, gleiche Zahlen - nur der
+        # Treiber wechselt, weshalb der Floor unten seine Bedeutung behaelt.
+        # Die Ausschluesse entsprechen 1:1 der frueheren coverlet.runsettings.
+        #
+        # KEIN gemeinsamer Ausgabepfad ueber alle Projekte: jedes Test-Projekt
+        # schriebe in dieselbe Datei und ueberschriebe die anderen. Relativer
+        # CoverletOutput legt die .cobertura.xml je Projektverzeichnis ab,
+        # ReportGenerator sammelt sie per Glob ein.
+        #
+        # Hinweis: Die 0%-Coverage von Core/Clustering/Protocol.Kafka lag NICHT
+        # an Parallelitaet, sondern an Coverlets CecilAssemblyResolutionException
+        # beim Lesen der [LoggerMessage]-Attribute — gefixt via
+        # PreserveCompilationContext fuer Testprojekte in Directory.Build.targets.
         run: |
-          dotnet test coverage.slnx -c Release --no-build -m:1 \
-            --collect:"XPlat Code Coverage" \
-            --results-directory artifacts/coverage/raw \
-            --settings coverlet.runsettings \
-            --verbosity minimal
+          dotnet test --solution coverage.slnx -c Release --no-build \
+            --max-parallel-test-modules 1 \
+            --verbosity minimal \
+            /p:CollectCoverage=true \
+            /p:CoverletOutputFormat=cobertura \
+            /p:CoverletOutput=./coverage.cobertura.xml \
+            /p:Include="[Kuestenlogik.Surgewave.*]*" \
+            /p:Exclude="[*.Tests]*%2c[*]*.Program" \
+            /p:ExcludeByAttribute="Obsolete%2cGeneratedCodeAttribute%2cCompilerGeneratedAttribute%2cExcludeFromCodeCoverage" \
+            /p:ExcludeByFile="**/*.Designer.cs" \
+            /p:UseSourceLink=true
 
       - name: Generate coverage report
         uses: danielpalme/ReportGenerator-GitHub-Action@5
         with:
-          reports: 'artifacts/coverage/raw/**/coverage.cobertura.xml'
+          reports: 'tests/**/coverage.cobertura.xml'
           targetdir: 'artifacts/coverage/report'
           reporttypes: 'Html;Badges;TextSummary;MarkdownSummaryGithub'
           assemblyfilters: '+Kuestenlogik.Surgewave.*;-*.Tests;-*.Benchmarks'
