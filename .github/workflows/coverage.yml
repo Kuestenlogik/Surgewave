@@ -14,6 +14,7 @@ on:
       - 'Directory.*.props'
       - 'Directory.*.targets'
       - 'Kuestenlogik.Surgewave.slnx'
+      - 'codecoverage.runsettings'
       - '.github/workflows/coverage.yml'
   pull_request:
     branches: [main]
@@ -25,6 +26,7 @@ on:
       - 'Directory.*.props'
       - 'Directory.*.targets'
       - 'Kuestenlogik.Surgewave.slnx'
+      - 'codecoverage.runsettings'
       - '.github/workflows/coverage.yml'
   workflow_dispatch:
 
@@ -114,38 +116,36 @@ jobs:
 
       - name: Run tests with coverage
         # Test-Assemblies SERIELL, konsistent mit ci.yml/release.yml.
-        # Coverage kommt weiterhin von Coverlet, jetzt aber MSBuild-getrieben:
-        # coverlet.collector war ein VSTest-DataCollector und wird im
-        # MTP-Modus stumm ignoriert. Gleiche Engine, gleiche Zahlen - nur der
-        # Treiber wechselt, weshalb der Floor unten seine Bedeutung behaelt.
-        # Die Ausschluesse entsprechen 1:1 der frueheren coverlet.runsettings.
+        # Coverage kommt aus Microsoft.Testing.Extensions.CodeCoverage. Coverlet
+        # scheidet aus: der Collector war VSTest-only, und coverlet.msbuild
+        # laeuft im MTP-Modus ebenfalls nicht, weil dotnet test /p:-Argumente
+        # an die Test-App reicht statt an MSBuild - der Lauf erzeugt dann still
+        # gar keinen Report.
         #
-        # KEIN gemeinsamer Ausgabepfad ueber alle Projekte: jedes Test-Projekt
-        # schriebe in dieselbe Datei und ueberschriebe die anderen. Relativer
-        # CoverletOutput legt die .cobertura.xml je Projektverzeichnis ab,
+        # Die Engine wechselt damit, also sind die Zahlen nicht mehr 1:1 mit den
+        # frueher gemessenen vergleichbar; der Floor unten ist entsprechend zu
+        # kalibrieren, sobald der erste Lauf durch ist.
+        #
+        # Kein fixes --coverage-output: jedes Testprojekt schriebe sonst in
+        # dieselbe Datei. Die Extension vergibt pro Projekt einen <guid>-Namen,
         # ReportGenerator sammelt sie per Glob ein.
         #
-        # Hinweis: Die 0%-Coverage von Core/Clustering/Protocol.Kafka lag NICHT
-        # an Parallelitaet, sondern an Coverlets CecilAssemblyResolutionException
-        # beim Lesen der [LoggerMessage]-Attribute — gefixt via
-        # PreserveCompilationContext fuer Testprojekte in Directory.Build.targets.
+        # Bei 0%-Assemblies: --diagnostic anhaengen und das Log im
+        # results-directory pruefen - Instrumentierungsfehler landen nicht auf
+        # der Konsole.
         run: |
           dotnet test --solution coverage.slnx -c Release --no-build \
             --max-parallel-test-modules 1 \
-            --verbosity minimal \
-            /p:CollectCoverage=true \
-            /p:CoverletOutputFormat=cobertura \
-            /p:CoverletOutput=./coverage.cobertura.xml \
-            /p:Include="[Kuestenlogik.Surgewave.*]*" \
-            /p:Exclude="[*.Tests]*%2c[*]*.Program" \
-            /p:ExcludeByAttribute="Obsolete%2cGeneratedCodeAttribute%2cCompilerGeneratedAttribute%2cExcludeFromCodeCoverage" \
-            /p:ExcludeByFile="**/*.Designer.cs" \
-            /p:UseSourceLink=true
+            --coverage \
+            --coverage-output-format cobertura \
+            --coverage-settings codecoverage.runsettings \
+            --results-directory artifacts/coverage/raw \
+            --verbosity minimal
 
       - name: Generate coverage report
         uses: danielpalme/ReportGenerator-GitHub-Action@5
         with:
-          reports: 'tests/**/coverage.cobertura.xml'
+          reports: 'artifacts/coverage/raw/**/*.cobertura.xml'
           targetdir: 'artifacts/coverage/report'
           reporttypes: 'Html;Badges;TextSummary;MarkdownSummaryGithub'
           assemblyfilters: '+Kuestenlogik.Surgewave.*;-*.Tests;-*.Benchmarks'
