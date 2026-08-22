@@ -176,19 +176,20 @@ Tests run automatically on:
 
 ## Coverage Reports
 
-Coverage comes from Coverlet, driven by MSBuild. `coverlet.collector` was a
-VSTest data collector and is silently ignored now that xunit.v3 runs on
-Microsoft.Testing.Platform, so the switch is a `/p:` property rather than
-`--collect`.
+Coverage comes from `Microsoft.Testing.Extensions.CodeCoverage`. Coverlet is
+not usable here: the collector was VSTest-only, and coverlet.msbuild never runs
+either, because MTP-mode `dotnet test` forwards `/p:` to the test application
+rather than to MSBuild.
 
 ```bash
 # Generate coverage reports (one per test project)
-dotnet test --solution Kuestenlogik.Surgewave.slnx /p:CollectCoverage=true \
-  /p:CoverletOutputFormat=cobertura /p:CoverletOutput=./coverage.cobertura.xml
+dotnet test --solution Kuestenlogik.Surgewave.slnx --coverage \
+  --coverage-output-format cobertura --results-directory artifacts/coverage/raw
 
 # View report (requires reportgenerator)
-reportgenerator -reports:'tests/**/coverage.cobertura.xml' -targetdir:coverage-report
+reportgenerator -reports:'artifacts/coverage/raw/**/*.cobertura.xml' -targetdir:coverage-report
 ```
 
-Keep `CoverletOutput` relative: an absolute path would have every test project
-write to the same file and overwrite the others.
+Do not pin `--coverage-output` to a fixed name: every test project would write
+to the same file and overwrite the others. The extension gives each report a
+`<guid>` name, which is what the glob above matches.

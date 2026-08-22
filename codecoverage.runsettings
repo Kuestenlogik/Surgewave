@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <!--
+    Coverage settings for Microsoft.Testing.Extensions.CodeCoverage, passed to
+    dotnet test via the coverage-settings option.
+
+    Replaces coverlet.runsettings. coverlet is not usable here at all: the
+    collector is VSTest-only, and coverlet.msbuild never runs because MTP-mode
+    dotnet test forwards /p: to the test application instead of MSBuild.
+    Carried over from the old file are the two exclusions this engine does not
+    apply on its own: obsolete code and designer files.
+
+    Assembly and class scoping is deliberately NOT repeated here. It lives in
+    coverage.yml, where ReportGenerator applies assemblyfilters and
+    classfilters; a ModulePaths Include section that leaves the test assembly
+    uninstrumented aborts the run with exit code 5 and no diagnostic.
+
+    Watch the comment syntax: a double hyphen anywhere in here is invalid XML
+    and the parser rejects the whole file, again with a bare exit code 5.
+  -->
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="Code Coverage">
+        <Configuration>
+          <CodeCoverage>
+            <Attributes>
+              <Exclude>
+                <Attribute>^System\.ObsoleteAttribute$</Attribute>
+              </Exclude>
+            </Attributes>
+            <Sources>
+              <Exclude>
+                <Source>.*\.Designer\.cs$</Source>
+              </Exclude>
+            </Sources>
+          </CodeCoverage>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

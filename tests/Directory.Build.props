@@ -7,22 +7,19 @@
     Packages every test project needs, kept here so 40+ csproj files do not
     repeat them.
 
-    coverlet.msbuild drives coverage from MSBuild and is therefore independent
-    of the test runner. It replaces coverlet.collector, which was a VSTest data
-    collector and is silently ignored now that xunit.v3 runs on
-    Microsoft.Testing.Platform. Same engine, same numbers: only the driver
-    changed, which is what keeps the coverage floor in coverage.yml meaningful.
-    Activate it with
-      dotnet test ... /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
+    CodeCoverage and HangDump are Microsoft.Testing.Platform extensions, which
+    is what xunit.v3 4.x runs on. They replace the two pieces of VSTest
+    infrastructure that went away with the bridge: the "XPlat Code Coverage"
+    data collector and the blame-hang settings.
 
-    HangDump supplies the hangdump options that took over from the VSTest blame
-    settings when the VSTest infrastructure went away.
+    Note that coverlet is NOT an option here. coverlet.collector is a VSTest
+    data collector, and coverlet.msbuild never runs either: in MTP mode
+    `dotnet test` hands /p: arguments to the test application rather than to
+    MSBuild, so coverlet's targets are never invoked and the run silently
+    produces no report.
   -->
   <ItemGroup>
-    <PackageReference Include="coverlet.msbuild">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
   </ItemGroup>
 </Project>
