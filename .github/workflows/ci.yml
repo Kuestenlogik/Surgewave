@@ -246,33 +246,22 @@ jobs:
       - name: Build
         run: dotnet build tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj -c Release --no-restore
 
-      # One module at a time and the 300 s/full hangdump settings are unchanged
-      # from the serial lane: this assembly brings up real multi-broker topology
-      # on random ports, and a full memory dump is the diagnostic that matters
-      # when it hangs.
+      # This assembly brings up real multi-broker topology on random ports and
+      # runs 10+ minutes, and it is the one module the dotnet test orchestrator
+      # cannot finish: it reports all 155 tests passing and then dies with an
+      # OutOfMemoryException. Three things were ruled out one CI run at a time -
+      # -v normal, the live progress renderer, and the coverage collector all
+      # made no difference - which leaves the hang-dump watchdog, a second
+      # runtime started alongside a process that is already holding several
+      # brokers. So this lane runs without it and relies on the job timeout to
+      # catch a true hang. The serial lane keeps its dumps.
       #
-      # No -v normal, and the live progress renderer off. This module runs 10+
-      # minutes and logs several brokers to the console, and the dotnet test
-      # orchestrator dies on it with an OutOfMemoryException - first "Array
-      # dimensions exceeded supported range", then "Insufficient memory" -
-      # after every one of the 155 tests has passed. The module itself is fine:
-      # the identical command completes locally, and no hang dump is ever
-      # written, so neither the tests nor the HangDump extension are involved.
-      # What is left is the orchestrator accumulating the module's output, so
-      # both the verbosity and the renderer that retains it are turned off.
+      # The identical command completes locally, and no hang dump was ever
+      # written on CI, so neither the tests nor a dump are implicated.
       - name: Test
+        timeout-minutes: 30
         run: |
           dotnet test --project tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj \
             -c Release --no-build --max-parallel-test-modules 1 \
-            --no-progress --no-ansi \
-            --hangdump --hangdump-timeout 300s --hangdump-type Full
+            --no-progress --no-ansi
 
-      - name: Upload hang dumps
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: hang-dumps-integration-${{ github.run_id }}
-          path: |
-            **/TestResults/**/*.dmp
-          if-no-files-found: ignore
-          retention-days: 7
