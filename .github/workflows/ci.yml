@@ -47,13 +47,24 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
           else
+            # Base the prerelease on the floor in Directory.Build.props, not on a
+            # literal. This used to say 0.1.0, so every untagged build published
+            # Kuestenlogik.Surgewave.* as 0.1.0-ci.N while the product was at 0.5.x -
+            # a version that sorts below every release and reads as ancient to anyone
+            # looking at the feed. Deriving it means the prerelease follows the floor
+            # convention, including how it orders against the last release.
+            FLOOR=$(grep -oE '<Version>[0-9][^<]*</Version>' Directory.Build.props | head -1 | sed -E 's|</?Version>||g')
+            if [ -z "$FLOOR" ]; then
+              echo "::error::no <Version> floor found in Directory.Build.props"
+              exit 1
+            fi
             COMMIT_COUNT=$(git rev-list --count HEAD)
             SHORT_SHA=$(git rev-parse --short HEAD)
             # Prefix the sha with 'g' (git-describe convention). An all-numeric short sha with a
             # leading zero (e.g. 0558208) is an INVALID SemVer 2.0 pre-release identifier, which makes
             # `dotnet pack` fail with "PackageVersion string ... is invalid"; the letter forces an
             # alphanumeric identifier, where leading zeros are allowed.
-            echo "VERSION=0.1.0-ci.${COMMIT_COUNT}.g${SHORT_SHA}" >> $GITHUB_ENV
+            echo "VERSION=${FLOOR%-dev}-ci.${COMMIT_COUNT}.g${SHORT_SHA}" >> $GITHUB_ENV
           fi
 
       - name: Restore

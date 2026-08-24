@@ -82,12 +82,21 @@
 
   <!-- Version information. <Version> ist der Floor für Builds ohne Tag (lokal +
        CI ohne Tag); die Release-Pipeline überschreibt per -p:Version=$V aus dem
-       Git-Tag. Floor = zuletzt released + "-dev", wird nach jedem Release durch
-       .github/workflows/post-release-floor-bump.yml angehoben. Gilt bewusst für
+       Git-Tag. Floor = zuletzt released + Patch + "-dev" (nach v0.5.0 also
+       0.5.1-dev), wird nach jedem Release durch
+       .github/workflows/post-release-floor-bump.yml angehoben.
+
+       Warum die NAECHSTE Patch-Version und nicht die gerade released: unter
+       SemVer sortiert 0.5.0-dev UNTER 0.5.0. Ein main-Build nach dem Tag wuerde
+       sich damit aelter nennen als das Release, das er enthaelt. 0.5.1-dev
+       sortiert dazwischen - ueber dem letzten Release, unter dem naechsten -
+       und bleibt bei Major.Minor 0.5, was der VersionCompatibilityChecker
+       braucht: der lehnt Minor-Abweichung ab, ein Dev-Build soll aber weiter
+       in einen 0.5-Cluster mischen duerfen. Gilt bewusst für
        ALLE Projekte (auch IsPackable=false), damit Exe-Banner und
        Rolling-Upgrade-Checks dieselbe Version tragen. -->
   <PropertyGroup>
-    <Version>0.5.0-dev</Version>
+    <Version>0.5.1-dev</Version>
     <!-- AssemblyVersion + FileVersion folgen $(Version), damit der
          Release-Workflow per -p:Version=$V alle drei synchron bumpt.
          Padding auf vier Stellen erledigt MSBuild (0.1.6 -> 0.1.6.0).
