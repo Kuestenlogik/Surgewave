@@ -104,6 +104,18 @@ builder.Services.Configure<BrokerConfig>(
 // fall foul of socket exhaustion (the well-known HttpClient gotcha).
 builder.Services.AddHttpClient();
 
+// Bowire's service registrations. MapBowire() further down only maps the HTTP
+// surface — it registers nothing. Without this call BowireRecordingSession,
+// SchemaChangeLogStore and PluginUpdateCheckService are never registered, and
+// the workbench endpoints resolve all three with GetRequiredService: the
+// recording, schema-change-log and plugin-update surfaces of /bowire threw on
+// first use rather than at startup. AddBowire also applies BowireStorageRoot,
+// which decides where collections, environments and recordings live.
+//
+// The plugin update check it registers is opt-in and off by default
+// (Bowire:PluginUpdateCheck:Enabled), so this adds no outbound traffic.
+builder.Services.AddBowire();
+
 // KIP-714 client telemetry ingestor — singleton so its Meter lives for
 // the broker's lifetime and DI handles Dispose on shutdown.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>();
