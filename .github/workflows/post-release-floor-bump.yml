@@ -1,16 +1,21 @@
 # Post-release floor bump. After a successful `v*` release, raise the
-# Directory.Build.props `<Version>` floor to the just-released version +
-# `-dev` and open a PR. (AssemblyVersion/FileVersion leiten sich in diesem
+# Directory.Build.props `<Version>` floor to the NEXT patch version +
+# `-dev` (v0.5.0 released -> floor 0.5.1-dev) and open a PR. (AssemblyVersion/FileVersion leiten sich in diesem
 # Repo per Regex aus $(Version) ab und brauchen keinen eigenen Bump.)
 #
 # Why a workflow? The floor is used by every non-tag build (local + CI
 # without a tag) as the "this is not a released version" marker. If it
 # stays at the version BEFORE the last release, dev builds between
 # releases carry the OLD version + `-dev`, which makes a crash report
-# from a main-branch build look like it came from a stale era. Bumping
-# the floor to the *just-released* version + `-dev` keeps the dev
-# marker in lockstep with the latest tag, without hand-editing the
-# file every release.
+# from a main-branch build look like it came from a stale era.
+#
+# The floor goes to the NEXT patch rather than the just-released version
+# because under SemVer `0.5.0-dev` sorts BELOW `0.5.0`: a main build made
+# after the tag would claim to be older than the release it contains.
+# `0.5.1-dev` sorts between the two, and stays on Major.Minor 0.5 so a dev
+# build still mixes into a 0.5 cluster — VersionCompatibilityChecker rejects
+# a MINOR mismatch, so bumping the minor here would fence dev builds off
+# from released nodes.
 #
 # Triggers ONLY on a tag push that the release pipeline already
 # accepted (so a Release-Pipeline failure doesn't bump the floor).
@@ -89,9 +94,15 @@ jobs:
           fi
           # Strip any pre-release suffix (rc/beta) so the floor stays clean.
           BASE=$(echo "$RELEASED" | sed -E 's/-.*$//')
-          echo "Released: $RELEASED → new floor: ${BASE}-dev"
+          # Next PATCH, not the released version: see the rationale at the top.
+          MAJOR="${BASE%%.*}"
+          REST="${BASE#*.}"
+          MINOR="${REST%%.*}"
+          PATCH="${REST#*.}"
+          NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo "Released: $RELEASED → new floor: ${NEXT}-dev"
           echo "released=$RELEASED" >> "$GITHUB_OUTPUT"
-          echo "next=$BASE" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
 
       - name: Update Directory.Build.props
         env:
