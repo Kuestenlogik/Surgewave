@@ -18,10 +18,15 @@ public class InstallPluginCommand : CommandBase
         Description = "Path to .swpkg file, directory containing .swpkg files, glob pattern (*.swpkg), or package ID"
     };
 
-    private readonly Option<string> _directoryOpt = new("--directory", "-d")
+    private readonly Option<string?> _directoryOpt = new("--directory", "-d")
     {
-        Description = "Target plugins directory",
-        DefaultValueFactory = _ => "plugins"
+        Description = "Explicit target directory (overrides --scope)"
+    };
+
+    private readonly Option<PluginScope> _scopeOpt = new("--scope")
+    {
+        Description = "Where to install: machine (all users, needs elevation) or user (this account only)",
+        DefaultValueFactory = _ => PluginScope.Machine
     };
 
     private readonly Option<bool> _forceOpt = new("--force", "-f")
@@ -96,6 +101,7 @@ public class InstallPluginCommand : CommandBase
     {
         Arguments.Add(_packageArg);
         Options.Add(_directoryOpt);
+        Options.Add(_scopeOpt);
         Options.Add(_forceOpt);
         Options.Add(_fromUrlOpt);
         Options.Add(_fromNuGetOpt);
@@ -143,10 +149,61 @@ public class InstallPluginCommand : CommandBase
         }
     }
 
+    /// <summary>
+    /// Refuses rather than relocating when the chosen scope cannot be written.
+    /// </summary>
+    /// <remarks>
+    /// Falling back to the user scope would "work" on the machine that ran the
+    /// command and leave the broker — which runs under a service account, whose
+    /// profile is a different directory entirely — seeing nothing. That is exactly
+    /// how #157 presented: a success message, a plugin nobody could find, and no
+    /// error anywhere. Better to name the directory and let the operator decide
+    /// between elevating and choosing the user scope on purpose.
+    /// </remarks>
+    private bool EnsureScopeWritable(string directory, PluginScope scope)
+    {
+        try
+        {
+            Directory.CreateDirectory(directory);
+
+            // Creating the directory can succeed where writing into it does not,
+            // so probe with an actual file.
+            var probe = Path.Combine(directory, $".write-probe-{Environment.ProcessId}");
+            File.WriteAllText(probe, string.Empty);
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            WriteError($"Cannot write to the {scope.ToString().ToLowerInvariant()} plugin directory: {directory}");
+            if (scope == PluginScope.Machine)
+            {
+                WriteMarkup("[dim]This directory is shared by every account on the machine, which is why "
+                    + "the broker can read it whichever account it runs under. Re-run elevated to install "
+                    + "there, or pass [/]--scope user[dim] to install for this account only — note that a "
+                    + "broker running as a service account will not see a user-scope install.[/]");
+            }
+            return false;
+        }
+    }
+
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var package = parseResult.GetValue(_packageArg);
-        var directory = parseResult.GetValue(_directoryOpt) ?? "plugins";
+        // Used to default to "plugins", relative to the working directory — a
+        // directory the broker never reads, so installing reported success and
+        // changed nothing (#157). The scope decides now, and an explicit
+        // --directory still wins for anyone placing a package deliberately.
+        var directory = parseResult.GetValue(_directoryOpt);
+        var scope = parseResult.GetValue(_scopeOpt);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            directory = SurgewavePluginDirectories.Resolve(scope);
+            if (!EnsureScopeWritable(directory, scope))
+                return 1;
+        }
+        directory = Path.GetFullPath(directory);
+        WriteVerbose(parseResult, $"Target directory: {directory}");
         var force = parseResult.GetValue(_forceOpt);
         var fromUrl = parseResult.GetValue(_fromUrlOpt);
         var fromNuGet = parseResult.GetValue(_fromNuGetOpt);

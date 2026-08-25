@@ -24,6 +24,31 @@ public static class BrokerPluginActivator
 
     private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
+    // Directories to load plugins from, set once by the host before the first
+    // Discover<T>(). Null means "not configured", which falls back to the default
+    // search order. Discover<T>() takes no arguments and is called from several
+    // places, so the alternative was threading configuration through all of them.
+    private static IReadOnlyList<string>? _pluginDirectories;
+    private static ILogger? _loadLogger;
+
+    /// <summary>
+    /// Tells the activator where to look for plugins, and where to report what it
+    /// found. Call once during host startup, before any <see cref="Discover{T}"/>.
+    /// </summary>
+    /// <remarks>
+    /// This exists because loading used to read <c>plugins/</c> next to the
+    /// executable and nothing else — <c>Surgewave:PluginsDirectory</c> was honoured
+    /// when layering in plugin default settings and when building the signer, but
+    /// not when actually loading the assemblies. Pointing that setting at a
+    /// directory therefore changed a plugin's configuration without changing which
+    /// plugins existed.
+    /// </remarks>
+    public static void ConfigureDirectories(IReadOnlyList<string> directories, ILogger? logger = null)
+    {
+        _pluginDirectories = directories;
+        _loadLogger = logger;
+    }
+
     /// <summary>
     /// Scans all loaded assemblies for <see cref="IBrokerPlugin"/> implementations,
     /// checks configuration and licensing, and calls ConfigureServices on each enabled plugin.
@@ -214,8 +239,8 @@ public static class BrokerPluginActivator
 
     /// <summary>
     /// Loads Surgewave assemblies from the application directory (dev mode) and
-    /// manifest-declared assemblies from each plugins/&lt;id&gt;/ subdirectory.
-    /// Already-loaded assemblies are skipped.
+    /// manifest-declared assemblies from each &lt;scope&gt;/&lt;id&gt;/ subdirectory of the
+    /// configured plugin directories. Already-loaded assemblies are skipped.
     /// </summary>
     private static void EnsurePluginsLoaded()
     {
@@ -233,16 +258,42 @@ public static class BrokerPluginActivator
         foreach (var dll in Directory.GetFiles(baseDir, $"{SurgewavePackageConventions.HostAssemblyPrefix}*.dll"))
             TryLoadAssembly(dll, isPluginAssembly: false, loadedNames);
 
-        // Plugin loading: each installed plugin lives in plugins/<id>/ and declares its
-        // assemblies in a plugin.json manifest. Loading is driven by the manifest,
-        // so no naming convention filter is needed here.
-        var pluginsDir = Path.Combine(baseDir, "plugins");
-        if (!Directory.Exists(pluginsDir)) return;
+        // Plugin loading: each installed plugin lives in <scope>/<id>/ and declares
+        // its assemblies in a plugin.json manifest. Loading is driven by the
+        // manifest, so no naming convention filter is needed here.
+        //
+        // Resolve by plugin id across all scopes BEFORE loading anything. Doing it
+        // the other way round would make precedence an accident of iteration order:
+        // TryLoadAssembly skips assemblies that are already loaded, so whichever
+        // scope happened to be visited first would silently win, and the scope that
+        // lost would leave no trace anywhere.
+        var directories = _pluginDirectories ?? SurgewavePluginDirectories.SearchOrder();
+        var selected = new Dictionary<string, (string Dir, string Scope)>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var manifestFile in Directory.GetFiles(pluginsDir, SurgewavePackageConventions.ManifestFileName, SearchOption.AllDirectories))
+        foreach (var scopeDir in directories)
         {
-            var pluginDir = Path.GetDirectoryName(manifestFile)!;
-            var manifest = TryReadManifest(manifestFile);
+            if (!Directory.Exists(scopeDir)) continue;
+
+            foreach (var manifestFile in Directory.GetFiles(scopeDir, SurgewavePackageConventions.ManifestFileName, SearchOption.AllDirectories))
+            {
+                var pluginDir = Path.GetDirectoryName(manifestFile)!;
+                var manifest = TryReadManifest(manifestFile);
+                if (manifest == null) continue;
+
+                if (selected.TryGetValue(manifest.Id, out var previous) && previous.Dir != pluginDir)
+                {
+                    _loadLogger?.LogInformation(
+                        "Plugin {PluginId} in {Directory} takes precedence over the copy in {ShadowedDirectory}",
+                        manifest.Id, pluginDir, previous.Dir);
+                }
+
+                selected[manifest.Id] = (pluginDir, scopeDir);
+            }
+        }
+
+        foreach (var (pluginDir, _) in selected.Values)
+        {
+            var manifest = TryReadManifest(Path.Combine(pluginDir, SurgewavePackageConventions.ManifestFileName));
             if (manifest == null) continue;
 
             // Load the plugin's own assemblies — these are scanned for IPlugin implementations
