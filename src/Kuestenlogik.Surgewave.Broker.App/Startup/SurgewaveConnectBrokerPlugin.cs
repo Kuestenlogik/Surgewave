@@ -2,6 +2,7 @@ using Grpc.Core;
 using Kuestenlogik.Surgewave.Api.Grpc.Server;
 using Kuestenlogik.Surgewave.Client;
 using Kuestenlogik.Surgewave.Connect;
+using Kuestenlogik.Surgewave.Plugins.Packaging;
 using Kuestenlogik.Surgewave.Connect.Pipelines;
 using Kuestenlogik.Surgewave.Connect.Pipelines.Chat;
 using Kuestenlogik.Surgewave.Plugins;
@@ -50,7 +51,7 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
                 OffsetsTopic = brokerConfig.Connect.OffsetsTopic,
                 StatusTopic = brokerConfig.Connect.StatusTopic,
                 PluginsDirectory = cfg.GetValue<string>("Surgewave:Connect:PluginsDirectory")
-                    ?? brokerConfig.Connect.PluginsDirectory ?? "plugins"
+                    ?? brokerConfig.Connect.PluginsDirectory ?? ""
             };
         });
 
@@ -70,15 +71,17 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
 
         // Discover connectors from plugins directory
         var pluginDiscovery = services.GetRequiredService<PluginDiscovery>();
-        var pluginsDirectory = connectConfig.PluginsDirectory;
-        if (!string.IsNullOrEmpty(pluginsDirectory))
+        // Scan every connector scope, not one working-directory-relative path. The
+        // configured value still wins and still means that directory alone.
+        var connectorDirectories = SurgewaveConnectorDirectories.SearchOrder(
+            connectConfig.PluginsDirectory);
+
+        foreach (var directory in connectorDirectories)
         {
-            var fullPluginsPath = Path.GetFullPath(pluginsDirectory);
-            if (Directory.Exists(fullPluginsPath))
-            {
-                app.Logger.LogInformation("Scanning plugins directory for connectors: {Directory}", fullPluginsPath);
-                pluginDiscovery.DiscoverPlugins(fullPluginsPath, useDefaultContext: false);
-            }
+            if (!Directory.Exists(directory)) continue;
+
+            app.Logger.LogInformation("Scanning for connectors: {Directory}", directory);
+            pluginDiscovery.DiscoverPlugins(directory, useDefaultContext: false);
         }
 
         // Pipeline metrics + worker services

@@ -19,6 +19,20 @@ public sealed class ControlPluginRegistry
     public IReadOnlyList<ControlNavItem> NavItems => _navItems;
     public IReadOnlyList<IControlPlugin> Plugins => _plugins;
 
+    /// <summary>
+    /// Scans every directory in the given order. Control's plugins live under the
+    /// same scopes as the broker's (#158) — one shipped with the installation, one
+    /// the machine added, one the current user added — so passing the resolved
+    /// order keeps Control from disagreeing with the broker about what is
+    /// installed. It used to scan the literal <c>plugins</c>, relative to whatever
+    /// directory Control happened to be started from.
+    /// </summary>
+    public void DiscoverPlugins(IReadOnlyList<string> pluginsDirectories, ILogger<ControlPluginRegistry> logger)
+    {
+        foreach (var directory in pluginsDirectories)
+            DiscoverPlugins(directory, logger);
+    }
+
     public void DiscoverPlugins(string pluginsDirectory, ILogger<ControlPluginRegistry> logger)
     {
         var pluginsDir = Path.GetFullPath(pluginsDirectory);

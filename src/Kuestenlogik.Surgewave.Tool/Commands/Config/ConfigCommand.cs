@@ -2,6 +2,8 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using Spectre.Console;
 
+using Kuestenlogik.Surgewave.Plugins.Packaging;
+
 namespace Kuestenlogik.Surgewave.Cli.Commands.Config;
 
 /// <summary>
@@ -98,8 +100,8 @@ internal sealed class ConfigInitCommand : Command
     };
     private readonly Option<string> _directoryOpt = new("--directory", "-d")
     {
-        Description = "Plugins directory to look up the plugin",
-        DefaultValueFactory = _ => "plugins"
+        Description = "Plugins directory to look up the plugin (default: the resolved scopes)",
+        DefaultValueFactory = _ => SurgewavePluginDirectories.SearchOrder()[^1]
     };
 
     public ConfigInitCommand() : base("init", "Initialize a CLI config file, or generate a plugin config section (--plugin)")

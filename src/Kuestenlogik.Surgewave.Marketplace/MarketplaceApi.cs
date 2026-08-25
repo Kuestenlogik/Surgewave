@@ -225,7 +225,11 @@ public static class MarketplaceApi
 
                 if (signatureFile is not null && signatureExtension is not null)
                 {
-                    using var registry = PluginPackageSignerRegistry.LoadFrom(signerOptions.PluginsDirectory);
+                    // An explicit setting means that directory alone; otherwise the
+                    // scopes, most specific last, matching what the broker loads.
+                    var signerDirectory = SurgewavePluginDirectories
+                        .SearchOrder(signerOptions.PluginsDirectory)[^1];
+                    using var registry = PluginPackageSignerRegistry.LoadFrom(signerDirectory);
                     ISppSignerProvider? provider;
                     try
                     {

@@ -49,15 +49,34 @@ public static class SurgewavePluginDirectories
     /// broker running under that developer's account, which is precisely what
     /// makes the user scope safe to include here.
     /// </remarks>
-    public static IReadOnlyList<string> SearchOrder(string? configuredDirectory = null)
+    /// <param name="allowUserScope">
+    /// Whether to include the current user's directory. An administrator can turn
+    /// this off, because a user-scope plugin is code the host executes that an
+    /// unprivileged account was able to place there — the machine scope needs
+    /// elevation, the user scope by definition does not. Turning it off is only
+    /// meaningful where the host is started by someone other than that user (a
+    /// service, a container): anyone who starts the process themselves can set the
+    /// setting themselves, and could equally point Surgewave:PluginsDirectory
+    /// anywhere. It belongs in machine-scope configuration or in the installation's
+    /// appsettings.json, neither of which an unprivileged account can edit.
+    /// </param>
+    public static IReadOnlyList<string> SearchOrder(
+        string? configuredDirectory = null,
+        bool allowUserScope = true)
     {
         if (!string.IsNullOrWhiteSpace(configuredDirectory))
             return [Path.GetFullPath(configuredDirectory)];
 
+        string[] scopes = allowUserScope
+            ? [Installation, Machine, User]
+            : [Installation, Machine];
+
         // Distinct: the SURGEWAVE_DATA_DIR override collapses machine and user onto
         // one root, and scanning the same directory twice would log every plugin in
-        // it as shadowing itself.
-        return new[] { Installation, Machine, User }
+        // it as shadowing itself. Note that it also makes allowUserScope moot, since
+        // both scopes then name the same directory — a redirected root is a
+        // development and test facility, not a hardening boundary.
+        return scopes
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

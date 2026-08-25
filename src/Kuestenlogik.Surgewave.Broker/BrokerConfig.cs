@@ -1116,9 +1116,18 @@ public sealed class ConnectConfig
     public string StatusTopic { get; set; } = "surgewave-connect-status";
 
     /// <summary>
-    /// Directory to scan for connector plugins
+    /// Directory to scan for connectors. Empty means the resolved scopes —
+    /// installation, machine, user — are all scanned; see
+    /// <see cref="Kuestenlogik.Surgewave.Plugins.Packaging.SurgewaveConnectorDirectories"/>.
     /// </summary>
-    public string PluginsDirectory { get; set; } = "plugins";
+    /// <remarks>
+    /// The default used to be the literal <c>plugins</c>, resolved against the
+    /// working directory, which meant the broker and the CLI never named the same
+    /// place (#158). Empty rather than a literal so that "not configured" is
+    /// distinguishable from "configured to exactly this" — otherwise anyone who
+    /// deliberately wrote <c>plugins</c> would be treated as having said nothing.
+    /// </remarks>
+    public string PluginsDirectory { get; set; } = "";
 }
 
 /// <summary>

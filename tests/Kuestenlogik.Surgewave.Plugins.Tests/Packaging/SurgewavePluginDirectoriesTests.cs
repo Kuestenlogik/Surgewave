@@ -54,6 +54,34 @@ public sealed class SurgewavePluginDirectoriesTests : IDisposable
     }
 
     [Fact]
+    public void TheUserScopeCanBeRefused()
+    {
+        Environment.SetEnvironmentVariable(SurgewaveDataRoot.OverrideVariable, null);
+        SurgewaveDataRoot.Configure();
+
+        // A plugin in a home directory is code the host runs that an unprivileged
+        // account could place there; the machine scope needs elevation and a home
+        // directory does not. An administrator deploying a service must be able to
+        // refuse it.
+        var order = SurgewavePluginDirectories.SearchOrder(allowUserScope: false);
+
+        Assert.DoesNotContain(Path.GetFullPath(SurgewavePluginDirectories.User), order);
+        Assert.Contains(Path.GetFullPath(SurgewavePluginDirectories.Machine), order);
+        Assert.Contains(Path.GetFullPath(SurgewavePluginDirectories.Installation), order);
+    }
+
+    [Fact]
+    public void RefusingTheUserScopeDoesNotAffectAnExplicitDirectory()
+    {
+        // An explicit directory is the administrator's own choice, so the switch
+        // that protects them from a user's directory has nothing to say about it.
+        var order = SurgewavePluginDirectories.SearchOrder("/mnt/plugins", allowUserScope: false);
+
+        Assert.Single(order);
+        Assert.Equal(Path.GetFullPath("/mnt/plugins"), order[0]);
+    }
+
+    [Fact]
     public void ResolveAgreesWithTheProperties()
     {
         Assert.Equal(SurgewavePluginDirectories.Installation, SurgewavePluginDirectories.Resolve(PluginScope.Installation));

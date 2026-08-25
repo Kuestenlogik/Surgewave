@@ -62,7 +62,7 @@ public sealed class ConnectWorkerConfig : IValidatableConfig
     /// Use PluginsDirectories for multiple directories.
     /// Each subdirectory represents a plugin.
     /// </summary>
-    public string PluginsDirectory { get; set; } = "plugins";
+    public string PluginsDirectory { get; set; } = "";
 
     /// <summary>
     /// Whether to automatically scan for new plugins on startup.
