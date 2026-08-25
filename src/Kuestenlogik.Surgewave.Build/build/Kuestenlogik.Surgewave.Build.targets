@@ -72,6 +72,7 @@
   -->
   <PropertyGroup>
     <SurgewavePluginManifest Condition="'$(SurgewavePluginManifest)' == '' and Exists('$(MSBuildProjectDirectory)\plugin.json')">$(MSBuildProjectDirectory)\plugin.json</SurgewavePluginManifest>
+    <SurgewavePluginVersion Condition="'$(SurgewavePluginVersion)' == ''">$(Version)</SurgewavePluginVersion>
   </PropertyGroup>
 
   <Target Name="SurgewaveValidatePluginManifest"
@@ -94,10 +95,16 @@
           AfterTargets="Publish"
           Condition="'$(SurgewavePackPlugin)' == 'true' and '$(PublishDir)' != ''">
 
+    <!-- Version="$(Version)": the package takes the build's version, not the one
+         written in plugin.json. That field is maintained by hand and drifts, so a
+         repo could tag v0.4.0, publish 0.4.0 to NuGet and still emit a .swpkg
+         named 0.1.0. Set $(SurgewavePluginVersion) to pin it explicitly, or clear
+         it to fall back to whatever the manifest says. -->
     <PackPluginTask
         SourceDir="$(PublishDir.TrimEnd('\/'))"
         OutputDir="$(SurgewaveSppOutputDir)"
         ManifestPath="$(SurgewavePluginManifest)"
+        Version="$(SurgewavePluginVersion)"
         SigningKeyPath="$(SurgewaveSigningKey)">
       <Output TaskParameter="PackagePath" PropertyName="_SurgewavePackagePath" />
     </PackPluginTask>

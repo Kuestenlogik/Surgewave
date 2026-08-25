@@ -239,6 +239,7 @@ public sealed class PluginPackageManager
         string? manifestPath,
         string outputPath,
         ISppSigner? signer = null,
+        string? version = null,
         CancellationToken cancellationToken = default)
     {
         _logger?.LogInformation("Creating package from {BuildOutput}", buildOutputDir);
@@ -280,6 +281,17 @@ public sealed class PluginPackageManager
         else
         {
             manifest = GenerateManifest(connectorDll);
+        }
+
+        // A version passed by the caller wins over the one written in the manifest.
+        // The manifest's field is maintained by hand and drifts: a repo would tag
+        // v0.4.0, publish NuGet packages as 0.4.0 and produce a .swpkg still calling
+        // itself 0.1.0, because packing never looked at the build's version at all.
+        // The override is what lets the MSBuild task pass $(Version) through, so the
+        // package name, the manifest inside it and the NuGet feed agree.
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            manifest = manifest with { Version = version };
         }
 
         // outputPath is the target directory; create it and place the package inside.

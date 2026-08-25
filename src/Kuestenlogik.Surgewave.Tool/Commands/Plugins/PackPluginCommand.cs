@@ -37,6 +37,11 @@ public class PackPluginCommand : CommandBase
         Description = "Path to custom plugin.json manifest"
     };
 
+    private readonly Option<string?> _versionOpt = new("--version")
+    {
+        Description = "Version to stamp into the package, overriding the manifest's own field"
+    };
+
     public PackPluginCommand() : base("pack", "Create a plugin package from build output")
     {
         Options.Add(_projectOpt);
@@ -44,6 +49,7 @@ public class PackPluginCommand : CommandBase
         Options.Add(_outputOpt);
         Options.Add(_configurationOpt);
         Options.Add(_manifestOpt);
+        Options.Add(_versionOpt);
         this.SetAction(ExecuteAsync);
     }
 
@@ -54,6 +60,7 @@ public class PackPluginCommand : CommandBase
         var outputDir = parseResult.GetValue(_outputOpt) ?? "artifacts/pkg";
         var configuration = parseResult.GetValue(_configurationOpt) ?? "Release";
         var manifestPath = parseResult.GetValue(_manifestOpt);
+        var versionOverride = parseResult.GetValue(_versionOpt);
 
         // Find the build output directory
         string buildOutputDir;
@@ -124,7 +131,8 @@ public class PackPluginCommand : CommandBase
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync("Creating package...", async ctx =>
                 {
-                    return await manager.PackAsync(buildOutputDir, manifestPath, fullOutputDir, signer: null, ct);
+                    return await manager.PackAsync(buildOutputDir, manifestPath, fullOutputDir,
+                        signer: null, version: versionOverride, cancellationToken: ct);
                 });
 
             WriteSuccess($"Created package: {packagePath}");

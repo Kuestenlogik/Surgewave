@@ -8,7 +8,11 @@ namespace Kuestenlogik.Surgewave.Plugins.Packaging;
 /// </summary>
 [SuppressMessage("Design", "CA1056:URI-like properties should not be strings",
     Justification = "JSON serialization requires string type for URLs")]
-public sealed class PluginManifest
+// A record rather than a class so a caller can override a single field with
+// `with` — the build needs to stamp the version without restating twenty
+// properties. Serialization is unaffected: init accessors and JsonPropertyName
+// behave identically.
+public sealed record PluginManifest
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
