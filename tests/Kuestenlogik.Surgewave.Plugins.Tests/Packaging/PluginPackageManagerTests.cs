@@ -49,6 +49,42 @@ public sealed class PluginPackageManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Pack_VersionOverride_RenamesPackageAndStampsManifest()
+    {
+        // The manifest's version field is maintained by hand and drifts from the
+        // build's. Packing used to take it verbatim, so a repo tagged v0.4.0 shipped
+        // a .swpkg calling itself 0.1.0 next to NuGet packages calling themselves
+        // 0.4.0. The MSBuild task passes $(Version) here so both agree.
+        var manifestPath = WriteManifest("stamped.plugin", "0.1.0", ["stamped-plugin.dll"]);
+        WriteStubDll("stamped-plugin.dll");
+
+        var pkg = await _manager.PackAsync(_buildDir, manifestPath, _outputDir, version: "0.4.1-ci.7.gabc123");
+
+        Assert.Contains("stamped.plugin-0.4.1-ci.7.gabc123", pkg);
+
+        // The version inside the package must move too — the broker reads that one,
+        // and a file name alone would leave the installed plugin reporting 0.1.0.
+        var validation = await _manager.ValidateAsync(pkg);
+        Assert.True(validation.IsValid);
+        Assert.Equal("0.4.1-ci.7.gabc123", validation.Manifest!.Version);
+
+        // The manifest on disk is an input, not an output: packing must not rewrite
+        // the developer's file.
+        Assert.Contains("\"0.1.0\"", await File.ReadAllTextAsync(manifestPath));
+    }
+
+    [Fact]
+    public async Task Pack_WithoutVersionOverride_KeepsManifestVersion()
+    {
+        var manifestPath = WriteManifest("unstamped.plugin", "2.3.4", ["unstamped-plugin.dll"]);
+        WriteStubDll("unstamped-plugin.dll");
+
+        var pkg = await _manager.PackAsync(_buildDir, manifestPath, _outputDir);
+
+        Assert.Contains("unstamped.plugin-2.3.4", pkg);
+    }
+
+    [Fact]
     public async Task Pack_AlsoWritesSha256Sidecar()
     {
         var manifestPath = WriteManifest("with.checksum", "0.1.0", ["with-checksum.dll"]);

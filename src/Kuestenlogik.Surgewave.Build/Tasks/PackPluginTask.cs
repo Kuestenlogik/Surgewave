@@ -21,6 +21,13 @@ public sealed class PackPluginTask : MsBuildTask
     /// <summary>Optional path to a custom <c>plugin.json</c> manifest (default: auto-detected in SourceDir).</summary>
     public string? ManifestPath { get; set; }
 
+    /// <summary>
+    /// Version to stamp into the package, overriding the manifest's own field.
+    /// The targets default this to <c>$(Version)</c> so a release passes the git
+    /// tag straight through; leave it empty to keep whatever plugin.json says.
+    /// </summary>
+    public string? Version { get; set; }
+
     /// <summary>Optional path to ECDSA private key for signing the package.</summary>
     public string? SigningKeyPath { get; set; }
 
@@ -39,7 +46,7 @@ public sealed class PackPluginTask : MsBuildTask
 
             PackagePath = manager
                 .PackAsync(SourceDir, string.IsNullOrEmpty(ManifestPath) ? null : ManifestPath, OutputDir,
-                    signer: signer)
+                    signer: signer, version: string.IsNullOrWhiteSpace(Version) ? null : Version)
                 .GetAwaiter().GetResult();
 
             Log.LogMessage(MessageImportance.High, $"Surgewave: packed plugin → {PackagePath}");
