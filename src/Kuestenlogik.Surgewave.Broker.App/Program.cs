@@ -1,5 +1,4 @@
 using System.Runtime;
-using Kuestenlogik.Bowire;
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.Plugins;
 using Kuestenlogik.Surgewave.Broker.Native;
@@ -104,17 +103,6 @@ builder.Services.Configure<BrokerConfig>(
 // fall foul of socket exhaustion (the well-known HttpClient gotcha).
 builder.Services.AddHttpClient();
 
-// Bowire's service registrations. MapBowire() further down only maps the HTTP
-// surface — it registers nothing. Without this call BowireRecordingSession,
-// SchemaChangeLogStore and PluginUpdateCheckService are never registered, and
-// the workbench endpoints resolve all three with GetRequiredService: the
-// recording, schema-change-log and plugin-update surfaces of /bowire threw on
-// first use rather than at startup. AddBowire also applies BowireStorageRoot,
-// which decides where collections, environments and recordings live.
-//
-// The plugin update check it registers is opt-in and off by default
-// (Bowire:PluginUpdateCheck:Enabled), so this adds no outbound traffic.
-builder.Services.AddBowire();
 
 // KIP-714 client telemetry ingestor — singleton so its Meter lives for
 // the broker's lifetime and DI handles Dispose on shutdown.
@@ -1620,11 +1608,14 @@ app.MapGrpcService<TransactionServiceImpl>();
 app.MapGrpcService<QuotaServiceImpl>();
 app.MapGrpcService<SecurityServiceImpl>();
 app.MapGrpcReflectionService();
-app.MapBowire("/bowire", options =>
-{
-    options.Title = "Surgewave gRPC API";
-    options.Description = "Interactive gRPC browser for Surgewave Broker";
-});
+// The Bowire workbench is deliberately NOT mapped here. It ships as the
+// Surgewave.Diagnostics.Bowire plugin, which brings Bowire itself plus the
+// surgewave:// protocol adapter and maps /bowire from its own Configure().
+// Two consequences worth stating: a broker with no plugin installed exposes no
+// workbench at all, which is the point — whether a debugging surface exists on
+// a host is now a deployment decision rather than a config switch someone can
+// flip in production. And this file must not map /bowire even conditionally:
+// the route would collide with the plugin's and turn every request into a 500.
 app.MapPrometheusScrapingEndpoint();
 
 // Schema Registry endpoint mapping and gRPC holder init are handled by
