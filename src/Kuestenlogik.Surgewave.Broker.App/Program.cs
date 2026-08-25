@@ -1,6 +1,7 @@
 using System.Runtime;
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.Plugins;
+using Kuestenlogik.Surgewave.Plugins.Packaging;
 using Kuestenlogik.Surgewave.Broker.Native;
 using Kuestenlogik.Surgewave.Broker.Native.Coordination;
 using Kuestenlogik.Surgewave.Broker.KeyValue;
@@ -65,8 +66,37 @@ var builder = WebApplication.CreateBuilder(args);
 //   tier 1 (lowest)  — plugin defaults from plugins/<id>/<settings-file>   (this call)
 //   tier 2           — broker appsettings.json + appsettings.{Env}.json    (already added)
 //   tier 3 (highest) — environment variables + command-line args           (already added)
-var brokerPluginsDir = builder.Configuration["Surgewave:PluginsDirectory"]
-    ?? Path.Combine(AppContext.BaseDirectory, "plugins");
+// Data location, resolved once for the whole process (#158). Configuration wins
+// over the environment because it already layers appsettings, environment and
+// command line; SurgewaveDataRoot falls back to SURGEWAVE_DATA_DIR /
+// SURGEWAVE_INSTANCE for anything that runs before configuration exists.
+//
+// Surgewave:Instance separates several brokers on one machine. It is not the
+// cluster id: two nodes of the same cluster on one host share that, and they are
+// precisely the pair that must not share a data directory.
+SurgewaveDataRoot.Configure(
+    builder.Configuration["Surgewave:DataDirectory"],
+    builder.Configuration["Surgewave:Instance"]);
+
+// Where plugins are read from. An explicit Surgewave:PluginsDirectory means that
+// directory and nothing else — a container mounting one directory wants exactly
+// that. Otherwise: installation, then machine state, then this user, with a
+// plugin id found later replacing the same id found earlier.
+var pluginSearchOrder = SurgewavePluginDirectories.SearchOrder(
+    builder.Configuration["Surgewave:PluginsDirectory"]);
+
+// The directory writes go to, and the one whose plugin default settings are
+// layered in. The last entry is the most specific, which is the one an operator
+// or developer most recently chose.
+var brokerPluginsDir = pluginSearchOrder[^1];
+
+// Before any Discover<T>(): the storage-engine lookup further down is already one,
+// and it would otherwise load from the default order while the rest of the host
+// used the configured one. Host logging does not exist this early, so the
+// directories are handed over now and the logger follows once there is one —
+// EnsurePluginsLoaded re-evaluates on every discovery, so nothing is lost by
+// attaching it late.
+BrokerPluginActivator.ConfigureDirectories(pluginSearchOrder);
 
 builder.Configuration.AddPluginDefaults(brokerPluginsDir);
 
@@ -358,6 +388,13 @@ using (var bootstrapLoggerFactory = LoggerFactory.Create(logging => logging.AddS
     // --- Enterprise Broker Plugins (IBrokerPlugin discovery) ---
     // Scans loaded assemblies for IBrokerPlugin implementations, checks config + license,
     // and calls ConfigureServices on each enabled plugin. Replaces per-feature if-blocks.
+    // Same directories as above. Loading used to read plugins/ next to the
+    // executable and nothing else, so Surgewave:PluginsDirectory changed a plugin's
+    // settings without changing which plugins existed. This second call exists only
+    // to attach the logger, so a plugin installed in two scopes reports which copy
+    // won instead of one of them vanishing silently.
+    BrokerPluginActivator.ConfigureDirectories(pluginSearchOrder, pluginActivationLogger);
+
     activatedPlugins = BrokerPluginActivator.ActivatePlugins(
         builder.Services, builder.Configuration, license, pluginActivationLogger);
 }
