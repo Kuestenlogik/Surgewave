@@ -26,10 +26,18 @@ public sealed class MarketplaceSignerOptions
 
     /// <summary>
     /// Plugin directory used to discover additional <see cref="Kuestenlogik.Surgewave.Plugins.Packaging.ISppSignerProvider"/>
-    /// implementations. When empty, only the built-in provider is available. Defaults to
-    /// <c>plugins</c> next to the marketplace data directory.
+    /// implementations. When empty, the resolved plugin scopes are searched
+    /// (installation, machine, user) — see
+    /// <see cref="Kuestenlogik.Surgewave.Plugins.Packaging.SurgewavePluginDirectories"/>.
     /// </summary>
-    public string PluginsDirectory { get; set; } = "plugins";
+    /// <remarks>
+    /// The default used to be the literal <c>plugins</c>, resolved against the
+    /// marketplace's working directory. A signer provider installed as a plugin was
+    /// therefore found only when the marketplace happened to be started from the
+    /// directory above it, and an upload signed by that provider was rejected as
+    /// misconfigured everywhere else (#158).
+    /// </remarks>
+    public string PluginsDirectory { get; set; } = "";
 
     /// <summary>
     /// When <c>true</c>, uploads without a signature sidecar are rejected. When <c>false</c>

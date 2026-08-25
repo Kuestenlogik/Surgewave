@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Plugins.Packaging;
 using System.Reflection;
 using Kuestenlogik.Surgewave.Api.Grpc.Server;
 using Kuestenlogik.Surgewave.Client;
@@ -28,16 +29,19 @@ for (int i = 1; i < args.Length; i++)
         distributed = true;
 }
 
-// Resolve the plugins directory with the broker's precedence:
+// Resolve the plugins directory the way the broker does (#158):
 //   1. --plugin-path CLI argument (highest)
 //   2. Surgewave:PluginsDirectory in IConfiguration (appsettings.json + env vars)
-//   3. ./plugins relative to the working directory (lowest)
-// Builder.Configuration is already populated with appsettings/env/CLI sources at
-// this point, so reading the setting here gives the same effective value the
-// broker would see.
-var pluginPath = pluginPathArg
-    ?? builder.Configuration["Surgewave:PluginsDirectory"]
-    ?? "./plugins";
+//   3. the resolved scopes: installation, machine state, this user
+//
+// The third step used to be "./plugins relative to the working directory", under
+// a comment claiming it matched the broker — which read plugins/ next to its own
+// executable. The two agreed only when the worker happened to be started from the
+// broker's directory.
+var pluginSearchOrder = SurgewavePluginDirectories.SearchOrder(
+    pluginPathArg ?? builder.Configuration["Surgewave:PluginsDirectory"],
+    builder.Configuration.GetValue("Surgewave:Plugins:AllowUserScope", true));
+var pluginPath = pluginSearchOrder[^1];
 
 // Layer plugin-bundled defaults BENEATH the worker's own appsettings.json so
 // plugin authors can ship recommended defaults that user values still override.

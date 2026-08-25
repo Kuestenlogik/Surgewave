@@ -16,6 +16,8 @@ using Kuestenlogik.Surgewave.Protocol.Native;
 using Kuestenlogik.Surgewave.Schema.Registry;
 using Microsoft.Extensions.Logging;
 
+using Kuestenlogik.Surgewave.Plugins.Packaging;
+
 namespace Kuestenlogik.Surgewave.Broker;
 
 /// <summary>
@@ -138,7 +140,10 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         // Verwendet den konfigurierten PluginsDirectory (gleich der vom Connect-Plugin
         // gescannt wird), so dass Control's Plugin-Marketplace die installierten
         // Connectoren als "installed" listet.
-        var pluginsDirAbsolute = Path.GetFullPath(_config.Connect.PluginsDirectory ?? "plugins");
+        // Most specific scope, matching what the Connect plugin scans, so Control's
+        // marketplace lists the same connectors the broker actually loaded.
+        var pluginsDirAbsolute = SurgewaveConnectorDirectories
+            .SearchOrder(_config.Connect.PluginsDirectory)[^1];
         _connectorRepositoryManager = new ConnectorRepositoryManager(pluginsDirAbsolute);
         _nativeHandler = new SurgewaveNativeHandler(
             _logManager,

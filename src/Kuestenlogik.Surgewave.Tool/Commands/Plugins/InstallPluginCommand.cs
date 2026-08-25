@@ -201,6 +201,17 @@ public class InstallPluginCommand : CommandBase
             directory = SurgewavePluginDirectories.Resolve(scope);
             if (!EnsureScopeWritable(directory, scope))
                 return 1;
+
+            if (scope == PluginScope.User)
+            {
+                // Stated rather than checked: this tool has no way to read the
+                // configuration of a broker it did not start, and pretending to
+                // enforce a policy it cannot see would be worse than naming it.
+                WriteMarkup("[dim]User scope: visible only to a broker running as this account, and "
+                    + "only when that broker allows it — an administrator can set [/]"
+                    + "Surgewave:Plugins:AllowUserScope=false[dim] to refuse plugins from user "
+                    + "directories entirely.[/]");
+            }
         }
         directory = Path.GetFullPath(directory);
         WriteVerbose(parseResult, $"Target directory: {directory}");
@@ -793,9 +804,12 @@ public class InstallPluginCommand : CommandBase
         return failed > 0 ? 1 : 0;
     }
 
-    private static string GetDefaultInstallDirectory()
-    {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".surgewave", "connectors");
-    }
+    /// <summary>
+    /// Where a connector installed from a repository lands. Machine scope, for the
+    /// same reason plugins use it: this used to be the user profile, while the
+    /// Connect plugin scanned a working-directory-relative path — two directories
+    /// that never named the same place, so the defaults only worked for someone who
+    /// overrode both (#158).
+    /// </summary>
+    private static string GetDefaultInstallDirectory() => SurgewaveConnectorDirectories.Machine;
 }

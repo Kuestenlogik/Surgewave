@@ -55,7 +55,7 @@ public sealed class StandaloneWorkerConfig : IValidatableConfig
     /// </summary>
     [Required]
     [MinLength(1)]
-    public string PluginPath { get; set; } = "./plugins";
+    public string PluginPath { get; set; } = "";
 
     /// <summary>
     /// Worker ID (defaults to hostname).

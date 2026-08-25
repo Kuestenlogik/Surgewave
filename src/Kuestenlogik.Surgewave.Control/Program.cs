@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Plugins.Packaging;
 using Kuestenlogik.Surgewave.Control.Components;
 using Kuestenlogik.Surgewave.Control.Hubs;
 using Kuestenlogik.Surgewave.Control.Models.Assistant;
@@ -219,7 +220,15 @@ builder.Services.AddHostedService(sp => new AlertEvaluationWorker(
 var controlPluginRegistry = new ControlPluginRegistry();
 using (var lf = LoggerFactory.Create(b => b.AddConsole()))
 {
-    controlPluginRegistry.DiscoverPlugins("plugins", lf.CreateLogger<ControlPluginRegistry>());
+    // Same scopes as the broker resolves (#158). The literal that stood here was
+    // relative to the working directory, so Control listed a different set of
+    // plugins than the broker it was managing whenever it was started from
+    // somewhere else.
+    controlPluginRegistry.DiscoverPlugins(
+        SurgewavePluginDirectories.SearchOrder(
+            builder.Configuration["Surgewave:PluginsDirectory"],
+            builder.Configuration.GetValue("Surgewave:Plugins:AllowUserScope", true)),
+        lf.CreateLogger<ControlPluginRegistry>());
 }
 builder.Services.AddSingleton(controlPluginRegistry);
 

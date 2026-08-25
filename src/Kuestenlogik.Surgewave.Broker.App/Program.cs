@@ -82,8 +82,18 @@ SurgewaveDataRoot.Configure(
 // directory and nothing else — a container mounting one directory wants exactly
 // that. Otherwise: installation, then machine state, then this user, with a
 // plugin id found later replacing the same id found earlier.
+//
+// Surgewave:Plugins:AllowUserScope=false drops the per-user directory. A plugin
+// there is code this process runs that an unprivileged account was able to put
+// on disk — the machine scope needs elevation, a home directory does not — so an
+// administrator deploying a broker as a service can refuse it. The setting only
+// binds someone who does not start the process: anyone who does can set it, or
+// point Surgewave:PluginsDirectory wherever they like. It therefore belongs in
+// the installation's appsettings.json or in machine-scope configuration.
+var allowUserScopePlugins = builder.Configuration.GetValue("Surgewave:Plugins:AllowUserScope", true);
 var pluginSearchOrder = SurgewavePluginDirectories.SearchOrder(
-    builder.Configuration["Surgewave:PluginsDirectory"]);
+    builder.Configuration["Surgewave:PluginsDirectory"],
+    allowUserScopePlugins);
 
 // The directory writes go to, and the one whose plugin default settings are
 // layered in. The last entry is the most specific, which is the one an operator
@@ -394,6 +404,15 @@ using (var bootstrapLoggerFactory = LoggerFactory.Create(logging => logging.AddS
     // to attach the logger, so a plugin installed in two scopes reports which copy
     // won instead of one of them vanishing silently.
     BrokerPluginActivator.ConfigureDirectories(pluginSearchOrder, pluginActivationLogger);
+
+    if (!allowUserScopePlugins)
+    {
+        // Say it out loud: a plugin sitting in the user directory would otherwise
+        // simply not appear, which is the kind of silence that produced #157.
+        pluginActivationLogger.LogInformation(
+            "User-scope plugins are disabled (Surgewave:Plugins:AllowUserScope=false); "
+            + "only {Directories} are searched", string.Join(", ", pluginSearchOrder));
+    }
 
     activatedPlugins = BrokerPluginActivator.ActivatePlugins(
         builder.Services, builder.Configuration, license, pluginActivationLogger);
