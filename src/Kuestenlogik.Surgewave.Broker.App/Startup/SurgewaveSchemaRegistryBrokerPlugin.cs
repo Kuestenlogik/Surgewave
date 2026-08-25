@@ -269,10 +269,13 @@ public sealed class SurgewaveSchemaRegistryBrokerPlugin : IBrokerPlugin
             },
             getSchemaTypes: () => compatibilityChecker.GetSupportedTypes().ToList());
 
-        // Map REST + gRPC endpoints. mapBowireWorkbench: false — der Broker
-        // mappt seine Workbench bereits in Program.cs; ein zweites
-        // MapBowire("/bowire") macht jede /bowire-Anfrage zum 500
-        // (AmbiguousMatchException).
+        // Map REST + gRPC endpoints. mapBowireWorkbench: false — die Workbench
+        // gehört dem Diagnostics.Bowire-Plugin, nicht mehr der Program.cs. Der
+        // Grund für das Flag bleibt derselbe: ein zweites MapBowire("/bowire")
+        // im selben Host macht jede /bowire-Anfrage zum 500
+        // (AmbiguousMatchException). Dass hier auch dann nicht gemappt wird,
+        // wenn das Plugin gar nicht installiert ist, ist beabsichtigt — sonst
+        // brächte die Installation des Plugins genau diese Route.
         app.MapSurgewaveSchemaRegistry(mapBowireWorkbench: false);
         app.MapGrpcService<SchemaRegistryServiceImpl>();
 
