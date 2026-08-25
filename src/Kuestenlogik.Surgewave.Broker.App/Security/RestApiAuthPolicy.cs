@@ -6,8 +6,11 @@ namespace Kuestenlogik.Surgewave.Broker.Security;
 /// Pure authorization decision for the broker's HTTP surface, extracted from the
 /// middleware so it is unit-testable. Default-deny: every path is protected
 /// except the anonymous allowlist, so gRPC (/v3, raw gRPC), Schema Registry
-/// (/subjects, …), /bowire and REST (/admin, /api) are all covered by
-/// construction. Protected paths require authentication; mutating REST methods
+/// (/subjects, …) and REST (/admin, /api) are all covered by construction.
+/// Default-deny is also what keeps plugin-mapped paths covered: the Bowire
+/// workbench moved out of this host into a plugin, and its /bowire routes stay
+/// protected without anyone remembering to add them here — an allowlist would
+/// have silently exposed them the moment the plugin was installed. Protected paths require authentication; mutating REST methods
 /// additionally require the configured role. gRPC calls (all POST) require
 /// authentication only, since the HTTP method cannot distinguish read from
 /// write.

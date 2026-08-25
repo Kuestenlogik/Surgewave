@@ -9,7 +9,10 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 /// Decision tests for the broker REST auth gate (#37). Default-deny: everything
 /// except the anonymous allowlist requires authentication — including the gRPC
 /// transcoding (/v3), Schema Registry (/subjects) and /bowire surfaces that a
-/// naive /admin+/api allowlist would have left open. Mutating REST methods also
+/// naive /admin+/api allowlist would have left open. /bowire is kept in the
+/// table although the broker no longer maps it: the workbench is a plugin now,
+/// and this is the assertion that a path appearing at runtime from outside this
+/// assembly is still protected. Mutating REST methods also
 /// require the role; gRPC requires authentication only.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
@@ -42,7 +45,7 @@ public sealed class RestApiAuthPolicyTests
     [InlineData("/subjects")]            // Schema Registry — was bypassable
     [InlineData("/subjects/orders/versions")]
     [InlineData("/config")]
-    [InlineData("/bowire")]              // interactive gRPC console — was bypassable
+    [InlineData("/bowire")]              // workbench, mapped by a plugin rather than this host
     [InlineData("/api/license")]         // no longer an anonymous carve-out
     [InlineData("/")]                    // unknown paths default-deny too
     public void ProtectedPath_NoAuth_IsUnauthenticated(string path)
