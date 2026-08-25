@@ -29,17 +29,37 @@ internal static class ConfigLoader
     }
 
     /// <summary>
-    /// Resolves the plugins directory using the same heuristic as the broker:
-    /// prefer <paramref name="assembliesDir"/> (if set), otherwise the directory
-    /// of the config file, then <c>AppContext.BaseDirectory</c> — and append
-    /// <c>plugins</c>.
+    /// Resolves the plugins directory for a config file being inspected.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately deployment-relative rather than machine-relative: these commands
+    /// answer "what does this appsettings.json mean", possibly for an installation
+    /// on another host, so the plugins next to that file are the right ones. That is
+    /// a different question from "what would a broker load here", which
+    /// <see cref="SurgewavePluginDirectories"/> answers.
+    /// </para>
+    /// <para>
+    /// The comment here used to claim this was the broker's own heuristic. It was
+    /// not even then — the broker read <c>plugins</c> beside its executable — and
+    /// with the scopes of #158 it is further from it still. Only the last resort
+    /// changed: falling back to the CLI's own directory described nothing at all,
+    /// so an unaccompanied config file now falls back to the machine's scopes.
+    /// </para>
+    /// </remarks>
     public static string ResolvePluginsDirectory(string configFullPath, string? assembliesDir)
     {
-        var baseDir = !string.IsNullOrEmpty(assembliesDir)
-            ? Path.GetFullPath(assembliesDir)
-            : Path.GetDirectoryName(configFullPath) ?? AppContext.BaseDirectory;
-        return Path.Combine(baseDir, "plugins");
+        if (!string.IsNullOrEmpty(assembliesDir))
+            return Path.Combine(Path.GetFullPath(assembliesDir), "plugins");
+
+        var configDir = Path.GetDirectoryName(configFullPath);
+        if (!string.IsNullOrEmpty(configDir))
+        {
+            var beside = Path.Combine(configDir, "plugins");
+            if (Directory.Exists(beside)) return beside;
+        }
+
+        return SurgewavePluginDirectories.SearchOrder()[^1];
     }
 
     /// <summary>
