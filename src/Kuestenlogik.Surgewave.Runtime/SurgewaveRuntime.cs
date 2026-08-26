@@ -718,6 +718,30 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     /// <summary>
     /// Stop the broker and clean up resources.
     /// </summary>
+    /// <summary>
+    /// Awaits a background task during shutdown, reporting a fault instead of
+    /// propagating it. Cancellation is the normal path and says nothing.
+    /// </summary>
+    private async Task ObserveBackgroundTaskAsync(Task? task, string name)
+    {
+        if (task is null)
+            return;
+
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: shutdown cancelled it.
+        }
+        catch (Exception ex)
+        {
+            _loggerFactory.CreateLogger<SurgewaveRuntime>().LogWarning(
+                ex, "The {Task} task had faulted before shutdown observed it", name);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
@@ -744,35 +768,23 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _cts.Dispose();
         }
 
-        // Wait for cluster task
-        if (_clusterTask != null)
-        {
-            try
-            {
-                await _clusterTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected
-            }
-        }
-
-        // Wait for broker task
-        if (_brokerTask != null)
-        {
-            try
-            {
-                await _brokerTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during normal shutdown
-            }
-            catch (Exception)
-            {
-                // Startup may have failed. Swallow to avoid confusing cleanup failures.
-            }
-        }
+        // Wait for the background tasks. A fault in either is observed and logged
+        // here, never rethrown: Dispose reporting a failure that happened minutes
+        // earlier, somewhere else, is how a startup problem turns into a confusing
+        // teardown error.
+        //
+        // #151 was exactly that. The replication listener failed to bind with
+        // "Address already in use" — on a wildcard port, so ephemeral-port pressure
+        // rather than a conflict — the cluster task faulted, nobody observed it, and
+        // the exception surfaced from `await controller.DisposeAsync()` in a failover
+        // test whose own stack said nothing about binding. The broker task was
+        // already swallowing faults for this reason; the cluster task was not, which
+        // is the whole of the inconsistency.
+        //
+        // Logged rather than swallowed silently: the previous code left no trace at
+        // all, so a startup failure could be invisible in both directions.
+        await ObserveBackgroundTaskAsync(_clusterTask, "cluster");
+        await ObserveBackgroundTaskAsync(_brokerTask, "broker");
 
         // #60 Inc6b — stop the lifecycle loop first so it no longer heartbeats over the pool.
         if (_lifecycleLoop != null)
