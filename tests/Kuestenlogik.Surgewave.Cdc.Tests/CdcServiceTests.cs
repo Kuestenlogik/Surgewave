@@ -1,3 +1,4 @@
+using System.Text;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -25,8 +26,22 @@ public sealed class CdcServiceTests
     private static ILoggerFactory CreateLoggerFactory()
         => LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning));
 
-    private static CdcService CreateService(CdcConfig config, ILoggerFactory loggerFactory)
-        => new(config, loggerFactory.CreateLogger<CdcService>(), loggerFactory);
+    private static CdcService CreateService(CdcConfig config, ILoggerFactory loggerFactory, ICdcSink? sink = null)
+        => new(config, sink ?? new RecordingSink(), loggerFactory.CreateLogger<CdcService>(), loggerFactory);
+
+    /// <summary>Captures what the capture loop hands to the sink (#144).</summary>
+    private sealed class RecordingSink : ICdcSink
+    {
+        public List<(string Topic, byte[]? Key, byte[] Value)> Writes { get; } = [];
+
+        public ValueTask WriteAsync(
+            string topic, ReadOnlyMemory<byte>? key, ReadOnlyMemory<byte> value, CancellationToken cancellationToken = default)
+        {
+            lock (Writes)
+                Writes.Add((topic, key?.ToArray(), value.ToArray()));
+            return ValueTask.CompletedTask;
+        }
+    }
 
     [Fact]
     public void Constructor_NullConfig_Throws()
@@ -34,7 +49,19 @@ public sealed class CdcServiceTests
         using var loggerFactory = CreateLoggerFactory();
 
         Assert.Throws<ArgumentNullException>(() =>
-            new CdcService(null!, loggerFactory.CreateLogger<CdcService>(), loggerFactory));
+            new CdcService(null!, new RecordingSink(), loggerFactory.CreateLogger<CdcService>(), loggerFactory));
+    }
+
+    [Fact]
+    public void Constructor_NullSink_Throws()
+    {
+        // Required, not optional: capture without a destination is the whole of
+        // #144 — the loop serialised every event and dropped it, while the source
+        // reported healthy and its event count rose.
+        using var loggerFactory = CreateLoggerFactory();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new CdcService(new CdcConfig(), null!, loggerFactory.CreateLogger<CdcService>(), loggerFactory));
     }
 
     [Fact]
@@ -43,7 +70,7 @@ public sealed class CdcServiceTests
         using var loggerFactory = CreateLoggerFactory();
 
         Assert.Throws<ArgumentNullException>(() =>
-            new CdcService(new CdcConfig(), null!, loggerFactory));
+            new CdcService(new CdcConfig(), new RecordingSink(), null!, loggerFactory));
     }
 
     [Fact]
@@ -52,7 +79,7 @@ public sealed class CdcServiceTests
         using var loggerFactory = CreateLoggerFactory();
 
         Assert.Throws<ArgumentNullException>(() =>
-            new CdcService(new CdcConfig(), loggerFactory.CreateLogger<CdcService>(), null!));
+            new CdcService(new CdcConfig(), new RecordingSink(), loggerFactory.CreateLogger<CdcService>(), null!));
     }
 
     [Fact]
@@ -163,6 +190,104 @@ public sealed class CdcServiceTests
 
         Assert.True(service.AddSource("reusable", new CdcConfig { ConnectionString = "Host=localhost" }));
         Assert.NotNull(service.GetSourceStatus("reusable"));
+    }
+
+    [Fact]
+    public async Task CapturedEvents_ReachTheSink()
+    {
+        // The regression test for #144. Capture used to compute the topic name,
+        // serialise the event and its key, and drop all three — the source stayed
+        // "Streaming", the event count rose, and nothing was ever appended. Every
+        // existing test here asserted on registry state or the fault path, so none
+        // of them could see it.
+        using var loggerFactory = CreateLoggerFactory();
+        var sink = new RecordingSink();
+        var config = new CdcConfig { Enabled = true, TopicPrefix = "cdc" };
+        using var service = CreateService(config, loggerFactory, sink);
+
+        var source = new ScriptedSource([
+            new CdcEvent
+            {
+                Operation = CdcOperation.Insert,
+                Schema = "public",
+                Table = "orders",
+                Lsn = 42,
+                Timestamp = DateTimeOffset.UnixEpoch,
+                After = new Dictionary<string, object?> { ["id"] = 7 },
+            },
+        ]);
+
+        Assert.True(service.AddSource("scripted", source, config));
+
+        await service.StartAsync(CancellationToken.None);
+        Assert.NotNull(service.ExecuteTask);
+        await service.ExecuteTask.WaitAsync(ExecuteTimeout);
+        await service.StopAsync(CancellationToken.None);
+
+        var write = Assert.Single(sink.Writes);
+        Assert.Equal(CdcTopicNaming.GetTopicName(config, "public", "orders"), write.Topic);
+
+        // The value is the serialised event and the key is the row — asserting on
+        // content, not just on "something was written", because writing the wrong
+        // thing would satisfy a count.
+        Assert.Contains("orders", Encoding.UTF8.GetString(write.Value), StringComparison.Ordinal);
+        Assert.NotNull(write.Key);
+        Assert.Contains("\"id\"", Encoding.UTF8.GetString(write.Key!), StringComparison.Ordinal);
+
+        var status = Assert.Single(service.GetAllSourceStatuses());
+        Assert.Equal(1, status.EventsCaptured);
+    }
+
+    [Fact]
+    public async Task AFailingSinkFaultsTheSourceRatherThanLosingTheChange()
+    {
+        // A CDC event cannot be replayed: it came from a replication slot that has
+        // moved on. So a sink failure has to stop the source and be visible in its
+        // status — swallowing it would put the pipeline back to losing changes
+        // quietly, which is the defect one layer down.
+        using var loggerFactory = CreateLoggerFactory();
+        var config = new CdcConfig { Enabled = true, TopicPrefix = "cdc" };
+        using var service = CreateService(config, loggerFactory, new ThrowingSink());
+
+        var source = new ScriptedSource([
+            new CdcEvent { Operation = CdcOperation.Insert, Schema = "public", Table = "orders", Lsn = 1 },
+        ]);
+        Assert.True(service.AddSource("scripted", source, config));
+
+        await service.StartAsync(CancellationToken.None);
+        Assert.NotNull(service.ExecuteTask);
+        await service.ExecuteTask.WaitAsync(ExecuteTimeout);
+        await service.StopAsync(CancellationToken.None);
+
+        var status = Assert.Single(service.GetAllSourceStatuses());
+        Assert.Equal(CdcSourceState.Faulted, status.State);
+        Assert.Equal(0, status.EventsCaptured);
+    }
+
+    /// <summary>A source that yields a fixed script of events and then completes.</summary>
+    private sealed class ScriptedSource(IReadOnlyList<CdcEvent> events) : ICdcSource
+    {
+        public string DatabaseType => "Scripted";
+
+        public async IAsyncEnumerable<CdcEvent> CaptureChangesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            foreach (var e in events)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return e;
+                await Task.Yield();
+            }
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ThrowingSink : ICdcSink
+    {
+        public ValueTask WriteAsync(
+            string topic, ReadOnlyMemory<byte>? key, ReadOnlyMemory<byte> value, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("the topic is unavailable");
     }
 
     [Fact]

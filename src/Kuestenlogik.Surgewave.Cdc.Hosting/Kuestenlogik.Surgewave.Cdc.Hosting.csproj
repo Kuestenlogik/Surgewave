@@ -15,6 +15,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Cdc\Kuestenlogik.Surgewave.Cdc.csproj" />
+    <!-- LogManager + RecordBatchSerializer for CdcTopicSink: the sink appends
+         in-process rather than through a client, so this is a compile edge to
+         storage, not to the broker host. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
   </ItemGroup>
 
 </Project>

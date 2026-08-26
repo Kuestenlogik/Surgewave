@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Cdc.Hosting;
 using Kuestenlogik.Surgewave.Cdc;
 using Kuestenlogik.Surgewave.Plugins;
 using Microsoft.AspNetCore.Builder;
@@ -36,6 +37,11 @@ public sealed class SurgewaveCdcBrokerPlugin : IBrokerPlugin
             configuration.GetSection(CdcConfig.SectionName).Bind(cdcConfig);
             return cdcConfig;
         });
+        // The sink CDC never had (#144). CdcService takes it as a required
+        // constructor dependency, so enabling capture without saying where the
+        // events go is now a startup failure rather than a service that reports
+        // healthy sources and rising counts while writing nothing.
+        services.AddSingleton<ICdcSink, CdcTopicSink>();
         services.AddSingleton<CdcService>();
         services.AddHostedService(sp => sp.GetRequiredService<CdcService>());
     }
