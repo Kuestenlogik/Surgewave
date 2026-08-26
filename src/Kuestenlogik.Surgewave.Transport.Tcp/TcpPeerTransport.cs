@@ -122,12 +122,46 @@ internal sealed class TcpPeerListener : IPeerListener
 
     public IPEndPoint LocalEndPoint => (IPEndPoint)_listener.LocalEndpoint;
 
-    public ValueTask StartAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Binds and starts listening, retrying briefly when the endpoint asked the
+    /// operating system to choose the port.
+    /// </summary>
+    /// <remarks>
+    /// On a wildcard port, <c>EADDRINUSE</c> cannot mean "someone holds this port" —
+    /// no port was named. It means the system could not hand out an ephemeral one,
+    /// which on a loaded machine with many sockets in TIME_WAIT is transient and
+    /// clears in milliseconds. Failing there took down whichever component was
+    /// starting: #151 was a replication listener losing that race, faulting the
+    /// cluster task, and surfacing minutes later out of DisposeAsync.
+    ///
+    /// An explicit port is the opposite case and is deliberately not retried: there
+    /// the error means exactly what it says, and retrying would trade a clear
+    /// failure for a slow one.
+    /// </remarks>
+    public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_started) return ValueTask.CompletedTask;
-        _listener.Start();
-        _started = true;
-        return ValueTask.CompletedTask;
+        if (_started) return;
+
+        var wildcardPort = ((IPEndPoint)_listener.LocalEndpoint).Port == 0;
+        const int attempts = 5;
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                _listener.Start();
+                _started = true;
+                return;
+            }
+            catch (SocketException ex) when (
+                ex.SocketErrorCode == SocketError.AddressAlreadyInUse
+                && wildcardPort
+                && attempt < attempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
     }
 
     public async ValueTask<IPeerConnection> AcceptAsync(CancellationToken cancellationToken = default)
