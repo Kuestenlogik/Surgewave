@@ -34,7 +34,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
 - [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
-- [#63](https://github.com/Kuestenlogik/Surgewave/issues/63) **Embedded Bowire host: share Kuestenlogik.Surgewave ALC prefix + register SDK services in DI** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
 
 ### v0.9 — Correctness & durability
@@ -54,6 +53,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
 - [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
+- [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
 
 ---
 
