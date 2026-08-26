@@ -180,24 +180,43 @@ jobs:
       - name: Build
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.VERSION }}
 
-      - name: Test
-        # NOTE: this runs the FULL solution, IntegrationTests included. An
-        # earlier version of this comment claimed they were excluded as being
-        # flaky on GitHub-Actions runners, but the command below carries no
-        # --filter and never did the excluding. Corrected rather than
-        # "restored": gating a release on fewer tests than main is a decision
-        # to take deliberately, not to reinstate from a stale comment.
-        # If the exclusion is wanted, do it by project path — a name filter
-        # like FullyQualifiedName!~IntegrationTests also catches
-        # Cli.IntegrationTests, RaftIntegrationTests and
-        # AmqpQueueViewIntegrationTests.
-        #
-        # Assemblies seriell (siehe ci.yml).
-        # --hangdump + timeout/type: fail-fast bei hängendem Test, Dump als
-        # Artifact zur Thread-Trace-Analyse. Die Option kommt aus
-        # Microsoft.Testing.Extensions.HangDump und ersetzt --blame-hang-*,
-        # das mit der VSTest-Infrastruktur weggefallen ist.
-        run: dotnet test --solution Kuestenlogik.Surgewave.slnx -c Release --no-build -v normal --max-parallel-test-modules 1 --hangdump --hangdump-timeout 300s --hangdump-type Full
+      # Everything except IntegrationTests, which runs below as its own module.
+      # Splitting it out is not a preference: the `dotnet test` orchestrator
+      # collects each module's output and joins it into one string, and
+      # IntegrationTests produces enough of it that the ORCHESTRATOR dies with an
+      # OutOfMemoryException in String.Join. The tests themselves are fine. The
+      # first v0.5.1 attempt failed here, reporting "error: 1, failed: 0" — which
+      # is what an orchestrator crash looks like from the outside. ci.yml already
+      # ran the module directly for this reason; this workflow never got the fix.
+      #
+      # Excluded by project path, not by name: a filter like
+      # FullyQualifiedName!~IntegrationTests would also catch
+      # Cli.IntegrationTests, RaftIntegrationTests and
+      # AmqpQueueViewIntegrationTests, which is the mistake coverage.yml made.
+      #
+      # Assemblies seriell (siehe ci.yml). --hangdump + timeout/type: fail-fast
+      # bei haengendem Test, Dump als Artifact zur Thread-Trace-Analyse.
+      - name: Test (solution without IntegrationTests)
+        run: |
+          set -euo pipefail
+          INTEGRATION='tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj'
+          if ! grep -qF "$INTEGRATION" Kuestenlogik.Surgewave.slnx; then
+            echo "::error::$INTEGRATION is not in the solution - the exclusion below would cover nothing and the orchestrator would OOM again."
+            exit 1
+          fi
+          grep -vF "$INTEGRATION" Kuestenlogik.Surgewave.slnx > release-tests.slnx
+          dotnet test --solution release-tests.slnx -c Release --no-build -v normal             --max-parallel-test-modules 1             --hangdump --hangdump-timeout 300s --hangdump-type Full
+
+      # Run directly rather than through the orchestrator, for the reason above.
+      - name: Test (IntegrationTests module)
+        timeout-minutes: 30
+        run: |
+          MODULE=artifacts/bin/Kuestenlogik.Surgewave.IntegrationTests/Release/Kuestenlogik.Surgewave.IntegrationTests
+          if [ ! -x "$MODULE" ]; then
+            echo "::error::$MODULE is missing or not executable - did the artifacts layout change?"
+            exit 1
+          fi
+          "$MODULE" -longRunning 300
 
       - name: Pack NuGet
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
