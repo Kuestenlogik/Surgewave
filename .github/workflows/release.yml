@@ -180,43 +180,56 @@ jobs:
       - name: Build
         run: dotnet build Kuestenlogik.Surgewave.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.VERSION }}
 
-      # Everything except IntegrationTests, which runs below as its own module.
-      # Splitting it out is not a preference: the `dotnet test` orchestrator
-      # collects each module's output and joins it into one string, and
-      # IntegrationTests produces enough of it that the ORCHESTRATOR dies with an
-      # OutOfMemoryException in String.Join. The tests themselves are fine. The
-      # first v0.5.1 attempt failed here, reporting "error: 1, failed: 0" — which
-      # is what an orchestrator crash looks like from the outside. ci.yml already
-      # ran the module directly for this reason; this workflow never got the fix.
+      # No test run here. ci.yml triggers on `v*` tags as well, so the tagged
+      # commit is already being tested by the setup that is exercised on every
+      # push — two lanes plus IntegrationTests on its own runner. This workflow
+      # used to run the whole solution a second time through a single `dotnet
+      # test`, and that second, differently-configured run was the only place a
+      # failure ever appeared: v0.5.1 died in it with an OutOfMemoryException
+      # inside `dotnet test`'s own orchestrator while launching the
+      # IntegrationTests module.
       #
-      # Excluded by project path, not by name: a filter like
-      # FullyQualifiedName!~IntegrationTests would also catch
-      # Cli.IntegrationTests, RaftIntegrationTests and
-      # AmqpQueueViewIntegrationTests, which is the mistake coverage.yml made.
+      # The cause was never established. What was ruled out: the module's output
+      # (6 KB), its memory (135 MB peak), and the hang-dump watchdog (never
+      # fired). Excluding the project made the release pass, but a workaround for
+      # an unexplained failure in a duplicated test run is two problems, not one.
+      # Deleting the duplicate removes both, and leaves exactly one test
+      # configuration in the repository.
       #
-      # Assemblies seriell (siehe ci.yml). --hangdump + timeout/type: fail-fast
-      # bei haengendem Test, Dump als Artifact zur Thread-Trace-Analyse.
-      - name: Test (solution without IntegrationTests)
+      # What is kept is the guarantee: publishing is irreversible, so refuse to
+      # publish a commit whose CI run is not green.
+      - name: Require a green CI run for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          INTEGRATION='tests/Kuestenlogik.Surgewave.IntegrationTests/Kuestenlogik.Surgewave.IntegrationTests.csproj'
-          if ! grep -qF "$INTEGRATION" Kuestenlogik.Surgewave.slnx; then
-            echo "::error::$INTEGRATION is not in the solution - the exclusion below would cover nothing and the orchestrator would OOM again."
-            exit 1
-          fi
-          grep -vF "$INTEGRATION" Kuestenlogik.Surgewave.slnx > release-tests.slnx
-          dotnet test --solution release-tests.slnx -c Release --no-build -v normal             --max-parallel-test-modules 1             --hangdump --hangdump-timeout 300s --hangdump-type Full
-
-      # Run directly rather than through the orchestrator, for the reason above.
-      - name: Test (IntegrationTests module)
-        timeout-minutes: 30
-        run: |
-          MODULE=artifacts/bin/Kuestenlogik.Surgewave.IntegrationTests/Release/Kuestenlogik.Surgewave.IntegrationTests
-          if [ ! -x "$MODULE" ]; then
-            echo "::error::$MODULE is missing or not executable - did the artifacts layout change?"
-            exit 1
-          fi
-          "$MODULE" -longRunning 300
+          SHA="${GITHUB_SHA}"
+          echo "Waiting for the CI run on ${SHA}"
+          for attempt in $(seq 1 90); do
+            RUN=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow ci.yml --commit "$SHA" --limit 1 --json status,conclusion,url --jq '.[0] | "\(.status) \(.conclusion // "-") \(.url)"' || true)
+            STATUS=$(echo "$RUN" | cut -d' ' -f1)
+            CONCLUSION=$(echo "$RUN" | cut -d' ' -f2)
+            URL=$(echo "$RUN" | cut -d' ' -f3)
+            # `.[0]` on an empty list yields the string "null", not an empty
+            # one, so testing for emptiness alone would read "no run exists" as
+            # a status and fall through to the not-completed branch forever.
+            if [ -z "$STATUS" ] || [ "$STATUS" = "null" ]; then
+              echo "  no CI run yet for ${SHA} (attempt ${attempt})"
+            else
+              if [ "$STATUS" = "completed" ]; then
+                if [ "$CONCLUSION" = "success" ]; then
+                  echo "CI is green: $URL"
+                  exit 0
+                fi
+                echo "::error::CI concluded '${CONCLUSION}' for ${SHA} — refusing to publish. $URL"
+                exit 1
+              fi
+              echo "  CI ${STATUS} (attempt ${attempt}) — $URL"
+            fi
+            sleep 40
+          done
+          echo "::error::No completed CI run for ${SHA} after an hour — refusing to publish."
+          exit 1
 
       - name: Pack NuGet
         run: dotnet pack Kuestenlogik.Surgewave.slnx -c Release --no-build -o artifacts/packages -p:Version=${{ steps.version.outputs.VERSION }}
