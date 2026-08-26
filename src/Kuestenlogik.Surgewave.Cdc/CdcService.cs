@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Hosting;
@@ -13,6 +14,7 @@ namespace Kuestenlogik.Surgewave.Cdc;
 public sealed class CdcService : BackgroundService
 {
     private readonly CdcConfig _config;
+    private readonly ICdcSink _sink;
     private readonly ILogger<CdcService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ConcurrentDictionary<string, CdcSourceEntry> _sources = new();
@@ -26,11 +28,13 @@ public sealed class CdcService : BackgroundService
     /// Initializes a new instance of <see cref="CdcService"/>.
     /// </summary>
     /// <param name="config">CDC configuration.</param>
+    /// <param name="sink">Where captured events are appended (#144).</param>
     /// <param name="logger">Logger for the service.</param>
     /// <param name="loggerFactory">Logger factory for creating source loggers.</param>
-    public CdcService(CdcConfig config, ILogger<CdcService> logger, ILoggerFactory loggerFactory)
+    public CdcService(CdcConfig config, ICdcSink sink, ILogger<CdcService> logger, ILoggerFactory loggerFactory)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
     }
@@ -47,6 +51,21 @@ public sealed class CdcService : BackgroundService
 #pragma warning disable CA2000 // Source ownership is transferred to CdcSourceEntry, disposed via RemoveSourceAsync
         var source = new PostgresCdcSource(config, sourceLogger);
 #pragma warning restore CA2000
+        return AddSource(id, source, config);
+    }
+
+    /// <summary>
+    /// Registers a source that was constructed elsewhere.
+    /// </summary>
+    /// <remarks>
+    /// The entry was typed to <c>PostgresCdcSource</c> even though
+    /// <see cref="ICdcSource"/> exists and Postgres implements it, so the capture
+    /// loop could only be exercised against a live database — which is part of why
+    /// it could serialise every event and drop it (#144) without a test noticing.
+    /// Also the seam a second source type will need.
+    /// </remarks>
+    internal bool AddSource(string id, ICdcSource source, CdcConfig config)
+    {
         var entry = new CdcSourceEntry(id, source, config);
 
         if (!_sources.TryAdd(id, entry))
@@ -151,6 +170,17 @@ public sealed class CdcService : BackgroundService
                     ? JsonSerializer.Serialize(keyData, s_jsonOptions)
                     : null;
 
+                // The append this loop was missing (#144). Everything above was
+                // already computed and then dropped: the counter rose, the trace
+                // line claimed a topic, and nothing was ever written to it.
+                await _sink.WriteAsync(
+                    topicName,
+                    key is null ? null : Encoding.UTF8.GetBytes(key),
+                    Encoding.UTF8.GetBytes(value),
+                    linkedCts.Token).ConfigureAwait(false);
+
+                // Counted after the append, not before: a count that rises for
+                // events that never landed is how this stayed invisible.
                 entry.EventsCaptured++;
                 entry.LastLsn = evt.Lsn;
                 entry.LastEventTimestamp = evt.Timestamp;
@@ -178,7 +208,7 @@ public sealed class CdcService : BackgroundService
         private readonly CancellationTokenSource _cts = new();
 
         public string Id { get; }
-        public PostgresCdcSource Source { get; }
+        public ICdcSource Source { get; }
         public CdcConfig Config { get; }
         public CdcSourceState State { get; set; } = CdcSourceState.Stopped;
         public long EventsCaptured { get; set; }
@@ -189,7 +219,7 @@ public sealed class CdcService : BackgroundService
 
         public CancellationToken CancellationToken => _cts.Token;
 
-        public CdcSourceEntry(string id, PostgresCdcSource source, CdcConfig config)
+        public CdcSourceEntry(string id, ICdcSource source, CdcConfig config)
         {
             Id = id;
             Source = source;
