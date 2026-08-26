@@ -129,10 +129,23 @@ public sealed class BoundedDecompressionTests
         CompressionCodec.TryDecompressBounded(small, compressionType, Budget, out var warm, out _, out var warmPooled);
         CompressionCodec.Release(warm, warmPooled);
 
-        var before = GC.GetTotalAllocatedBytes(precise: true);
+        // Per-thread, not process-wide (#150). GC.GetTotalAllocatedBytes counts every
+        // thread in the process, so on a loaded runner the tests running in parallel
+        // land inside the measurement window and the reading says whatever they
+        // allocated. That is what failed here on a docs-only commit: 1,225,728 bytes
+        // measured against a 1 MiB ceiling, while materialising the expansion would
+        // have shown 8 MiB. Measured directly, a busy neighbouring thread moves the
+        // process-wide counter to 1.2 GB while the per-thread one stays at the
+        // 100 KiB this thread actually allocated.
+        //
+        // Per-thread is only correct because TryDecompressBounded is synchronous and
+        // stays on this thread. TcpTransportResponseLeaseTests deliberately uses the
+        // process-wide counter for the opposite reason: its allocation happens in a
+        // continuation on a pool thread, where a per-thread counter sees nothing.
+        var before = GC.GetAllocatedBytesForCurrentThread();
         var accepted = CompressionCodec.TryDecompressBounded(
             bomb, compressionType, Budget, out var buffer, out _, out var isPooled);
-        var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         CompressionCodec.Release(buffer, isPooled);
 
