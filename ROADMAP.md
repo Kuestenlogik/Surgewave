@@ -54,7 +54,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 - [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
 - [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
-- [#156](https://github.com/Kuestenlogik/Surgewave/issues/156) **Move the eleven sibling repos off their hand-written zip step onto PackPlugin** `area:plugin-sdk` `track:plugin-distribution`
 
 ---
 
