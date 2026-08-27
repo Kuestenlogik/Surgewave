@@ -39,6 +39,63 @@ public class ClusterMembershipServiceTests
     }
 
     [Fact]
+    public void ApplyReplicatedRemoval_ForgetsBothTheRegistrationAndTheNode()
+    {
+        // #129: registration had no opposite. _registrations was written and never removed
+        // from, so a decommissioned broker stayed in the cluster metadata — and, through the
+        // replicated log, stayed there for the cluster, not just for one process.
+        var (service, state) = NewService();
+        var incarnation = Guid.NewGuid();
+        service.Register(Registration(1, incarnation));
+
+        Assert.NotNull(state.GetBroker(1));
+
+        service.ApplyReplicatedRemoval(1);
+
+        // Both halves, because leaving either is what "still in the metadata" was made of.
+        Assert.Null(state.GetBroker(1));
+
+        // The epoch bookkeeping is gone too: a heartbeat from the removed broker is answered
+        // as unregistered rather than from a record no longer visible in cluster state.
+        var outcome = service.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: 1, BrokerEpoch: 1, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+        Assert.Equal(ClusterRpcStatus.BrokerNotAvailable, outcome.Status);
+    }
+
+    [Fact]
+    public void ApplyReplicatedRemoval_IsIdempotent()
+    {
+        // A committed entry is applied more than once: on replay after a restart, and by a
+        // follower catching up. Removing what is already gone must not throw or report
+        // differently — refusing an unknown broker is the proposer's job, not the apply's.
+        var (service, state) = NewService();
+        service.Register(Registration(1, Guid.NewGuid()));
+
+        service.ApplyReplicatedRemoval(1);
+        service.ApplyReplicatedRemoval(1);
+        service.ApplyReplicatedRemoval(99);
+
+        Assert.Null(state.GetBroker(1));
+        Assert.Null(state.GetBroker(99));
+    }
+
+    [Fact]
+    public void ARemovedBrokerCanRegisterAgain()
+    {
+        // Decommission then re-commission with the same id. The re-registration mints a fresh
+        // epoch rather than colliding with the forgotten one, which is the property that makes
+        // removal safe to use on a broker whose id will be reused.
+        var (service, state) = NewService();
+        service.Register(Registration(1, Guid.NewGuid()));
+        service.ApplyReplicatedRemoval(1);
+
+        var outcome = service.Register(Registration(1, Guid.NewGuid()));
+
+        Assert.Equal(ClusterRpcStatus.None, outcome.Status);
+        Assert.NotNull(state.GetBroker(1));
+    }
+
+    [Fact]
     public void Register_AssignsMonotonicEpochsAndStoresBroker()
     {
         var (service, state) = NewService();

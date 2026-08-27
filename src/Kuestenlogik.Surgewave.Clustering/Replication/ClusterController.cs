@@ -830,20 +830,50 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Remove a broker via Raft consensus.
     /// </summary>
-    public async Task<bool> RemoveBrokerViaRaftAsync(int brokerId, CancellationToken ct)
+    /// <remarks>
+    /// <para>
+    /// The guards below went in while this method still had no callers (#129), which is
+    /// the cheap moment: they exist before an admin surface or KIP-853 voter removal
+    /// reaches them, rather than being retrofitted after the first accident.
+    /// </para>
+    /// <para>
+    /// Kafka added the same two when it closed this gap in KIP-1312, having had
+    /// registration for years without an unregister. They are not symmetrical
+    /// conveniences: refusing self-removal keeps the controller from dismantling the
+    /// identity it is using to replicate the entry, and refusing an unknown id keeps a
+    /// typo from committing an entry that does nothing while reporting success.
+    /// </para>
+    /// </remarks>
+    public async Task<BrokerRemovalOutcome> RemoveBrokerViaRaftAsync(int brokerId, CancellationToken ct)
     {
         if (_raftNode == null || !_raftNode.IsLeader)
         {
-            return false;
+            return BrokerRemovalOutcome.NotController;
+        }
+
+        // Being the Raft leader IS being the active controller, so reaching here with our
+        // own id is exactly the case Kafka names.
+        if (brokerId == _config.BrokerId)
+        {
+            LogRemoveSelfRefused(brokerId);
+            return BrokerRemovalOutcome.CannotRemoveSelf;
+        }
+
+        if (_clusterState.GetBroker(brokerId) is null)
+        {
+            LogRemoveUnknownRefused(brokerId);
+            return BrokerRemovalOutcome.UnknownBroker;
         }
 
         var command = new BrokerRemovedCommand(brokerId);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.BrokerRemovedCommand);
 
         var index = await _raftNode.ProposeAsync(MetadataCommandType.BrokerRemoved, data, ct);
-        if (index < 0) return false;
+        if (index < 0) return BrokerRemovalOutcome.NotCommitted;
 
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct)
+            ? BrokerRemovalOutcome.Removed
+            : BrokerRemovalOutcome.NotCommitted;
     }
 
     /// <summary>

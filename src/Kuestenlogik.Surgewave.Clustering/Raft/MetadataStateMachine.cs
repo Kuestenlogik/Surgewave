@@ -157,7 +157,11 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         var cmd = JsonSerializer.Deserialize(data, ClusteringJsonContext.Default.BrokerRemovedCommand);
         if (cmd == null) return;
 
-        _clusterState.RemoveBroker(cmd.BrokerId);
+        // Through membership, not straight into cluster state: this used to drop the node
+        // and leave the registration behind, so the broker was gone from the metadata
+        // while its epoch bookkeeping still claimed it (#129). The membership service owns
+        // both halves, exactly as it does for a registration.
+        _membership.ApplyReplicatedRemoval(cmd.BrokerId);
         LogBrokerRemoved(cmd.BrokerId);
     }
 
