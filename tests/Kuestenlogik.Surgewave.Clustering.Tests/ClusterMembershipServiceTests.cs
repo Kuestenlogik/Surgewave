@@ -38,6 +38,72 @@ public class ClusterMembershipServiceTests
             PreviousBrokerEpoch: -1);
     }
 
+    private static ClusterMembershipService NewRaftModeService(ClusterState state)
+    {
+        var config = new ClusteringConfig { BrokerId = 0 };
+        return new ClusterMembershipService(
+            new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance),
+            state,
+            NullLogger<ClusterMembershipService>.Instance,
+            epochsAreMetadataIndices: true);
+    }
+
+    [Fact]
+    public void InRaftMode_ABrokerBehindItsOwnRegistrationStaysFenced()
+    {
+        // Kafka's rule (#160): "we will only unfence a broker when its high watermark has
+        // reached its broker registration record". In Raft mode our broker epoch IS the
+        // committed index of that registration entry, so the comparison is the same one.
+        var state = new ClusterState();
+        var service = NewRaftModeService(state);
+        service.ApplyReplicatedRegistration(
+            brokerId: 1, incarnationId: Guid.NewGuid(), epoch: 42,
+            host: "h", port: 9093, rack: null,
+            interBrokerProtocol: InterBrokerProtocolFeature.Native, replicationPort: null);
+
+        var outcome = service.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: 1, BrokerEpoch: 42, CurrentMetadataOffset: 41,
+            WantFence: false, WantShutDown: false));
+
+        Assert.False(outcome.IsCaughtUp);
+        Assert.True(outcome.IsFenced);
+    }
+
+    [Fact]
+    public void InRaftMode_ABrokerThatReachedItsRegistrationIsUnfenced()
+    {
+        var state = new ClusterState();
+        var service = NewRaftModeService(state);
+        service.ApplyReplicatedRegistration(
+            brokerId: 1, incarnationId: Guid.NewGuid(), epoch: 42,
+            host: "h", port: 9093, rack: null,
+            interBrokerProtocol: InterBrokerProtocolFeature.Native, replicationPort: null);
+
+        var outcome = service.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: 1, BrokerEpoch: 42, CurrentMetadataOffset: 42,
+            WantFence: false, WantShutDown: false));
+
+        Assert.True(outcome.IsCaughtUp);
+        Assert.False(outcome.IsFenced);
+    }
+
+    [Fact]
+    public void InPushMode_AnyHeartbeatingBrokerCountsAsCaughtUp()
+    {
+        // Deliberate, not an oversight: push-mode metadata carries no position, so there is
+        // nothing to be behind. Making this strict would fence every broker permanently,
+        // and since #123 a fenced broker is left out of metadata pushes entirely.
+        var (service, _) = NewService();
+        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+
+        var outcome = service.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: 1, BrokerEpoch: epoch, CurrentMetadataOffset: 0,
+            WantFence: false, WantShutDown: false));
+
+        Assert.True(outcome.IsCaughtUp);
+        Assert.False(outcome.IsFenced);
+    }
+
     [Fact]
     public void ASessionTimeoutBelowTheFloorIsRejected()
     {

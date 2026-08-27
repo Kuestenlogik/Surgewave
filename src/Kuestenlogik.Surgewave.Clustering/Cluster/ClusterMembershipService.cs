@@ -47,6 +47,7 @@ public sealed partial class ClusterMembershipService
 
     private readonly ClusterIdManager _clusterIdManager;
     private readonly ClusterState _clusterState;
+    private readonly bool _epochsAreMetadataIndices;
     private readonly ILogger<ClusterMembershipService> _logger;
 
     private readonly ConcurrentDictionary<int, BrokerRegistrationRecord> _registrations = new();
@@ -57,11 +58,18 @@ public sealed partial class ClusterMembershipService
     private long _perReignCounter = 1;
     private readonly Lock _epochLock = new();
 
+    /// <param name="epochsAreMetadataIndices">
+    /// Whether broker epochs are committed metadata-log indices (Raft mode) rather than
+    /// composed mints. This decides whether "caught up" is a question that can be
+    /// answered at all — see <see cref="Heartbeat"/> (#160).
+    /// </param>
     public ClusterMembershipService(
         ClusterIdManager clusterIdManager,
         ClusterState clusterState,
-        ILogger<ClusterMembershipService> logger)
+        ILogger<ClusterMembershipService> logger,
+        bool epochsAreMetadataIndices = false)
     {
+        _epochsAreMetadataIndices = epochsAreMetadataIndices;
         _clusterIdManager = clusterIdManager;
         _clusterState = clusterState;
         _logger = logger;
@@ -322,13 +330,30 @@ public sealed partial class ClusterMembershipService
         registration.LastContactUtc = DateTime.UtcNow;
         registration.CurrentMetadataOffset = input.CurrentMetadataOffset;
 
-        // Vacuous outside Raft, and knowingly so (#160). Brokers report 0 because push-mode
-        // metadata has no position: ordering is controller epoch plus per-partition leader
-        // epoch, deliberately not a per-push version. So this admits every broker that
-        // heartbeats at all, which is the correct answer when "behind" is undefined — and
-        // the wrong one for a broker that is reachable but not serving, which needs a health
-        // signal rather than an offset comparison.
-        var isCaughtUp = registration.CurrentMetadataOffset >= 0;
+        // Kafka's rule, where it applies (#160). In Raft mode the broker epoch IS the
+        // committed index of this broker's own registration entry (#72 Inc5), which is
+        // exactly Kafka's registerBrokerRecordOffset — so "caught up" means the broker has
+        // consumed the metadata log up to and including its own registration:
+        //
+        //     if (request.currentMetadataOffset() >= registerBrokerRecordOffset) → UNFENCED
+        //
+        // Comparing against the controller's CURRENT position instead would be a race the
+        // broker cannot win: the lifecycle loop is serial, so its report is up to
+        // interval + request timeout old before the controller reads it.
+        //
+        // Outside Raft the comparison has nothing to compare. Push-mode metadata carries no
+        // position — ordering is controller epoch plus per-partition leader epoch, and a
+        // coarse per-push version is deliberately avoided because it would drop disjoint
+        // partial pushes. So the check admits every broker that heartbeats, which is the
+        // honest answer when "behind" is undefined, and the wrong one for a broker that is
+        // reachable but not serving. That case needs a health signal, not an offset.
+        //
+        // Kafka reached this by removing the push model: as of 4.x there is no
+        // UpdateMetadata and no ZooKeeper mode, so every broker consumes the log and the
+        // question always has an answer.
+        var isCaughtUp = _epochsAreMetadataIndices
+            ? registration.CurrentMetadataOffset >= registration.BrokerEpoch
+            : registration.CurrentMetadataOffset >= 0;
         var shouldShutDown = false;
 
         if (input.WantFence && !registration.IsFenced)

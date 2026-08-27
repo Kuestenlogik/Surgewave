@@ -507,8 +507,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // epochs + fencing). Wired unconditionally so a plugin-free broker owns it too.
         var clusterIdManager = new ClusterIdManager(
             clusteringConfig, _loggerFactory.CreateLogger<ClusterIdManager>());
+        // epochsAreMetadataIndices: in Raft mode a broker epoch is the committed index of
+        // its registration entry (#72 Inc5), which is what makes the caught-up comparison
+        // possible at all — see Heartbeat (#160).
         var membershipService = new ClusterMembershipService(
-            clusterIdManager, _clusterState, _loggerFactory.CreateLogger<ClusterMembershipService>());
+            clusterIdManager, _clusterState, _loggerFactory.CreateLogger<ClusterMembershipService>(),
+            epochsAreMetadataIndices: clusteringConfig.UseRaftConsensus);
 
         // #123 — the native path only ever learned that a broker exists, never that one
         // stopped: a silent follower stayed registered, unfenced and holding a valid
@@ -556,7 +560,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _connectionPool, _clusterState, clusteringConfig,
             _loggerFactory.CreateLogger<NativeBrokerLifecycleClient>());
         _lifecycleLoop = new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop(
-            lifecycleClient, clusteringConfig, _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop>());
+            lifecycleClient, clusteringConfig, _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop>(),
+            metadataPosition: clusteringConfig.UseRaftConsensus ? () => _raftNode?.CommitIndex ?? 0 : null);
 
         // Wire up the controller client (gated native/Kafka-wire, Inc5) so the controller can push
         // LeaderAndIsr to remote brokers when topology changes (topic create, reelection).
