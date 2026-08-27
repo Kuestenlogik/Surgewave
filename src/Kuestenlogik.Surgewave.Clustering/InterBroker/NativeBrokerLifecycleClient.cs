@@ -16,7 +16,14 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// </summary>
 public sealed partial class NativeBrokerLifecycleClient : IBrokerLifecycleRpc
 {
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// How long one lifecycle exchange may take. Public because the native session
+    /// timeout has to clear it: the loop is serial — RPC, then delay — so a slow
+    /// controller stretches the effective heartbeat interval by up to this much, and a
+    /// session timeout below interval + this would expire a broker whose heartbeat was
+    /// merely late on our own transport (#123).
+    /// </summary>
+    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ConnectionPool _connectionPool;
     private readonly ClusterState _clusterState;

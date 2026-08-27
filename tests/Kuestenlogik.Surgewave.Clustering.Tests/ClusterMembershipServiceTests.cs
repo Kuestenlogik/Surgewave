@@ -39,6 +39,135 @@ public class ClusterMembershipServiceTests
     }
 
     [Fact]
+    public void ASessionTimeoutBelowTheFloorIsRejected()
+    {
+        // The trap #123 named: the lifecycle loop is serial — RPC, then delay — over a
+        // client with a 10 s request timeout, so at a 3 s interval a slow controller
+        // produces an effective interval of 13 s. HeartbeatTimeoutMs is 10 s and belongs
+        // to the TCP detector; borrowing it here would expire brokers for being slow.
+        var config = new ClusteringConfig
+        {
+            BrokerId = 0,
+            Port = 9092,
+            ReplicationPort = 10092,
+            HeartbeatIntervalMs = 3000,
+            NativeSessionTimeoutMs = 10000,
+        };
+
+        var errors = config.Validate();
+
+        Assert.Contains(errors, e => e.Contains(nameof(ClusteringConfig.NativeSessionTimeoutMs), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheDefaultSessionTimeoutClearsTheFloor()
+    {
+        // A default that fails its own validation would be a trap of its own.
+        var config = new ClusteringConfig { BrokerId = 0, Port = 9092, ReplicationPort = 10092 };
+
+        Assert.DoesNotContain(
+            config.Validate(),
+            e => e.Contains(nameof(ClusteringConfig.NativeSessionTimeoutMs), StringComparison.Ordinal));
+    }
+
+    /// <summary>Registers broker 1 and heartbeats it into the unfenced, caught-up state.</summary>
+    private static void RegisterAndUnfence(ClusterMembershipService service, int brokerId, Guid incarnation)
+    {
+        var outcome = service.Register(Registration(brokerId, incarnation));
+        var heartbeat = service.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: brokerId, BrokerEpoch: outcome.BrokerEpoch,
+            CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+        Assert.False(heartbeat.IsFenced);
+    }
+
+    [Fact]
+    public void ExpireStaleSessions_FencesABrokerThatWentSilent()
+    {
+        // #123: the native path was purely request-driven. It learned that a broker exists
+        // and never that one stopped — a silent broker stayed registered, unfenced and
+        // holding a valid epoch, and went into every metadata push as live.
+        var (service, _) = NewService();
+        RegisterAndUnfence(service, 1, Guid.NewGuid());
+
+        // The clock is a parameter precisely so this is an assertion rather than a wait.
+        var expired = service.ExpireStaleSessions(DateTime.UtcNow.AddMinutes(5), TimeSpan.FromSeconds(20));
+
+        Assert.Equal([1], expired);
+        Assert.True(service.IsKnownFenced(1));
+    }
+
+    [Fact]
+    public void ExpireStaleSessions_LeavesABrokerHeardFromRecently()
+    {
+        var (service, _) = NewService();
+        RegisterAndUnfence(service, 1, Guid.NewGuid());
+
+        var expired = service.ExpireStaleSessions(DateTime.UtcNow.AddSeconds(5), TimeSpan.FromSeconds(20));
+
+        Assert.Empty(expired);
+        Assert.False(service.IsKnownFenced(1));
+    }
+
+    [Fact]
+    public void AHeartbeatRefreshesTheSession()
+    {
+        // The record had no timestamp at all, so a received heartbeat was indistinguishable
+        // from its absence the moment the call returned. This is the difference.
+        var (service, _) = NewService();
+        var incarnation = Guid.NewGuid();
+        RegisterAndUnfence(service, 1, incarnation);
+
+        var epoch = service.Register(Registration(1, incarnation)).BrokerEpoch;
+        service.Heartbeat(new BrokerHeartbeatInput(
+            BrokerId: 1, BrokerEpoch: epoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+
+        Assert.Empty(service.ExpireStaleSessions(DateTime.UtcNow.AddSeconds(5), TimeSpan.FromSeconds(20)));
+    }
+
+    [Fact]
+    public void ReRegisteringTheSameIncarnationDoesNotReFenceACaughtUpBroker()
+    {
+        // The latent defect #123 warned about, which session expiry would have made sharp:
+        // Register wrote IsFenced = true outside the branch that keeps the epoch, and
+        // BrokerLifecycleLoop re-registers with a STABLE incarnation id after any transient
+        // heartbeat failure. So every network hiccup fenced a fully caught-up broker.
+        var (service, _) = NewService();
+        var incarnation = Guid.NewGuid();
+        RegisterAndUnfence(service, 1, incarnation);
+
+        service.Register(Registration(1, incarnation));
+
+        Assert.False(service.IsKnownFenced(1));
+    }
+
+    [Fact]
+    public void ARestartedBrokerStartsFenced()
+    {
+        // The other half of the same branch: a NEW incarnation is a restarted broker and
+        // must start fenced until it catches up. Keeping the fence state would be the
+        // opposite bug.
+        var (service, _) = NewService();
+        RegisterAndUnfence(service, 1, Guid.NewGuid());
+
+        service.Register(Registration(1, Guid.NewGuid()));
+
+        Assert.True(service.IsKnownFenced(1));
+    }
+
+    [Fact]
+    public void AnUnregisteredBrokerIsNotKnownFenced()
+    {
+        // IsBrokerFenced answers "fenced" for a broker it has never heard of, which is
+        // right for "may this broker act" and wrong for "leave it out of the metadata
+        // push": the native path registers followers only, on the controller only, so
+        // filtering on it would have emptied the push instead of trimming it.
+        var (service, _) = NewService();
+
+        Assert.True(service.IsBrokerFenced(42));
+        Assert.False(service.IsKnownFenced(42));
+    }
+
+    [Fact]
     public void ApplyReplicatedRemoval_ForgetsBothTheRegistrationAndTheNode()
     {
         // #129: registration had no opposite. _registrations was written and never removed

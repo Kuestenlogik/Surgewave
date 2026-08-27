@@ -86,6 +86,28 @@ public sealed class ClusteringConfig : IValidatableConfig
     [Range(1, int.MaxValue)]
     public int MaxHeartbeatFailures { get; set; } = 3;
 
+    /// <summary>
+    /// How long a registered broker may go without a native heartbeat before the
+    /// controller fences it (#123).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately NOT <see cref="HeartbeatTimeoutMs"/>, which belongs to the TCP
+    /// failure detector and is 10 s. The native lifecycle loop is serial — one RPC,
+    /// then the delay — over a client whose request timeout is 10 s, so at the default
+    /// 3 s interval a slow controller produces an effective interval of 13 s. A 10 s
+    /// session timeout would expire a broker that was heartbeating perfectly well.
+    /// </para>
+    /// <para>
+    /// The floor is therefore interval + request timeout, enforced in
+    /// <see cref="Validate"/> rather than left as a comment: this is the kind of
+    /// setting whose wrong value looks like a cluster problem, not a config problem.
+    /// The default leaves a margin above the floor for one missed heartbeat.
+    /// </para>
+    /// </remarks>
+    [Range(1, int.MaxValue)]
+    public int NativeSessionTimeoutMs { get; set; } = 20000;
+
     // Raft consensus settings
     public bool UseRaftConsensus { get; set; } = false;
 
@@ -173,6 +195,18 @@ public sealed class ClusteringConfig : IValidatableConfig
 
         if (HeartbeatTimeoutMs <= HeartbeatIntervalMs)
             errors.Add($"{nameof(HeartbeatTimeoutMs)} must exceed {nameof(HeartbeatIntervalMs)}.");
+
+        // The floor, not a preference: below it a healthy broker whose heartbeat waited
+        // out the client's request timeout is expired for being slow, not silent.
+        var nativeSessionFloorMs = HeartbeatIntervalMs
+            + (int)InterBroker.NativeBrokerLifecycleClient.RequestTimeout.TotalMilliseconds;
+        if (NativeSessionTimeoutMs < nativeSessionFloorMs)
+        {
+            errors.Add(
+                $"{nameof(NativeSessionTimeoutMs)} ({NativeSessionTimeoutMs}) must be at least "
+                + $"{nameof(HeartbeatIntervalMs)} + the lifecycle request timeout ({nativeSessionFloorMs} ms); "
+                + "below that a broker is expired for a heartbeat that was merely slow.");
+        }
 
         if (UseRaftConsensus && RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
             errors.Add($"{nameof(RaftElectionTimeoutMinMs)} must be less than {nameof(RaftElectionTimeoutMaxMs)}.");
