@@ -54,6 +54,9 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
 - [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
 - [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
+- [#161](https://github.com/Kuestenlogik/Surgewave/issues/161) **feat(clustering): debounce native session fencing so a flapping broker does not flap the cluster** 
+- [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
+- [#163](https://github.com/Kuestenlogik/Surgewave/issues/163) **RFC: converge on the metadata log and retire the push model** 
 
 ---
 
