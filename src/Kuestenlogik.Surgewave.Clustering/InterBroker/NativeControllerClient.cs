@@ -36,6 +36,7 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
     private readonly ClusterState _clusterState;
     private readonly ClusteringConfig _config;
     private readonly ILogger<NativeControllerClient> _logger;
+    private Cluster.ClusterMembershipService? _membership;
 
     public NativeControllerClient(
         ConnectionPool connectionPool,
@@ -48,6 +49,20 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
         _config = config;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Supplies the membership authority so pushes can leave out fenced brokers (#123).
+    /// </summary>
+    /// <remarks>
+    /// A setter rather than a constructor parameter because the runtime builds this
+    /// client before it builds the membership service, and reordering that is a larger
+    /// change than this needs. Same pattern as SetRaftNode / SetNativeInterBrokerServer.
+    /// Unset means no filter, which is the behaviour that existed before — but the
+    /// runtime wires it unconditionally, so that is a fallback for a host that has no
+    /// membership authority at all, not an opt-in.
+    /// </remarks>
+    public void SetMembership(Cluster.ClusterMembershipService membership)
+        => _membership = membership;
 
     /// <summary>
     /// Send LeaderAndIsr to every affected broker (leader and all replicas), one frame per broker.
@@ -173,12 +188,27 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
     /// also teach it the leader's endpoint. Carries the REAL replication port and the advertised
     /// protocol level. Iterates the concurrent map directly (no .Values copy).
     /// </summary>
+    /// <remarks>
+    /// "Live" used to mean "registered at some point": every broker in cluster state went
+    /// into every UpdateMetadata and LeaderAndIsr push, including one that had been silent
+    /// for hours (#123). A fenced broker is left out now, which is what makes session
+    /// expiry observable at all — fencing had no production reader before it.
+    /// </remarks>
     private List<LiveBrokerSpec> SnapshotLiveBrokers()
     {
         var brokers = new List<LiveBrokerSpec>();
         foreach (var kvp in _clusterState.Brokers)
         {
             var b = kvp.Value;
+
+            // IsKnownFenced, not IsBrokerFenced: the latter answers "fenced" for a broker
+            // it has never heard of, and the native path registers followers only, on the
+            // controller only. Using it here would drop this controller itself, every
+            // Kafka-wire peer and everyone during startup — an empty push rather than a
+            // filtered one.
+            if (_membership?.IsKnownFenced(b.BrokerId) == true)
+                continue;
+
             brokers.Add(new LiveBrokerSpec(
                 b.BrokerId, b.Host, b.Port, b.ReplicationPort, b.InterBrokerProtocol, b.Rack));
         }

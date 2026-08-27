@@ -84,6 +84,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private KafkaConnectionHandler? _kafkaConnectionHandler;
     private Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop? _lifecycleLoop;
     private Task? _clusterTask;
+    private BrokerSessionSweeper? _sessionSweeper;
 
     // Raft components (only initialized when UseRaftConsensus = true)
     private RaftNode? _raftNode;
@@ -509,6 +510,20 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var membershipService = new ClusterMembershipService(
             clusterIdManager, _clusterState, _loggerFactory.CreateLogger<ClusterMembershipService>());
 
+        // #123 — the native path only ever learned that a broker exists, never that one
+        // stopped: a silent follower stayed registered, unfenced and holding a valid
+        // epoch, and went into every metadata push as live. The sweeper is what asks.
+        _sessionSweeper = new BrokerSessionSweeper(
+            membershipService,
+            TimeSpan.FromMilliseconds(clusteringConfig.NativeSessionTimeoutMs),
+            _loggerFactory.CreateLogger<BrokerSessionSweeper>());
+        _sessionSweeper.Start();
+
+        // And what makes the fencing observable: a fenced broker stops being pushed as
+        // live. Wired unconditionally — the filter falling back to "no filter" without a
+        // membership authority is for a host that has none, not an opt-in.
+        nativeControllerClient.SetMembership(membershipService);
+
         // #60 Inc4/Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the
         // ReplicationServer's shared port. It applies decoded native control-plane frames
         // (LeaderAndIsr / UpdateMetadata / StopReplica / AlterPartition) and handles native
@@ -785,6 +800,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // all, so a startup failure could be invisible in both directions.
         await ObserveBackgroundTaskAsync(_clusterTask, "cluster");
         await ObserveBackgroundTaskAsync(_brokerTask, "broker");
+
+        if (_sessionSweeper is not null)
+            await _sessionSweeper.DisposeAsync();
 
         // #60 Inc6b — stop the lifecycle loop first so it no longer heartbeats over the pool.
         if (_lifecycleLoop != null)

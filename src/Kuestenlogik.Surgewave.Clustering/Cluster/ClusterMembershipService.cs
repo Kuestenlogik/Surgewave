@@ -85,9 +85,10 @@ public sealed partial class ClusterMembershipService
         long brokerEpoch;
         lock (_epochLock)
         {
-            if (_registrations.TryGetValue(input.BrokerId, out var existing) && existing.IncarnationId == input.IncarnationId)
+            _registrations.TryGetValue(input.BrokerId, out var existingRecord);
+            if (existingRecord is not null && existingRecord.IncarnationId == input.IncarnationId)
             {
-                brokerEpoch = existing.BrokerEpoch; // same incarnation reconnecting — keep the epoch
+                brokerEpoch = existingRecord.BrokerEpoch; // same incarnation reconnecting — keep the epoch
             }
             else
             {
@@ -113,12 +114,28 @@ public sealed partial class ClusterMembershipService
                 LogNewEpoch(input.BrokerId, brokerEpoch);
             }
 
+            // Same incarnation = the SAME broker reconnecting, so its fence state and
+            // caught-up position survive; a new incarnation is a restarted broker and
+            // starts fenced until it catches up.
+            //
+            // This used to write IsFenced = true unconditionally, outside the branch
+            // that keeps the epoch. BrokerLifecycleLoop re-registers after any transient
+            // heartbeat failure with a stable incarnation id, so every network hiccup
+            // re-fenced a broker that was fully caught up (#123). It was invisible only
+            // because IsBrokerFenced has no production caller — and session expiry is
+            // exactly what makes fencing observable, so it had to be fixed alongside.
+            // ApplyReplicatedRegistration already reasons this way; the two agree now.
+            var sameIncarnation = existingRecord is not null
+                && existingRecord.IncarnationId == input.IncarnationId;
+
             _registrations[input.BrokerId] = new BrokerRegistrationRecord
             {
                 BrokerId = input.BrokerId,
                 IncarnationId = input.IncarnationId,
                 BrokerEpoch = brokerEpoch,
-                IsFenced = true, // start fenced until caught up
+                IsFenced = sameIncarnation ? existingRecord!.IsFenced : true,
+                CurrentMetadataOffset = sameIncarnation ? existingRecord!.CurrentMetadataOffset : -1,
+                LastContactUtc = DateTime.UtcNow,
             };
         }
 
@@ -233,6 +250,57 @@ public sealed partial class ClusterMembershipService
         LogReplicatedRemoval(brokerId, wasRegistered);
     }
 
+    /// <summary>
+    /// Fences every registered broker that has not been heard from within
+    /// <paramref name="timeout"/>, and returns their ids (#123).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The native registration path was purely request-driven: it learned about a broker
+    /// when the broker spoke and never noticed when it stopped. A silent broker stayed
+    /// registered, unfenced and holding a valid epoch.
+    /// </para>
+    /// <para>
+    /// Fenced, not deregistered. A silent broker may be partitioned rather than gone, and
+    /// coming back has to be cheap — the next heartbeat clears the fence. Forgetting the
+    /// identity is a deliberate, guarded act with its own path (#129), not something a
+    /// timer should do on a broker's behalf.
+    /// </para>
+    /// <para>
+    /// The clock is a parameter so expiry can be tested at the boundary rather than by
+    /// waiting for it, and so a sweep cannot disagree with itself about "now" halfway
+    /// through. It does not schedule itself: this class is the membership authority, and
+    /// a timer here would make every test that touches registration also a test about
+    /// time. <c>BrokerSessionSweeper</c> drives it.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<int> ExpireStaleSessions(DateTime nowUtc, TimeSpan timeout)
+    {
+        List<int>? expired = null;
+
+        foreach (var kvp in _registrations)
+        {
+            var registration = kvp.Value;
+            if (registration.IsFenced) continue;
+            if (nowUtc - registration.LastContactUtc <= timeout) continue;
+
+            // Re-check under the lock the registration paths use, so a heartbeat landing
+            // between the read above and here is not overwritten by a stale verdict.
+            lock (_epochLock)
+            {
+                if (registration.IsFenced || nowUtc - registration.LastContactUtc <= timeout)
+                    continue;
+
+                registration.IsFenced = true;
+            }
+
+            (expired ??= []).Add(registration.BrokerId);
+            LogSessionExpired(registration.BrokerId, (long)(nowUtc - registration.LastContactUtc).TotalMilliseconds);
+        }
+
+        return expired ?? (IReadOnlyList<int>)[];
+    }
+
     /// <summary>Process a broker heartbeat, returning the fence/caught-up/shutdown state.</summary>
     public BrokerHeartbeatOutcome Heartbeat(BrokerHeartbeatInput input)
     {
@@ -248,6 +316,10 @@ public sealed partial class ClusterMembershipService
             return new BrokerHeartbeatOutcome(ClusterRpcStatus.StaleBrokerEpoch, IsFenced: true, IsCaughtUp: false, ShouldShutDown: false);
         }
 
+        // The heartbeat's whole point, and what the record could not hold before: that we
+        // heard from this broker just now. Written after the epoch check, so a stale-epoch
+        // frame from a zombie does not keep a session alive.
+        registration.LastContactUtc = DateTime.UtcNow;
         registration.CurrentMetadataOffset = input.CurrentMetadataOffset;
 
         // Caught-up once the broker has reached a non-negative metadata offset (mirrors the Kafka-wire
@@ -278,6 +350,20 @@ public sealed partial class ClusterMembershipService
     public bool IsBrokerFenced(int brokerId)
         => !_registrations.TryGetValue(brokerId, out var reg) || reg.IsFenced;
 
+    /// <summary>
+    /// Whether this broker is registered natively AND fenced.
+    /// </summary>
+    /// <remarks>
+    /// The weaker question than <see cref="IsBrokerFenced"/>, which answers "fenced" for
+    /// a broker it has never heard of — correct for "may this broker act", wrong for
+    /// "should this broker be left out of a metadata push". The native path registers
+    /// followers only, and only on the controller, so an unregistered broker is the
+    /// normal case for the controller itself, for a Kafka-wire peer and for anyone
+    /// during startup. Filtering those out would empty the push.
+    /// </remarks>
+    public bool IsKnownFenced(int brokerId)
+        => _registrations.TryGetValue(brokerId, out var reg) && reg.IsFenced;
+
     private static bool IsReplication(ListenerSpec l)
         => string.Equals(l.Name, ReplicationListenerName, StringComparison.OrdinalIgnoreCase);
 
@@ -298,6 +384,13 @@ public sealed partial class ClusterMembershipService
         public required long BrokerEpoch { get; init; }
         public bool IsFenced { get; set; } = true;
         public long CurrentMetadataOffset { get; set; } = -1;
+
+        /// <summary>
+        /// When this broker was last heard from. Without it a received heartbeat was
+        /// indistinguishable from its absence the moment the call returned, so a broker
+        /// that went silent stayed registered, unfenced and with a valid epoch (#123).
+        /// </summary>
+        public DateTime LastContactUtc { get; set; } = DateTime.UtcNow;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Broker registration: BrokerId={BrokerId} ClusterId={ClusterId} IncarnationId={IncarnationId}")]
@@ -317,6 +410,10 @@ public sealed partial class ClusterMembershipService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker removal: BrokerId={BrokerId} wasRegistered={WasRegistered}")]
     private partial void LogReplicatedRemoval(int brokerId, bool wasRegistered);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Fencing broker {BrokerId}: no native heartbeat for {SilentForMs} ms")]
+    private partial void LogSessionExpired(int brokerId, long silentForMs);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Heartbeat from unregistered broker {BrokerId}")]
     private partial void LogUnregisteredHeartbeat(int brokerId);
