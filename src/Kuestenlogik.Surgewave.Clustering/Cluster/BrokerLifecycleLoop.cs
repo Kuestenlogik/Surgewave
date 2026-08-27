@@ -20,17 +20,32 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
     private readonly IBrokerLifecycleRpc _rpc;
     private readonly ClusteringConfig _config;
     private readonly ILogger<BrokerLifecycleLoop> _logger;
+    private readonly Func<long>? _metadataPosition;
 
     private readonly Guid _incarnationId = Guid.NewGuid();
     private long _brokerEpoch = -1;
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
 
-    public BrokerLifecycleLoop(IBrokerLifecycleRpc rpc, ClusteringConfig config, ILogger<BrokerLifecycleLoop> logger)
+    /// <param name="metadataPosition">
+    /// This broker's consumed metadata position, or <c>null</c> when it has none.
+    /// </param>
+    /// <remarks>
+    /// Supplied only in Raft mode, where metadata is a replicated log and there is a
+    /// position to be behind. In push mode there is none by construction, and the
+    /// controller's caught-up check is correspondingly permissive — see the comment at
+    /// the call site below (#160).
+    /// </remarks>
+    public BrokerLifecycleLoop(
+        IBrokerLifecycleRpc rpc,
+        ClusteringConfig config,
+        ILogger<BrokerLifecycleLoop> logger,
+        Func<long>? metadataPosition = null)
     {
         _rpc = rpc;
         _config = config;
         _logger = logger;
+        _metadataPosition = metadataPosition;
     }
 
     /// <summary>The broker epoch assigned by the controller, or -1 before a successful registration.</summary>
@@ -86,19 +101,23 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
                         new BrokerHeartbeatInput(
                             BrokerId: _config.BrokerId,
                             BrokerEpoch: BrokerEpoch,
-                            // 0, and not as a stand-in for a number we have not got round to
-                            // sending: outside Raft there is no metadata position to send. Metadata
-                            // arrives as controller pushes ordered by controller epoch and
-                            // per-partition leader epoch — deliberately not by a per-push version,
-                            // because a coarse one would drop disjoint partial pushes. "Behind" is
-                            // therefore not defined in this mode, so the controller's caught-up
-                            // check is vacuous by construction rather than by omission (#160).
+                            // In Raft mode this is the committed index this broker has consumed,
+                            // which the controller compares against the index of the broker's own
+                            // registration entry — Kafka's rule, and its words: "we will only
+                            // unfence a broker when its high watermark has reached its broker
+                            // registration record".
                             //
-                            // Do not "fix" this by sending -1 to make the check meaningful: a
-                            // fenced broker is now left out of metadata pushes (#123), so a value
-                            // that never satisfies the check would fence every broker permanently
-                            // and empty the pushes.
-                            CurrentMetadataOffset: 0,
+                            // In push mode it stays 0, and not as a stand-in for a number nobody
+                            // got round to sending: there is no position to send. Metadata arrives
+                            // as controller pushes ordered by controller epoch and per-partition
+                            // leader epoch — deliberately not by a per-push version, since a coarse
+                            // one would drop disjoint partial pushes. "Behind" is undefined there,
+                            // so the controller's check is permissive by construction (#160).
+                            //
+                            // Do not make push mode send -1 to give the check teeth: a fenced
+                            // broker is left out of metadata pushes (#123), so a value that never
+                            // satisfies the check would fence every broker permanently.
+                            CurrentMetadataOffset: _metadataPosition?.Invoke() ?? 0,
                             WantFence: false,
                             WantShutDown: false),
                         ct).ConfigureAwait(false);
