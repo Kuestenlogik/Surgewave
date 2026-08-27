@@ -196,6 +196,43 @@ public sealed partial class ClusterMembershipService
         LogReplicatedRegistration(brokerId, recordedEpoch, host, port, interBrokerProtocol);
     }
 
+    /// <summary>
+    /// Forgets a broker: the counterpart to <see cref="ApplyReplicatedRegistration"/>, applied from
+    /// a committed <c>BrokerRemoved</c> entry (#129).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Registration had no opposite. <c>_registrations</c> was written by <c>Register</c> and by the
+    /// replicated apply and never removed from, so a decommissioned broker stayed in the cluster
+    /// metadata for the lifetime of the process — and, through the replicated log, of the cluster.
+    /// The neighbouring pieces each solved something else: <c>RaftConfiguration.RemoveVoter</c>
+    /// removes the voter, <c>ReassignmentPlanner.GenerateDecommissionPlan</c> moves the partitions.
+    /// Nothing forgot the identity.
+    /// </para>
+    /// <para>
+    /// Both halves of the record go together, exactly as the registration writes both: the epoch
+    /// bookkeeping here and the node in cluster state. Leaving either behind is what "still in the
+    /// metadata" was made of.
+    /// </para>
+    /// <para>
+    /// Idempotent, because a committed entry may be applied more than once — on replay after a
+    /// restart, or by a follower catching up. Removing what is already gone is not an error here;
+    /// refusing an unknown broker is the *proposer's* job, so that a mistyped id fails at the admin
+    /// surface instead of committing an entry that does nothing.
+    /// </para>
+    /// </remarks>
+    public void ApplyReplicatedRemoval(int brokerId)
+    {
+        bool wasRegistered;
+        lock (_epochLock)
+        {
+            wasRegistered = _registrations.TryRemove(brokerId, out _);
+        }
+
+        _clusterState.RemoveBroker(brokerId);
+        LogReplicatedRemoval(brokerId, wasRegistered);
+    }
+
     /// <summary>Process a broker heartbeat, returning the fence/caught-up/shutdown state.</summary>
     public BrokerHeartbeatOutcome Heartbeat(BrokerHeartbeatInput input)
     {
@@ -277,6 +314,9 @@ public sealed partial class ClusterMembershipService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker registration: BrokerId={BrokerId} epoch={Epoch} at {Host}:{Port} (level={Level})")]
     private partial void LogReplicatedRegistration(int brokerId, long epoch, string host, int port, short level);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker removal: BrokerId={BrokerId} wasRegistered={WasRegistered}")]
+    private partial void LogReplicatedRemoval(int brokerId, bool wasRegistered);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Heartbeat from unregistered broker {BrokerId}")]
     private partial void LogUnregisteredHeartbeat(int brokerId);

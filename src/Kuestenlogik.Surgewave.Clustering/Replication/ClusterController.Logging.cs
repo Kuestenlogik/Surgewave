@@ -134,4 +134,12 @@ public sealed partial class ClusterController
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Triggering automatic rebalance after broker {BrokerId} recovery")]
     private partial void LogTriggeringRebalanceAfterRecovery(int brokerId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Refused to remove broker {BrokerId}: a controller cannot remove itself while it is the active one")]
+    private partial void LogRemoveSelfRefused(int brokerId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Refused to remove broker {BrokerId}: no such broker is known, so the entry would commit and do nothing")]
+    private partial void LogRemoveUnknownRefused(int brokerId);
 }
