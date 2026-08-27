@@ -322,8 +322,12 @@ public sealed partial class ClusterMembershipService
         registration.LastContactUtc = DateTime.UtcNow;
         registration.CurrentMetadataOffset = input.CurrentMetadataOffset;
 
-        // Caught-up once the broker has reached a non-negative metadata offset (mirrors the Kafka-wire
-        // handler's placeholder — a full impl compares against the controller's metadata-log offset).
+        // Vacuous outside Raft, and knowingly so (#160). Brokers report 0 because push-mode
+        // metadata has no position: ordering is controller epoch plus per-partition leader
+        // epoch, deliberately not a per-push version. So this admits every broker that
+        // heartbeats at all, which is the correct answer when "behind" is undefined — and
+        // the wrong one for a broker that is reachable but not serving, which needs a health
+        // signal rather than an offset comparison.
         var isCaughtUp = registration.CurrentMetadataOffset >= 0;
         var shouldShutDown = false;
 
