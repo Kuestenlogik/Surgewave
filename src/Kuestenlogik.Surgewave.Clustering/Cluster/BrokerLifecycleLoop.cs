@@ -86,7 +86,19 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
                         new BrokerHeartbeatInput(
                             BrokerId: _config.BrokerId,
                             BrokerEpoch: BrokerEpoch,
-                            CurrentMetadataOffset: 0, // caught up: single metadata source in this build
+                            // 0, and not as a stand-in for a number we have not got round to
+                            // sending: outside Raft there is no metadata position to send. Metadata
+                            // arrives as controller pushes ordered by controller epoch and
+                            // per-partition leader epoch — deliberately not by a per-push version,
+                            // because a coarse one would drop disjoint partial pushes. "Behind" is
+                            // therefore not defined in this mode, so the controller's caught-up
+                            // check is vacuous by construction rather than by omission (#160).
+                            //
+                            // Do not "fix" this by sending -1 to make the check meaningful: a
+                            // fenced broker is now left out of metadata pushes (#123), so a value
+                            // that never satisfies the check would fence every broker permanently
+                            // and empty the pushes.
+                            CurrentMetadataOffset: 0,
                             WantFence: false,
                             WantShutDown: false),
                         ct).ConfigureAwait(false);
