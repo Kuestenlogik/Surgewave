@@ -524,7 +524,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // possible at all — see Heartbeat (#160).
         var membershipService = new ClusterMembershipService(
             clusterIdManager, _clusterState, _loggerFactory.CreateLogger<ClusterMembershipService>(),
-            epochsAreMetadataIndices: clusteringConfig.UseRaftConsensus);
+            epochsAreMetadataIndices: clusteringConfig.UseRaftConsensus,
+            minFencedDwell: TimeSpan.FromMilliseconds(clusteringConfig.NativeMinFencedDwellMs),
+            timeProvider: TimeProvider.System);
 
         // #123 — the native path only ever learned that a broker exists, never that one
         // stopped: a silent follower stayed registered, unfenced and holding a valid

@@ -48,6 +48,8 @@ public sealed partial class ClusterMembershipService
     private readonly ClusterIdManager _clusterIdManager;
     private readonly ClusterState _clusterState;
     private readonly bool _epochsAreMetadataIndices;
+    private readonly TimeSpan _minFencedDwell;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<ClusterMembershipService> _logger;
 
     private readonly ConcurrentDictionary<int, BrokerRegistrationRecord> _registrations = new();
@@ -67,9 +69,13 @@ public sealed partial class ClusterMembershipService
         ClusterIdManager clusterIdManager,
         ClusterState clusterState,
         ILogger<ClusterMembershipService> logger,
-        bool epochsAreMetadataIndices = false)
+        bool epochsAreMetadataIndices = false,
+        TimeSpan? minFencedDwell = null,
+        TimeProvider? timeProvider = null)
     {
         _epochsAreMetadataIndices = epochsAreMetadataIndices;
+        _minFencedDwell = minFencedDwell ?? TimeSpan.Zero;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _clusterIdManager = clusterIdManager;
         _clusterState = clusterState;
         _logger = logger;
@@ -143,7 +149,13 @@ public sealed partial class ClusterMembershipService
                 BrokerEpoch = brokerEpoch,
                 IsFenced = sameIncarnation ? existingRecord!.IsFenced : true,
                 CurrentMetadataOffset = sameIncarnation ? existingRecord!.CurrentMetadataOffset : -1,
-                LastContactUtc = DateTime.UtcNow,
+                LastContactUtc = _timeProvider.GetUtcNow().UtcDateTime,
+                // Null on a fresh registration: the initial fence means "not caught up
+                // yet", and holding a starting broker back by the dwell would add that
+                // delay to every startup for a rule aimed at flapping (#161). A
+                // reconnecting broker keeps whatever clock it had, so a transient failure
+                // cannot reset its way out of a dwell it is serving.
+                FencedSinceUtc = sameIncarnation ? existingRecord!.FencedSinceUtc : null,
             };
         }
 
@@ -275,15 +287,17 @@ public sealed partial class ClusterMembershipService
     /// timer should do on a broker's behalf.
     /// </para>
     /// <para>
-    /// The clock is a parameter so expiry can be tested at the boundary rather than by
-    /// waiting for it, and so a sweep cannot disagree with itself about "now" halfway
-    /// through. It does not schedule itself: this class is the membership authority, and
+    /// The clock comes from an injected <see cref="TimeProvider"/>, so expiry can be tested
+    /// at the boundary rather than by waiting for it, and one reading is taken per sweep so
+    /// it cannot disagree with itself halfway through. It does not schedule itself: this class is the membership authority, and
     /// a timer here would make every test that touches registration also a test about
     /// time. <c>BrokerSessionSweeper</c> drives it.
     /// </para>
     /// </remarks>
-    public IReadOnlyList<int> ExpireStaleSessions(DateTime nowUtc, TimeSpan timeout)
+    public IReadOnlyList<int> ExpireStaleSessions(TimeSpan timeout)
     {
+        var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+
         List<int>? expired = null;
 
         foreach (var kvp in _registrations)
@@ -300,6 +314,7 @@ public sealed partial class ClusterMembershipService
                     continue;
 
                 registration.IsFenced = true;
+                registration.FencedSinceUtc = nowUtc;
             }
 
             (expired ??= []).Add(registration.BrokerId);
@@ -310,8 +325,11 @@ public sealed partial class ClusterMembershipService
     }
 
     /// <summary>Process a broker heartbeat, returning the fence/caught-up/shutdown state.</summary>
+    /// <param name="input">The heartbeat.</param>
     public BrokerHeartbeatOutcome Heartbeat(BrokerHeartbeatInput input)
     {
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+
         if (!_registrations.TryGetValue(input.BrokerId, out var registration))
         {
             LogUnregisteredHeartbeat(input.BrokerId);
@@ -327,7 +345,7 @@ public sealed partial class ClusterMembershipService
         // The heartbeat's whole point, and what the record could not hold before: that we
         // heard from this broker just now. Written after the epoch check, so a stale-epoch
         // frame from a zombie does not keep a session alive.
-        registration.LastContactUtc = DateTime.UtcNow;
+        registration.LastContactUtc = now;
         registration.CurrentMetadataOffset = input.CurrentMetadataOffset;
 
         // Kafka's rule, where it applies (#160). In Raft mode the broker epoch IS the
@@ -359,11 +377,35 @@ public sealed partial class ClusterMembershipService
         if (input.WantFence && !registration.IsFenced)
         {
             registration.IsFenced = true;
+            registration.FencedSinceUtc = now;
         }
         else if (!input.WantFence && registration.IsFenced && isCaughtUp)
         {
-            LogUnfenced(input.BrokerId, input.CurrentMetadataOffset);
-            registration.IsFenced = false;
+            // Minimum dwell in the fenced state (#161). A fenced broker is left out of
+            // metadata pushes, so every crossing of the fence line costs a full push to
+            // every peer. A broker on a marginal link would otherwise expire, be fenced,
+            // heartbeat once, unfence, and repeat — one push per crossing, indefinitely.
+            //
+            // Time-based rather than "N consecutive good heartbeats": the flapping is
+            // time-shaped, and at a 3 s interval a dwell already implies several
+            // heartbeats. Two mechanisms for one goal would only need reconciling.
+            //
+            // It delays legitimate recovery by the same amount, which is the trade and
+            // why the default is short relative to the session timeout.
+            // No clock means the fence was never raised against this broker's conduct —
+            // it is the initial one from registration, which the dwell does not govern.
+            var dwell = registration.FencedSinceUtc is { } since ? now - since : TimeSpan.MaxValue;
+            if (dwell < _minFencedDwell)
+            {
+                LogUnfenceDeferred(input.BrokerId, (long)dwell.TotalMilliseconds,
+                    (long)_minFencedDwell.TotalMilliseconds);
+            }
+            else
+            {
+                LogUnfenced(input.BrokerId, input.CurrentMetadataOffset);
+                registration.IsFenced = false;
+                registration.FencedSinceUtc = null;
+            }
         }
 
         if (input.WantShutDown)
@@ -415,11 +457,17 @@ public sealed partial class ClusterMembershipService
         public long CurrentMetadataOffset { get; set; } = -1;
 
         /// <summary>
+        /// When the fence last went up, or <c>null</c> while unfenced. Read by the dwell
+        /// rule in <see cref="Heartbeat"/> (#161).
+        /// </summary>
+        public DateTime? FencedSinceUtc { get; set; }
+
+        /// <summary>
         /// When this broker was last heard from. Without it a received heartbeat was
         /// indistinguishable from its absence the moment the call returned, so a broker
         /// that went silent stayed registered, unfenced and with a valid epoch (#123).
         /// </summary>
-        public DateTime LastContactUtc { get; set; } = DateTime.UtcNow;
+        public DateTime LastContactUtc { get; set; }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Broker registration: BrokerId={BrokerId} ClusterId={ClusterId} IncarnationId={IncarnationId}")]
@@ -439,6 +487,10 @@ public sealed partial class ClusterMembershipService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker removal: BrokerId={BrokerId} wasRegistered={WasRegistered}")]
     private partial void LogReplicatedRemoval(int brokerId, bool wasRegistered);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Not unfencing broker {BrokerId} yet: fenced for {DwellMs} ms of a {MinDwellMs} ms minimum")]
+    private partial void LogUnfenceDeferred(int brokerId, long dwellMs, long minDwellMs);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Fencing broker {BrokerId}: no native heartbeat for {SilentForMs} ms")]

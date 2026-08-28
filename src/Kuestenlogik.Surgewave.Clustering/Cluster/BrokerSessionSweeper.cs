@@ -64,7 +64,7 @@ public sealed class BrokerSessionSweeper : IAsyncDisposable
             try
             {
                 await timer.WaitForNextTickAsync(ct).ConfigureAwait(false);
-                _membership.ExpireStaleSessions(DateTime.UtcNow, _sessionTimeout);
+                _membership.ExpireStaleSessions(_sessionTimeout);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

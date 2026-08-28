@@ -108,6 +108,24 @@ public sealed class ClusteringConfig : IValidatableConfig
     [Range(1, int.MaxValue)]
     public int NativeSessionTimeoutMs { get; set; } = 20000;
 
+    /// <summary>
+    /// Shortest time a fenced broker stays fenced before a good heartbeat can unfence it
+    /// (#161).
+    /// </summary>
+    /// <remarks>
+    /// A fenced broker is left out of metadata pushes, so every crossing of the fence line
+    /// costs a push to every peer. Without a floor, a broker on a marginal link expires,
+    /// gets fenced, heartbeats once, unfences, and repeats — one full push per crossing.
+    /// <para>
+    /// The default is two heartbeat intervals: long enough that unfencing means the broker
+    /// was steadily present rather than momentarily reachable, short enough that a genuine
+    /// recovery is not held back noticeably. It delays legitimate recovery by exactly this
+    /// much, which is the trade.
+    /// </para>
+    /// </remarks>
+    [Range(0, int.MaxValue)]
+    public int NativeMinFencedDwellMs { get; set; } = 6000;
+
     // Raft consensus settings
     public bool UseRaftConsensus { get; set; } = false;
 
@@ -206,6 +224,16 @@ public sealed class ClusteringConfig : IValidatableConfig
                 $"{nameof(NativeSessionTimeoutMs)} ({NativeSessionTimeoutMs}) must be at least "
                 + $"{nameof(HeartbeatIntervalMs)} + the lifecycle request timeout ({nativeSessionFloorMs} ms); "
                 + "below that a broker is expired for a heartbeat that was merely slow.");
+        }
+
+        // A dwell at or above the session timeout would mean a broker cannot get out of
+        // the fence before it is eligible to be expired again — fencing that never lifts.
+        if (NativeMinFencedDwellMs >= NativeSessionTimeoutMs)
+        {
+            errors.Add(
+                $"{nameof(NativeMinFencedDwellMs)} ({NativeMinFencedDwellMs}) must be less than "
+                + $"{nameof(NativeSessionTimeoutMs)} ({NativeSessionTimeoutMs}); at or above it a fenced "
+                + "broker cannot unfence before it can be expired again.");
         }
 
         if (UseRaftConsensus && RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
