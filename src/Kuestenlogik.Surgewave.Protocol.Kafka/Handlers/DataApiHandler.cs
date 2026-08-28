@@ -11,6 +11,7 @@ using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Observability;
 using Kuestenlogik.Surgewave.Core.Pipeline;
 using Kuestenlogik.Surgewave.Core.Replication;
+using Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Core.Storage.Indexing;
 using Kuestenlogik.Surgewave.Core.Util;
@@ -29,6 +30,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 {
     private readonly IBrokerConfigView _config;
     private readonly LogManager _logManager;
+    private IPartitionLeadership? _partitionLeadership;
     private readonly IProduceTransactionCoordinator _transactionCoordinator;
     private readonly IQuotaManager _quotaManager;
     private readonly IBandwidthQuota? _bandwidthQuotaManager;
@@ -66,6 +68,17 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
     /// Supplies the durability gate consulted for acks=all. Left unset on a broker without
     /// replication, where every write a partition accepts is as durable as that broker gets.
     /// </summary>
+    /// <summary>
+    /// Supplies the leadership view once clustering exists (#164).
+    /// </summary>
+    /// <remarks>
+    /// A setter for the same reason SetCommitGate is one: the handler is built before
+    /// clustering. Left unset — a single-broker or embedded runtime — the produce path
+    /// keeps appending exactly as before, which is the behaviour those deployments need.
+    /// </remarks>
+    public void SetPartitionLeadership(IPartitionLeadership? leadership)
+        => _partitionLeadership = leadership;
+
     public void SetCommitGate(IPartitionCommitGate? commitGate) => _commitGate = commitGate;
 
     /// <summary>
@@ -365,6 +378,26 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         Topic = topic,
                         Partition = partitionData.Index
                     };
+
+                    // A produce for a partition another broker leads is refused rather than
+                    // appended (#164). Without this a client whose cached metadata is stale
+                    // writes to the old leader and is told nothing, so the records exist
+                    // where nobody will ever read them. Kafka answers the same way, from the
+                    // equally local leaderLogIfLocal.
+                    //
+                    // Only when we positively KNOW someone else leads: a single-broker or
+                    // embedded runtime has no partition states at all, and must keep working.
+                    if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true)
+                    {
+                        partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                        {
+                            Index = partitionData.Index,
+                            ErrorCode = ErrorCode.NotLeaderForPartition,
+                            BaseOffset = -1,
+                            LogAppendTimeMs = -1
+                        });
+                        continue;
+                    }
 
                     // Durability admission, BEFORE the idempotence validation below — that call
                     // advances the producer's sequence, and advancing it for a batch we then refuse

@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- IPartitionLeadership (#164). Broker.Abstractions references only Core, so this
+         edge adds no cycle; the adapter over ClusterState belongs next to the state it
+         reads rather than in the hosts that wire it. -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker.Abstractions\Kuestenlogik.Surgewave.Broker.Abstractions.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <!-- #59 b5 ATOMIC FLIP: Protocol.Kafka reference REMOVED. Clustering is now wire-neutral;
          the Kafka codecs (ControllerClient/BrokerLifecycleManager) moved into Protocol.Kafka,

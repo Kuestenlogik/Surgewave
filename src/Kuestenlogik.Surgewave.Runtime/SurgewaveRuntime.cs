@@ -499,6 +499,17 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // after the request handlers.
         _dataApiHandler?.SetCommitGate(new ReplicaCommitGate(_clusterState, _replicaManager));
 
+        // #164 — the produce path refuses a partition another broker leads. Supplied here
+        // rather than in the constructor because clustering does not exist yet up there;
+        // a runtime without clustering never calls this, and its produce path is unchanged.
+        var partitionLeadership = new ClusterStatePartitionLeadership(_clusterState, clusteringConfig.BrokerId);
+        _dataApiHandler?.SetPartitionLeadership(partitionLeadership);
+
+        // The native path is this product's default and gets the same refusal — checking
+        // only the Kafka compatibility surface would protect the wrong one. It lives on
+        // SurgewaveBroker, which owns the native handler.
+        _broker?.SetPartitionLeadership(partitionLeadership);
+
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);
         _replicationServer.SetHeartbeatManager(_heartbeatManager);

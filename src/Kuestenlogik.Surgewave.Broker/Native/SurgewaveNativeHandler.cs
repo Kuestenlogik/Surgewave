@@ -37,6 +37,18 @@ public sealed class SurgewaveNativeHandler
     /// </summary>
     public NativeRequestDispatcher Dispatcher => _dispatcher;
 
+    private readonly NativeDataHandler? _dataHandler;
+
+    /// <summary>
+    /// Passes the leadership view to the data handler once clustering exists (#164).
+    /// </summary>
+    /// <remarks>
+    /// Null on the dispatcher-injecting constructor, which builds no handlers of its own —
+    /// a caller that supplies its own dispatcher owns what is in it.
+    /// </remarks>
+    public void SetPartitionLeadership(Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership? leadership)
+        => _dataHandler?.SetPartitionLeadership(leadership);
+
     public SurgewaveNativeHandler(
         LogManager logManager,
         RecordBatchSerializer recordBatchSerializer,
@@ -63,11 +75,13 @@ public sealed class SurgewaveNativeHandler
         _recordBatchSerializer = recordBatchSerializer;
 
         // Create handlers
+        _dataHandler = new NativeDataHandler(config, logManager, recordBatchSerializer, groupCoordinator,
+            logger as ILogger<NativeDataHandler> ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NativeDataHandler>.Instance,
+            dlqManager: dlqManager);
+
         var handlers = new List<INativeRequestHandler>
         {
-            new NativeDataHandler(config, logManager, recordBatchSerializer, groupCoordinator,
-                logger as ILogger<NativeDataHandler> ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NativeDataHandler>.Instance,
-                dlqManager: dlqManager),
+            _dataHandler,
             new NativeMetadataHandler(logManager),
             new NativeTopicHandler(logManager),
             new NativeConsumerGroupHandler(groupCoordinator, lagCalculator),

@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
@@ -33,6 +34,15 @@ public sealed class NativeDataHandler : INativeRequestHandler
         SurgewaveOpCode.FetchOffset,
         SurgewaveOpCode.Nack
     ];
+
+    private IPartitionLeadership? _partitionLeadership;
+
+    /// <summary>
+    /// Supplies the leadership view once clustering exists (#164). Unset — single broker,
+    /// embedded — leaves the produce path exactly as it was.
+    /// </summary>
+    public void SetPartitionLeadership(IPartitionLeadership? leadership)
+        => _partitionLeadership = leadership;
 
     public NativeDataHandler(
         BrokerConfig config,
@@ -126,6 +136,17 @@ public sealed class NativeDataHandler : INativeRequestHandler
         }
 
         var topicPartition = new TopicPartition { Topic = topic, Partition = partition };
+
+        // Refused rather than appended when another broker leads it (#164), and before any
+        // work: a batch we are going to refuse should not be serialised first. The native
+        // path is this product's default, so leaving it unchecked while the Kafka path
+        // refuses would protect the compatibility surface and not our own.
+        if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true)
+        {
+            await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.ProduceAck,
+                SurgewaveErrorCode.NotLeader, ReadOnlyMemory<byte>.Empty, cancellationToken);
+            return;
+        }
         var log = _logManager.GetOrCreateLog(topicPartition);
 
         // Re-obtain span after potential await (spans can't be held across await boundaries)
@@ -257,6 +278,14 @@ public sealed class NativeDataHandler : INativeRequestHandler
                     }
 
                     var topicPartition = new TopicPartition { Topic = topicBatch.Topic, Partition = partitionBatch.Partition };
+
+                    // Same refusal as the single-message path (#164). A batched produce
+                    // carries several partitions, so this skips the ones we do not lead
+                    // rather than failing the whole request — GetOrCreateLog below would
+                    // otherwise MATERIALISE a log for a partition led elsewhere.
+                    if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true)
+                        continue;
+
                     var log = _logManager.GetOrCreateLog(topicPartition);
 
                     // Use pooled list to reduce GC pressure
