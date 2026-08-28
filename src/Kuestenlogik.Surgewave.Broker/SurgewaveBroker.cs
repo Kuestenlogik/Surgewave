@@ -50,6 +50,12 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
 
     // Surgewave native protocol handler
     private readonly SurgewaveNativeHandler _nativeHandler;
+
+    /// <summary>
+    /// Passes the leadership view to the native data path once clustering exists (#164).
+    /// </summary>
+    public void SetPartitionLeadership(Abstractions.Routing.IPartitionLeadership? leadership)
+        => _nativeHandler.SetPartitionLeadership(leadership);
     private readonly ILoggerFactory _nativeLoggerFactory;
     private readonly ConnectorRepositoryManager _connectorRepositoryManager;
 
