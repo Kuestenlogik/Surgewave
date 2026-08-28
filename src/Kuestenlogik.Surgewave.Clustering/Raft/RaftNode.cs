@@ -14,6 +14,7 @@ public sealed partial class RaftNode : IAsyncDisposable
     private readonly RaftPersistence _persistence;
     private readonly IRaftTransport _transport;
     private readonly IRaftStateMachine _stateMachine;
+    private readonly IRaftVoterSet _voterSet;
     private readonly object _lock = new();
     private readonly Random _random = new();
 
@@ -81,7 +82,7 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<int> GetPeerIds()
     {
-        return _transport.GetPeerIds();
+        return PeerIds;
     }
 
     /// <summary>
@@ -94,12 +95,11 @@ public sealed partial class RaftNode : IAsyncDisposable
             if (_state != RaftState.Leader)
                 return false;
 
-            var peers = _transport.GetPeerIds();
+            var peers = PeerIds;
             if (peers.Count == 0)
                 return true; // Single node cluster
 
-            var clusterSize = peers.Count + 1; // Include self
-            var majority = (clusterSize / 2) + 1;
+            var majority = _voterSet.Majority;
             var isolationTimeout = TimeSpan.FromMilliseconds(_config.RaftIsolationTimeoutMs);
             var now = DateTimeOffset.UtcNow;
 
@@ -119,13 +119,19 @@ public sealed partial class RaftNode : IAsyncDisposable
         ClusteringConfig config,
         RaftPersistence persistence,
         IRaftTransport transport,
-        IRaftStateMachine stateMachine)
+        IRaftStateMachine stateMachine,
+        IRaftVoterSet? voterSet = null)
     {
         _logger = logger;
         _config = config;
         _persistence = persistence;
         _transport = transport;
         _stateMachine = stateMachine;
+
+        // Who votes is a membership question, not a transport one (#166). Defaults to the
+        // set Surgewave has today — every broker the transport knows — so this changes
+        // nothing until an explicit controller quorum supplies a different one.
+        _voterSet = voterSet ?? new TransportDerivedVoterSet(transport, config.BrokerId);
 
         ResetElectionTimeout();
     }
@@ -488,9 +494,8 @@ public sealed partial class RaftNode : IAsyncDisposable
         // would get enough votes. This prevents a partitioned node from
         // repeatedly incrementing its term and disrupting the cluster.
 
-        var peers = _transport.GetPeerIds();
-        var clusterSize = peers.Count + 1; // peers + self
-        var majority = (clusterSize / 2) + 1;
+        var peers = PeerIds;
+        var majority = _voterSet.Majority;
         var proposedTerm = _currentTerm + 1;
 
         // Split-brain prevention: Don't start election when peers are expected but not yet discovered.
@@ -664,7 +669,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         if (_config.RaftPeerDiscoveryTimeoutSeconds <= 0)
             return;
 
-        var peers = _transport.GetPeerIds();
+        var peers = PeerIds;
         if (peers.Count == 0)
         {
             LogWaitingForPeerDiscoveryStart();
@@ -675,8 +680,9 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
         {
-            // Refresh peer list in case new brokers were registered
-            peers = _transport.GetPeerIds();
+            // Refresh in case new brokers were registered — the voter set is queried, not
+            // snapshotted, precisely so this keeps working.
+            peers = PeerIds;
 
             // Try to reach at least one peer
             foreach (var peerId in peers)
@@ -714,7 +720,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         _nextIndex.Clear();
         _matchIndex.Clear();
 
-        foreach (var peerId in _transport.GetPeerIds())
+        foreach (var peerId in PeerIds)
         {
             _nextIndex[peerId] = LastLogIndex + 1;
             _matchIndex[peerId] = 0;
@@ -851,7 +857,7 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     private async Task SendHeartbeatsAsync(CancellationToken ct)
     {
-        var peers = _transport.GetPeerIds();
+        var peers = PeerIds;
         var tasks = peers.Select(peerId => SendAppendEntriesAsync(peerId, ct));
         await Task.WhenAll(tasks);
 
@@ -976,6 +982,25 @@ public sealed partial class RaftNode : IAsyncDisposable
             return lastLogTerm > myLastTerm;
 
         return lastLogIndex >= myLastIndex;
+    }
+
+    /// <summary>
+    /// The voters other than this node — who to send to, and what to count acknowledgements
+    /// from. Derived from the voter set rather than the transport, so membership has one
+    /// source (#166).
+    /// </summary>
+    private IReadOnlyList<int> PeerIds
+    {
+        get
+        {
+            var voters = _voterSet.VoterIds;
+            var peers = new List<int>(voters.Count);
+            foreach (var id in voters)
+            {
+                if (id != _config.BrokerId) peers.Add(id);
+            }
+            return peers;
+        }
     }
 
     private void ResetElectionTimeout()
