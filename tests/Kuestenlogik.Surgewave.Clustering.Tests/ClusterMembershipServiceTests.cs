@@ -12,13 +12,24 @@ namespace Kuestenlogik.Surgewave.Clustering.Tests;
 /// </summary>
 public class ClusterMembershipServiceTests
 {
-    private static (ClusterMembershipService Service, ClusterState State) NewService()
+    // xunit builds one instance per test, so a clock on the instance is not shared.
+    private readonly TestClock _clock = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+    private (ClusterMembershipService Service, ClusterState State) NewService()
     {
         var config = new ClusteringConfig { BrokerId = 0 };
         var state = new ClusterState();
         var idManager = new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance);
-        var service = new ClusterMembershipService(idManager, state, NullLogger<ClusterMembershipService>.Instance);
+        var service = new ClusterMembershipService(
+            idManager, state, NullLogger<ClusterMembershipService>.Instance, timeProvider: _clock);
         return (service, state);
+    }
+
+    /// <summary>Moves the clock forward, then sweeps — the shape every expiry test wants.</summary>
+    private IReadOnlyList<int> ExpireAfter(ClusterMembershipService service, TimeSpan elapsed, TimeSpan timeout)
+    {
+        _clock.Advance(elapsed);
+        return service.ExpireStaleSessions(timeout);
     }
 
     // ClusterId "" short-circuits ValidateClusterId to true, keeping tests hermetic (no cluster.id file).
@@ -38,14 +49,15 @@ public class ClusterMembershipServiceTests
             PreviousBrokerEpoch: -1);
     }
 
-    private static ClusterMembershipService NewRaftModeService(ClusterState state)
+    private ClusterMembershipService NewRaftModeService(ClusterState state)
     {
         var config = new ClusteringConfig { BrokerId = 0 };
         return new ClusterMembershipService(
             new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance),
             state,
             NullLogger<ClusterMembershipService>.Instance,
-            epochsAreMetadataIndices: true);
+            epochsAreMetadataIndices: true,
+            timeProvider: _clock);
     }
 
     [Fact]
@@ -146,6 +158,125 @@ public class ClusterMembershipServiceTests
         Assert.False(heartbeat.IsFenced);
     }
 
+    private (ClusterMembershipService Service, TestClock Clock) NewServiceWithDwell(
+        ClusterState state, TimeSpan dwell)
+    {
+        var config = new ClusteringConfig { BrokerId = 0 };
+        var service = new ClusterMembershipService(
+            new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance),
+            state, NullLogger<ClusterMembershipService>.Instance,
+            minFencedDwell: dwell, timeProvider: _clock);
+        return (service, _clock);
+    }
+
+    /// <summary>
+    /// A clock the test moves by hand. TimeProvider is the BCL abstraction for exactly this,
+    /// so the service takes one; only the fake is local, since the repository does not
+    /// reference Microsoft.Extensions.TimeProvider.Testing (the broker tests hand-rolled
+    /// their own for the same reason).
+    /// </summary>
+    private sealed class TestClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
+    }
+
+    [Fact]
+    public void TheStartupFenceIsNotHeldBackByTheDwell()
+    {
+        // The dwell exists against flapping, not against joining. Applying it to the fence
+        // a fresh registration starts with would add it to every broker's startup — which
+        // is what an earlier version of this did, and what these tests caught.
+        var (service, _) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
+        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+
+        var first = service.Heartbeat(Beat(1, epoch));
+
+        Assert.False(first.IsFenced);
+    }
+
+    [Fact]
+    public void AFencedBrokerIsNotUnfencedBeforeTheDwellHasPassed()
+    {
+        // #161: a fenced broker is left out of metadata pushes, so every crossing of the
+        // fence line costs a push to every peer. Without a floor, a broker on a marginal
+        // link expires, gets fenced, heartbeats once, unfences, and repeats.
+        var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
+        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        service.Heartbeat(Beat(1, epoch));
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        service.ExpireStaleSessions(TimeSpan.FromSeconds(20));
+        Assert.True(service.IsKnownFenced(1));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var tooSoon = service.Heartbeat(Beat(1, epoch));
+
+        Assert.True(tooSoon.IsFenced);
+        Assert.True(service.IsKnownFenced(1));
+    }
+
+    [Fact]
+    public void AfterTheDwellAGoodHeartbeatUnfences()
+    {
+        var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
+        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        service.Heartbeat(Beat(1, epoch));
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        service.ExpireStaleSessions(TimeSpan.FromSeconds(20));
+
+        clock.Advance(TimeSpan.FromSeconds(7));
+        var afterDwell = service.Heartbeat(Beat(1, epoch));
+
+        Assert.False(afterDwell.IsFenced);
+        Assert.False(service.IsKnownFenced(1));
+    }
+
+    [Fact]
+    public void WithoutADwellTheOldBehaviourIsUnchanged()
+    {
+        // The default is no dwell, so nothing that does not configure one changes — which is
+        // what keeps every other test in this file meaning what it did.
+        var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.Zero);
+        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        service.Heartbeat(Beat(1, epoch));
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        service.ExpireStaleSessions(TimeSpan.FromSeconds(20));
+
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.False(service.Heartbeat(Beat(1, epoch)).IsFenced);
+    }
+
+    [Fact]
+    public void AReconnectDuringTheDwellDoesNotRestartIt()
+    {
+        // BrokerLifecycleLoop re-registers after any transient heartbeat failure, with a
+        // stable incarnation id. If that reset the dwell clock, a flapping broker would
+        // reset its way out of the very rule meant to catch it.
+        var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
+        var incarnation = Guid.NewGuid();
+        var epoch = service.Register(Registration(1, incarnation)).BrokerEpoch;
+        service.Heartbeat(Beat(1, epoch));
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        service.ExpireStaleSessions(TimeSpan.FromSeconds(20));
+
+        clock.Advance(TimeSpan.FromSeconds(3));
+        service.Register(Registration(1, incarnation));   // same incarnation, mid-dwell
+
+        clock.Advance(TimeSpan.FromSeconds(4));           // 7 s total since fencing
+        Assert.False(service.Heartbeat(Beat(1, epoch)).IsFenced);
+    }
+
+    private static BrokerHeartbeatInput Beat(int brokerId, long epoch) => new(
+        BrokerId: brokerId, BrokerEpoch: epoch, CurrentMetadataOffset: 0,
+        WantFence: false, WantShutDown: false);
+
     [Fact]
     public void ExpireStaleSessions_FencesABrokerThatWentSilent()
     {
@@ -156,7 +287,7 @@ public class ClusterMembershipServiceTests
         RegisterAndUnfence(service, 1, Guid.NewGuid());
 
         // The clock is a parameter precisely so this is an assertion rather than a wait.
-        var expired = service.ExpireStaleSessions(DateTime.UtcNow.AddMinutes(5), TimeSpan.FromSeconds(20));
+        var expired = ExpireAfter(service, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(20));
 
         Assert.Equal([1], expired);
         Assert.True(service.IsKnownFenced(1));
@@ -168,7 +299,7 @@ public class ClusterMembershipServiceTests
         var (service, _) = NewService();
         RegisterAndUnfence(service, 1, Guid.NewGuid());
 
-        var expired = service.ExpireStaleSessions(DateTime.UtcNow.AddSeconds(5), TimeSpan.FromSeconds(20));
+        var expired = ExpireAfter(service, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20));
 
         Assert.Empty(expired);
         Assert.False(service.IsKnownFenced(1));
@@ -187,7 +318,7 @@ public class ClusterMembershipServiceTests
         service.Heartbeat(new BrokerHeartbeatInput(
             BrokerId: 1, BrokerEpoch: epoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
 
-        Assert.Empty(service.ExpireStaleSessions(DateTime.UtcNow.AddSeconds(5), TimeSpan.FromSeconds(20)));
+        Assert.Empty(ExpireAfter(service, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20)));
     }
 
     [Fact]
