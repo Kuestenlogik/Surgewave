@@ -14,15 +14,23 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
     private readonly ILogger<MetadataStateMachine> _logger;
     private readonly ClusterState _clusterState;
     private readonly ClusterMembershipService _membership;
+    private readonly Replication.ReplicationTransitionQueue? _transitions;
 
+    /// <param name="transitions">
+    /// Carries out the replication transitions a committed entry implies (#165). Null in
+    /// tests and wherever the log is applied without a replica manager; the apply then does
+    /// what it always did — update cluster state — and the broker acts on controller pushes.
+    /// </param>
     public MetadataStateMachine(
         ILogger<MetadataStateMachine> logger,
         ClusterState clusterState,
-        ClusterMembershipService membership)
+        ClusterMembershipService membership,
+        Replication.ReplicationTransitionQueue? transitions = null)
     {
         _logger = logger;
         _clusterState = clusterState;
         _membership = membership;
+        _transitions = transitions;
     }
 
     public void Apply(RaftLogEntry entry)
@@ -220,6 +228,17 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
 
         var tp = new TopicPartition { Topic = cmd.Topic, Partition = cmd.Partition };
         _clusterState.ElectLeader(tp, cmd.NewLeader);
+
+        // The half the log apply was missing (#165). Knowing who leads the partition is not
+        // the same as acting on it: without this the state is correct on every broker and
+        // no follower starts fetching from the new leader, and no new leader takes over.
+        // The controller push does both; this is the other one.
+        //
+        // Replicas come from cluster state rather than the command, because LeaderChanged
+        // carries only the new leader — the assignment was committed separately.
+        var replicas = _clusterState.GetPartitionState(tp)?.Replicas ?? [];
+        _transitions?.EnqueueLeadershipChange(tp, cmd.NewLeader, cmd.LeaderEpoch, replicas);
+
         LogLeaderChanged(cmd.Topic, cmd.Partition, cmd.NewLeader, cmd.LeaderEpoch);
     }
 

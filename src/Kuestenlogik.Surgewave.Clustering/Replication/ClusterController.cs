@@ -781,7 +781,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             // returns only after the surviving brokers have updated their
             // local _clusterState — otherwise a Metadata request landing on
             // a follower right after reelection still sees the stale leader.
-            if (_controllerClient != null)
+            if (_controllerClient != null && ShouldPushPartitionState)
             {
                 var partitionState = _clusterState.GetPartitionState(tp);
                 if (partitionState != null)
@@ -844,6 +844,26 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// typo from committing an entry that does nothing while reporting success.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Whether the controller still has to push partition state to the brokers (#165).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// In Raft mode it does not: the decision is a committed log entry that every broker
+    /// applies, and the apply now drives the replication transition as well as the state
+    /// write. Pushing on top would deliver the same change twice, by the weaker of the two
+    /// mechanisms — an unordered RPC that can be lost, against an ordered log that cannot.
+    /// </para>
+    /// <para>
+    /// This trades a synchronous guarantee for an eventual one, deliberately. ElectLeaderAsync
+    /// used to return only once the affected brokers had acked, so metadata served anywhere
+    /// was current; now a broker converges when it applies the entry. That is what the log
+    /// model means, and #164 is what makes it safe: a client landing on a broker that has not
+    /// caught up is refused rather than silently served.
+    /// </para>
+    /// </remarks>
+    private bool ShouldPushPartitionState => !_config.UseRaftConsensus;
+
     public async Task<BrokerRemovalOutcome> RemoveBrokerViaRaftAsync(int brokerId, CancellationToken ct)
     {
         if (_raftNode == null || !_raftNode.IsLeader)
@@ -1040,7 +1060,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // request landing on a follower right after reelection still sees
         // the stale leader and the producer times out before the next
         // refresh cycle picks up the change.
-        if (_controllerClient != null)
+        if (_controllerClient != null && ShouldPushPartitionState)
         {
             var updatedState = _clusterState.GetPartitionState(tp);
             if (updatedState != null)
@@ -1101,7 +1121,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // Re-broadcast LeaderAndIsr so all replicas (incl. the reporting leader)
         // and the controller's own metadata view converge.
         var updated = _clusterState.GetPartitionState(tp);
-        if (_controllerClient != null && updated != null)
+        if (_controllerClient != null && updated != null && ShouldPushPartitionState)
         {
             await _controllerClient.SendLeaderAndIsrAsync([(tp, updated)], ct).ConfigureAwait(false);
         }
