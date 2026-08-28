@@ -85,6 +85,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop? _lifecycleLoop;
     private Task? _clusterTask;
     private BrokerSessionSweeper? _sessionSweeper;
+    private ReplicationTransitionQueue? _replicationTransitions;
 
     // Raft components (only initialized when UseRaftConsensus = true)
     private RaftNode? _raftNode;
@@ -614,7 +615,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
             _raftPersistence = new RaftPersistence(raftPersistenceLogger, clusteringConfig);
             _raftTransport = new RaftTransport(raftTransportLogger, _clusterState, clusteringConfig, peerTransport);
-            _metadataStateMachine = new MetadataStateMachine(metadataStateMachineLogger, _clusterState, membershipService);
+            // #165 — the log apply has to act, not only record: a committed leadership change
+            // must reach BecomeLeader/BecomeFollower on this broker, exactly as a controller
+            // push does. Queued rather than awaited, because Apply runs in the Raft apply
+            // loop and a follower's transition must not block consensus.
+            _replicationTransitions = new ReplicationTransitionQueue(
+                _replicaManager, clusteringConfig.BrokerId,
+                _loggerFactory.CreateLogger<ReplicationTransitionQueue>());
+
+            _metadataStateMachine = new MetadataStateMachine(
+                metadataStateMachineLogger, _clusterState, membershipService, _replicationTransitions);
 
             _raftNode = new RaftNode(
                 raftNodeLogger,
@@ -819,6 +829,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
         if (_sessionSweeper is not null)
             await _sessionSweeper.DisposeAsync();
+
+        if (_replicationTransitions is not null)
+            await _replicationTransitions.DisposeAsync();
 
         // #60 Inc6b — stop the lifecycle loop first so it no longer heartbeats over the pool.
         if (_lifecycleLoop != null)
