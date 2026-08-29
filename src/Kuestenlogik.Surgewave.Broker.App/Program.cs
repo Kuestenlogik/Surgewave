@@ -225,9 +225,9 @@ builder.Services.AddSingleton(sp =>
         RetentionHours = config.LogRetentionHours,
         RetentionBytes = config.LogRetentionBytes
     };
-    // When Raft is enabled, don't persist topics to file - Raft log is the source of truth
-    var persistTopicsToFile = !config.UseRaftConsensus;
-    return new LogManager(config.DataDirectory, segmentFactory, retentionPolicy: retentionPolicy, persistTopicsToFile: persistTopicsToFile);
+    // The metadata log is the source of truth for topics (#163 step 3), so nothing is
+    // persisted alongside it. A second store would be a second answer to the same question.
+    return new LogManager(config.DataDirectory, segmentFactory, retentionPolicy: retentionPolicy, persistTopicsToFile: false);
 });
 
 // Kestrel endpoint configuration from appsettings.json (Kestrel section)
@@ -483,7 +483,6 @@ builder.Services.AddSingleton(sp =>
         heartbeatIntervalMs: c.HeartbeatIntervalMs,
         heartbeatTimeoutMs: c.HeartbeatTimeoutMs,
         maxHeartbeatFailures: c.MaxHeartbeatFailures,
-        useRaftConsensus: c.UseRaftConsensus,
         raftDataDirectory: c.RaftDataDirectory,
         raftElectionTimeoutMinMs: c.RaftElectionTimeoutMinMs,
         raftElectionTimeoutMaxMs: c.RaftElectionTimeoutMaxMs,
@@ -811,9 +810,10 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetry
     return ingestor;
 });
 
-// Raft components in DI so the plugin's RaftApiHandler can resolve them (#59 b5). Gated on
-// UseRaftConsensus; the post-build init below resolves these SAME singletons to wire SetRaftNode.
-if (featuresConfig.UseRaftConsensus)
+// Raft components in DI so the plugin's RaftApiHandler can resolve them (#59 b5). The
+// post-build init below resolves these SAME singletons to wire SetRaftNode. Unconditional
+// since #163 step 3: the metadata log is the only model, so there is no configuration in
+// which a broker does without one.
 {
     builder.Services.AddSingleton(sp => new RaftPersistence(
         sp.GetRequiredService<ILogger<RaftPersistence>>(),
@@ -939,11 +939,10 @@ var lifecycleLoop = new BrokerLifecycleLoop(
     app.Services.GetRequiredService<ILogger<BrokerLifecycleLoop>>());
 #pragma warning restore CA2000
 
-// Initialize Raft consensus if enabled
-RaftNode? raftNode = null;
-RaftTransport? raftTransport = null;
-RaftPersistence? raftPersistence = null;
-if (config.UseRaftConsensus)
+// Initialize Raft consensus — every broker has a metadata log (#163 step 3).
+RaftNode raftNode;
+RaftTransport raftTransport;
+RaftPersistence raftPersistence;
 {
     logger.LogInformation("Initializing Raft consensus mode...");
 
@@ -1543,7 +1542,7 @@ if (config.BrokerDlq.Enabled)
 // once at startup. When Kafka is disabled the set is empty and the dispatcher stays null
 // (native-only; SurgewaveBroker rejects Kafka connections at the accept path).
 // NOTE: RaftApiHandler is appended here rather than DI-registered because raftNode/
-// raftPersistence are post-build locals (null unless UseRaftConsensus). InterBrokerApiHandler
+// raftPersistence are post-build locals. InterBrokerApiHandler
 // IS in the DI set, so the multi-broker control plane (LeaderAndIsr / AlterPartition) still
 // rides the Kafka wire today; native-only is single-broker until that path is native (#60).
 // #59 b5 ATOMIC FLIP: the Kafka dispatcher + wire loop live in the plugin's KafkaConnectionHandler
@@ -1729,7 +1728,6 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
             broker_id = config.BrokerId,
             topics_count = clusterState.Topics.Count,
             brokers_count = clusterState.Brokers.Count,
-            raft_enabled = config.UseRaftConsensus,
             raft_state = raftNode?.State.ToString(),
             raft_leader_id = raftNode?.LeaderId
         };

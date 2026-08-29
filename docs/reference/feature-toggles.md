@@ -41,7 +41,6 @@ Set via `appsettings.json`, environment variable (`Surgewave__X__Enabled=true`),
 | `Surgewave:Security:TlsEnabled` | `false` | TLS encryption for client connections. |
 | `Surgewave:Security:AclEnabled` | `false` | ACL-based authorization for topics, groups, and admin operations. |
 | `Surgewave:Security:OAuth2:Enabled` | `false` | OAuth2/OIDC JWT token validation. |
-| `Surgewave:UseRaftConsensus` | `false` | Raft-based controller election (replaces ISR-based leader election). |
 | `Surgewave:GeoReplicationEnabled` | `false` | Broker-native geo-replication via cluster linking. |
 | `Surgewave:ActiveReplicationEnabled` | `false` | Active-active multi-datacenter replication with conflict resolution. |
 | `Surgewave:AutoRebalanceEnabled` | **`true`** | Automatic partition rebalancing when imbalance exceeds threshold. |

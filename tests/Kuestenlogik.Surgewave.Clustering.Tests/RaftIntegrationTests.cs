@@ -767,7 +767,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster()
-            .WithRaft(true) // Enable Raft consensus
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -780,7 +779,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
-            .WithRaft(true)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -795,7 +793,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
-            .WithRaft(true)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -842,7 +839,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster()
-            .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -856,7 +852,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
-            .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -872,7 +867,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
-            .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -923,7 +917,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster()
-            .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -937,7 +930,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
-            .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -953,7 +945,6 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
-            .WithRaft(true)
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)

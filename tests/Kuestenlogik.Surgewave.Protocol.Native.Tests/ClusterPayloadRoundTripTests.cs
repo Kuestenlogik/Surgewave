@@ -125,7 +125,6 @@ public sealed class ClusterPayloadRoundTripTests
             IsController = true,
             ControllerId = 42,
             ControllerEpoch = 7,
-            UseRaftConsensus = true,
             IsRaftLeader = true,
             RaftTerm = 4,
             TopicCount = 128,
@@ -140,7 +139,6 @@ public sealed class ClusterPayloadRoundTripTests
         Assert.Equal("ctrl-host", parsed.Host);
         Assert.True(parsed.IsController);
         Assert.Equal(7, parsed.ControllerEpoch);
-        Assert.True(parsed.UseRaftConsensus);
         Assert.True(parsed.IsRaftLeader);
         Assert.Equal(4, parsed.RaftTerm);
         Assert.Equal(128, parsed.TopicCount);
@@ -160,7 +158,6 @@ public sealed class ClusterPayloadRoundTripTests
             IsController = false,
             ControllerId = 1,
             ControllerEpoch = 3,
-            UseRaftConsensus = false,
             IsRaftLeader = false,
             RaftTerm = 0,
             TopicCount = 0,
@@ -172,7 +169,6 @@ public sealed class ClusterPayloadRoundTripTests
             buf => { var r = new SurgewavePayloadReader(buf); return ClusterInfoPayload.Read(ref r); });
 
         Assert.False(parsed.IsController);
-        Assert.False(parsed.UseRaftConsensus);
         Assert.False(parsed.IsRaftLeader);
         Assert.Equal(0, parsed.RaftTerm);
     }

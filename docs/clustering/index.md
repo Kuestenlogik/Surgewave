@@ -37,8 +37,7 @@ flowchart LR
     "BrokerId": 1,
     "Host": "broker1",
     "Port": 9092,
-    "ClusterNodes": "broker1:9092,broker2:9092,broker3:9092",
-    "UseRaftConsensus": true
+    "ClusterNodes": "broker1:9092,broker2:9092,broker3:9092"
   }
 }
 ```
@@ -50,8 +49,7 @@ flowchart LR
     "BrokerId": 2,
     "Host": "broker2",
     "Port": 9092,
-    "ClusterNodes": "broker1:9092,broker2:9092,broker3:9092",
-    "UseRaftConsensus": true
+    "ClusterNodes": "broker1:9092,broker2:9092,broker3:9092"
   }
 }
 ```
@@ -63,8 +61,7 @@ flowchart LR
     "BrokerId": 3,
     "Host": "broker3",
     "Port": 9092,
-    "ClusterNodes": "broker1:9092,broker2:9092,broker3:9092",
-    "UseRaftConsensus": true
+    "ClusterNodes": "broker1:9092,broker2:9092,broker3:9092"
   }
 }
 ```
@@ -75,7 +72,6 @@ flowchart LR
 |---------|---------|-------------|
 | `ClusterNodes` | "" | Comma-separated broker endpoints |
 | `ClusterId` | "surgewave-cluster" | Cluster identifier |
-| `UseRaftConsensus` | false | Enable KRaft consensus |
 | `ReplicationPort` | 10092 | Replication traffic port |
 | `MinInSyncReplicas` | 1 | Minimum ISR for writes |
 

@@ -55,7 +55,6 @@ Section: `Surgewave`
 | `HeartbeatIntervalMs` | int | `3000` | Heartbeat interval |
 | `HeartbeatTimeoutMs` | int | `10000` | Heartbeat timeout |
 | `MaxHeartbeatFailures` | int | `3` | Failures before broker marked dead |
-| `UseRaftConsensus` | bool | `false` | Use Raft for controller election |
 | `ProcessRoles` | string | `broker,controller` | What this node does. Both is combined mode. |
 | `ControllerQuorumVoters` | string | *(empty)* | Nodes that vote on metadata, as `id@host:port`. Empty means every broker votes. |
 | `RaftDataDirectory` | string | `./data/raft` | Raft log directory |

@@ -48,8 +48,6 @@ spec:
           value: "$(POD_NAME).surgewave-headless"
         - name: Surgewave__ClusterNodes
           value: "surgewave-0.surgewave-headless:9092,surgewave-1.surgewave-headless:9092,surgewave-2.surgewave-headless:9092"
-        - name: Surgewave__UseRaftConsensus
-          value: "true"
         volumeMounts:
         - name: data
           mountPath: /data

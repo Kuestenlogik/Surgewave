@@ -8,6 +8,21 @@ before Highlights drops into specifics.>
 
 ## Highlights
 
+### Metadata is a replicated log, and only that (#163)
+
+The controller no longer pushes partition state to brokers. A leadership
+change, an ISR change and a topic creation are committed metadata-log
+entries that every broker applies, which is the model Kafka moved to when
+it removed `UpdateMetadataRequest` and ZooKeeper in 4.0. A broker now has
+a *position* in the metadata, so "is this broker up to date" has an
+answer; controller failover and broker recovery resume from that position
+instead of rebuilding the whole state.
+
+The cost is stated plainly: a push was one hop and waited for nobody, a
+commit waits for a majority. Metadata changes — leader elections, ISR
+changes — get slower; the data path is untouched. Recovery and failover
+get faster.
+
 ### The metadata quorum can be smaller than the cluster (#167, #168)
 
 Until now every broker voted on metadata, so a metadata write waited for a
@@ -34,12 +49,32 @@ every node keeps voting exactly as before.
 
 ## Breaking changes
 
-<Only when real. Each change has been on a back-compat ramp through the
-prior minor and is removed in this release.>
+### `UseRaftConsensus` is gone; there is no non-Raft mode (#163)
 
-### <Title of the breaking change> (#issue)
+Every broker runs on the metadata log. The setting, the
+`SurgewaveRuntimeBuilder.WithRaft()` method, and the `UseRaftConsensus`
+field of the native `ClusterInfo` payload have all been removed. Remove
+the setting from your configuration — it is now ignored, and it named a
+mode that no longer exists. A single broker and an embedded host run as a
+one-node quorum, which needs no configuration.
 
-<What changed on the wire / API / package surface, what to do to migrate.>
+### Topic metadata is not carried over from an upgrade (#163)
+
+Topics used to be persisted to `data/.metadata/topics.json` when Raft was
+off. The metadata log is now the only source of truth for them, and that
+file is no longer read. **A broker upgraded from an earlier version starts
+with no topics**; the partition segments stay on disk but nothing refers to
+them. Recreate the topics, or start from a clean data directory. There is
+deliberately no migration: Surgewave makes no compatibility promise before
+1.0.
+
+### The controller role is taken by election, not by convention (#163)
+
+The lowest-id broker no longer becomes controller synchronously at
+startup. Raft leadership is the controller role, so a freshly started
+broker is not the controller until an election completes — a matter of
+milliseconds, but no longer instantaneous. Code that assumed a broker was
+the controller immediately after `StartAsync` has to wait for it.
 
 ## Acknowledgements
 

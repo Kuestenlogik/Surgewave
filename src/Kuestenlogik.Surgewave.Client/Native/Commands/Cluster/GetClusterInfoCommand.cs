@@ -22,7 +22,6 @@ public sealed class GetClusterInfoCommand : NoRequestCommand<ClusterInfo>
             IsController = wirePayload.IsController,
             ControllerId = wirePayload.ControllerId,
             ControllerEpoch = wirePayload.ControllerEpoch,
-            UseRaftConsensus = wirePayload.UseRaftConsensus,
             IsRaftLeader = wirePayload.IsRaftLeader,
             RaftTerm = wirePayload.RaftTerm,
             TopicCount = wirePayload.TopicCount,

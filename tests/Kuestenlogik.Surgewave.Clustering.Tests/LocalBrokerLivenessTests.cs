@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Testing;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Core.Models;
@@ -67,7 +68,7 @@ public class LocalBrokerLivenessTests
         var heartbeats = new HeartbeatManager(NullLogger<HeartbeatManager>.Instance, state, config);
         controller.SetHeartbeatManager(heartbeats);
         await controller.StartAsync(CancellationToken.None);
-        Assert.True(controller.IsController, "the lowest live broker id should hold the role");
+        await BecomesControllerAsync(controller);
 
         Assert.True(await controller.ElectLeaderAsync(tp),
             "the election failed although a live replica exists — the local broker was skipped");
@@ -96,6 +97,7 @@ public class LocalBrokerLivenessTests
 
         controller.SetHeartbeatManager(heartbeats);
         await controller.StartAsync(CancellationToken.None);
+        await BecomesControllerAsync(controller);
 
         Assert.True(await controller.ElectLeaderAsync(tp));
         Assert.Equal(LocalBroker, state.GetPartitionState(tp)!.LeaderBrokerId);
@@ -143,27 +145,9 @@ public class LocalBrokerLivenessTests
         Assert.Equal(LocalBroker, state.GetPartitionState(tp)!.LeaderBrokerId);
     }
 
-    [Fact]
-    public async Task ControllerElection_StrayHealthRecordForOurOwnId_DoesNotDisqualifyUs()
-    {
-        // ProcessHeartbeat keys on whatever broker id the sender claims, so a misconfigured peer can
-        // plant a record under the local id. Our own liveness must not be lookup-dependent.
-        var config = NewConfig();
-        var (controller, state) = NewController(config);
-
-        state.AddBroker(NewBroker(LocalBroker));
-        state.AddBroker(NewBroker(Peer));
-
-        var heartbeats = new HeartbeatManager(NullLogger<HeartbeatManager>.Instance, state, config);
-        heartbeats.ProcessHeartbeat(new HeartbeatRequest(LocalBroker, 0, 0, LocalBroker, 0));
-        heartbeats.GetBrokerHealth(LocalBroker)!.MarkFailed();
-
-        controller.SetHeartbeatManager(heartbeats);
-        await controller.StartAsync(CancellationToken.None);
-
-        Assert.True(controller.IsController,
-            "a health record claiming we are dead took us out of our own election");
-    }
+    // ControllerElection_StrayHealthRecordForOurOwnId_DoesNotDisqualifyUs was removed with the
+    // lowest-id election it guarded (#163 step 3). Eligibility no longer consults health records
+    // at all: the controller role is Raft leadership, and a node's own vote is not a lookup.
 
     private static ClusteringConfig NewConfig() => new()
     {
@@ -193,6 +177,27 @@ public class LocalBrokerLivenessTests
             new Kuestenlogik.Surgewave.Transport.Tcp.TcpPeerTransport());
         var controller = new ClusterController(
             NullLogger<ClusterController>.Instance, state, replicaManager, config);
+
+        // The controller role IS Raft leadership since #163 step 3, so a controller without a
+        // metadata log is not a configuration that exists.
+        controller.SetRaftNode(TestRaftNode.ForSingleNode(config, state, TestRaftNode.NewMembership(config, state)));
         return (controller, state);
     }
+
+    /// <summary>
+    /// Waits for this broker to win the metadata-log election.
+    /// </summary>
+    /// <remarks>
+    /// Taking the controller role used to be synchronous — the lowest id simply claimed it — and
+    /// is now the outcome of a Raft election (#163 step 3). Asserting immediately after StartAsync
+    /// would be asserting that an election has already finished.
+    /// </remarks>
+    private static async Task BecomesControllerAsync(ClusterController controller)
+    {
+        var elected = await TestUtilities.WaitForCondition(
+            () => controller.IsController, TimeSpan.FromSeconds(30));
+
+        Assert.True(elected, "this broker never won the metadata-log election");
+    }
+
 }

@@ -11,7 +11,6 @@ public record ClusterInfo
     public bool IsController { get; init; }
     public int ControllerId { get; init; }
     public int ControllerEpoch { get; init; }
-    public bool UseRaftConsensus { get; init; }
     public bool IsRaftLeader { get; init; }
     public int RaftTerm { get; init; }
     public int TopicCount { get; init; }

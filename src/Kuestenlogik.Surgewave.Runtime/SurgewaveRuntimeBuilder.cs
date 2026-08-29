@@ -35,7 +35,6 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     private bool _enableCluster = false;
     private bool _enableKafka = true;
     private List<string> _clusterNodes = [];
-    private bool _useRaftConsensus = false;
     private int _raftElectionTimeoutMinMs = 150;
     private int _raftElectionTimeoutMaxMs = 300;
     private int _raftHeartbeatIntervalMs = 50;
@@ -267,15 +266,6 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
-    /// Enables or disables Raft consensus.
-    /// </summary>
-    public SurgewaveRuntimeBuilder WithRaft(bool enable = true)
-    {
-        _useRaftConsensus = enable;
-        return this;
-    }
-
-    /// <summary>
     /// Configures Raft election timeouts.
     /// </summary>
     public SurgewaveRuntimeBuilder WithRaftElectionTimeout(int minMs, int maxMs)
@@ -428,7 +418,6 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         _retentionHours = config.LogRetentionHours;
         _retentionBytes = config.LogRetentionBytes;
         _enableCluster = !string.IsNullOrEmpty(config.ClusterNodes);
-        _useRaftConsensus = config.UseRaftConsensus;
         _enableSasl = config.Security.SaslEnabled;
         _enableTls = config.Security.TlsEnabled;
         _enableAcl = config.Security.AclEnabled;
@@ -458,7 +447,6 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         EnableCluster = _enableCluster,
         EnableKafka = _enableKafka,
         ClusterNodes = _clusterNodes,
-        UseRaftConsensus = _useRaftConsensus,
         RaftElectionTimeoutMinMs = _raftElectionTimeoutMinMs,
         RaftElectionTimeoutMaxMs = _raftElectionTimeoutMaxMs,
         RaftHeartbeatIntervalMs = _raftHeartbeatIntervalMs,
