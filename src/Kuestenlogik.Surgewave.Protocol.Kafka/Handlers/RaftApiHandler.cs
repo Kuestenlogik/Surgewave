@@ -448,28 +448,39 @@ public sealed partial class RaftApiHandler : IKafkaRequestHandler
                 var observers = new List<DescribeQuorumResponse.ReplicaState>();
                 var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                // Add self as a voter
-                currentVoters.Add(new DescribeQuorumResponse.ReplicaState
+                // This node goes into whichever list it belongs to. In combined mode that is
+                // always the voters; with a controller quorum a plain broker is an observer
+                // and reporting it as a voter would overstate how many nodes must agree
+                // (#167).
+                (_raftNode!.IsVoterNode ? currentVoters : observers).Add(new DescribeQuorumResponse.ReplicaState
                 {
                     ReplicaId = _config.BrokerId,
-                    LogEndOffset = _raftNode!.LastLogIndex,
+                    LogEndOffset = _raftNode.LastLogIndex,
                     LastFetchTimestamp = now,
                     LastCaughtUpTimestamp = now
                 });
 
-                // Add other known brokers as voters
+                // The Raft node is the authority on who votes — cluster state only knows who
+                // exists, and those stopped being the same question once observers existed.
+                var voterIds = _raftNode.GetPeerIds();
+
                 foreach (var broker in _clusterState.Brokers.Values)
                 {
-                    if (broker.BrokerId != _config.BrokerId)
+                    if (broker.BrokerId == _config.BrokerId)
+                        continue;
+
+                    var state = new DescribeQuorumResponse.ReplicaState
                     {
-                        currentVoters.Add(new DescribeQuorumResponse.ReplicaState
-                        {
-                            ReplicaId = broker.BrokerId,
-                            LogEndOffset = _raftNode.GetPeerMatchIndex(broker.BrokerId),
-                            LastFetchTimestamp = _raftNode.GetPeerLastContact(broker.BrokerId)?.ToUnixTimeMilliseconds() ?? -1,
-                            LastCaughtUpTimestamp = _raftNode.GetPeerLastContact(broker.BrokerId)?.ToUnixTimeMilliseconds() ?? -1
-                        });
-                    }
+                        ReplicaId = broker.BrokerId,
+                        LogEndOffset = _raftNode.GetPeerMatchIndex(broker.BrokerId),
+                        LastFetchTimestamp = _raftNode.GetPeerLastContact(broker.BrokerId)?.ToUnixTimeMilliseconds() ?? -1,
+                        LastCaughtUpTimestamp = _raftNode.GetPeerLastContact(broker.BrokerId)?.ToUnixTimeMilliseconds() ?? -1
+                    };
+
+                    if (voterIds.Contains(broker.BrokerId))
+                        currentVoters.Add(state);
+                    else
+                        observers.Add(state);
                 }
 
                 partitions.Add(new DescribeQuorumResponse.PartitionData

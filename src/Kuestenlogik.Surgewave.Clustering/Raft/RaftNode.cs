@@ -86,6 +86,16 @@ public sealed partial class RaftNode : IAsyncDisposable
     }
 
     /// <summary>
+    /// Whether this node votes, or only follows the log (#167).
+    /// </summary>
+    /// <remarks>
+    /// Read by <c>DescribeQuorum</c>, which has to put this node in the right list: reporting
+    /// an observer among the voters overstates how many nodes must agree, and that number is
+    /// what the API exists to answer.
+    /// </remarks>
+    public bool IsVoterNode => IsVoter;
+
+    /// <summary>
     /// Returns true if the leader has contact with a majority of peers within the isolation timeout.
     /// </summary>
     public bool HasQuorumConnectivity
@@ -199,6 +209,16 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         lock (_lock)
         {
+            // An observer is not part of the quorum, so its answer must not be counted
+            // towards one (#167). A candidate does not ask it; refusing is the guard for a
+            // stale voter list on the other side, where granting would let a minority of
+            // real voters plus observers elect a leader.
+            if (!IsVoter)
+            {
+                response = new PreVoteResponse(_currentTerm, false);
+                return Task.FromResult(response);
+            }
+
             // If proposed term is less than our current term, reject
             if (request.ProposedTerm < _currentTerm)
             {
@@ -261,7 +281,12 @@ public sealed partial class RaftNode : IAsyncDisposable
             // Grant vote if:
             // 1. We haven't voted for anyone else in this term
             // 2. Candidate's log is at least as up-to-date as ours
-            var canVote = (_votedFor == null || _votedFor == request.CandidateId) &&
+            // 3. We are a voter — an observer is outside the quorum, so counting its answer
+            //    would let a minority of real voters elect a leader (#167). The term above is
+            //    still adopted: an observer that has seen a newer term must not keep serving
+            //    the old one, it simply does not get a say in who wins it.
+            var canVote = IsVoter &&
+                          (_votedFor == null || _votedFor == request.CandidateId) &&
                           IsLogUpToDate(request.LastLogIndex, request.LastLogTerm);
 
             if (canVote)
@@ -466,6 +491,12 @@ public sealed partial class RaftNode : IAsyncDisposable
                     continue;
 
                 if (_state == RaftState.Leader)
+                    continue;
+
+                // An observer has no vote, so it cannot win and its campaign would only
+                // disrupt a healthy term (#167). It stays a follower for as long as it is
+                // outside the quorum.
+                if (!IsVoter)
                     continue;
 
                 var elapsed = (DateTimeOffset.UtcNow - _lastHeartbeat).TotalMilliseconds;
@@ -726,6 +757,15 @@ public sealed partial class RaftNode : IAsyncDisposable
             _matchIndex[peerId] = 0;
         }
 
+        // Observers are replicated to on the same terms as voters — they just do not count
+        // (#167). Without this they would have no nextIndex and SendAppendEntriesAsync would
+        // skip them, which is a broker with no metadata log at all.
+        foreach (var observerId in ObserverIds)
+        {
+            _nextIndex[observerId] = LastLogIndex + 1;
+            _matchIndex[observerId] = 0;
+        }
+
         LogBecameLeader(_currentTerm);
 
         // Start heartbeat loop
@@ -858,7 +898,15 @@ public sealed partial class RaftNode : IAsyncDisposable
     private async Task SendHeartbeatsAsync(CancellationToken ct)
     {
         var peers = PeerIds;
-        var tasks = peers.Select(peerId => SendAppendEntriesAsync(peerId, ct));
+        var observers = ObserverIds;
+
+        // A node that joined mid-term has no replication state yet, because BecomeLeader ran
+        // before it existed. Seeding it here rather than skipping it is what lets a broker
+        // start into a running cluster and receive the log (#167).
+        EnsureReplicationState(peers);
+        EnsureReplicationState(observers);
+
+        var tasks = peers.Concat(observers).Select(peerId => SendAppendEntriesAsync(peerId, ct));
         await Task.WhenAll(tasks);
 
         // Update commit index based on match indices
@@ -867,8 +915,18 @@ public sealed partial class RaftNode : IAsyncDisposable
             if (_state != RaftState.Leader)
                 return;
 
-            // Find the highest index replicated on a majority
-            var matchIndices = _matchIndex.Values.Append(LastLogIndex).OrderDescending().ToList();
+            // Find the highest index replicated on a majority — of the VOTERS (#167).
+            // Counting observers here would let their acknowledgements stand in for a
+            // quorum: three observers behind two voters would commit an entry that only one
+            // voter holds, and losing that voter loses committed metadata.
+            var matchIndices = new List<long>(peers.Count + 1) { LastLogIndex };
+            foreach (var voterId in peers)
+            {
+                matchIndices.Add(_matchIndex.TryGetValue(voterId, out var match) ? match : 0);
+            }
+
+            matchIndices.Sort();
+            matchIndices.Reverse();
             var majorityIndex = matchIndices.Count / 2;
             var newCommitIndex = matchIndices[majorityIndex];
 
@@ -881,6 +939,35 @@ public sealed partial class RaftNode : IAsyncDisposable
                     LogCommitIndexAdvanced(_commitIndex);
                     ApplyCommittedEntries();
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives nodes that appeared after this leader took office the replication state
+    /// <see cref="SendAppendEntriesAsync"/> needs (#167).
+    /// </summary>
+    private void EnsureReplicationState(IReadOnlyList<int> nodeIds)
+    {
+        // The common case is that everything is already seeded, so this walks the list first
+        // and takes the lock only when a node is actually missing. The lock is for
+        // LastLogIndex, which reads the log; the index dictionaries are concurrent.
+        var missing = false;
+        foreach (var nodeId in nodeIds)
+        {
+            if (!_nextIndex.ContainsKey(nodeId)) { missing = true; break; }
+        }
+
+        if (!missing)
+            return;
+
+        lock (_lock)
+        {
+            var nextIndex = LastLogIndex + 1;
+            foreach (var nodeId in nodeIds)
+            {
+                _nextIndex.TryAdd(nodeId, nextIndex);
+                _matchIndex.TryAdd(nodeId, 0);
             }
         }
     }
@@ -1000,6 +1087,49 @@ public sealed partial class RaftNode : IAsyncDisposable
                 if (id != _config.BrokerId) peers.Add(id);
             }
             return peers;
+        }
+    }
+
+    /// <summary>
+    /// Whether this node decides, or only follows along (#167).
+    /// </summary>
+    /// <remarks>
+    /// False makes this node an observer: it receives and applies the metadata log, but never
+    /// campaigns, never votes, and never counts towards a commit. With the transport-derived
+    /// voter set this is always true — that set contains this node by construction — so an
+    /// observer exists only where a quorum was stated explicitly and left this node out.
+    /// </remarks>
+    private bool IsVoter => _voterSet.VoterIds.Contains(_config.BrokerId);
+
+    /// <summary>
+    /// The nodes that receive the log without deciding it (#167).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything the transport can reach that the voter set does not name. The two questions
+    /// are deliberately answered by different sources: the voter set states who decides, the
+    /// transport reports who exists, and an observer is exactly the difference.
+    /// </para>
+    /// <para>
+    /// Empty in combined mode, where every node is a voter — which is why this costs nothing
+    /// for a single broker or an embedded host.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<int> ObserverIds
+    {
+        get
+        {
+            var voters = _voterSet.VoterIds;
+            var known = _transport.GetPeerIds();
+
+            List<int>? observers = null;
+            foreach (var id in known)
+            {
+                if (id == _config.BrokerId || voters.Contains(id)) continue;
+                (observers ??= []).Add(id);
+            }
+
+            return observers ?? (IReadOnlyList<int>)[];
         }
     }
 
