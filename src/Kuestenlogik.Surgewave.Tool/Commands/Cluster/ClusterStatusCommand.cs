@@ -69,7 +69,6 @@ public class ClusterStatusCommand : CommandBase
                     },
                     Raft = new
                     {
-                        Enabled = clusterInfo.UseRaftConsensus,
                         IsLeader = clusterInfo.IsRaftLeader,
                         Term = clusterInfo.RaftTerm
                     },
@@ -84,7 +83,7 @@ public class ClusterStatusCommand : CommandBase
                 Console.WriteLine($"connected\t{clusterInfo.Host}:{clusterInfo.Port}");
                 Console.WriteLine($"broker\t{clusterInfo.BrokerId}\t{(clusterInfo.IsController ? "controller" : "follower")}");
                 Console.WriteLine($"controller\t{clusterInfo.ControllerId}\tepoch={clusterInfo.ControllerEpoch}");
-                Console.WriteLine($"raft\t{(clusterInfo.UseRaftConsensus ? "enabled" : "disabled")}\tleader={(clusterInfo.IsRaftLeader ? "yes" : "no")}\tterm={clusterInfo.RaftTerm}");
+                Console.WriteLine($"raft\tleader={(clusterInfo.IsRaftLeader ? "yes" : "no")}\tterm={clusterInfo.RaftTerm}");
                 Console.WriteLine($"topics\t{clusterInfo.TopicCount}\tpartitions={clusterInfo.TotalPartitions}");
                 foreach (var topic in topics.OrderBy(t => t.Name))
                     Console.WriteLine($"topic\t{topic.Name}\t{topic.PartitionCount}");
@@ -104,16 +103,8 @@ public class ClusterStatusCommand : CommandBase
                 grid.AddRow("[bold]Controller ID:[/]", clusterInfo.ControllerId.ToString());
                 grid.AddRow("[bold]Controller Epoch:[/]", clusterInfo.ControllerEpoch.ToString());
 
-                if (clusterInfo.UseRaftConsensus)
-                {
-                    grid.AddRow("[bold]Raft Consensus:[/]", "[green]Enabled[/]");
-                    grid.AddRow("[bold]Raft Leader:[/]", clusterInfo.IsRaftLeader ? "[green]Yes[/]" : "No");
-                    grid.AddRow("[bold]Raft Term:[/]", clusterInfo.RaftTerm.ToString());
-                }
-                else
-                {
-                    grid.AddRow("[bold]Raft Consensus:[/]", "[dim]Disabled[/]");
-                }
+                grid.AddRow("[bold]Raft Leader:[/]", clusterInfo.IsRaftLeader ? "[green]Yes[/]" : "No");
+                grid.AddRow("[bold]Raft Term:[/]", clusterInfo.RaftTerm.ToString());
 
                 grid.AddRow("", "");
                 grid.AddRow("[bold]Topics:[/]", clusterInfo.TopicCount.ToString());

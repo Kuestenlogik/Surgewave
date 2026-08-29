@@ -27,6 +27,10 @@ public class ClusterControllerLocalNodeTests
             new Kuestenlogik.Surgewave.Transport.Tcp.TcpPeerTransport());
         var controller = new ClusterController(
             NullLogger<ClusterController>.Instance, state, replicaManager, config);
+
+        // The controller role IS Raft leadership since #163 step 3, so a controller without a
+        // metadata log is not a configuration that exists.
+        controller.SetRaftNode(TestRaftNode.ForSingleNode(config, state, TestRaftNode.NewMembership(config, state)));
         return (controller, state);
     }
 

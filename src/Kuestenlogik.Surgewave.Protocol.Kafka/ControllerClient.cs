@@ -143,7 +143,7 @@ public sealed partial class ControllerClient : IDisposable, IControllerReplicaRp
                 CorrelationId = Interlocked.Increment(ref _correlationId),
                 ClientId = $"surgewave-controller-{_config.BrokerId}",
                 ControllerId = _config.BrokerId,
-                IsKRaftController = _config.UseRaftConsensus,
+                IsKRaftController = true,
                 ControllerEpoch = _clusterState.ControllerEpoch,
                 BrokerEpoch = -1,
                 Type = 0, // Full update
@@ -347,7 +347,7 @@ public sealed partial class ControllerClient : IDisposable, IControllerReplicaRp
                 CorrelationId = Interlocked.Increment(ref _correlationId),
                 ClientId = $"surgewave-controller-{_config.BrokerId}",
                 ControllerId = _config.BrokerId,
-                IsKRaftController = _config.UseRaftConsensus,
+                IsKRaftController = true,
                 ControllerEpoch = _clusterState.ControllerEpoch,
                 BrokerEpoch = -1,
                 TopicStates = topicStates,
@@ -415,7 +415,7 @@ public sealed partial class ControllerClient : IDisposable, IControllerReplicaRp
                 CorrelationId = Interlocked.Increment(ref _correlationId),
                 ClientId = $"surgewave-controller-{_config.BrokerId}",
                 ControllerId = _config.BrokerId,
-                IsKRaftController = _config.UseRaftConsensus,
+                IsKRaftController = true,
                 ControllerEpoch = _clusterState.ControllerEpoch,
                 BrokerEpoch = -1,
                 TopicStates = topicStates

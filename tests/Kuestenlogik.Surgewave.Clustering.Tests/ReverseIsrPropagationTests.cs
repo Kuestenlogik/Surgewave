@@ -43,6 +43,10 @@ public class ReverseIsrPropagationTests
             new Kuestenlogik.Surgewave.Transport.Tcp.TcpPeerTransport());
         var controller = new ClusterController(
             NullLogger<ClusterController>.Instance, state, replicaManager, config);
+
+        // The controller role IS Raft leadership since #163 step 3, so a controller without a
+        // metadata log is not a configuration that exists.
+        controller.SetRaftNode(TestRaftNode.ForSingleNode(config, state, TestRaftNode.NewMembership(config, state)));
         return (controller, state, logs);
     }
 
@@ -51,7 +55,7 @@ public class ReverseIsrPropagationTests
     {
         var (controller, state, logs) = NewController(brokerId: 0, brokers: [0, 1, 2]);
         await controller.StartAsync(CancellationToken.None); // lowest id -> this broker is controller
-        Assert.True(controller.IsController);
+        await BecomesControllerAsync(controller);
 
         var tp = new TopicPartition { Topic = "orders", Partition = 0 };
         state.AssignReplicas(tp, [0, 1, 2], 1); // initial ISR = {0} (leader only)
@@ -72,6 +76,7 @@ public class ReverseIsrPropagationTests
     {
         var (controller, state, logs) = NewController(brokerId: 0, brokers: [0, 1, 2]);
         await controller.StartAsync(CancellationToken.None);
+        await BecomesControllerAsync(controller);
 
         var tp = new TopicPartition { Topic = "orders", Partition = 0 };
         state.AssignReplicas(tp, [0, 1, 2], 1);
@@ -104,4 +109,21 @@ public class ReverseIsrPropagationTests
         await controller.DisposeAsync();
         logs.Dispose();
     }
+
+    /// <summary>
+    /// Waits for this broker to win the metadata-log election.
+    /// </summary>
+    /// <remarks>
+    /// Taking the controller role used to be synchronous — the lowest id simply claimed it — and
+    /// is now the outcome of a Raft election (#163 step 3). Asserting immediately after StartAsync
+    /// would be asserting that an election has already finished.
+    /// </remarks>
+    private static async Task BecomesControllerAsync(ClusterController controller)
+    {
+        var elected = await TestUtilities.WaitForCondition(
+            () => controller.IsController, TimeSpan.FromSeconds(30));
+
+        Assert.True(elected, "this broker never won the metadata-log election");
+    }
+
 }

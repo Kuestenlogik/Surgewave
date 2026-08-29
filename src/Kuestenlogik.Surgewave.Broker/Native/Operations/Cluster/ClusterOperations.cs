@@ -50,9 +50,8 @@ public sealed class GetClusterInfoOperation : INoRequestOperationHandler<Cluster
             IsController = isController,
             ControllerId = controllerId,
             ControllerEpoch = 1,
-            UseRaftConsensus = _context.Config.UseRaftConsensus,
-            IsRaftLeader = isController && _context.Config.UseRaftConsensus,
-            RaftTerm = _context.Config.UseRaftConsensus ? 1 : 0,
+            IsRaftLeader = isController,
+            RaftTerm = 1,
             TopicCount = topics.Count,
             TotalPartitions = totalPartitions
         };

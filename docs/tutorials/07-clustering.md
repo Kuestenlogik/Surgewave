@@ -33,7 +33,6 @@ Create `broker1/appsettings.json`:
     "DataDirectory": "./data/broker1",
     "ClusterNodes": "localhost:9092,localhost:9094,localhost:9096",
     "ClusterId": "surgewave-tutorial-cluster",
-    "UseRaftConsensus": true,
     "ReplicationPort": 10092,
     "DefaultReplicationFactor": 3,
     "MinInSyncReplicas": 2
@@ -55,7 +54,6 @@ Create `broker2/appsettings.json`:
     "DataDirectory": "./data/broker2",
     "ClusterNodes": "localhost:9092,localhost:9094,localhost:9096",
     "ClusterId": "surgewave-tutorial-cluster",
-    "UseRaftConsensus": true,
     "ReplicationPort": 10094,
     "DefaultReplicationFactor": 3,
     "MinInSyncReplicas": 2
@@ -77,7 +75,6 @@ Create `broker3/appsettings.json`:
     "DataDirectory": "./data/broker3",
     "ClusterNodes": "localhost:9092,localhost:9094,localhost:9096",
     "ClusterId": "surgewave-tutorial-cluster",
-    "UseRaftConsensus": true,
     "ReplicationPort": 10096,
     "DefaultReplicationFactor": 3,
     "MinInSyncReplicas": 2
@@ -122,7 +119,6 @@ services:
       Surgewave__BrokerId: 1
       Surgewave__Port: 9092
       Surgewave__ClusterNodes: broker1:9092,broker2:9092,broker3:9092
-      Surgewave__UseRaftConsensus: true
       Surgewave__DefaultReplicationFactor: 3
       Surgewave__MinInSyncReplicas: 2
 
@@ -135,7 +131,6 @@ services:
       Surgewave__BrokerId: 2
       Surgewave__Port: 9092
       Surgewave__ClusterNodes: broker1:9092,broker2:9092,broker3:9092
-      Surgewave__UseRaftConsensus: true
 
   broker3:
     image: kuestenlogik/surgewave
@@ -146,7 +141,6 @@ services:
       Surgewave__BrokerId: 3
       Surgewave__Port: 9092
       Surgewave__ClusterNodes: broker1:9092,broker2:9092,broker3:9092
-      Surgewave__UseRaftConsensus: true
 ```
 
 ```bash
@@ -297,7 +291,6 @@ All three brokers should be back online with full ISR membership.
 |---------|---------|-------------|
 | `ClusterNodes` | "" | All broker endpoints, comma-separated |
 | `ClusterId` | "surgewave-cluster" | Unique cluster identifier |
-| `UseRaftConsensus` | false | Enable KRaft consensus protocol |
 | `ReplicationPort` | 10092 | Port for inter-broker replication traffic |
 | `DefaultReplicationFactor` | 1 | Default replication for new topics |
 | `MinInSyncReplicas` | 1 | Minimum ISR count required for writes |

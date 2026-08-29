@@ -46,7 +46,6 @@ public sealed class SurgewaveRuntimeTests
         Assert.False(options.EnableCluster);
         Assert.Empty(options.ClusterNodes);
         Assert.Equal(0, options.ReplicationPort);
-        Assert.False(options.UseRaftConsensus);
         Assert.Equal(150, options.RaftElectionTimeoutMinMs);
         Assert.Equal(300, options.RaftElectionTimeoutMaxMs);
         Assert.Equal(50, options.RaftHeartbeatIntervalMs);
@@ -104,7 +103,6 @@ public sealed class SurgewaveRuntimeTests
             EnableCluster = true,
             ClusterNodes = ["1:localhost:9093:9094", "2:localhost:9095:9096"],
             ReplicationPort = 9094,
-            UseRaftConsensus = true,
             RaftElectionTimeoutMinMs = 200,
             RaftElectionTimeoutMaxMs = 400,
             RaftHeartbeatIntervalMs = 100,
@@ -116,7 +114,6 @@ public sealed class SurgewaveRuntimeTests
         Assert.True(options.EnableCluster);
         Assert.Equal(2, options.ClusterNodes.Count);
         Assert.Equal(9094, options.ReplicationPort);
-        Assert.True(options.UseRaftConsensus);
         Assert.Equal(200, options.RaftElectionTimeoutMinMs);
         Assert.Equal(400, options.RaftElectionTimeoutMaxMs);
         Assert.Equal(100, options.RaftHeartbeatIntervalMs);
@@ -310,18 +307,9 @@ public sealed class SurgewaveRuntimeTests
         Assert.Equal(9094, options.ReplicationPort);
     }
 
-    [Fact]
-    public void SurgewaveRuntimeBuilder_WithRaft_SetsRaftOptions()
-    {
-        // Act
-        var builder = SurgewaveRuntime.CreateBuilder()
-            .WithCluster()
-            .WithRaft();
-
-        // Assert
-        var options = builder.Build();
-        Assert.True(options.UseRaftConsensus);
-    }
+    // SurgewaveRuntimeBuilder_WithRaft_SetsRaftOptions was removed with WithRaft itself
+    // (#163 step 3): metadata is a replicated log in every configuration, so there is no
+    // longer a switch for it to set.
 
     [Fact]
     public void SurgewaveRuntimeBuilder_Fluent_ChainsMethods()

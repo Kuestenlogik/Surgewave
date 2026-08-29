@@ -16,8 +16,6 @@ public sealed partial class MetadataService
     private readonly ClusteringConfig _config;
     private readonly RaftNode? _raftNode;
 
-    private long _metadataVersion;
-
     public MetadataService(
         ILogger<MetadataService> logger,
         ClusterState clusterState,
@@ -31,23 +29,14 @@ public sealed partial class MetadataService
     }
 
     /// <summary>
-    /// Current metadata version (increments on any metadata change).
-    /// In Raft mode, this is the Raft commit index.
+    /// Current metadata version — the commit index of the metadata log (#163 step 3).
     /// </summary>
-    public long MetadataVersion => _config.UseRaftConsensus && _raftNode != null
-        ? _raftNode.CommitIndex
-        : _metadataVersion;
-
-    /// <summary>
-    /// Increment metadata version (for non-Raft mode).
-    /// </summary>
-    public void IncrementVersion()
-    {
-        if (!_config.UseRaftConsensus)
-        {
-            Interlocked.Increment(ref _metadataVersion);
-        }
-    }
+    /// <remarks>
+    /// A position, not a counter: it says how far this broker has consumed, which is what
+    /// makes "is this broker up to date" answerable at all. The local counter it replaced
+    /// could only say that something had changed.
+    /// </remarks>
+    public long MetadataVersion => _raftNode?.CommitIndex ?? 0;
 
     /// <summary>
     /// Get all brokers in the cluster.
@@ -156,9 +145,13 @@ public sealed partial class MetadataService
     }
 
     /// <summary>
-    /// Check if Raft consensus is enabled and functioning.
+    /// Whether the metadata log is wired up on this instance.
     /// </summary>
-    public bool IsRaftEnabled => _config.UseRaftConsensus && _raftNode != null;
+    /// <remarks>
+    /// Always true on a running broker; false only where a MetadataService was built without
+    /// one, which is tests and diagnostics.
+    /// </remarks>
+    public bool IsRaftEnabled => _raftNode != null;
 
     /// <summary>
     /// Get Raft state information (for diagnostics).

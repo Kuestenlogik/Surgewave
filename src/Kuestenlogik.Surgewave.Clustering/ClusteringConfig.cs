@@ -127,7 +127,6 @@ public sealed class ClusteringConfig : IValidatableConfig
     public int NativeMinFencedDwellMs { get; set; } = 6000;
 
     // Raft consensus settings
-    public bool UseRaftConsensus { get; set; } = false;
 
     /// <summary>
     /// What this node does — Kafka's <c>process.roles</c>: <c>broker</c>, <c>controller</c>,
@@ -267,11 +266,9 @@ public sealed class ClusteringConfig : IValidatableConfig
                 + "broker cannot unfence before it can be expired again.");
         }
 
-        if (UseRaftConsensus && RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
+        if (RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
             errors.Add($"{nameof(RaftElectionTimeoutMinMs)} must be less than {nameof(RaftElectionTimeoutMaxMs)}.");
 
-        // Checked regardless of UseRaftConsensus: a typo in the quorum should be reported
-        // when it is written, not on the day consensus is switched on (#168).
         Raft.ControllerQuorum.Validate(this, errors);
 
         return errors;
@@ -297,7 +294,6 @@ public sealed class ClusteringConfig : IValidatableConfig
         int heartbeatIntervalMs,
         int heartbeatTimeoutMs,
         int maxHeartbeatFailures,
-        bool useRaftConsensus,
         string raftDataDirectory,
         int raftElectionTimeoutMinMs,
         int raftElectionTimeoutMaxMs,
@@ -336,7 +332,6 @@ public sealed class ClusteringConfig : IValidatableConfig
             HeartbeatIntervalMs = heartbeatIntervalMs,
             HeartbeatTimeoutMs = heartbeatTimeoutMs,
             MaxHeartbeatFailures = maxHeartbeatFailures,
-            UseRaftConsensus = useRaftConsensus,
             RaftDataDirectory = raftDataDirectory,
             RaftElectionTimeoutMinMs = raftElectionTimeoutMinMs,
             RaftElectionTimeoutMaxMs = raftElectionTimeoutMaxMs,

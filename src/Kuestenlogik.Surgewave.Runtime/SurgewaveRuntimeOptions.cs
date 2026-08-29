@@ -127,12 +127,6 @@ public sealed record SurgewaveRuntimeOptions
     public List<string> ClusterNodes { get; init; } = [];
 
     /// <summary>
-    /// Enable Raft consensus for controller election and metadata replication.
-    /// Requires EnableCluster = true.
-    /// </summary>
-    public bool UseRaftConsensus { get; init; } = false;
-
-    /// <summary>
     /// Minimum election timeout in milliseconds (Raft).
     /// </summary>
     public int RaftElectionTimeoutMinMs { get; init; } = 150;

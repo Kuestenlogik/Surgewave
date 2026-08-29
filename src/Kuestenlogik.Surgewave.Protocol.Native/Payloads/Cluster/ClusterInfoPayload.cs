@@ -14,7 +14,6 @@ public readonly record struct ClusterInfoPayload
     public bool IsController { get; init; }
     public int ControllerId { get; init; }
     public int ControllerEpoch { get; init; }
-    public bool UseRaftConsensus { get; init; }
     public bool IsRaftLeader { get; init; }
     public int RaftTerm { get; init; }
     public int TopicCount { get; init; }
@@ -33,7 +32,6 @@ public readonly record struct ClusterInfoPayload
             IsController = reader.ReadUInt8() != 0,
             ControllerId = reader.ReadInt32(),
             ControllerEpoch = reader.ReadInt32(),
-            UseRaftConsensus = reader.ReadUInt8() != 0,
             IsRaftLeader = reader.ReadUInt8() != 0,
             RaftTerm = reader.ReadInt32(),
             TopicCount = reader.ReadInt32(),
@@ -52,7 +50,6 @@ public readonly record struct ClusterInfoPayload
         writer.WriteUInt8(IsController ? (byte)1 : (byte)0);
         writer.WriteInt32(ControllerId);
         writer.WriteInt32(ControllerEpoch);
-        writer.WriteUInt8(UseRaftConsensus ? (byte)1 : (byte)0);
         writer.WriteUInt8(IsRaftLeader ? (byte)1 : (byte)0);
         writer.WriteInt32(RaftTerm);
         writer.WriteInt32(TopicCount);
@@ -70,7 +67,6 @@ public readonly record struct ClusterInfoPayload
         writer.WriteUInt8(IsController ? (byte)1 : (byte)0);
         writer.WriteInt32(ControllerId);
         writer.WriteInt32(ControllerEpoch);
-        writer.WriteUInt8(UseRaftConsensus ? (byte)1 : (byte)0);
         writer.WriteUInt8(IsRaftLeader ? (byte)1 : (byte)0);
         writer.WriteInt32(RaftTerm);
         writer.WriteInt32(TopicCount);
@@ -87,7 +83,6 @@ public readonly record struct ClusterInfoPayload
         1 +                                           // IsController
         4 +                                           // ControllerId
         4 +                                           // ControllerEpoch
-        1 +                                           // UseRaftConsensus
         1 +                                           // IsRaftLeader
         4 +                                           // RaftTerm
         4 +                                           // TopicCount

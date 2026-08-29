@@ -196,7 +196,7 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             sp.GetRequiredService<ILogger<ClusterMembershipHandler>>()));
 
         // RaftApiHandler: RaftNode / RaftPersistence are optional (registered only under
-        // UseRaftConsensus). Resolve them nullably so the handler answers NotController otherwise.
+        // host wiring). Resolve them nullably so the handler answers NotController otherwise.
         services.AddSingleton<IKafkaRequestHandler>(sp => new RaftApiHandler(
             sp.GetRequiredService<IBrokerConfigView>(),
             sp.GetService<RaftNode>(),

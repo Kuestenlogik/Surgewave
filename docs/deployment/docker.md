@@ -49,7 +49,6 @@ services:
       - Surgewave__BrokerId=1
       - Surgewave__Host=surgewave-1
       - Surgewave__ClusterNodes=surgewave-1:9092,surgewave-2:9092,surgewave-3:9092
-      - Surgewave__UseRaftConsensus=true
     volumes:
       - surgewave-1-data:/data
     networks:
@@ -64,7 +63,6 @@ services:
       - Surgewave__BrokerId=2
       - Surgewave__Host=surgewave-2
       - Surgewave__ClusterNodes=surgewave-1:9092,surgewave-2:9092,surgewave-3:9092
-      - Surgewave__UseRaftConsensus=true
     volumes:
       - surgewave-2-data:/data
     networks:
@@ -79,7 +77,6 @@ services:
       - Surgewave__BrokerId=3
       - Surgewave__Host=surgewave-3
       - Surgewave__ClusterNodes=surgewave-1:9092,surgewave-2:9092,surgewave-3:9092
-      - Surgewave__UseRaftConsensus=true
     volumes:
       - surgewave-3-data:/data
     networks:
@@ -106,7 +103,6 @@ volumes:
 | `Surgewave__StorageMode` | File | Storage backend |
 | `Surgewave__AutoCreateTopics` | true | Auto-create |
 | `Surgewave__ClusterNodes` | - | Cluster nodes |
-| `Surgewave__UseRaftConsensus` | false | Enable Raft |
 
 ## Volumes
 

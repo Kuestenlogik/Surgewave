@@ -34,7 +34,6 @@ public sealed class ClusterRaftCommand : CommandBase
             {
                 var raftState = new
                 {
-                    Enabled = clusterInfo.UseRaftConsensus,
                     ThisBroker = new
                     {
                         Id = clusterInfo.BrokerId,
@@ -61,7 +60,6 @@ public sealed class ClusterRaftCommand : CommandBase
             }
             else if (format == OutputFormat.Plain)
             {
-                if (!clusterInfo.UseRaftConsensus) return 0;
                 Console.WriteLine($"term\t{clusterInfo.RaftTerm}");
                 Console.WriteLine($"broker\t{clusterInfo.BrokerId}\t{(clusterInfo.IsRaftLeader ? "Leader" : "Follower")}");
                 Console.WriteLine($"controller\t{clusterInfo.ControllerId}\tepoch={clusterInfo.ControllerEpoch}");
@@ -72,13 +70,6 @@ public sealed class ClusterRaftCommand : CommandBase
             {
                 AnsiConsole.Write(new Rule("[bold blue]Raft Consensus State[/]").LeftJustified());
                 AnsiConsole.WriteLine();
-
-                if (!clusterInfo.UseRaftConsensus)
-                {
-                    AnsiConsole.MarkupLine("[yellow]Raft consensus is not enabled on this broker.[/]");
-                    AnsiConsole.MarkupLine("[dim]Use --raft-consensus=true to enable Raft mode.[/]");
-                    return 0;
-                }
 
                 // Raft state grid
                 var grid = new Grid();

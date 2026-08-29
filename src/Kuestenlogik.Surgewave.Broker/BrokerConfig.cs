@@ -228,7 +228,6 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int MaxHeartbeatFailures { get; set; } = 3;
 
     // Raft consensus settings (Phase 2: Controller Election)
-    public bool UseRaftConsensus { get; set; } = false;
     public string RaftDataDirectory { get; set; } = "./data/raft";
     public int RaftElectionTimeoutMinMs { get; set; } = KafkaConstants.Raft.ElectionTimeoutMinMs;
     public int RaftElectionTimeoutMaxMs { get; set; } = KafkaConstants.Raft.ElectionTimeoutMaxMs;
@@ -394,7 +393,7 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
         }
 
         // Raft election timeout range must be valid
-        if (UseRaftConsensus && RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
+        if (RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
         {
             errors.Add($"{nameof(RaftElectionTimeoutMinMs)} ({RaftElectionTimeoutMinMs}ms) must be " +
                        $"strictly less than {nameof(RaftElectionTimeoutMaxMs)} ({RaftElectionTimeoutMaxMs}ms).");

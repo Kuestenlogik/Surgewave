@@ -38,9 +38,9 @@ public static class CoreServicesRegistration
                 RetentionHours = config.LogRetentionHours,
                 RetentionBytes = config.LogRetentionBytes
             };
-            // When Raft is enabled, don't persist topics to file - Raft log is the source of truth
-            var persistTopicsToFile = !config.UseRaftConsensus;
-            return new LogManager(config.DataDirectory, segmentFactory, retentionPolicy: retentionPolicy, persistTopicsToFile: persistTopicsToFile);
+            // The metadata log is the source of truth for topics (#163 step 3), so nothing is
+            // persisted alongside it. A second store would be a second answer to the same question.
+            return new LogManager(config.DataDirectory, segmentFactory, retentionPolicy: retentionPolicy, persistTopicsToFile: false);
         });
 
         // Configure Kestrel with options

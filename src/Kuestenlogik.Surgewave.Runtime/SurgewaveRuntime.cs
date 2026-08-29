@@ -87,7 +87,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private BrokerSessionSweeper? _sessionSweeper;
     private ReplicationTransitionQueue? _replicationTransitions;
 
-    // Raft components (only initialized when UseRaftConsensus = true)
+    // Raft components — every broker has a metadata log (#163 step 3).
     private RaftNode? _raftNode;
     private RaftPersistence? _raftPersistence;
     private RaftTransport? _raftTransport;
@@ -159,12 +159,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _heartbeatManager?.AllBrokerHealth ?? ReadOnlyDictionary<int, BrokerHealthState>.Empty;
 
     /// <summary>
-    /// Whether this broker is the Raft leader (only valid when UseRaftConsensus = true).
+    /// Whether this broker is the Raft leader — that is, the active controller.
     /// </summary>
     public bool IsRaftLeader => _raftNode?.IsLeader ?? false;
 
     /// <summary>
-    /// The RaftNode instance (only valid when UseRaftConsensus = true).
+    /// The RaftNode instance.
     /// </summary>
     public RaftNode? RaftNode => _raftNode;
 
@@ -227,7 +227,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             // Cluster settings
             ReplicationPort = _actualReplicationPort,
             ClusterNodes = clusterNodesStr,
-            UseRaftConsensus = _options.UseRaftConsensus,
             HeartbeatIntervalMs = _options.HeartbeatIntervalMs,
             HeartbeatTimeoutMs = _options.HeartbeatTimeoutMs,
             // Raft settings
@@ -249,8 +248,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             RetentionBytes = _options.RetentionBytes
         };
 
-        // When Raft is enabled, don't persist topics to file
-        var persistTopicsToFile = !_options.UseRaftConsensus;
+        // The metadata log is the source of truth for topics (#163 step 3).
+        const bool persistTopicsToFile = false;
 
         // Create segment factory: custom factory takes precedence over storage engine
         ILogSegmentFactory segmentFactory;
@@ -396,7 +395,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             heartbeatIntervalMs: config.HeartbeatIntervalMs,
             heartbeatTimeoutMs: config.HeartbeatTimeoutMs,
             maxHeartbeatFailures: config.MaxHeartbeatFailures,
-            useRaftConsensus: config.UseRaftConsensus,
             raftDataDirectory: config.RaftDataDirectory,
             raftElectionTimeoutMinMs: config.RaftElectionTimeoutMinMs,
             raftElectionTimeoutMaxMs: config.RaftElectionTimeoutMaxMs,
@@ -521,12 +519,14 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // epochs + fencing). Wired unconditionally so a plugin-free broker owns it too.
         var clusterIdManager = new ClusterIdManager(
             clusteringConfig, _loggerFactory.CreateLogger<ClusterIdManager>());
-        // epochsAreMetadataIndices: in Raft mode a broker epoch is the committed index of
-        // its registration entry (#72 Inc5), which is what makes the caught-up comparison
-        // possible at all — see Heartbeat (#160).
+        // epochsAreMetadataIndices stays false: a JOINING broker registers over the native
+        // lifecycle RPC, which calls ClusterMembershipService.Register directly and mints a
+        // composed epoch — the metadata log carries only the controller's own registration.
+        // Until registration goes through the log, an epoch is not an index and the strict
+        // caught-up comparison would fence every joiner forever. Tracked separately; it is
+        // what lets the composed mint go and Kafka's rule apply (#160, #163 step 3).
         var membershipService = new ClusterMembershipService(
             clusterIdManager, _clusterState, _loggerFactory.CreateLogger<ClusterMembershipService>(),
-            epochsAreMetadataIndices: clusteringConfig.UseRaftConsensus,
             minFencedDwell: TimeSpan.FromMilliseconds(clusteringConfig.NativeMinFencedDwellMs),
             timeProvider: TimeProvider.System);
 
@@ -577,7 +577,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _loggerFactory.CreateLogger<NativeBrokerLifecycleClient>());
         _lifecycleLoop = new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop(
             lifecycleClient, clusteringConfig, _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop>(),
-            metadataPosition: clusteringConfig.UseRaftConsensus ? () => _raftNode?.CommitIndex ?? 0 : null);
+            metadataPosition: () => _raftNode?.CommitIndex ?? 0);
 
         // Wire up the controller client (gated native/Kafka-wire, Inc5) so the controller can push
         // LeaderAndIsr to remote brokers when topology changes (topic create, reelection).
@@ -609,8 +609,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _metadataApiHandler?.SetClusterState(_clusterState);
         _metadataApiHandler?.SetClusterTopicCreator(_clusterController);
 
-        // Initialize Raft components if enabled
-        if (_options.UseRaftConsensus)
+        // Initialize Raft components — every broker has a metadata log (#163 step 3).
         {
             var raftNodeLogger = _loggerFactory.CreateLogger<RaftNode>();
             var raftPersistenceLogger = _loggerFactory.CreateLogger<RaftPersistence>();

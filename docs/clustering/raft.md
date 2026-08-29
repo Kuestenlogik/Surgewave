@@ -15,7 +15,6 @@ KRaft (Kafka Raft) provides:
 ```json
 {
   "Surgewave": {
-    "UseRaftConsensus": true,
     "RaftDataDirectory": "./raft",
     "RaftElectionTimeoutMinMs": 150,
     "RaftElectionTimeoutMaxMs": 300,
@@ -96,7 +95,6 @@ brokers. To keep it fixed, name the voters:
 ```json
 {
   "Surgewave": {
-    "UseRaftConsensus": true,
     "ProcessRoles": "broker",
     "ControllerQuorumVoters": "1@controller-1:9093,2@controller-2:9093,3@controller-3:9093"
   }

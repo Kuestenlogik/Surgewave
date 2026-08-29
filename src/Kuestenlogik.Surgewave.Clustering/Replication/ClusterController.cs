@@ -185,33 +185,19 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // Parse cluster nodes from config
         await InitializeClusterNodesAsync();
 
-        // Legacy mode has no way to learn it has been replaced: _isController is only ever cleared
-        // on the Raft paths, so once a broker wins the lowest-id election it believes it is the
-        // controller forever. That was unreachable while nothing could elect a second one — a
-        // failure detector makes it reachable, and a broker that keeps serving topic creation and
-        // leader elections against its own state while another broker does the same is a split view
-        // with no reconciliation path. Raft is excluded: there the leader watch owns the role.
-        if (!_config.UseRaftConsensus)
-            _clusterState.OnControllerChanged = OnControllerReplaced;
-
-        if (_config.UseRaftConsensus && _raftNode != null)
+        // Raft leadership IS the controller role (#163 step 3). The lowest-id election it
+        // replaced could elect a second controller with no way for either to learn it had
+        // been replaced — a split view with no reconciliation path.
+        if (_raftNode == null)
         {
-            // Raft mode: start Raft node and watch for leadership changes
-            await _raftNode.StartAsync(cancellationToken);
-            _raftLeaderWatchTask = Task.Run(() => RaftLeaderWatchLoopAsync(_cts.Token), _cts.Token);
-            LogRaftModeEnabled();
+            throw new InvalidOperationException(
+                "ClusterController requires a RaftNode: metadata is a replicated log and the "
+                + "controller role is Raft leadership. Call SetRaftNode before StartAsync.");
         }
-        else
-        {
-            // Legacy mode: lowest broker ID becomes controller
-            await TryBecomeControllerAsync(cancellationToken);
 
-            // Start controller loop if we're the controller
-            if (_isController)
-            {
-                _controllerTask = Task.Run(() => ControllerLoopAsync(_cts.Token), _cts.Token);
-            }
-        }
+        await _raftNode.StartAsync(cancellationToken);
+        _raftLeaderWatchTask = Task.Run(() => RaftLeaderWatchLoopAsync(_cts.Token), _cts.Token);
+        LogRaftModeEnabled();
     }
 
     /// <summary>
@@ -430,81 +416,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         return Task.CompletedTask;
     }
 
-    private Task TryBecomeControllerAsync(CancellationToken ct)
-    {
-        // Simple strategy: the lowest LIVE broker ID becomes controller. Liveness matters because
-        // this also runs as the re-election after the previous controller was declared dead — and a
-        // dead broker stays in Brokers (outside Raft nothing removes it), so an unfiltered minimum
-        // re-elects the corpse and the cluster is left without a controller for good: every repair
-        // path (leader election, ISR shrink, topic creation) returns early on a non-controller.
-        var lowestBrokerId = LowestEligibleControllerId();
-
-        if (_config.BrokerId == lowestBrokerId)
-        {
-            _isController = true;
-            var epoch = _clusterState.BecomeController(_config.BrokerId);
-            LogBecameController(_config.BrokerId, epoch);
-        }
-        else
-        {
-            _clusterState.ControllerId = lowestBrokerId;
-            LogControllerElected(lowestBrokerId);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Stand down when an accepted push names someone else as controller. The controller loop is
-    /// left to notice on its own turn: every controller-only action already guards on
-    /// <c>_isController</c>, so a demoted broker's loop finds nothing to do.
-    /// </summary>
-    private void OnControllerReplaced(int newControllerId)
-    {
-        if (newControllerId == _config.BrokerId || !_isController)
-            return;
-
-        _isController = false;
-        LogSteppedDownAsController(newControllerId);
-    }
-
-    /// <summary>
-    /// Lowest broker id that may hold the controller role, skipping brokers the heartbeat monitor
-    /// has declared dead.
-    /// </summary>
-    private int LowestEligibleControllerId()
-    {
-        var lowest = int.MaxValue;
-
-        foreach (var brokerId in _clusterState.Brokers.Keys)
-        {
-            if (brokerId < lowest && IsEligibleForController(brokerId))
-                lowest = brokerId;
-        }
-
-        // Brokers is normally non-empty (it contains us), but never elect nobody.
-        return lowest == int.MaxValue ? _config.BrokerId : lowest;
-    }
-
-    /// <summary>
-    /// Whether <paramref name="brokerId"/> may be elected controller. Only brokers actively known to
-    /// be dead are excluded — an absent health record means "not observed yet", which is the normal
-    /// state during startup for every peer, and excluding those would make each broker elect itself.
-    /// </summary>
-    private bool IsEligibleForController(int brokerId)
-    {
-        // Our own liveness is certain and is not up for lookup: a stray health record for the local
-        // id (ProcessHeartbeat keys on whatever id the sender claims) must not be able to take us
-        // out of our own election.
-        if (brokerId == _config.BrokerId)
-            return true;
-
-        // Deliberately not IsBrokerAlive for peers: that answers false for a peer with no health
-        // record yet, which during startup is every peer. Eligibility asks the weaker question —
-        // is this broker KNOWN to be dead — so an unobserved peer still counts.
-        return _heartbeatManager?.GetBrokerHealth(brokerId) is not { IsAlive: false };
-    }
-
     private async Task ControllerLoopAsync(CancellationToken ct)
     {
         var checkInterval = TimeSpan.FromSeconds(
@@ -618,14 +529,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
-        // When Raft is enabled, propose through Raft log for replication
-        if (_config.UseRaftConsensus && _raftNode != null)
-        {
-            return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, ct);
-        }
-
-        // Legacy mode: apply directly
-        return await CreateTopicDirectAsync(topic, partitionCount, replicationFactor, config, ct);
+        return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, ct);
     }
 
     /// <summary>
@@ -701,100 +605,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         return true;
     }
 
-    /// <summary>
-    /// Create topic directly (legacy mode without Raft).
-    /// </summary>
-    private async Task<bool> CreateTopicDirectAsync(
-        string topic,
-        int partitionCount,
-        short replicationFactor,
-        Dictionary<string, string>? config,
-        CancellationToken ct)
-    {
-        // Create topic metadata
-        var topicMetadata = new TopicMetadata
-        {
-            Name = topic,
-            TopicId = Guid.NewGuid(),
-            PartitionCount = partitionCount,
-            ReplicationFactor = replicationFactor,
-            Config = config is null ? [] : new Dictionary<string, string>(config),
-            CreatedAt = DateTime.UtcNow
-        };
-        _clusterState.AddTopic(topicMetadata);
-
-        // Broadcast topic creation to all brokers
-        if (_metadataUpdateClient != null)
-        {
-            var topicCmd = new TopicCreatedCommand(topic, topicMetadata.TopicId, partitionCount, replicationFactor, topicMetadata.Config);
-            var topicData = JsonSerializer.SerializeToUtf8Bytes(topicCmd, ClusteringJsonContext.Default.TopicCreatedCommand);
-            await _metadataUpdateClient.BroadcastMetadataUpdateAsync(MetadataCommandType.TopicCreated, topicData, ct);
-        }
-
-        // Assign partitions to brokers
-        var brokerIds = _clusterState.Brokers.Keys.OrderBy(id => id).ToList();
-        if (brokerIds.Count == 0)
-        {
-            LogNoBrokersAvailable(topic);
-            return false;
-        }
-
-        for (int partition = 0; partition < partitionCount; partition++)
-        {
-            var tp = new TopicPartition { Topic = topic, Partition = partition };
-
-            // Round-robin assignment with rack awareness
-            var replicas = _replicaAssignment.AssignReplicas(brokerIds, partition, replicationFactor);
-
-            _clusterState.AssignReplicas(tp, replicas, _config.MinInSyncReplicas);
-
-            LogPartitionAssigned(topic, partition, string.Join(",", replicas));
-
-            // Broadcast partition assignment to all brokers
-            if (_metadataUpdateClient != null)
-            {
-                var assignCmd = new PartitionAssignedCommand(topic, partition, replicas, _config.MinInSyncReplicas);
-                var assignData = JsonSerializer.SerializeToUtf8Bytes(assignCmd, ClusteringJsonContext.Default.PartitionAssignedCommand);
-                await _metadataUpdateClient.BroadcastMetadataUpdateAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
-            }
-
-            // Handle local broker assignments
-            foreach (var brokerId in replicas)
-            {
-                if (brokerId == _config.BrokerId)
-                {
-                    // Local broker
-                    var isLeader = replicas[0] == brokerId;
-                    if (isLeader)
-                    {
-                        await _replicaManager.BecomeLeaderAsync(tp, 1, ct, topicMetadata.TopicId);
-                    }
-                    else
-                    {
-                        await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct, topicMetadata.TopicId);
-                    }
-                }
-            }
-
-            // Broadcast LeaderAndIsr to remote brokers for this partition.
-            // Awaited (not fire-and-forget) so the controller's reelection
-            // returns only after the surviving brokers have updated their
-            // local _clusterState — otherwise a Metadata request landing on
-            // a follower right after reelection still sees the stale leader.
-            if (_controllerClient != null && ShouldPushPartitionState)
-            {
-                var partitionState = _clusterState.GetPartitionState(tp);
-                if (partitionState != null)
-                {
-                    await _controllerClient.SendLeaderAndIsrAsync([(tp, partitionState)], ct).ConfigureAwait(false);
-                }
-            }
-        }
-
-        LogTopicCreated(topic, partitionCount, replicationFactor);
-        return true;
-    }
-
     #region Raft-based Metadata Operations
 
     /// <summary>
@@ -844,26 +654,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// typo from committing an entry that does nothing while reporting success.
     /// </para>
     /// </remarks>
-    /// <summary>
-    /// Whether the controller still has to push partition state to the brokers (#165).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// In Raft mode it does not: the decision is a committed log entry that every broker
-    /// applies, and the apply now drives the replication transition as well as the state
-    /// write. Pushing on top would deliver the same change twice, by the weaker of the two
-    /// mechanisms — an unordered RPC that can be lost, against an ordered log that cannot.
-    /// </para>
-    /// <para>
-    /// This trades a synchronous guarantee for an eventual one, deliberately. ElectLeaderAsync
-    /// used to return only once the affected brokers had acked, so metadata served anywhere
-    /// was current; now a broker converges when it applies the entry. That is what the log
-    /// model means, and #164 is what makes it safe: a client landing on a broker that has not
-    /// caught up is refused rather than silently served.
-    /// </para>
-    /// </remarks>
-    private bool ShouldPushPartitionState => !_config.UseRaftConsensus;
-
     public async Task<BrokerRemovalOutcome> RemoveBrokerViaRaftAsync(int brokerId, CancellationToken ct)
     {
         if (_raftNode == null || !_raftNode.IsLeader)
@@ -1028,20 +818,14 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
-        // When Raft is enabled, replicate leader change via Raft
-        if (_config.UseRaftConsensus && _raftNode != null)
+        // The decision is a committed log entry that every broker applies; the apply drives
+        // the replication transition as well as the state write (#165). There is no second
+        // path to keep in step with it.
+        var committed = await ElectLeaderViaRaftAsync(tp, newLeader, newLeaderEpoch, ct);
+        if (!committed)
         {
-            var committed = await ElectLeaderViaRaftAsync(tp, newLeader, newLeaderEpoch, ct);
-            if (!committed)
-            {
-                LogRaftCommitTimeout("LeaderChanged", 0);
-                return false;
-            }
-        }
-        else
-        {
-            // Update partition state directly
-            _clusterState.ElectLeader(tp, newLeader);
+            LogRaftCommitTimeout("LeaderChanged", 0);
+            return false;
         }
 
         // Notify local replica manager
@@ -1052,21 +836,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         else if (partitionState.Replicas.Contains(_config.BrokerId))
         {
             await _replicaManager.BecomeFollowerAsync(tp, newLeader, newLeaderEpoch, ct);
-        }
-
-        // Broadcast LeaderAndIsr to all affected brokers. Awaited so the
-        // controller's ElectLeaderAsync returns only after the followers
-        // have ack'd the new leader assignment; without this a Metadata
-        // request landing on a follower right after reelection still sees
-        // the stale leader and the producer times out before the next
-        // refresh cycle picks up the change.
-        if (_controllerClient != null && ShouldPushPartitionState)
-        {
-            var updatedState = _clusterState.GetPartitionState(tp);
-            if (updatedState != null)
-            {
-                await _controllerClient.SendLeaderAndIsrAsync([(tp, updatedState)], ct).ConfigureAwait(false);
-            }
         }
 
         LogLeaderElected(tp.Topic, tp.Partition, oldLeader, newLeader, newLeaderEpoch);
@@ -1108,23 +877,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return state;
         }
 
-        // Apply the ISR wholesale (an ISR-only change does not bump LeaderEpoch).
-        if (_config.UseRaftConsensus && _raftNode != null)
-        {
-            await UpdateIsrViaRaftAsync(tp, newIsr.ToList(), ct);
-        }
-        else
-        {
-            _clusterState.UpdateIsr(tp, newIsr.ToList());
-        }
+        // Apply the ISR wholesale (an ISR-only change does not bump LeaderEpoch). Replicas
+        // converge by applying the committed entry, not by being told.
+        await UpdateIsrViaRaftAsync(tp, newIsr.ToList(), ct);
 
-        // Re-broadcast LeaderAndIsr so all replicas (incl. the reporting leader)
-        // and the controller's own metadata view converge.
         var updated = _clusterState.GetPartitionState(tp);
-        if (_controllerClient != null && updated != null && ShouldPushPartitionState)
-        {
-            await _controllerClient.SendLeaderAndIsrAsync([(tp, updated)], ct).ConfigureAwait(false);
-        }
 
         LogIsrUpdateApplied(tp.Topic, tp.Partition, leaderId, string.Join(",", newIsr));
         return updated;
@@ -1137,29 +894,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     {
         LogBrokerFailureDetected(failedBrokerId);
 
+        // A controller that dies is replaced by a Raft election, which the leader watch
+        // notices; there is nothing for a follower to do about it here.
         if (!_isController)
-        {
-            // Check if the failed broker was the controller. Never in Raft mode: there the leader
-            // watch owns the role, and running the lowest-id election here would both contradict
-            // Raft and start a SECOND ControllerLoopAsync next to the one the watch already owns.
-            if (!_config.UseRaftConsensus && _clusterState.ControllerId == failedBrokerId)
-            {
-                LogControllerFailed(failedBrokerId);
-                await TryBecomeControllerAsync(CancellationToken.None);
-
-                if (_isController)
-                {
-                    _controllerTask = Task.Run(() => ControllerLoopAsync(_cts!.Token), _cts!.Token);
-                }
-            }
-
-            // Taking the role does not excuse us from the work: a failure is reported exactly once,
-            // and this one was reported while we were still a follower. Returning here would leave
-            // the dead broker in every ISR with no second event to ever clean it up, so a broker
-            // promoted by this very failure falls through and handles it as controller.
-            if (!_isController)
-                return;
-        }
+            return;
 
         // As controller, handle the broker failure
         // 1. Remove from ISR for all partitions
