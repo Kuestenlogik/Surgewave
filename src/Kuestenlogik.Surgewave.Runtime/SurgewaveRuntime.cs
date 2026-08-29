@@ -406,7 +406,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             rebalanceCheckIntervalSeconds: config.RebalanceCheckIntervalSeconds,
             rebalanceImbalanceThreshold: config.RebalanceImbalanceThreshold,
             reassignmentThrottleBytesPerSec: config.ReassignmentThrottleBytesPerSec,
-            reassignmentMaxConcurrent: config.ReassignmentMaxConcurrent
+            reassignmentMaxConcurrent: config.ReassignmentMaxConcurrent,
+            processRoles: config.ProcessRoles,
+            controllerQuorumVoters: config.ControllerQuorumVoters
         );
 
         // Create cluster state

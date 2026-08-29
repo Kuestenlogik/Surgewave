@@ -138,12 +138,49 @@ public sealed partial class RaftNode : IAsyncDisposable
         _transport = transport;
         _stateMachine = stateMachine;
 
-        // Who votes is a membership question, not a transport one (#166). Defaults to the
-        // set Surgewave has today — every broker the transport knows — so this changes
-        // nothing until an explicit controller quorum supplies a different one.
-        _voterSet = voterSet ?? new TransportDerivedVoterSet(transport, config.BrokerId);
+        // Who votes is a membership question, not a transport one (#166). An explicitly
+        // configured quorum wins; without one the set is every broker the transport knows,
+        // which is what this cluster did before the setting existed (#168).
+        _voterSet = voterSet ?? BuildVoterSet(config, transport);
 
         ResetElectionTimeout();
+    }
+
+    /// <summary>
+    /// Picks the voter set from configuration, so both the hosted broker and the embedded
+    /// runtime get the same answer without either having to assemble it (#168).
+    /// </summary>
+    private IRaftVoterSet BuildVoterSet(ClusteringConfig config, IRaftTransport transport)
+    {
+        // Startup does not run the config validator — that is reachable through
+        // /api/config/validate — so an unreadable entry has to be said here or it is said
+        // nowhere. Logged rather than thrown: refusing to start over one bad entry would take
+        // a broker down for a setting that is new, and the remaining voters still form a
+        // quorum if they are a majority.
+        var parseErrors = new List<string>();
+        var voters = ControllerQuorum.Parse(config.ControllerQuorumVoters, parseErrors);
+
+        foreach (var parseError in parseErrors)
+            LogQuorumEntryIgnored(parseError);
+
+        if (voters.Count == 0)
+        {
+            // Either nothing was configured — combined mode, the default — or nothing in it
+            // could be read, in which case falling back beats running with a quorum this node
+            // cannot reach.
+            if (parseErrors.Count > 0)
+                LogQuorumUnusable();
+
+            return new TransportDerivedVoterSet(transport, config.BrokerId);
+        }
+
+        if (ControllerQuorum.IsEvenVoterCount(voters))
+            LogEvenVoterCount(voters.Count, voters.Count - 1);
+
+        var voterIds = voters.Select(v => v.NodeId).ToArray();
+        LogConfiguredQuorum(voterIds.Length, string.Join(", ", voterIds), voterIds.Contains(config.BrokerId));
+
+        return new ConfiguredVoterSet(voterIds);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -1140,6 +1177,25 @@ public sealed partial class RaftNode : IAsyncDisposable
             _config.RaftElectionTimeoutMaxMs
         );
     }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Ignoring an entry in the controller quorum: {Error}")]
+    private partial void LogQuorumEntryIgnored(string error);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "No usable voter in the configured controller quorum; falling back to combined mode, "
+            + "where every broker votes")]
+    private partial void LogQuorumUnusable();
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Controller quorum configured with {VoterCount} voters ({VoterIds}); this node votes: {IsVoter}")]
+    private partial void LogConfiguredQuorum(int voterCount, string voterIds, bool isVoter);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Controller quorum has an even number of voters ({VoterCount}); it tolerates the same "
+            + "number of failures as {OddCount} would, so the extra voter adds a node that can fail without "
+            + "adding a failure the quorum survives")]
+    private partial void LogEvenVoterCount(int voterCount, int oddCount);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Raft node {NodeId} started (term={Term}, logSize={LogSize})")]
     private partial void LogRaftNodeStarted(int nodeId, int term, int logSize);

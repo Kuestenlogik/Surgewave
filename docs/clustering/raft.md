@@ -81,6 +81,45 @@ Brokers register with controller:
 | `RaftElectionTimeoutMaxMs` | 300 | Max election timeout |
 | `RaftHeartbeatIntervalMs` | 50 | Heartbeat interval |
 | `RaftDataDirectory` | ./raft | Raft log storage |
+| `ProcessRoles` | broker,controller | What this node does |
+| `ControllerQuorumVoters` | *(empty)* | Nodes that vote, as `id@host:port` |
+
+## Roles and the Controller Quorum
+
+By default every node runs in **combined mode** — it is both a broker and a controller, and
+every broker votes on metadata. That is the right shape for a single broker, for an embedded
+host, and for a small cluster.
+
+The quorum then grows with the cluster, and a metadata write waits for a majority of *all*
+brokers. To keep it fixed, name the voters:
+
+```json
+{
+  "Surgewave": {
+    "UseRaftConsensus": true,
+    "ProcessRoles": "broker",
+    "ControllerQuorumVoters": "1@controller-1:9093,2@controller-2:9093,3@controller-3:9093"
+  }
+}
+```
+
+Nodes 1, 2 and 3 carry `"ProcessRoles": "broker,controller"` (or `"controller"` alone for
+dedicated controllers). Every other broker sets `"ProcessRoles": "broker"` and becomes an
+**observer**: it receives and serves the metadata log but does not vote, so adding brokers no
+longer makes metadata writes slower.
+
+`ControllerQuorumVoters` and `ClusterNodes` answer different questions and neither derives from
+the other — cluster nodes say who exists, the voter list says who decides. They are checked
+against each other at startup: a voter no broker knows about is rejected, because it would be
+counted towards the majority and never answer.
+
+Prefer an odd number of voters. Four voters need three to agree, exactly as five do, so the
+fourth adds a node that can fail without adding a failure the quorum survives; Surgewave logs
+a warning for an even count rather than refusing it, since it is a legitimate intermediate
+state during a rolling change.
+
+Changing the voter set on a running cluster (KIP-853 online reconfiguration) is not
+implemented — the list is read at startup.
 
 ## Raft Log
 

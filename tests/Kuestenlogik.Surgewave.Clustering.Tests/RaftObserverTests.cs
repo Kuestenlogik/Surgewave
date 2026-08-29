@@ -150,11 +150,40 @@ public sealed class RaftObserverTests : IAsyncDisposable
         Assert.True(committed, "a voter majority acknowledged but nothing committed");
     }
 
+    [Fact]
+    public async Task AConfiguredQuorumMakesANodeOutsideItAnObserver()
+    {
+        // The wiring between #168 and #167: nothing hands RaftNode a voter set here, it reads
+        // controller.quorum.voters itself. Node 3 is not in that list, so it must behave
+        // exactly like the observer the earlier tests construct by hand.
+        await using var observer = NewNode(
+            nodeId: 3, voters: [], reachable: [1, 2], controllerQuorumVoters: "1@localhost:9093,2@localhost:9193");
+        await observer.StartAsync(CancellationToken.None);
+
+        var campaigned = await TestUtilities.WaitForCondition(
+            () => observer.State != RaftState.Follower,
+            TimeSpan.FromSeconds(2));
+
+        Assert.False(campaigned, "a node outside the configured quorum must not campaign");
+        Assert.False(observer.IsVoterNode);
+    }
+
+    [Fact]
+    public async Task WithoutAConfiguredQuorumEveryNodeStillVotes()
+    {
+        // Combined mode, and the case every existing deployment is in: no voter list, so the
+        // node falls back to the transport-derived set and votes.
+        await using var node = NewNode(nodeId: 3, voters: [], reachable: [1, 2]);
+
+        Assert.True(node.IsVoterNode);
+    }
+
     private RaftNode NewNode(
         int nodeId,
         int[] voters,
         int[]? reachable = null,
-        RecordingTransport? transport = null)
+        RecordingTransport? transport = null,
+        string controllerQuorumVoters = "")
     {
         var directory = Path.Combine(Path.GetTempPath(), "surgewave-raft-observer-" + Guid.NewGuid().ToString("N"));
         _dataDirectories.Add(directory);
@@ -167,7 +196,12 @@ public sealed class RaftObserverTests : IAsyncDisposable
             RaftHeartbeatIntervalMs = 25,
             RaftPeerDiscoveryTimeoutSeconds = 0,
             RaftDataDirectory = directory,
+            ControllerQuorumVoters = controllerQuorumVoters,
         };
+
+        // An empty voter list means "let the node decide from its configuration" — which is
+        // what the two tests above exercise.
+        var voterSet = voters.Length > 0 ? new FixedVoterSet(voters) : null;
 
         return new RaftNode(
             NullLogger<RaftNode>.Instance,
@@ -175,7 +209,7 @@ public sealed class RaftObserverTests : IAsyncDisposable
             new RaftPersistence(NullLogger<RaftPersistence>.Instance, config),
             transport ?? new RecordingTransport(reachable ?? [], voters),
             new NoOpStateMachine(),
-            new FixedVoterSet(voters));
+            voterSet);
     }
 
     public ValueTask DisposeAsync()

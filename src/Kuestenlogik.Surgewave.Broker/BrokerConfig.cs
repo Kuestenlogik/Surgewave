@@ -235,6 +235,18 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int RaftHeartbeatIntervalMs { get; set; } = KafkaConstants.Raft.HeartbeatIntervalMs;
     public int RaftPeerDiscoveryTimeoutSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// What this node does — Kafka's <c>process.roles</c>: <c>broker</c>, <c>controller</c>,
+    /// or both (#168). Both by default, which is combined mode.
+    /// </summary>
+    public string ProcessRoles { get; set; } = "broker,controller";
+
+    /// <summary>
+    /// The nodes that vote on metadata — Kafka's <c>controller.quorum.voters</c>, as
+    /// <c>id@host:port</c> entries separated by commas (#168). Empty means every broker votes.
+    /// </summary>
+    public string ControllerQuorumVoters { get; set; } = "";
+
     // Partition reassignment settings (Phase 4)
     public long ReassignmentThrottleBytesPerSec { get; set; } = 50_000_000; // 50 MB/s
     public int ReassignmentMaxConcurrent { get; set; } = 5;
