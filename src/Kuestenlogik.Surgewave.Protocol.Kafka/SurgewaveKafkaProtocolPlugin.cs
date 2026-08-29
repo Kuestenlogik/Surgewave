@@ -193,7 +193,10 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
         // authority for both the Kafka and the native wire.
         services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterMembershipHandler(
             sp.GetRequiredService<ClusterMembershipService>(),
-            sp.GetRequiredService<ILogger<ClusterMembershipHandler>>()));
+            sp.GetRequiredService<ILogger<ClusterMembershipHandler>>(),
+            // Optional: a host that wires no coordinator cannot commit a registration, which is
+            // what a non-controller answers anyway (#171).
+            sp.GetService<BrokerRegistrationCoordinator>()));
 
         // RaftApiHandler: RaftNode / RaftPersistence are optional (registered only under
         // host wiring). Resolve them nullably so the handler answers NotController otherwise.

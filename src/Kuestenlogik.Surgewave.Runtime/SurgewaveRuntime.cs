@@ -488,8 +488,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             clusteringConfig);
 
         // #72 Inc4 — controller-epoch high-water: prime from the node-local persisted floor and
-        // persist every strict advance, so a restarted broker elects (and mints composed broker
-        // epochs) strictly above every reign it already observed. Wired before StartAsync elects.
+        // persist every strict advance, so a restarted broker elects strictly above every reign it
+        // already observed. Broker epochs are committed metadata-log indices now (#171) and do not
+        // depend on this.
         var controllerEpochStore = new ControllerEpochStore(
             clusteringConfig.DataDirectory, _loggerFactory.CreateLogger<ControllerEpochStore>());
         _clusterState.PrimeControllerEpochFloor(controllerEpochStore.Load());
@@ -551,13 +552,21 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // unconditionally (native clustering must not depend on the Kafka plugin); legacy fetch/Raft
         // traffic is unaffected by the multiplex.
         var nativeInterBrokerLogger = _loggerFactory.CreateLogger<NativeInterBrokerServer>();
+
+        // #171 — registration goes through the metadata log, so a broker's epoch is the committed
+        // index of its own registration entry rather than a locally minted number.
+        var registrationCoordinator = new BrokerRegistrationCoordinator(
+            membershipService, _clusterController, _clusterState, clusteringConfig.BrokerId,
+            _loggerFactory.CreateLogger<BrokerRegistrationCoordinator>());
+
         _replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
             nativeInterBrokerLogger,
             new ClusterStateInterBrokerService(
                 _loggerFactory.CreateLogger<ClusterStateInterBrokerService>(),
                 _clusterState, _replicaManager, _logManager!, clusteringConfig.BrokerId,
                 isrUpdateApplier: _clusterController, membership: membershipService,
-                markerSink: _transactionCoordinator))); // #60 Inc7: apply native WriteTxnMarkers to the txn index
+                markerSink: _transactionCoordinator, // #60 Inc7: apply native WriteTxnMarkers to the txn index
+                registrationCoordinator: registrationCoordinator)));
 
         // #72 Inc7 — wire best-effort marker replication into the LIVE coordinator over the same native
         // transport (gated by the finalized inter-broker level; no Kafka-wire fallback in the embedded

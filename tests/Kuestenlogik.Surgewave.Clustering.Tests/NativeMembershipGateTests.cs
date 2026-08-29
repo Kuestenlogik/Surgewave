@@ -28,9 +28,15 @@ public class NativeMembershipGateTests
         var membership = new ClusterMembershipService(
             new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance), state, NullLogger<ClusterMembershipService>.Instance);
         // isrUpdateApplier null → IsController falls back to (ControllerId == localBrokerId).
+        // The registrar stands in for the metadata log a registration now commits to (#171).
+        var coordinator = new BrokerRegistrationCoordinator(
+            membership,
+            new TestBrokerRegistrar(membership, isController: controllerId == localBrokerId),
+            state, localBrokerId, NullLogger<BrokerRegistrationCoordinator>.Instance);
+
         var service = new ClusterStateInterBrokerService(
             NullLogger<ClusterStateInterBrokerService>.Instance, state, replicas, logs, localBrokerId,
-            isrUpdateApplier: null, membership: membership);
+            isrUpdateApplier: null, membership: membership, registrationCoordinator: coordinator);
         return (service, state);
     }
 

@@ -90,8 +90,9 @@ public class MetadataStateMachineBrokerRegistrationTests
         var (sm, _, membership) = NewStateMachine();
 
         sm.Apply(Entry(5, new BrokerRegisteredCommand(1, "h", 9092, null, Guid.NewGuid(), InterBrokerProtocolFeature.Native, 0)));
-        // A caught-up (offset >= 0), non-fence-requesting heartbeat unfences the broker.
-        Assert.False(membership.Heartbeat(new BrokerHeartbeatInput(1, 5, 0, false, false)).IsFenced);
+        // Caught up means having reached this broker's own registration entry, whose index IS the
+        // epoch (#171) — so the offset has to be 5, not merely non-negative.
+        Assert.False(membership.Heartbeat(new BrokerHeartbeatInput(1, 5, 5, false, false)).IsFenced);
 
         // A re-registration under a NEW incarnation (higher committed index) must start fenced again —
         // it is a fresh join that has not yet caught up, not an idempotent replay of the same entry.

@@ -278,7 +278,10 @@ public sealed class ControllerWireConvergenceTests
             state, NullLogger<ClusterMembershipService>.Instance);
         var native = new ClusterStateInterBrokerService(
             NullLogger<ClusterStateInterBrokerService>.Instance, state, replicas, logs, LocalBrokerId,
-            membership: membership);
+            membership: membership,
+            registrationCoordinator: new BrokerRegistrationCoordinator(
+                membership, new TestBrokerRegistrar(membership), state, LocalBrokerId,
+                NullLogger<BrokerRegistrationCoordinator>.Instance));
 
         // This broker is the controller (reign epoch 1); it advertises Native, but the old-build
         // peer 1 pins the finalized level to KafkaWire — the mixed window of a rolling upgrade.

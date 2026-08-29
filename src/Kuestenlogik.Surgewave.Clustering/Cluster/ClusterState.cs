@@ -114,8 +114,8 @@ public sealed class ClusterState
     /// <summary>
     /// #72 Inc4 — raise the controller epoch to a persisted floor at boot, WITHOUT claiming
     /// controllership or touching the controller id / Kafka-wire cap. A restarted broker primes from
-    /// its high-water file before any election, so <see cref="BecomeController"/> mints strictly
-    /// above every reign this node ever observed.
+    /// its high-water file before any election, so <see cref="BecomeController"/> takes an epoch
+    /// strictly above every reign this node ever observed.
     /// </summary>
     public void PrimeControllerEpochFloor(int epoch)
     {

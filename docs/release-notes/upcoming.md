@@ -23,6 +23,21 @@ commit waits for a majority. Metadata changes — leader elections, ISR
 changes — get slower; the data path is untouched. Recovery and failover
 get faster.
 
+### A broker's epoch is its place in the metadata log (#171)
+
+Registration now goes through the metadata log over both wires, so a
+broker's epoch is the committed index of its own registration entry —
+Kafka's `registerBrokerRecordOffset`. That makes "is this broker up to
+date" answerable for every broker rather than only the controller, and
+Kafka's unfence rule applies as written: a broker is unfenced once it has
+consumed the log up to and including its own registration.
+
+It also closes a gap the Kafka-wire registration API left open. That path
+was deliberately un-gated, so any broker answering it wrote the
+registration store and could hand out an epoch that no other broker
+agreed to. Only the controller can commit a log entry, so the gate is now
+structural.
+
 ### The metadata quorum can be smaller than the cluster (#167, #168)
 
 Until now every broker voted on metadata, so a metadata write waited for a

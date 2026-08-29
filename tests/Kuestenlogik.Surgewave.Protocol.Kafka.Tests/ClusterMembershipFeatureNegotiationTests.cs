@@ -29,7 +29,14 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         var clusterIdManager = new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance);
         var state = new ClusterState();
         var membership = new ClusterMembershipService(clusterIdManager, state, NullLogger<ClusterMembershipService>.Instance);
-        var handler = new ClusterMembershipHandler(membership, NullLogger<ClusterMembershipHandler>.Instance);
+
+        // Registration is a committed metadata-log entry now (#171); the registrar stands in for
+        // the log so these stay wire tests.
+        var coordinator = new BrokerRegistrationCoordinator(
+            membership, new TestBrokerRegistrar(membership), state, config.BrokerId,
+            NullLogger<BrokerRegistrationCoordinator>.Instance);
+        var handler = new ClusterMembershipHandler(
+            membership, NullLogger<ClusterMembershipHandler>.Instance, coordinator);
         return (handler, state, membership);
     }
 
@@ -177,8 +184,11 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         var response = await Register(handler, Registration(1, InterBrokerProtocol(InterBrokerProtocolFeature.Native)));
         Assert.Equal(ErrorCode.None, response.ErrorCode);
 
+        // Caught up means having reached this broker's own registration entry, whose index IS the
+        // epoch (#171).
         var outcome = membership.Heartbeat(new BrokerHeartbeatInput(
-            BrokerId: 1, BrokerEpoch: response.BrokerEpoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+            BrokerId: 1, BrokerEpoch: response.BrokerEpoch, CurrentMetadataOffset: response.BrokerEpoch,
+            WantFence: false, WantShutDown: false));
 
         Assert.Equal(ClusterRpcStatus.None, outcome.Status);
         Assert.False(outcome.IsFenced);
@@ -192,11 +202,11 @@ public sealed class ClusterMembershipFeatureNegotiationTests
 
         // The mirror direction: register against the NEUTRAL authority (as the native join path
         // does) and heartbeat over the KAFKA wire with that epoch.
-        var outcome = membership.Register(new BrokerRegistrationInput(
-            BrokerId: 2, ClusterId: "", IncarnationId: Guid.NewGuid(),
-            Listeners: [new ListenerSpec("PLAINTEXT", "h", 9094, 0)],
-            Features: [], Rack: null, PreviousBrokerEpoch: -1));
-        Assert.Equal(ClusterRpcStatus.None, outcome.Status);
+        const long registrationIndex = 4;
+        membership.ApplyReplicatedRegistration(
+            brokerId: 2, incarnationId: Guid.NewGuid(), epoch: registrationIndex,
+            host: "h", port: 9094, rack: null,
+            interBrokerProtocol: InterBrokerProtocolFeature.KafkaWire, replicationPort: null);
 
         var response = (BrokerHeartbeatResponse)await handler.HandleAsync(new BrokerHeartbeatRequest
         {
@@ -205,8 +215,8 @@ public sealed class ClusterMembershipFeatureNegotiationTests
             CorrelationId = 7,
             ClientId = "broker-2",
             BrokerId = 2,
-            BrokerEpoch = outcome.BrokerEpoch,
-            CurrentMetadataOffset = 0,
+            BrokerEpoch = registrationIndex,
+            CurrentMetadataOffset = registrationIndex,
             WantFence = false,
             WantShutDown = false,
         }, Ctx, CancellationToken.None);
