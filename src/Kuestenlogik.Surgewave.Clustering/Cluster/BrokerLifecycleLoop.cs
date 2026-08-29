@@ -53,7 +53,12 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(_config.ClusterNodes))
+        // A configured controller quorum is a cluster too (#169). Gating on ClusterNodes alone
+        // would leave a broker that was told only where the controllers are idling forever —
+        // and that is the shape an observer is deployed in, since it does not need to know
+        // every broker, only the quorum.
+        if (string.IsNullOrEmpty(_config.ClusterNodes)
+            && string.IsNullOrWhiteSpace(_config.ControllerQuorumVoters))
         {
             LogStandalone();
             return Task.CompletedTask;
