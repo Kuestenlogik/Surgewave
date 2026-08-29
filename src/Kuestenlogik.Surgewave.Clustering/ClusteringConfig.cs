@@ -129,6 +129,37 @@ public sealed class ClusteringConfig : IValidatableConfig
     // Raft consensus settings
     public bool UseRaftConsensus { get; set; } = false;
 
+    /// <summary>
+    /// What this node does — Kafka's <c>process.roles</c>: <c>broker</c>, <c>controller</c>,
+    /// or both (#168).
+    /// </summary>
+    /// <remarks>
+    /// Both by default, which is combined mode and what every Surgewave node did before this
+    /// setting existed. A single broker and an embedded host stay on it; separating the roles
+    /// is what makes the metadata quorum smaller than the cluster.
+    /// </remarks>
+    public string ProcessRoles { get; set; } = Raft.NodeRolesParser.CombinedMode;
+
+    /// <summary>
+    /// The nodes that vote on metadata — Kafka's <c>controller.quorum.voters</c>, as
+    /// <c>id@host:port</c> entries separated by commas (#168).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Empty means every broker votes, which is the behaviour this cluster had before the
+    /// setting existed. Naming a subset makes the rest observers: they receive the metadata
+    /// log and serve it, but a write waits only for a majority of the nodes listed here
+    /// (#167).
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="ClusterNodes"/> on purpose — that lists who exists, this lists
+    /// who decides. Neither derives from the other, but they are checked against each other:
+    /// a voter no broker knows about is a typo that costs the quorum a vote it waits for
+    /// forever.
+    /// </para>
+    /// </remarks>
+    public string ControllerQuorumVoters { get; set; } = "";
+
     [Required]
     [MinLength(1)]
     public string RaftDataDirectory { get; set; } = "./data/raft";
@@ -239,6 +270,10 @@ public sealed class ClusteringConfig : IValidatableConfig
         if (UseRaftConsensus && RaftElectionTimeoutMinMs >= RaftElectionTimeoutMaxMs)
             errors.Add($"{nameof(RaftElectionTimeoutMinMs)} must be less than {nameof(RaftElectionTimeoutMaxMs)}.");
 
+        // Checked regardless of UseRaftConsensus: a typo in the quorum should be reported
+        // when it is written, not on the day consensus is switched on (#168).
+        Raft.ControllerQuorum.Validate(this, errors);
+
         return errors;
     }
 
@@ -276,7 +311,9 @@ public sealed class ClusteringConfig : IValidatableConfig
         string interBrokerTransport = "tcp",
         string interBrokerCertificatePath = "",
         string interBrokerCertificatePassword = "",
-        string interBrokerCaCertificatePath = "")
+        string interBrokerCaCertificatePath = "",
+        string processRoles = Raft.NodeRolesParser.CombinedMode,
+        string controllerQuorumVoters = "")
     {
         return new ClusteringConfig
         {
@@ -309,7 +346,9 @@ public sealed class ClusteringConfig : IValidatableConfig
             RebalanceCheckIntervalSeconds = rebalanceCheckIntervalSeconds,
             RebalanceImbalanceThreshold = rebalanceImbalanceThreshold,
             ReassignmentThrottleBytesPerSec = reassignmentThrottleBytesPerSec,
-            ReassignmentMaxConcurrent = reassignmentMaxConcurrent
+            ReassignmentMaxConcurrent = reassignmentMaxConcurrent,
+            ProcessRoles = processRoles,
+            ControllerQuorumVoters = controllerQuorumVoters
         };
     }
 }

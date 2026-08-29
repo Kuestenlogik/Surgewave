@@ -497,7 +497,9 @@ builder.Services.AddSingleton(sp =>
         interBrokerTransport: c.InterBrokerTransport,
         interBrokerCertificatePath: c.InterBrokerCertificatePath,
         interBrokerCertificatePassword: c.InterBrokerCertificatePassword,
-        interBrokerCaCertificatePath: c.InterBrokerCaCertificatePath);
+        interBrokerCaCertificatePath: c.InterBrokerCaCertificatePath,
+        processRoles: c.ProcessRoles,
+        controllerQuorumVoters: c.ControllerQuorumVoters);
 });
 // Inter-broker transport (TCP by default, QUIC when Surgewave:InterBrokerTransport=quic).
 // Explicitly invoke both registrations so the module initializers run even if no

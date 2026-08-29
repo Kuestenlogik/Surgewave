@@ -8,10 +8,19 @@ before Highlights drops into specifics.>
 
 ## Highlights
 
-### <Headline of the first major change> (#issue)
+### The metadata quorum can be smaller than the cluster (#167, #168)
 
-<2-4 sentences. What changed, why it matters to the user, where to
-look in the docs / settings.>
+Until now every broker voted on metadata, so a metadata write waited for a
+majority of *all* brokers and adding brokers made it slower. Two new
+settings follow Kafka's shape: `ProcessRoles` (`broker`, `controller`, or
+both) and `ControllerQuorumVoters` (`id@host:port`). Nodes outside the
+voter list become observers — they receive and serve the metadata log
+without voting on it, so the quorum stays the size you chose. See
+[Roles and the Controller Quorum](../clustering/raft.md#roles-and-the-controller-quorum).
+
+Combined mode stays the default and nothing changes for a single broker,
+an embedded host, or an existing cluster: leave both settings alone and
+every node keeps voting exactly as before.
 
 ### <Headline of the second major change> (#issue)
 
