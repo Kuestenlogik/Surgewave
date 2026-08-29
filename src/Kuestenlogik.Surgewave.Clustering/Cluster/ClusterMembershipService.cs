@@ -28,17 +28,12 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// #72 follow-up and MUST land before fencing/epochs gate real traffic.
 /// </para>
 /// <para>
-/// <b>Epoch scheme (#72 Inc4):</b> epochs are composed — <c>(controller epoch &lt;&lt; 32) | per-reign
-/// counter</c>, where the reign epoch folds strictly upward at the mint site (immune to downward
-/// wobbles of the shared state) and the hosts persist a node-local high-water
-/// (<see cref="ControllerEpochStore"/>, primed at boot) — so a controller mints strictly above every
-/// reign its process has ever observed, including across its own restarts; the old restart-at-1
-/// counter handed re-registering brokers LOWER epochs. Honest scope: node-local and best-effort — a
-/// crash can lose the last persisted advance, and a quiet-reign failover onto a broker that never
-/// observed a push of the reign epoch can still elect at (not above) that epoch; both are bounded by
-/// exact-equality fencing plus fresh incarnations, and closed for real in Raft mode by #72 Inc5
-/// (epoch = committed registration log index, KRaft parity). Broker epochs are still consumed only
-/// by the self-healing heartbeat loop, NOT by partition/leader-epoch fencing.
+/// <b>Epoch scheme (#171):</b> a broker epoch IS the committed index of its registration entry in
+/// the metadata log — durable, replicated and strictly monotone across failover and restarts, which
+/// is KRaft's scheme. It replaced a node-local composed mint that was only ever an approximation of
+/// this, and that made "is this broker caught up" unanswerable for every broker but the controller:
+/// the comparison is against the index of the broker's own registration, and a minted epoch is not
+/// an index.
 /// </para>
 /// </summary>
 public sealed partial class ClusterMembershipService
@@ -47,33 +42,23 @@ public sealed partial class ClusterMembershipService
 
     private readonly ClusterIdManager _clusterIdManager;
     private readonly ClusterState _clusterState;
-    private readonly bool _epochsAreMetadataIndices;
     private readonly TimeSpan _minFencedDwell;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ClusterMembershipService> _logger;
 
     private readonly ConcurrentDictionary<int, BrokerRegistrationRecord> _registrations = new();
 
-    // #72 Inc4 — composed-mint state (see Register): per-reign counter, reset when the controller
-    // epoch observed at mint time moves. Both guarded by _epochLock.
-    private int _lastMintControllerEpoch = -1;
-    private long _perReignCounter = 1;
+    // Guards the registration store, so two concurrent registrations for the same broker cannot
+    // interleave their read-decide-write.
     private readonly Lock _epochLock = new();
 
-    /// <param name="epochsAreMetadataIndices">
-    /// Whether broker epochs are committed metadata-log indices (Raft mode) rather than
-    /// composed mints. This decides whether "caught up" is a question that can be
-    /// answered at all — see <see cref="Heartbeat"/> (#160).
-    /// </param>
     public ClusterMembershipService(
         ClusterIdManager clusterIdManager,
         ClusterState clusterState,
         ILogger<ClusterMembershipService> logger,
-        bool epochsAreMetadataIndices = false,
         TimeSpan? minFencedDwell = null,
         TimeProvider? timeProvider = null)
     {
-        _epochsAreMetadataIndices = epochsAreMetadataIndices;
         _minFencedDwell = minFencedDwell ?? TimeSpan.Zero;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _clusterIdManager = clusterIdManager;
@@ -81,86 +66,23 @@ public sealed partial class ClusterMembershipService
         _logger = logger;
     }
 
-    /// <summary>Register (or re-register) a broker, assigning/keeping its epoch and updating cluster state.</summary>
-    public BrokerRegistrationOutcome Register(BrokerRegistrationInput input)
+    /// <summary>
+    /// Whether <paramref name="clusterId"/> is this cluster's, checked before a registration is
+    /// proposed so a wrong one never commits an entry.
+    /// </summary>
+    public bool ValidateClusterId(string clusterId) => _clusterIdManager.ValidateClusterId(clusterId);
+
+    /// <summary>
+    /// The endpoints and protocol level a registration advertises, as the metadata-log entry needs
+    /// them (#171).
+    /// </summary>
+    /// <remarks>
+    /// The client listener explicitly skips REPLICATION, which is the inter-broker endpoint, and the
+    /// replication listener is resolved separately (#60 Inc5). Extracted so the proposer and the
+    /// apply cannot drift into reading a listener set differently.
+    /// </remarks>
+    public static BrokerEndpoints ResolveEndpoints(BrokerRegistrationInput input)
     {
-        LogRegistration(input.BrokerId, input.ClusterId, input.IncarnationId);
-
-        if (!_clusterIdManager.ValidateClusterId(input.ClusterId))
-        {
-            LogClusterIdMismatch(_clusterIdManager.GetClusterId(), input.ClusterId);
-            return new BrokerRegistrationOutcome(ClusterRpcStatus.ClusterAuthorizationFailed, -1);
-        }
-
-        // Decide the epoch and write the registration record as ONE atomic step under _epochLock, so
-        // two concurrent registrations for the same incarnation can't each mint a different epoch (the
-        // "same incarnation keeps its epoch" invariant must hold under concurrency, not just the
-        // monotonic counter). Reads elsewhere use the ConcurrentDictionary directly.
-        long brokerEpoch;
-        lock (_epochLock)
-        {
-            _registrations.TryGetValue(input.BrokerId, out var existingRecord);
-            if (existingRecord is not null && existingRecord.IncarnationId == input.IncarnationId)
-            {
-                brokerEpoch = existingRecord.BrokerEpoch; // same incarnation reconnecting — keep the epoch
-            }
-            else
-            {
-                // #72 Inc4 — composed mint: (controller epoch << 32) | per-reign counter. Composed
-                // epochs are monotone over every reign THIS PROCESS has observed: the reign epoch
-                // used for composition only ever rises (strictly-greater fold below, immune to a
-                // downward wobble of the shared state such as a snapshot restore), and the hosts
-                // persist a node-local high-water (ControllerEpochStore) primed at boot, so a
-                // RESTARTED controller elects and mints strictly above its previous reigns too. The
-                // epoch is an opaque int64 on both wires and fencing stays exact-equality — no wire
-                // change, rolling-upgrade safe. Residual (documented in the class remarks): a
-                // quiet-reign failover onto a broker that never observed a push of the reign epoch;
-                // Raft mode closes that in #72 Inc5. (The counter cannot realistically overflow
-                // 32 bits within one reign — that would take 4 billion registrations.)
-                var controllerEpoch = _clusterState.ControllerEpoch;
-                if (controllerEpoch > _lastMintControllerEpoch)
-                {
-                    _lastMintControllerEpoch = controllerEpoch;
-                    _perReignCounter = 1;
-                }
-
-                brokerEpoch = ((long)_lastMintControllerEpoch << 32) | (uint)_perReignCounter++;
-                LogNewEpoch(input.BrokerId, brokerEpoch);
-            }
-
-            // Same incarnation = the SAME broker reconnecting, so its fence state and
-            // caught-up position survive; a new incarnation is a restarted broker and
-            // starts fenced until it catches up.
-            //
-            // This used to write IsFenced = true unconditionally, outside the branch
-            // that keeps the epoch. BrokerLifecycleLoop re-registers after any transient
-            // heartbeat failure with a stable incarnation id, so every network hiccup
-            // re-fenced a broker that was fully caught up (#123). It was invisible only
-            // because IsBrokerFenced has no production caller — and session expiry is
-            // exactly what makes fencing observable, so it had to be fixed alongside.
-            // ApplyReplicatedRegistration already reasons this way; the two agree now.
-            var sameIncarnation = existingRecord is not null
-                && existingRecord.IncarnationId == input.IncarnationId;
-
-            _registrations[input.BrokerId] = new BrokerRegistrationRecord
-            {
-                BrokerId = input.BrokerId,
-                IncarnationId = input.IncarnationId,
-                BrokerEpoch = brokerEpoch,
-                IsFenced = sameIncarnation ? existingRecord!.IsFenced : true,
-                CurrentMetadataOffset = sameIncarnation ? existingRecord!.CurrentMetadataOffset : -1,
-                LastContactUtc = _timeProvider.GetUtcNow().UtcDateTime,
-                // Null on a fresh registration: the initial fence means "not caught up
-                // yet", and holding a starting broker back by the dwell would add that
-                // delay to every startup for a rule aimed at flapping (#161). A
-                // reconnecting broker keeps whatever clock it had, so a transient failure
-                // cannot reset its way out of a dwell it is serving.
-                FencedSinceUtc = sameIncarnation ? existingRecord!.FencedSinceUtc : null,
-            };
-        }
-
-        // Resolve the client listener (explicitly skipping REPLICATION, which is the inter-broker
-        // endpoint) and the replication listener separately (#60 Inc5).
         ListenerSpec? clientListener = null;
         ListenerSpec? replicationListener = null;
         foreach (var l in input.Listeners)
@@ -170,24 +92,34 @@ public sealed partial class ClusterMembershipService
             else
                 clientListener ??= l;
         }
+
         clientListener ??= input.Listeners.Count > 0 ? input.Listeners[0] : null;
-        var host = clientListener?.Host ?? "localhost";
-        var port = clientListener?.Port ?? 9092;
-        var interBrokerProtocol = InterBrokerProtocolFeature.LevelFrom(input.Features);
 
-        // Merge into cluster state atomically (#60 Inc6a UpdateBroker): register the full identity for
-        // an unknown broker, or update host/port/level for a known one while keeping an explicitly
-        // discovered replication port when this registration didn't advertise one (#60 Inc5).
-        var advertisedReplicationPort = replicationListener?.Port;
-        _clusterState.UpdateBroker(
-            input.BrokerId,
-            NewBrokerNode(input.BrokerId, host, port, input.Rack, interBrokerProtocol, advertisedReplicationPort, existingReplicationPort: null),
-            known => NewBrokerNode(
-                input.BrokerId, host, port, input.Rack, interBrokerProtocol, advertisedReplicationPort,
-                existingReplicationPort: known.HasExplicitReplicationPort ? known.ReplicationPort : null));
+        return new BrokerEndpoints(
+            clientListener?.Host ?? "localhost",
+            clientListener?.Port ?? 9092,
+            InterBrokerProtocolFeature.LevelFrom(input.Features),
+            replicationListener?.Port);
+    }
 
-        LogRegistered(input.BrokerId, host, port, brokerEpoch, interBrokerProtocol, _clusterState.FinalizedInterBrokerProtocol);
-        return new BrokerRegistrationOutcome(ClusterRpcStatus.None, brokerEpoch);
+    /// <summary>
+    /// The epoch recorded for a broker, or <c>false</c> when it has no registration.
+    /// </summary>
+    /// <remarks>
+    /// Read after a registration entry commits, rather than taking the entry's index: the index is
+    /// the epoch only for a NEW incarnation. A broker re-registering after a transient failure keeps
+    /// the epoch it already has, and handing it the new index would fence it for a hiccup.
+    /// </remarks>
+    public bool TryGetBrokerEpoch(int brokerId, out long epoch)
+    {
+        if (_registrations.TryGetValue(brokerId, out var registration))
+        {
+            epoch = registration.BrokerEpoch;
+            return true;
+        }
+
+        epoch = -1;
+        return false;
     }
 
     /// <summary>
@@ -348,30 +280,21 @@ public sealed partial class ClusterMembershipService
         registration.LastContactUtc = now;
         registration.CurrentMetadataOffset = input.CurrentMetadataOffset;
 
-        // Kafka's rule, where it applies (#160). In Raft mode the broker epoch IS the
-        // committed index of this broker's own registration entry (#72 Inc5), which is
-        // exactly Kafka's registerBrokerRecordOffset — so "caught up" means the broker has
-        // consumed the metadata log up to and including its own registration:
+        // Kafka's rule (#160). The broker epoch IS the committed index of this broker's own
+        // registration entry (#171), which is exactly Kafka's registerBrokerRecordOffset — so
+        // "caught up" means the broker has consumed the metadata log up to and including its own
+        // registration:
         //
         //     if (request.currentMetadataOffset() >= registerBrokerRecordOffset) → UNFENCED
         //
-        // Comparing against the controller's CURRENT position instead would be a race the
-        // broker cannot win: the lifecycle loop is serial, so its report is up to
-        // interval + request timeout old before the controller reads it.
+        // Comparing against the controller's CURRENT position instead would be a race the broker
+        // cannot win: the lifecycle loop is serial, so its report is up to interval + request
+        // timeout old before the controller reads it.
         //
-        // Outside Raft the comparison has nothing to compare. Push-mode metadata carries no
-        // position — ordering is controller epoch plus per-partition leader epoch, and a
-        // coarse per-push version is deliberately avoided because it would drop disjoint
-        // partial pushes. So the check admits every broker that heartbeats, which is the
-        // honest answer when "behind" is undefined, and the wrong one for a broker that is
-        // reachable but not serving. That case needs a health signal, not an offset.
-        //
-        // Kafka reached this by removing the push model: as of 4.x there is no
-        // UpdateMetadata and no ZooKeeper mode, so every broker consumes the log and the
-        // question always has an answer.
-        var isCaughtUp = _epochsAreMetadataIndices
-            ? registration.CurrentMetadataOffset >= registration.BrokerEpoch
-            : registration.CurrentMetadataOffset >= 0;
+        // This used to have a permissive branch for push-mode metadata, which carried no position
+        // and so admitted every broker that heartbeated. Both the push model and the composed epoch
+        // it depended on are gone (#163, #171), and with them the case where "behind" was undefined.
+        var isCaughtUp = registration.CurrentMetadataOffset >= registration.BrokerEpoch;
         var shouldShutDown = false;
 
         if (input.WantFence && !registration.IsFenced)
@@ -469,18 +392,6 @@ public sealed partial class ClusterMembershipService
         /// </summary>
         public DateTime LastContactUtc { get; set; }
     }
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Broker registration: BrokerId={BrokerId} ClusterId={ClusterId} IncarnationId={IncarnationId}")]
-    private partial void LogRegistration(int brokerId, string clusterId, Guid incarnationId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting broker registration: cluster ID mismatch. Expected={Expected}, Got={Got}")]
-    private partial void LogClusterIdMismatch(string expected, string got);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Assigning broker {BrokerId} epoch {Epoch}")]
-    private partial void LogNewEpoch(int brokerId, long epoch);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Broker {BrokerId} registered at {Host}:{Port} (epoch={Epoch}, interBrokerProtocol={InterBrokerProtocol}, finalized={Finalized})")]
-    private partial void LogRegistered(int brokerId, string host, int port, long epoch, short interBrokerProtocol, short finalized);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker registration: BrokerId={BrokerId} epoch={Epoch} at {Host}:{Port} (level={Level})")]
     private partial void LogReplicatedRegistration(int brokerId, long epoch, string host, int port, short level);

@@ -617,6 +617,16 @@ builder.Services.AddSingleton(sp => new ReplicaManager(
 // Kafka plugin can resolve it without an edge to Clustering.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(sp =>
     new ReplicaCommitGate(sp.GetRequiredService<ClusterState>(), sp.GetRequiredService<ReplicaManager>()));
+// #171 — registration goes through the metadata log, over either wire, so a broker gets the same
+// epoch either way: the committed index of its own registration entry. Registered in DI rather than
+// built post-build because the Kafka plugin's membership handler resolves it too.
+builder.Services.AddSingleton(sp => new BrokerRegistrationCoordinator(
+    sp.GetRequiredService<ClusterMembershipService>(),
+    sp.GetRequiredService<ClusterController>(),
+    sp.GetRequiredService<ClusterState>(),
+    sp.GetRequiredService<ClusteringConfig>().BrokerId,
+    sp.GetRequiredService<ILogger<BrokerRegistrationCoordinator>>()));
+
 builder.Services.AddSingleton(sp => new ClusterController(
     sp.GetRequiredService<ILogger<ClusterController>>(),
     sp.GetRequiredService<ClusterState>(),
@@ -903,9 +913,9 @@ clusterController.SetHeartbeatManager(heartbeatManager);
 replicationServer.SetHeartbeatManager(heartbeatManager);
 
 // #72 Inc4 — controller-epoch high-water: prime the epoch from the node-local persisted floor so a
-// RESTARTED broker elects (and mints composed broker epochs) strictly above every reign it already
-// observed, and persist every strict advance (elections and fence-passing pushes). Wired BEFORE the
-// controller starts; best-effort node-local durability (Raft mode gets true durability in #72 Inc5).
+// RESTARTED broker elects strictly above every reign it already observed, and persist every strict
+// advance. Broker epochs no longer ride on this — they are committed metadata-log indices (#171) —
+// so what remains is keeping the controller epoch itself monotone across restarts.
 var controllerEpochStore = new ControllerEpochStore(
     clusteringConfig.DataDirectory, app.Services.GetRequiredService<ILogger<ControllerEpochStore>>());
 clusterState.PrimeControllerEpochFloor(controllerEpochStore.Load());
@@ -918,13 +928,16 @@ clusterState.OnControllerEpochAdvanced = controllerEpochStore.Save;
 // Unconditional: native clustering must not depend on the Kafka plugin. Legacy fetch/Raft frames
 // sit below the native opcode band, so the hot path is untouched.
 var membershipService = app.Services.GetRequiredService<ClusterMembershipService>();
+var registrationCoordinator = app.Services.GetRequiredService<BrokerRegistrationCoordinator>();
+
 replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
     app.Services.GetRequiredService<ILogger<NativeInterBrokerServer>>(),
     new ClusterStateInterBrokerService(
         app.Services.GetRequiredService<ILogger<ClusterStateInterBrokerService>>(),
         clusterState, replicaManager, app.Services.GetRequiredService<LogManager>(),
         clusteringConfig.BrokerId, isrUpdateApplier: clusterController, membership: membershipService,
-        markerSink: app.Services.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerSink>())));
+        markerSink: app.Services.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerSink>(),
+        registrationCoordinator: registrationCoordinator)));
 
 // #60 Inc6b — the native broker-lifecycle loop: a plugin-free broker registers with the controller
 // over the ReplicationPort and heartbeats, so it JOINS the cluster. No-ops on the controller/seed

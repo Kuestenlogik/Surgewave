@@ -19,15 +19,18 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 /// (log-only; not part of the neutral membership contract).
 /// </para>
 /// <para>
-/// Deliberately NOT gated on IsController: the Kafka-wire path registers on any broker, matching
-/// its pre-unification behavior for rolling upgrades — adding the gate is a separate decision
-/// tracked in #72. (The native path gates in <c>ClusterStateInterBrokerService</c>, which also owns
-/// the finalized-level gate-flip epoch bump.)
+/// Registration goes through <see cref="BrokerRegistrationCoordinator"/>, the same flow the native
+/// SRWV path uses, so a broker gets the same epoch over either wire — the committed index of its
+/// registration entry (#171). That also settles the gate this handler used to leave open: it was
+/// deliberately un-gated, so any broker answering ApiKey 62 wrote the store and could re-mint a
+/// natively registered broker's epoch. Only the controller can commit an entry, so the gate is now
+/// structural rather than a check somebody has to remember.
 /// </para>
 /// </summary>
 public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 {
     private readonly ClusterMembershipService _membership;
+    private readonly BrokerRegistrationCoordinator? _registrationCoordinator;
     private readonly ILogger<ClusterMembershipHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -38,32 +41,39 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 
     public ClusterMembershipHandler(
         ClusterMembershipService membership,
-        ILogger<ClusterMembershipHandler> logger)
+        ILogger<ClusterMembershipHandler> logger,
+        BrokerRegistrationCoordinator? registrationCoordinator = null)
     {
         _membership = membership;
         _logger = logger;
+        _registrationCoordinator = registrationCoordinator;
     }
 
     public Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
         return request switch
         {
-            BrokerRegistrationRequest registrationRequest => Task.FromResult<KafkaResponse>(HandleBrokerRegistration(registrationRequest)),
+            BrokerRegistrationRequest registrationRequest => HandleBrokerRegistrationAsync(registrationRequest, cancellationToken),
             BrokerHeartbeatRequest heartbeatRequest => Task.FromResult<KafkaResponse>(HandleBrokerHeartbeat(heartbeatRequest)),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ClusterMembershipHandler")
         };
     }
 
-    private BrokerRegistrationResponse HandleBrokerRegistration(BrokerRegistrationRequest request)
+    private async Task<KafkaResponse> HandleBrokerRegistrationAsync(
+        BrokerRegistrationRequest request, CancellationToken ct)
     {
-        var outcome = _membership.Register(new BrokerRegistrationInput(
-            BrokerId: request.BrokerId,
-            ClusterId: request.ClusterId,
-            IncarnationId: request.IncarnationId,
-            Listeners: [.. request.Listeners.Select(l => new ListenerSpec(l.Name, l.Host, l.Port, l.SecurityProtocol))],
-            Features: [.. request.Features.Select(f => new FeatureSpec(f.Name, f.MinSupportedVersion, f.MaxSupportedVersion))],
-            Rack: request.Rack,
-            PreviousBrokerEpoch: request.PreviousBrokerEpoch));
+        // No coordinator means this broker cannot commit — which is what a non-controller answers
+        // anyway, so the joiner retries against the controller.
+        var outcome = _registrationCoordinator is null
+            ? new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1)
+            : await _registrationCoordinator.RegisterAsync(new BrokerRegistrationInput(
+                BrokerId: request.BrokerId,
+                ClusterId: request.ClusterId,
+                IncarnationId: request.IncarnationId,
+                Listeners: [.. request.Listeners.Select(l => new ListenerSpec(l.Name, l.Host, l.Port, l.SecurityProtocol))],
+                Features: [.. request.Features.Select(f => new FeatureSpec(f.Name, f.MinSupportedVersion, f.MaxSupportedVersion))],
+                Rack: request.Rack,
+                PreviousBrokerEpoch: request.PreviousBrokerEpoch), ct).ConfigureAwait(false);
 
         return new BrokerRegistrationResponse
         {

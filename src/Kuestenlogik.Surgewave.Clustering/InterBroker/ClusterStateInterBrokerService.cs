@@ -38,6 +38,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly IIsrUpdateApplier? _isrUpdateApplier;
     private readonly ClusterMembershipService? _membership;
     private readonly ITransactionMarkerSink? _markerSink;
+    private readonly BrokerRegistrationCoordinator? _registrationCoordinator;
 
     public ClusterStateInterBrokerService(
         ILogger<ClusterStateInterBrokerService> logger,
@@ -47,7 +48,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         int localBrokerId,
         IIsrUpdateApplier? isrUpdateApplier = null,
         ClusterMembershipService? membership = null,
-        ITransactionMarkerSink? markerSink = null)
+        ITransactionMarkerSink? markerSink = null,
+        BrokerRegistrationCoordinator? registrationCoordinator = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -57,6 +59,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _isrUpdateApplier = isrUpdateApplier;
         _membership = membership;
         _markerSink = markerSink;
+        _registrationCoordinator = registrationCoordinator;
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyUpdateMetadataAsync(PartitionStatesPayload payload, CancellationToken ct = default)
@@ -218,32 +221,19 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         return ClusterRpcStatus.None;
     }
 
-    public ValueTask<BrokerRegistrationOutcome> RegisterBrokerAsync(BrokerRegistrationInput input, CancellationToken ct = default)
+    /// <summary>
+    /// Commits a joining broker's registration to the metadata log (#171).
+    /// </summary>
+    /// <remarks>
+    /// Delegated so this wire and the Kafka wire cannot drift: both used to write the membership
+    /// store directly, which minted an epoch on whichever broker answered and never reached the log.
+    /// </remarks>
+    public async ValueTask<BrokerRegistrationOutcome> RegisterBrokerAsync(BrokerRegistrationInput input, CancellationToken ct = default)
     {
-        // Only the controller owns the membership epoch/registration store; a non-controller returns
-        // NotController so the joining broker retries against the real controller (#60 Inc6b).
-        if (_membership is null || !IsController)
-            return ValueTask.FromResult(new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1));
+        if (_registrationCoordinator is null)
+            return new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1);
 
-        var finalizedBefore = _clusterState.FinalizedInterBrokerProtocol;
-        var outcome = _membership.Register(input);
-
-        // #72 Inc1 — deterministic upgrade re-convergence: when this registration raises the
-        // controller's finalized level to Native (the last downgraded/old peer just re-registered
-        // native), bump the controller epoch. Nothing else in a rolling upgrade produces a new epoch
-        // at the gate flip, and receivers capped by this reign's earlier Kafka-wire pushes only clear
-        // on a native push with a STRICTLY newer epoch (the cap's tie rule) — without the bump they
-        // would stay on the fallback wire until some unrelated election. The bump is monotone and
-        // benign: both push clients stamp payloads with the live ClusterState.ControllerEpoch.
-        if (outcome.Status == ClusterRpcStatus.None
-            && finalizedBefore < InterBrokerProtocolFeature.Native
-            && _clusterState.FinalizedInterBrokerProtocol >= InterBrokerProtocolFeature.Native)
-        {
-            var epoch = _clusterState.BecomeController(_localBrokerId);
-            LogFinalizedRoseEpochBumped(epoch);
-        }
-
-        return ValueTask.FromResult(outcome);
+        return await _registrationCoordinator.RegisterAsync(input, ct).ConfigureAwait(false);
     }
 
     public ValueTask<BrokerHeartbeatOutcome> HeartbeatAsync(BrokerHeartbeatInput input, CancellationToken ct = default)
@@ -383,8 +373,6 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         return ClusterRpcStatus.None;
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Finalized inter-broker protocol rose to Native — bumped controller epoch to {Epoch} so capped receivers re-converge on the next push (#72 Inc1)")]
-    private partial void LogFinalizedRoseEpochBumped(int epoch);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Rejecting stale native {OpName} push: controller epoch {RequestEpoch} < current {CurrentEpoch}")]
     private partial void LogStaleControllerEpoch(string opName, int requestEpoch, int currentEpoch);

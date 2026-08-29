@@ -49,7 +49,13 @@ public class NativeBrokerLifecycleClientTests : IAsyncLifetime
             NullLogger<NativeInterBrokerServer>.Instance,
             new ClusterStateInterBrokerService(
                 NullLogger<ClusterStateInterBrokerService>.Instance,
-                _controllerState, _controllerReplicas, logs, localBrokerId: 1, isrUpdateApplier: null, membership: _membership));
+                _controllerState, _controllerReplicas, logs, localBrokerId: 1, isrUpdateApplier: null,
+                membership: _membership,
+                // A registration is a committed metadata-log entry now (#171); the registrar stands
+                // in for the log so this stays a wire test.
+                registrationCoordinator: new BrokerRegistrationCoordinator(
+                    _membership, new TestBrokerRegistrar(_membership), _controllerState, 1,
+                    NullLogger<BrokerRegistrationCoordinator>.Instance)));
 
         _listener = transport.CreateListener(new IPEndPoint(IPAddress.Loopback, 0));
         await _listener.StartAsync();
@@ -112,8 +118,10 @@ public class NativeBrokerLifecycleClientTests : IAsyncLifetime
         Assert.Equal(ClusterRpcStatus.None, reg.Status);
         Assert.True(_membership.IsBrokerFenced(2)); // starts fenced
 
+        // Caught up means having consumed the log up to this broker's own registration entry,
+        // which its epoch now IS (#171) — reporting 0 would be a broker that is behind.
         var hb = await _client.HeartbeatAsync(
-            new BrokerHeartbeatInput(BrokerId: 2, BrokerEpoch: reg.BrokerEpoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false),
+            new BrokerHeartbeatInput(BrokerId: 2, BrokerEpoch: reg.BrokerEpoch, CurrentMetadataOffset: reg.BrokerEpoch, WantFence: false, WantShutDown: false),
             _cts.Token);
 
         Assert.Equal(ClusterRpcStatus.None, hb.Status);

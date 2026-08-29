@@ -39,7 +39,7 @@ public interface IClusterTopicCreator
 /// In a multi-broker setup, one broker becomes the controller.
 /// Supports both simple "lowest broker ID" strategy and Raft consensus.
 /// </summary>
-public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IIsrUpdateApplier
+public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IIsrUpdateApplier, IBrokerRegistrar
 {
     private readonly ILogger<ClusterController> _logger;
     private readonly ClusterState _clusterState;

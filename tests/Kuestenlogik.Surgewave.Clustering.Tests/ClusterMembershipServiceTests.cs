@@ -25,6 +25,29 @@ public class ClusterMembershipServiceTests
         return (service, state);
     }
 
+    // Registration entries commit in order, so the index that becomes an epoch only rises.
+    private long _nextLogIndex = 1;
+
+    /// <summary>
+    /// Registers a broker the way the cluster does: as a committed metadata-log entry (#171).
+    /// </summary>
+    /// <remarks>
+    /// The entry's index is the epoch for a NEW incarnation, and a re-registration of the same one
+    /// keeps the epoch it already has — so the epoch is read back rather than assumed, exactly as
+    /// <c>BrokerRegistrationCoordinator</c> does.
+    /// </remarks>
+    private BrokerRegistrationOutcome Register(ClusterMembershipService service, BrokerRegistrationInput input)
+    {
+        var endpoints = ClusterMembershipService.ResolveEndpoints(input);
+        service.ApplyReplicatedRegistration(
+            input.BrokerId, input.IncarnationId, epoch: _nextLogIndex++,
+            endpoints.Host, endpoints.Port, input.Rack,
+            endpoints.InterBrokerProtocol, endpoints.ReplicationPort);
+
+        service.TryGetBrokerEpoch(input.BrokerId, out var epoch);
+        return new BrokerRegistrationOutcome(ClusterRpcStatus.None, epoch);
+    }
+
     /// <summary>Moves the clock forward, then sweeps — the shape every expiry test wants.</summary>
     private IReadOnlyList<int> ExpireAfter(ClusterMembershipService service, TimeSpan elapsed, TimeSpan timeout)
     {
@@ -56,7 +79,6 @@ public class ClusterMembershipServiceTests
             new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance),
             state,
             NullLogger<ClusterMembershipService>.Instance,
-            epochsAreMetadataIndices: true,
             timeProvider: _clock);
     }
 
@@ -99,22 +121,10 @@ public class ClusterMembershipServiceTests
         Assert.False(outcome.IsFenced);
     }
 
-    [Fact]
-    public void InPushMode_AnyHeartbeatingBrokerCountsAsCaughtUp()
-    {
-        // Deliberate, not an oversight: push-mode metadata carries no position, so there is
-        // nothing to be behind. Making this strict would fence every broker permanently,
-        // and since #123 a fenced broker is left out of metadata pushes entirely.
-        var (service, _) = NewService();
-        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
-
-        var outcome = service.Heartbeat(new BrokerHeartbeatInput(
-            BrokerId: 1, BrokerEpoch: epoch, CurrentMetadataOffset: 0,
-            WantFence: false, WantShutDown: false));
-
-        Assert.True(outcome.IsCaughtUp);
-        Assert.False(outcome.IsFenced);
-    }
+    // InPushMode_AnyHeartbeatingBrokerCountsAsCaughtUp was removed with the permissive branch it
+    // pinned (#171). Push-mode metadata carried no position, so "behind" was undefined and every
+    // heartbeating broker counted as caught up. Metadata is a log now and a broker has a position,
+    // so the strict comparison above is the only one.
 
     [Fact]
     public void ASessionTimeoutBelowTheFloorIsRejected()
@@ -149,12 +159,10 @@ public class ClusterMembershipServiceTests
     }
 
     /// <summary>Registers broker 1 and heartbeats it into the unfenced, caught-up state.</summary>
-    private static void RegisterAndUnfence(ClusterMembershipService service, int brokerId, Guid incarnation)
+    private void RegisterAndUnfence(ClusterMembershipService service, int brokerId, Guid incarnation)
     {
-        var outcome = service.Register(Registration(brokerId, incarnation));
-        var heartbeat = service.Heartbeat(new BrokerHeartbeatInput(
-            BrokerId: brokerId, BrokerEpoch: outcome.BrokerEpoch,
-            CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+        var outcome = Register(service, Registration(brokerId, incarnation));
+        var heartbeat = service.Heartbeat(Beat(brokerId, outcome.BrokerEpoch));
         Assert.False(heartbeat.IsFenced);
     }
 
@@ -191,7 +199,7 @@ public class ClusterMembershipServiceTests
         // a fresh registration starts with would add it to every broker's startup — which
         // is what an earlier version of this did, and what these tests caught.
         var (service, _) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
-        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        var epoch = Register(service, Registration(1, Guid.NewGuid())).BrokerEpoch;
 
         var first = service.Heartbeat(Beat(1, epoch));
 
@@ -205,7 +213,7 @@ public class ClusterMembershipServiceTests
         // fence line costs a push to every peer. Without a floor, a broker on a marginal
         // link expires, gets fenced, heartbeats once, unfences, and repeats.
         var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
-        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        var epoch = Register(service, Registration(1, Guid.NewGuid())).BrokerEpoch;
         service.Heartbeat(Beat(1, epoch));
 
         clock.Advance(TimeSpan.FromMinutes(5));
@@ -223,7 +231,7 @@ public class ClusterMembershipServiceTests
     public void AfterTheDwellAGoodHeartbeatUnfences()
     {
         var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
-        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        var epoch = Register(service, Registration(1, Guid.NewGuid())).BrokerEpoch;
         service.Heartbeat(Beat(1, epoch));
 
         clock.Advance(TimeSpan.FromMinutes(5));
@@ -242,7 +250,7 @@ public class ClusterMembershipServiceTests
         // The default is no dwell, so nothing that does not configure one changes — which is
         // what keeps every other test in this file meaning what it did.
         var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.Zero);
-        var epoch = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        var epoch = Register(service, Registration(1, Guid.NewGuid())).BrokerEpoch;
         service.Heartbeat(Beat(1, epoch));
 
         clock.Advance(TimeSpan.FromMinutes(5));
@@ -260,21 +268,25 @@ public class ClusterMembershipServiceTests
         // reset its way out of the very rule meant to catch it.
         var (service, clock) = NewServiceWithDwell(new ClusterState(), TimeSpan.FromSeconds(6));
         var incarnation = Guid.NewGuid();
-        var epoch = service.Register(Registration(1, incarnation)).BrokerEpoch;
+        var epoch = Register(service, Registration(1, incarnation)).BrokerEpoch;
         service.Heartbeat(Beat(1, epoch));
 
         clock.Advance(TimeSpan.FromMinutes(5));
         service.ExpireStaleSessions(TimeSpan.FromSeconds(20));
 
         clock.Advance(TimeSpan.FromSeconds(3));
-        service.Register(Registration(1, incarnation));   // same incarnation, mid-dwell
+        Register(service, Registration(1, incarnation));   // same incarnation, mid-dwell
 
         clock.Advance(TimeSpan.FromSeconds(4));           // 7 s total since fencing
         Assert.False(service.Heartbeat(Beat(1, epoch)).IsFenced);
     }
 
+    /// <summary>
+    /// A heartbeat from a broker that has consumed the log up to its own registration entry —
+    /// which is what "caught up" means since the epoch became that entry's index (#171).
+    /// </summary>
     private static BrokerHeartbeatInput Beat(int brokerId, long epoch) => new(
-        BrokerId: brokerId, BrokerEpoch: epoch, CurrentMetadataOffset: 0,
+        BrokerId: brokerId, BrokerEpoch: epoch, CurrentMetadataOffset: epoch,
         WantFence: false, WantShutDown: false);
 
     [Fact]
@@ -314,9 +326,8 @@ public class ClusterMembershipServiceTests
         var incarnation = Guid.NewGuid();
         RegisterAndUnfence(service, 1, incarnation);
 
-        var epoch = service.Register(Registration(1, incarnation)).BrokerEpoch;
-        service.Heartbeat(new BrokerHeartbeatInput(
-            BrokerId: 1, BrokerEpoch: epoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+        var epoch = Register(service, Registration(1, incarnation)).BrokerEpoch;
+        service.Heartbeat(Beat(1, epoch));
 
         Assert.Empty(ExpireAfter(service, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20)));
     }
@@ -332,7 +343,7 @@ public class ClusterMembershipServiceTests
         var incarnation = Guid.NewGuid();
         RegisterAndUnfence(service, 1, incarnation);
 
-        service.Register(Registration(1, incarnation));
+        Register(service, Registration(1, incarnation));
 
         Assert.False(service.IsKnownFenced(1));
     }
@@ -346,7 +357,7 @@ public class ClusterMembershipServiceTests
         var (service, _) = NewService();
         RegisterAndUnfence(service, 1, Guid.NewGuid());
 
-        service.Register(Registration(1, Guid.NewGuid()));
+        Register(service, Registration(1, Guid.NewGuid()));
 
         Assert.True(service.IsKnownFenced(1));
     }
@@ -372,7 +383,7 @@ public class ClusterMembershipServiceTests
         // replicated log, stayed there for the cluster, not just for one process.
         var (service, state) = NewService();
         var incarnation = Guid.NewGuid();
-        service.Register(Registration(1, incarnation));
+        Register(service, Registration(1, incarnation));
 
         Assert.NotNull(state.GetBroker(1));
 
@@ -395,7 +406,7 @@ public class ClusterMembershipServiceTests
         // follower catching up. Removing what is already gone must not throw or report
         // differently — refusing an unknown broker is the proposer's job, not the apply's.
         var (service, state) = NewService();
-        service.Register(Registration(1, Guid.NewGuid()));
+        Register(service, Registration(1, Guid.NewGuid()));
 
         service.ApplyReplicatedRemoval(1);
         service.ApplyReplicatedRemoval(1);
@@ -412,10 +423,10 @@ public class ClusterMembershipServiceTests
         // epoch rather than colliding with the forgotten one, which is the property that makes
         // removal safe to use on a broker whose id will be reused.
         var (service, state) = NewService();
-        service.Register(Registration(1, Guid.NewGuid()));
+        Register(service, Registration(1, Guid.NewGuid()));
         service.ApplyReplicatedRemoval(1);
 
-        var outcome = service.Register(Registration(1, Guid.NewGuid()));
+        var outcome = Register(service, Registration(1, Guid.NewGuid()));
 
         Assert.Equal(ClusterRpcStatus.None, outcome.Status);
         Assert.NotNull(state.GetBroker(1));
@@ -426,8 +437,8 @@ public class ClusterMembershipServiceTests
     {
         var (service, state) = NewService();
 
-        var r1 = service.Register(Registration(1, Guid.NewGuid(), replicationPort: 10999));
-        var r2 = service.Register(Registration(2, Guid.NewGuid()));
+        var r1 = Register(service, Registration(1, Guid.NewGuid(), replicationPort: 10999));
+        var r2 = Register(service, Registration(2, Guid.NewGuid()));
 
         Assert.Equal(ClusterRpcStatus.None, r1.Status);
         Assert.Equal(ClusterRpcStatus.None, r2.Status);
@@ -445,8 +456,8 @@ public class ClusterMembershipServiceTests
         var (service, _) = NewService();
         var incarnation = Guid.NewGuid();
 
-        var first = service.Register(Registration(1, incarnation));
-        var again = service.Register(Registration(1, incarnation));
+        var first = Register(service, Registration(1, incarnation));
+        var again = Register(service, Registration(1, incarnation));
 
         Assert.Equal(first.BrokerEpoch, again.BrokerEpoch);
     }
@@ -456,87 +467,13 @@ public class ClusterMembershipServiceTests
     {
         var (service, _) = NewService();
 
-        var first = service.Register(Registration(1, Guid.NewGuid()));
-        var restarted = service.Register(Registration(1, Guid.NewGuid())); // restart → new incarnation
+        var first = Register(service, Registration(1, Guid.NewGuid()));
+        var restarted = Register(service, Registration(1, Guid.NewGuid())); // restart → new incarnation
 
         Assert.True(restarted.BrokerEpoch > first.BrokerEpoch);
     }
 
     // ── #72 Inc4: composed epochs are monotone across controller failover ───────────────────────
-
-    [Fact]
-    public void FailoverSuccessor_ThatObservedTheReignEpoch_MintsStrictlyAboveThePredecessor()
-    {
-        // Old controller's reign: several epochs minted at controller epoch 0.
-        var (oldController, _) = NewService();
-        var e1 = oldController.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
-        var e2 = oldController.Register(Registration(2, Guid.NewGuid())).BrokerEpoch;
-        var e3 = oldController.Register(Registration(3, Guid.NewGuid())).BrokerEpoch;
-
-        // Failover onto a broker that OBSERVED the reign epoch (fence-passing push) — the
-        // precondition the composed scheme needs; a successor that never saw a push is the
-        // documented quiet-reign residual (Raft mode closes it, #72 Inc5). The old restart-at-1
-        // counter would re-mint e1 for the first re-registering broker even WITH this knowledge.
-        var (newController, newState) = NewService();
-        newState.TryAdvanceControllerEpoch(controllerId: 0, controllerEpoch: 0); // learned via push
-        newState.BecomeController(1);
-
-        var afterFailover = newController.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
-
-        Assert.True(afterFailover > e1);
-        Assert.True(afterFailover > e2);
-        Assert.True(afterFailover > e3);
-    }
-
-    [Fact]
-    public void RestartedController_WithHighWaterStore_MintsStrictlyAboveItsPreviousReign()
-    {
-        var dataDir = Path.Combine(Path.GetTempPath(), $"surgewave-test-{Guid.NewGuid():N}");
-        try
-        {
-            // First incarnation of the controller process: elects (epoch persisted via the
-            // high-water hook) and mints broker epochs.
-            var (first, state1) = NewService();
-            var store1 = new ControllerEpochStore(dataDir, NullLogger<ControllerEpochStore>.Instance);
-            state1.OnControllerEpochAdvanced = store1.Save;
-            state1.BecomeController(0);
-            var beforeRestart = first.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
-
-            // The controller process RESTARTS: fresh ClusterState (in-memory epoch back to 0),
-            // fresh membership store. Without the persisted floor it would re-elect at epoch 1 and
-            // re-mint duplicate broker epochs (the review MAJOR); the primed floor forces the new
-            // reign strictly above the previous one.
-            var (restarted, state2) = NewService();
-            var store2 = new ControllerEpochStore(dataDir, NullLogger<ControllerEpochStore>.Instance);
-            state2.PrimeControllerEpochFloor(store2.Load());
-            state2.OnControllerEpochAdvanced = store2.Save;
-            state2.BecomeController(0);
-
-            var afterRestart = restarted.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
-
-            Assert.True(afterRestart > beforeRestart);
-        }
-        finally
-        {
-            try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { }
-        }
-    }
-
-    [Fact]
-    public void Mint_IsImmuneToADownwardWobbleOfTheSharedControllerEpoch()
-    {
-        var (service, state) = NewService();
-        state.TryAdvanceControllerEpoch(controllerId: 1, controllerEpoch: 5);
-
-        var atReign5 = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
-
-        // The shared epoch wobbles DOWN (snapshot-restore reset) — the mint folds the reign epoch
-        // strictly upward, so composed epochs must not regress below the reign-5 series.
-        state.Clear();
-        var afterWobble = service.Register(Registration(2, Guid.NewGuid())).BrokerEpoch;
-
-        Assert.True(afterWobble > atReign5);
-    }
 
     [Fact]
     public void ControllerEpochStore_RoundTrips_AndTreatsMissingOrGarbageAsZero()
@@ -591,25 +528,9 @@ public class ClusterMembershipServiceTests
         }
     }
 
-    [Fact]
-    public void ControllerEpochBumpMidReign_MintsAboveEarlierEpochs_AndKeepsSameIncarnationEpoch()
-    {
-        var (service, state) = NewService();
-        var keptIncarnation = Guid.NewGuid();
-
-        var before = service.Register(Registration(1, keptIncarnation)).BrokerEpoch;
-
-        // Mid-reign controller-epoch bump (election or the #72 Inc1 finalized-level gate flip).
-        state.BecomeController(0);
-
-        // A NEW incarnation mints strictly above the pre-bump epoch …
-        var fresh = service.Register(Registration(2, Guid.NewGuid())).BrokerEpoch;
-        Assert.True(fresh > before);
-
-        // … while the SAME incarnation re-registering still keeps its original epoch.
-        var kept = service.Register(Registration(1, keptIncarnation)).BrokerEpoch;
-        Assert.Equal(before, kept);
-    }
+    // The four composed-mint tests that stood here went with the mint (#171): a broker epoch is the
+    // committed index of its registration entry, so monotonicity comes from the log rather than from
+    // folding a reign epoch with a per-reign counter and a node-local high-water file.
 
     [Fact]
     public void Heartbeat_WithPreFailoverEpoch_IsFencedUntilReRegistration()
@@ -617,11 +538,11 @@ public class ClusterMembershipServiceTests
         var (service, state) = NewService();
 
         // Pre-failover epoch, held by a broker that survived the controller change.
-        var stale = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        var stale = Register(service, Registration(1, Guid.NewGuid())).BrokerEpoch;
 
         // The broker restarts and re-registers under the new reign (new incarnation, higher epoch).
         state.BecomeController(0);
-        var fresh = service.Register(Registration(1, Guid.NewGuid())).BrokerEpoch;
+        var fresh = Register(service, Registration(1, Guid.NewGuid())).BrokerEpoch;
         Assert.True(fresh > stale);
 
         // A heartbeat still carrying the pre-failover epoch is fenced — the lifecycle loop's
@@ -635,7 +556,7 @@ public class ClusterMembershipServiceTests
     {
         var (service, state) = NewService();
 
-        service.Register(Registration(3, Guid.NewGuid())); // no REPLICATION listener
+        Register(service, Registration(3, Guid.NewGuid())); // no REPLICATION listener
 
         // Client port 9092+3 = 9095, replication defaults to +1000.
         Assert.Equal(9095 + 1000, state.GetBroker(3)!.ReplicationPort);
@@ -656,7 +577,7 @@ public class ClusterMembershipServiceTests
     public void Heartbeat_StaleEpoch_IsStaleBrokerEpoch()
     {
         var (service, _) = NewService();
-        var reg = service.Register(Registration(1, Guid.NewGuid()));
+        var reg = Register(service, Registration(1, Guid.NewGuid()));
 
         var outcome = service.Heartbeat(new BrokerHeartbeatInput(1, reg.BrokerEpoch + 99, 0, false, false));
 
@@ -667,11 +588,11 @@ public class ClusterMembershipServiceTests
     public void Heartbeat_CaughtUp_Unfences()
     {
         var (service, _) = NewService();
-        var reg = service.Register(Registration(1, Guid.NewGuid()));
+        var reg = Register(service, Registration(1, Guid.NewGuid()));
         Assert.True(service.IsBrokerFenced(1)); // starts fenced
 
-        // A heartbeat at a non-negative metadata offset with WantFence=false unfences.
-        var outcome = service.Heartbeat(new BrokerHeartbeatInput(1, reg.BrokerEpoch, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+        // A heartbeat that has reached this broker's own registration entry unfences it.
+        var outcome = service.Heartbeat(Beat(1, reg.BrokerEpoch));
 
         Assert.Equal(ClusterRpcStatus.None, outcome.Status);
         Assert.True(outcome.IsCaughtUp);
@@ -684,11 +605,11 @@ public class ClusterMembershipServiceTests
     {
         var (service, state) = NewService();
 
-        service.Register(Registration(1, Guid.NewGuid(), level: InterBrokerProtocolFeature.Native));
+        Register(service, Registration(1, Guid.NewGuid(), level: InterBrokerProtocolFeature.Native));
         Assert.Equal(InterBrokerProtocolFeature.Native, state.FinalizedInterBrokerProtocol);
 
         // A KafkaWire peer joining drops the finalized MIN back to KafkaWire.
-        service.Register(Registration(2, Guid.NewGuid(), level: InterBrokerProtocolFeature.KafkaWire));
+        Register(service, Registration(2, Guid.NewGuid(), level: InterBrokerProtocolFeature.KafkaWire));
         Assert.Equal(InterBrokerProtocolFeature.KafkaWire, state.FinalizedInterBrokerProtocol);
     }
 }
