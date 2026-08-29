@@ -56,10 +56,9 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
 - [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
 - [#163](https://github.com/Kuestenlogik/Surgewave/issues/163) **RFC: converge on the metadata log and retire the push model** 
-- [#167](https://github.com/Kuestenlogik/Surgewave/issues/167) **raft: observer replication — a broker receives the log without voting** 
 - [#168](https://github.com/Kuestenlogik/Surgewave/issues/168) **config: node roles and an explicit controller quorum** 
 - [#169](https://github.com/Kuestenlogik/Surgewave/issues/169) **clustering: a broker finds the controller quorum without being in it** 
 
 ---
 
-*Generated 2026-08-28 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-08-29 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
