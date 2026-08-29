@@ -57,6 +57,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
 - [#163](https://github.com/Kuestenlogik/Surgewave/issues/163) **RFC: converge on the metadata log and retire the push model** 
 - [#169](https://github.com/Kuestenlogik/Surgewave/issues/169) **clustering: a broker finds the controller quorum without being in it** 
+- [#170](https://github.com/Kuestenlogik/Surgewave/issues/170) **config: nothing validates the configuration at broker startup** `area:clustering` `track:cluster-correctness`
 
 ---
 
