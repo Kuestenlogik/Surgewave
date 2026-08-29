@@ -26,9 +26,11 @@ public sealed partial class NativeBrokerLifecycleClient : IBrokerLifecycleRpc
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ConnectionPool _connectionPool;
-    private readonly ClusterState _clusterState;
     private readonly ClusteringConfig _config;
     private readonly ILogger<NativeBrokerLifecycleClient> _logger;
+    private readonly ControllerEndpointResolver _resolver;
+
+    private bool _reportedUnreachableQuorum;
 
     public NativeBrokerLifecycleClient(
         ConnectionPool connectionPool,
@@ -37,9 +39,12 @@ public sealed partial class NativeBrokerLifecycleClient : IBrokerLifecycleRpc
         ILogger<NativeBrokerLifecycleClient> logger)
     {
         _connectionPool = connectionPool;
-        _clusterState = clusterState;
         _config = config;
         _logger = logger;
+
+        // Who to ask for the controller is its own question (#169) — an observer cannot derive
+        // it from having been in the quorum, because it never was.
+        _resolver = new ControllerEndpointResolver(config, clusterState);
     }
 
     public async Task<BrokerRegistrationOutcome> RegisterAsync(BrokerRegistrationInput input, CancellationToken ct = default)
@@ -77,7 +82,7 @@ public sealed partial class NativeBrokerLifecycleClient : IBrokerLifecycleRpc
         where TPayload : ISerializablePayload<TPayload>
         where T : class
     {
-        var controller = ResolveController();
+        var controller = _resolver.Resolve();
         if (controller is null)
         {
             LogNoController();
@@ -110,6 +115,8 @@ public sealed partial class NativeBrokerLifecycleClient : IBrokerLifecycleRpc
                 }
 
                 exchangeComplete = true;
+                _resolver.ReportSuccess();
+                _reportedUnreachableQuorum = false;
                 var reader = new SurgewavePayloadReader(response.Payload.Span);
                 return decode(ref reader);
             }
@@ -124,44 +131,37 @@ public sealed partial class NativeBrokerLifecycleClient : IBrokerLifecycleRpc
         catch (Exception ex)
         {
             LogExchangeFailed(opcode, host, replicationPort, ex);
+            OnExchangeFailed();
             return null;
         }
     }
 
     /// <summary>
-    /// Resolve the controller's (host, ReplicationPort): the known controller from cluster state, else
-    /// the lowest-id peer (the controller by the lowest-id convention). Both use the endpoint already
-    /// discovered into <see cref="ClusterState"/> by the controller's cluster-node parse (with the real
-    /// replication port from a 4-part cluster-node entry), NOT a re-parse of the raw config — which
-    /// prepends this broker itself and would resolve to self. Returns null when no peer is known yet
-    /// (this broker is the seed/controller, or standalone).
+    /// Moves the resolver on, and says once when the configured quorum has been walked through
+    /// without a single answer (#169).
     /// </summary>
-    private (string Host, int ReplicationPort)? ResolveController()
+    /// <remarks>
+    /// On a first start there is no metadata log to learn the quorum from, so the configured
+    /// list is the whole truth — and a mistyped entry there is indistinguishable from an
+    /// unreachable network unless something says which one it is. Reported once per outage
+    /// rather than per attempt, because the loop retries about once a second.
+    /// </remarks>
+    private void OnExchangeFailed()
     {
-        var controllerId = _clusterState.ControllerId;
+        _resolver.ReportFailure();
 
-        // We ARE the controller — there is nobody to register with; idle (no seed fallback, or the
-        // controller would try to register against a follower and loop on NotController).
-        if (controllerId == _config.BrokerId)
-            return null;
-
-        if (controllerId >= 0 && _clusterState.GetBroker(controllerId) is { } controller)
-            return (controller.Host, controller.ReplicationPort);
-
-        // Controller not yet known — target the lowest-id peer excluding self (the conventional
-        // controller/seed) so a joining broker can bootstrap before the first UpdateMetadata push.
-        BrokerNode? seed = null;
-        foreach (var kvp in _clusterState.Brokers)
+        if (!_reportedUnreachableQuorum && _resolver.ExhaustedQuorumWithoutContact)
         {
-            var b = kvp.Value;
-            if (b.BrokerId == _config.BrokerId)
-                continue;
-            if (seed is null || b.BrokerId < seed.BrokerId)
-                seed = b;
+            _reportedUnreachableQuorum = true;
+            LogQuorumUnreachable(_resolver.DescribeConfiguredQuorum());
         }
-
-        return seed is null ? null : (seed.Host, seed.ReplicationPort);
     }
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "No configured controller answered; every voter in the quorum ({Quorum}) was tried and "
+            + "none of them responded. On a first start there is no metadata log to learn the quorum from, "
+            + "so this is either the endpoints being wrong or the controllers not being up")]
+    private partial void LogQuorumUnreachable(string quorum);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "No controller resolvable for native lifecycle RPC yet")]
     private partial void LogNoController();

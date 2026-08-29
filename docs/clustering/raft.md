@@ -113,6 +113,18 @@ the other — cluster nodes say who exists, the voter list says who decides. The
 against each other at startup: a voter no broker knows about is rejected, because it would be
 counted towards the majority and never answer.
 
+A broker that is not in the quorum cannot work out where the quorum is from having been part
+of it, so the configured list is how it makes first contact: it tries the voters in turn, and
+once it is replicating it follows the leader the metadata log itself reports. The configured
+list therefore only has to be good enough to reach the quorum once — a list that has gone
+stale is survivable rather than fatal. A broker configured with a quorum and nothing else
+still joins; `ClusterNodes` is not required for it.
+
+The exception is a cluster starting for the first time, where there is no log to learn from
+and the configured list is the whole truth. If every voter has been tried and none answered,
+Surgewave logs an error naming the endpoints, so a mistyped list does not look like a network
+problem.
+
 Prefer an odd number of voters. Four voters need three to agree, exactly as five do, so the
 fourth adds a node that can fail without adding a failure the quorum survives; Surgewave logs
 a warning for an even count rather than refusing it, since it is a legitimate intermediate
