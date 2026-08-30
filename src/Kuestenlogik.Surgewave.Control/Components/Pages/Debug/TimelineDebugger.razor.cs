@@ -30,7 +30,7 @@ public sealed partial class TimelineDebugger : IDisposable
 
     // Topic selection
     private List<string> _availableTopics = [];
-    private IEnumerable<string> _selectedTopics = [];
+    private IReadOnlyCollection<string> _selectedTopics = [];
 
     // Time range
     private DateTime? _fromDate = DateTime.Today;
@@ -100,7 +100,7 @@ public sealed partial class TimelineDebugger : IDisposable
 
     private async Task LoadTimelineAsync()
     {
-        if (!_selectedTopics.Any()) return;
+        if (_selectedTopics.Count == 0) return;
 
         _loading = true;
         _selectedEvent = null;

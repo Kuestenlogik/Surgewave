@@ -314,7 +314,7 @@
 
     private async Task DeleteBucketAsync(string bucket)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete bucket",
             $"Delete bucket '{bucket}' and all of its keys? This cannot be undone.",
             yesText: "Delete", cancelText: "Cancel");
@@ -404,7 +404,7 @@
             return;
 
         var key = _selectedEntry.Key;
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete key",
             $"Delete key '{key}' from bucket '{_selectedBucket}'?",
             yesText: "Delete", cancelText: "Cancel");

@@ -283,7 +283,7 @@
     {
         if (_editingConfig == null || _editValue == _editingConfig.Value) return;
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Confirm Configuration Change",
             $"Change '{_editingConfig.Key}' from '{_editingConfig.Value}' to '{_editValue}'?\n\nThis may require a broker restart to take effect.",
             yesText: "Apply", cancelText: "Cancel");

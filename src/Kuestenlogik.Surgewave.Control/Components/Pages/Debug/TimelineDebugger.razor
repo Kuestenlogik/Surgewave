@@ -47,7 +47,7 @@
                 </MudButtonGroup>
 
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
-                           OnClick="LoadTimelineAsync" Disabled="@(_loading || !_selectedTopics.Any())">
+                           OnClick="LoadTimelineAsync" Disabled="@(_loading || _selectedTopics.Count == 0)">
                     @if (_loading)
                     {
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />

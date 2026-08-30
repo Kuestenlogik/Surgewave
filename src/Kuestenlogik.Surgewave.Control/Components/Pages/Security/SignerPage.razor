@@ -76,14 +76,14 @@ else
                 </CardHeaderContent>
                 <CardHeaderActions>
                     <MudFileUpload T="IBrowserFile" Accept=".pub,.pem" FilesChanged="OnPubSelected">
-                        <ActivatorContent>
+                        <CustomContent Context="upload">
                             <MudButton Variant="Variant.Outlined"
                                        Color="Color.Primary"
                                        StartIcon="@Icons.Material.Filled.UploadFile"
-                                       Disabled="_busy">
+                                       Disabled="_busy" OnClick="@(() => upload.OpenFilePickerAsync())">
                                 Upload .pub
                             </MudButton>
-                        </ActivatorContent>
+                        </CustomContent>
                     </MudFileUpload>
                     <MudButton Variant="Variant.Filled"
                                Color="Color.Primary"
@@ -201,7 +201,7 @@ else
 
     private async Task DeleteKey(string name)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Revoke trusted key",
             $"Revoking '{name}' will reject any package signed only by this key starting with the next install. Continue?",
             yesText: "Revoke",

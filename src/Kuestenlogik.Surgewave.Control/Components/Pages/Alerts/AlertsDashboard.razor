@@ -43,7 +43,7 @@
           Value="@(Alerting.LastEvaluatedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "—")" />
 </SummaryStrip>
 
-<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" PanelClass="pt-4" Class="mb-4">
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" TabPanelsClass="pt-4" Class="mb-4">
     @* Tab 1: Active Alerts *@
     <MudTabPanel Text="Active Alerts" Icon="@Icons.Material.Filled.NotificationsActive"
                  BadgeData="@_activeAlerts.Count(a => a.AcknowledgedAt == null)"

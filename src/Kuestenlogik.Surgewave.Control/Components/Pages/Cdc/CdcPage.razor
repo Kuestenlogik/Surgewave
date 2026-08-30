@@ -116,7 +116,7 @@ else if (_error != null)
 
     private async Task DeleteSourceAsync(string id)
     {
-        var confirmed = await DialogService.ShowMessageBox("Remove CDC Source",
+        var confirmed = await DialogService.ShowMessageBoxAsync("Remove CDC Source",
             $"Remove CDC source '{id}'? This will stop change capture.", yesText: "Remove", cancelText: "Cancel");
         if (confirmed == true)
         {

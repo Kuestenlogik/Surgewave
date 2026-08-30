@@ -42,7 +42,7 @@ else if (_error != null)
     <Stat Label="Brokers" Value="@_assignments.SelectMany(a => a.Replicas).Distinct().Count().ToString()" />
 </SummaryStrip>
 
-<MudTabs Elevation="0" Rounded="true" PanelClass="pt-4">
+<MudTabs Elevation="0" Rounded="true" TabPanelsClass="pt-4">
     @* Current Assignments *@
     <MudTabPanel Text="Partition Assignments" Icon="@Icons.Material.Filled.ViewModule">
         <MudTable Items="_assignments" Hover="true" Dense="true" Class="ma-4" Filter="FilterAssignment">
@@ -152,7 +152,7 @@ else if (_error != null)
 
     private async Task AutoBalanceAsync()
     {
-        var confirmed = await DialogService.ShowMessageBox("Auto-Balance",
+        var confirmed = await DialogService.ShowMessageBoxAsync("Auto-Balance",
             "Generate and execute a partition balance plan across all brokers?", yesText: "Balance", cancelText: "Cancel");
         if (confirmed != true) return;
         _balancing = true;

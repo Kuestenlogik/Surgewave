@@ -18,11 +18,11 @@
 
     <MudFileUpload T="IBrowserFile" Accept=".swpkg"
                    FilesChanged="OnFileSelected">
-        <ActivatorContent>
+        <CustomContent Context="upload">
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.CloudUpload"
                        FullWidth="true" Disabled="_publishing"
-                       Style="height: 80px; border-style: dashed;">
+                       Style="height: 80px; border-style: dashed;" OnClick="@(() => upload.OpenFilePickerAsync())">
                 @if (_selectedFile != null)
                 {
                     <text>@_selectedFile.Name (@FormatSize(_selectedFile.Size))</text>
@@ -32,7 +32,7 @@
                     <text>Drop .swpkg file here or click to browse</text>
                 }
             </MudButton>
-        </ActivatorContent>
+        </CustomContent>
     </MudFileUpload>
 
     @if (_selectedFile != null)

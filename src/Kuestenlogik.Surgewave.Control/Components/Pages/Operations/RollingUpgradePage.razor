@@ -192,7 +192,7 @@ else if (_error != null)
 
     private async Task InitiateShutdownAsync()
     {
-        var confirmed = await DialogService.ShowMessageBox("Graceful Shutdown",
+        var confirmed = await DialogService.ShowMessageBoxAsync("Graceful Shutdown",
             "Initiate graceful shutdown with leadership transfer? This will stop this broker.",
             yesText: "Shut Down", cancelText: "Cancel");
         if (confirmed != true) return;

@@ -176,7 +176,7 @@
 
     private async Task DeleteAclAsync(AclEntryModel acl)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete ACL",
             $"Are you sure you want to delete this ACL?\n\nPrincipal: {acl.Principal}\nResource: {acl.ResourceType}:{acl.ResourceName}\nOperation: {acl.Operation}",
             yesText: "Delete",
@@ -207,7 +207,7 @@
     {
         if (_selectedAcls.Count == 0) return;
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete ACLs",
             $"Are you sure you want to delete {_selectedAcls.Count} selected ACL(s)?",
             yesText: "Delete",
