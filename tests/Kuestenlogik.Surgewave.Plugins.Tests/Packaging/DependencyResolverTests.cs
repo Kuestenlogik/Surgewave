@@ -252,7 +252,9 @@ public sealed class DependencyResolverTests
             manifestLoader: (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.FromResult<PluginManifest?>(null); },
             installedVersionProvider: _ => null);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => resolver.ResolveAsync("a", cts.Token));
+        // ThrowsAny: which cancellation type surfaces is the runtime's choice and changed under a
+        // servicing update; the assertion is that it cancels.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resolver.ResolveAsync("a", cts.Token));
     }
 
     // --- ResolvedDependency / DependencyResolutionResult ---

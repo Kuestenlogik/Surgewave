@@ -77,8 +77,13 @@ public class ObservabilityWiringTests
         });
         Assert.Equal(ConsumerGroupErrorStatus.None, sync.Status);
 
+        // ThrowsAnyAsync, not ThrowsAsync: the assertion is "nothing was published, so the read
+        // waits until it is cancelled". Which cancellation type surfaces —
+        // OperationCanceledException or the TaskCanceledException derived from it — is the
+        // runtime's choice, and it changed under a servicing update. Pinning the exact type was
+        // pinning an implementation detail rather than the behaviour.
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             ReadFirstAsync(observability, cts.Token));
     }
 
