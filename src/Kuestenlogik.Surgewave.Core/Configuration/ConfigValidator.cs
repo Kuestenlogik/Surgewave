@@ -59,6 +59,45 @@ public static class ConfigValidator
     }
 
     /// <summary>
+    /// Runs <see cref="IValidatableConfig.Validate"/> on every config and throws once with
+    /// everything that is wrong (#170).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One exception for all of them, not one per config: an operator fixing a deployment file
+    /// should see every mistake in it, not the first one and then the next after another restart.
+    /// </para>
+    /// <para>
+    /// Nulls are skipped, so a caller can pass a config that only exists when a feature is on
+    /// without branching at the call site.
+    /// </para>
+    /// </remarks>
+    public static void ThrowIfAnyInvalid(params IValidatableConfig?[] configs)
+    {
+        ArgumentNullException.ThrowIfNull(configs);
+
+        List<Type>? failedTypes = null;
+        List<string>? allErrors = null;
+
+        foreach (var config in configs)
+        {
+            if (config is null) continue;
+
+            var errors = config.Validate();
+            if (errors.Count == 0) continue;
+
+            var type = config.GetType();
+            (failedTypes ??= []).Add(type);
+            (allErrors ??= []).AddRange(errors.Select(e => $"{type.Name}: {e}"));
+        }
+
+        if (failedTypes is not null)
+        {
+            throw new ConfigValidationException(failedTypes, allErrors!);
+        }
+    }
+
+    /// <summary>
     /// Helper for configs that only need the standard DataAnnotations pass. Common shape:
     /// <code>
     /// public IReadOnlyList&lt;string&gt; Validate() =&gt; ConfigValidator.ValidateDataAnnotations(this);
@@ -77,25 +116,36 @@ public static class ConfigValidator
 public sealed class ConfigValidationException : Exception
 {
     /// <summary>
-    /// The type of the configuration that failed validation.
+    /// The type of the configuration that failed validation — the first one when several did.
     /// </summary>
-    public Type ConfigType { get; }
+    public Type ConfigType => ConfigTypes[0];
 
     /// <summary>
-    /// The individual error messages reported by the config's <c>Validate()</c> implementation.
+    /// Every configuration type that failed, in the order they were checked.
+    /// </summary>
+    public IReadOnlyList<Type> ConfigTypes { get; }
+
+    /// <summary>
+    /// The individual error messages reported by the configs' <c>Validate()</c> implementations.
     /// </summary>
     public IReadOnlyList<string> Errors { get; }
 
     internal ConfigValidationException(Type configType, IReadOnlyList<string> errors)
-        : base(BuildMessage(configType, errors))
+        : this([configType], errors)
     {
-        ConfigType = configType;
+    }
+
+    internal ConfigValidationException(IReadOnlyList<Type> configTypes, IReadOnlyList<string> errors)
+        : base(BuildMessage(configTypes, errors))
+    {
+        ConfigTypes = configTypes;
         Errors = errors;
     }
 
-    private static string BuildMessage(Type configType, IReadOnlyList<string> errors)
+    private static string BuildMessage(IReadOnlyList<Type> configTypes, IReadOnlyList<string> errors)
     {
-        var header = $"{configType.Name} failed validation with {errors.Count} error(s):";
+        var names = string.Join(", ", configTypes.Select(t => t.Name));
+        var header = $"{names} failed validation with {errors.Count} error(s):";
         return string.Join(Environment.NewLine, new[] { header }.Concat(errors.Select(e => "  - " + e)));
     }
 }

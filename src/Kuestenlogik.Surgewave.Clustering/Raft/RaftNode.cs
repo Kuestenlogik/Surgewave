@@ -263,6 +263,26 @@ public sealed partial class RaftNode : IAsyncDisposable
                 return Task.FromResult(response);
             }
 
+            // A leader that still has quorum does not help elect a rival. Pre-vote exists to stop a
+            // partitioned node from disrupting a healthy term, and the leader is the node that knows
+            // the term is healthy — but it never refreshes its own _lastHeartbeat, because it
+            // receives no heartbeats, so the "heard from a leader recently" check below always
+            // passes for it and it grants the pre-vote.
+            //
+            // That was unreachable while the push model carried metadata and Raft was off by
+            // default. With the log as the only model (#163 step 3) it is on the main path, and it
+            // is how a cluster ends up with a leader per broker: each newcomer campaigns, the
+            // sitting leader votes for it, and every node believes it is the controller.
+            //
+            // Gated on quorum connectivity rather than on being leader alone: a leader that has
+            // LOST its quorum must not be able to block the election that replaces it.
+            if (_state == RaftState.Leader && HasQuorumConnectivity)
+            {
+                LogPreVoteRejectedLeaderActive(request.CandidateId, NodeId);
+                response = new PreVoteResponse(_currentTerm, false);
+                return Task.FromResult(response);
+            }
+
             // Check if we've heard from a leader recently
             // If so, reject to prevent disrupting a working cluster
             var timeSinceLastHeartbeat = (DateTimeOffset.UtcNow - _lastHeartbeat).TotalMilliseconds;

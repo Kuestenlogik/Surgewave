@@ -7,6 +7,7 @@ using Kuestenlogik.Surgewave.Broker.Native.Coordination;
 using Kuestenlogik.Surgewave.Broker.KeyValue;
 using Kuestenlogik.Surgewave.Broker.Queue;
 using Kuestenlogik.Surgewave.Broker.Startup;
+using Kuestenlogik.Surgewave.Core.Configuration;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Queue;
 using Kuestenlogik.Surgewave.Clustering;
@@ -884,6 +885,14 @@ var tieredStorageManager = TieredStorageInitializer.Create(config, logger);
 var metrics = app.Services.GetRequiredService<BrokerMetrics>();
 var clusterState = app.Services.GetRequiredService<ClusterState>();
 var clusteringConfig = app.Services.GetRequiredService<ClusteringConfig>();
+
+// #170 — the configuration is checked before anything starts, and an invalid one stops the broker.
+// Every one of these rules was written as a startup gate and none of them was one: Validate() was
+// reachable only through /api/config/validate, so a setting whose wrong value looks like a cluster
+// problem rather than a config problem stayed silent until somebody thought to call the endpoint.
+// Both configs together, so an operator fixing a deployment file sees every mistake in it at once.
+ConfigValidator.ThrowIfAnyInvalid(config, clusteringConfig);
+
 var replicaManager = app.Services.GetRequiredService<ReplicaManager>();
 var clusterController = app.Services.GetRequiredService<ClusterController>();
 var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
