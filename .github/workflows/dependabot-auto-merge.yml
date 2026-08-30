@@ -10,6 +10,12 @@
 # branch list lean (the Dependabot temp branch otherwise lingers until
 # someone clicks "Delete branch" in the UI).
 #
+# This is the ONLY auto-merge workflow. A second one used to sit beside it
+# that merged on `pull_request` the moment the PR opened, without waiting
+# for CI and without excluding majors — and being the faster of the two, it
+# won every race, so the wait-for-green intent here never actually applied
+# and every bump landed on main unvalidated.
+#
 # Patch + minor bumps auto-merge unconditionally. Major bumps are NOT
 # auto-merged: they typically carry breaking-change semver semantics
 # and deserve a manual review.
