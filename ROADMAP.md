@@ -55,7 +55,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
 - [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
 - [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
-- [#170](https://github.com/Kuestenlogik/Surgewave/issues/170) **config: nothing validates the configuration at broker startup** `area:clustering` `track:cluster-correctness`
+- [#172](https://github.com/Kuestenlogik/Surgewave/issues/172) **clustering: a multi-broker cluster must declare its quorum, not discover it** `area:clustering` `track:cluster-correctness`
 
 ---
 
