@@ -147,7 +147,7 @@
     {
         if (string.IsNullOrEmpty(PipelineId)) return;
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Restore Version",
             $"Are you sure you want to restore version {version.VersionNumber}? This will create a new version with the old state.",
             yesText: "Restore", cancelText: "Cancel");

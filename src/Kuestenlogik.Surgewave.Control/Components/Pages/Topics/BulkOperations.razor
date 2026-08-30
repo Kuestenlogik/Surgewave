@@ -286,7 +286,7 @@
     // ===== BULK DELETE =====
     private async Task BulkDeleteAsync()
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Bulk Delete Topics",
             $"Delete {_selectedTopics.Count} topic(s)? This action cannot be undone.\n\n" +
             string.Join("\n", _selectedTopics.Take(10)) +

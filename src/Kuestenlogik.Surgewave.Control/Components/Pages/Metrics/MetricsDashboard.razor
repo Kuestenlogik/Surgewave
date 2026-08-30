@@ -63,8 +63,8 @@ else
                     </CardHeaderContent>
                 </MudCardHeader>
                 <MudCardContent Style="height: 300px;">
-                    <MudChart ChartType="ChartType.Line" ChartSeries="@_throughputSeries"
-                              XAxisLabels="@_throughputLabels" Width="100%" Height="280px"
+                    <MudChart T="double" ChartType="ChartType.Line" ChartSeries="@_throughputSeries"
+                              ChartLabels="@_throughputLabels" Width="100%" Height="280px"
                               ChartOptions="@_chartOptions" />
                 </MudCardContent>
             </MudCard>
@@ -79,8 +79,8 @@ else
                     </CardHeaderContent>
                 </MudCardHeader>
                 <MudCardContent Style="height: 300px;">
-                    <MudChart ChartType="ChartType.Line" ChartSeries="@_latencySeries"
-                              XAxisLabels="@_latencyLabels" Width="100%" Height="280px"
+                    <MudChart T="double" ChartType="ChartType.Line" ChartSeries="@_latencySeries"
+                              ChartLabels="@_latencyLabels" Width="100%" Height="280px"
                               ChartOptions="@_chartOptions" />
                 </MudCardContent>
             </MudCard>
@@ -95,8 +95,8 @@ else
                     </CardHeaderContent>
                 </MudCardHeader>
                 <MudCardContent Style="height: 300px;">
-                    <MudChart ChartType="ChartType.Line" ChartSeries="@_bytesSeries"
-                              XAxisLabels="@_bytesLabels" Width="100%" Height="280px"
+                    <MudChart T="double" ChartType="ChartType.Line" ChartSeries="@_bytesSeries"
+                              ChartLabels="@_bytesLabels" Width="100%" Height="280px"
                               ChartOptions="@_chartOptions" />
                 </MudCardContent>
             </MudCard>
@@ -124,8 +124,8 @@ else
                     }
                     else
                     {
-                        <MudChart ChartType="ChartType.Bar" ChartSeries="@_topTopicsMsgSeries"
-                                  XAxisLabels="@_topTopicsLabels" Width="100%" Height="220px"
+                        <MudChart T="double" ChartType="ChartType.Bar" ChartSeries="@_topTopicsMsgSeries"
+                                  ChartLabels="@_topTopicsLabels" Width="100%" Height="220px"
                                   ChartOptions="@_chartOptions" />
                     }
                 </MudCardContent>
@@ -149,8 +149,8 @@ else
                     }
                     else
                     {
-                        <MudChart ChartType="ChartType.Bar" ChartSeries="@_topTopicsBytesSeries"
-                                  XAxisLabels="@_topTopicsLabels" Width="100%" Height="220px"
+                        <MudChart T="double" ChartType="ChartType.Bar" ChartSeries="@_topTopicsBytesSeries"
+                                  ChartLabels="@_topTopicsLabels" Width="100%" Height="220px"
                                   ChartOptions="@_chartOptions" />
                     }
                 </MudCardContent>
@@ -234,17 +234,17 @@ else
     private List<MetricPoint> _p99Points = [];
 
     // MudChart series + labels
-    private List<ChartSeries> _throughputSeries = [];
+    private List<ChartSeries<double>> _throughputSeries = [];
     private string[] _throughputLabels = [];
-    private List<ChartSeries> _latencySeries = [];
+    private List<ChartSeries<double>> _latencySeries = [];
     private string[] _latencyLabels = [];
-    private List<ChartSeries> _bytesSeries = [];
+    private List<ChartSeries<double>> _bytesSeries = [];
     private string[] _bytesLabels = [];
-    private List<ChartSeries> _topTopicsMsgSeries = [];
-    private List<ChartSeries> _topTopicsBytesSeries = [];
+    private List<ChartSeries<double>> _topTopicsMsgSeries = [];
+    private List<ChartSeries<double>> _topTopicsBytesSeries = [];
     private string[] _topTopicsLabels = [];
 
-    private ChartOptions _chartOptions = new() { YAxisLines = true, XAxisLines = true };
+    private LineChartOptions _chartOptions = new() { YAxisLines = true, XAxisLines = true };
 
     // Topic metrics
     private Dictionary<string, TopicMetrics> _previousTopicMetrics = [];
@@ -375,8 +375,8 @@ else
         // Throughput
         _throughputSeries =
         [
-            new ChartSeries { Name = "Produced", Data = _throughputPoints.Select(p => p.Value).ToArray() },
-            new ChartSeries { Name = "Fetched", Data = _fetchedPoints.Select(p => p.Value).ToArray() }
+            new ChartSeries<double> { Name = "Produced", Data = _throughputPoints.Select(p => p.Value).ToArray() },
+            new ChartSeries<double> { Name = "Fetched", Data = _fetchedPoints.Select(p => p.Value).ToArray() }
         ];
         _throughputLabels = _throughputPoints.Select((p, i) => i % labelStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
 
@@ -384,9 +384,9 @@ else
         var latencyStep = Math.Max(1, _p50Points.Count / 10);
         _latencySeries =
         [
-            new ChartSeries { Name = "P50", Data = _p50Points.Select(p => p.Value).ToArray() },
-            new ChartSeries { Name = "P90", Data = _p90Points.Select(p => p.Value).ToArray() },
-            new ChartSeries { Name = "P99", Data = _p99Points.Select(p => p.Value).ToArray() }
+            new ChartSeries<double> { Name = "P50", Data = _p50Points.Select(p => p.Value).ToArray() },
+            new ChartSeries<double> { Name = "P90", Data = _p90Points.Select(p => p.Value).ToArray() },
+            new ChartSeries<double> { Name = "P99", Data = _p99Points.Select(p => p.Value).ToArray() }
         ];
         _latencyLabels = _p50Points.Select((p, i) => i % latencyStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
 
@@ -394,18 +394,18 @@ else
         var bytesStep = Math.Max(1, _bytesInPoints.Count / 10);
         _bytesSeries =
         [
-            new ChartSeries { Name = "Bytes In", Data = _bytesInPoints.Select(p => p.Value).ToArray() },
-            new ChartSeries { Name = "Bytes Out", Data = _bytesOutPoints.Select(p => p.Value).ToArray() }
+            new ChartSeries<double> { Name = "Bytes In", Data = _bytesInPoints.Select(p => p.Value).ToArray() },
+            new ChartSeries<double> { Name = "Bytes Out", Data = _bytesOutPoints.Select(p => p.Value).ToArray() }
         ];
         _bytesLabels = _bytesInPoints.Select((p, i) => i % bytesStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
 
         // Topic bar charts
         _topTopicsLabels = _topTopics.Select(t => t.Topic).ToArray();
-        _topTopicsMsgSeries = [new ChartSeries { Name = "Messages/sec", Data = _topTopics.Select(t => t.MessagesPerSec).ToArray() }];
+        _topTopicsMsgSeries = [new ChartSeries<double> { Name = "Messages/sec", Data = _topTopics.Select(t => t.MessagesPerSec).ToArray() }];
         _topTopicsBytesSeries =
         [
-            new ChartSeries { Name = "Bytes In", Data = _topTopics.Select(t => t.BytesInPerSec).ToArray() },
-            new ChartSeries { Name = "Bytes Out", Data = _topTopics.Select(t => t.BytesOutPerSec).ToArray() }
+            new ChartSeries<double> { Name = "Bytes In", Data = _topTopics.Select(t => t.BytesInPerSec).ToArray() },
+            new ChartSeries<double> { Name = "Bytes Out", Data = _topTopics.Select(t => t.BytesOutPerSec).ToArray() }
         ];
     }
 

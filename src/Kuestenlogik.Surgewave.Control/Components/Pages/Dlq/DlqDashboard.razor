@@ -542,7 +542,7 @@ else
             return;
         }
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Replay Message",
             $"Replay this message back to '{msg.OriginalTopic}'?",
             yesText: "Replay", cancelText: "Cancel");
@@ -579,7 +579,7 @@ else
             return;
         }
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Batch Replay",
             $"Replay {selected.Count} messages back to their source topics?",
             yesText: "Replay All", cancelText: "Cancel");
@@ -616,7 +616,7 @@ else
             return;
         }
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Replay All DLQ Messages",
             $"Replay all {dlq.TotalMessages:N0} messages from '{dlq.TopicName}' back to '{dlq.SourceTopic}'?\n\nThis may take a while for large queues.",
             yesText: "Replay All", cancelText: "Cancel");
@@ -630,7 +630,7 @@ else
 
     private async Task PurgeDlqAsync(DlqTopicInfo dlq)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Purge DLQ",
             $"Delete ALL {dlq.TotalMessages:N0} messages from '{dlq.TopicName}'?\n\nThis action cannot be undone.",
             yesText: "Purge", cancelText: "Cancel");

@@ -45,7 +45,7 @@
     <Stat Label="Total members" Value="@_state.Roles.Sum(r => r.Members.Count).ToString()" />
 </SummaryStrip>
 
-<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" PanelClass="pt-4" Class="mb-4">
+<MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" Rounded="true" TabPanelsClass="pt-4" Class="mb-4">
     <MudTabPanel Text="Roles" Icon="@Icons.Material.Filled.Shield" />
     <MudTabPanel Text="User Assignments" Icon="@Icons.Material.Filled.People" />
     <MudTabPanel Text="Permission Viewer" Icon="@Icons.Material.Filled.Visibility" />
@@ -455,7 +455,7 @@ else
 
     private async Task DeleteRoleAsync(RoleDefinition role)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Role",
             $"Delete role '{role.Name}' and remove all user assignments?",
             yesText: "Delete", cancelText: "Cancel");

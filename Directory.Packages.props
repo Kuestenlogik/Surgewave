@@ -25,17 +25,17 @@
     <PackageVersion Include="Grpc.Tools" Version="2.80.0" />
     <PackageVersion Include="Google.Protobuf" Version="3.35.0" />
     <PackageVersion Include="Google.Api.CommonProtos" Version="2.17.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Grpc.JsonTranscoding" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.Grpc.JsonTranscoding" Version="10.0.11" />
     <!-- Authentication -->
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
     <PackageVersion Include="ITfoxtec.Identity.Saml2" Version="4.18.0" />
     <PackageVersion Include="ITfoxtec.Identity.Saml2.MvcCore" Version="4.18.0" />
     <PackageVersion Include="System.DirectoryServices.Protocols" Version="10.0.8" />
     <!-- Testing -->
-    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.1" />
-    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />
+    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <!-- 1.3.1 schliesst GHSA-pggp-6c3x-2xmx — alle vorigen 1.x-Versionen sind verwundbar. -->
@@ -51,15 +51,15 @@
     <!-- HdrHistogram: G3 Public-Benchmark-Suite nutzt das fuer P50/P90/P99/P99.9/P99.99 -->
     <PackageVersion Include="HdrHistogram" Version="2.5.0" />
     <!-- Logging for tests -->
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
     <!-- OpenAPI + interactive workbench: Bowire ist Surgewave-weiter Default
          fuer REST/OpenAPI und gRPC Discovery (Scalar.AspNetCore wurde 2026-06
          abgeloest — Bowire deckt beide Surfaces ab + Mock-Recordings + Replay). -->
@@ -68,10 +68,10 @@
          inkl. des surgewave://embedded-Taps auf ISurgewaveBrokerObservability.
          Ohne dieses Paket kennt der /bowire-Browser nur gRPC. -->
     <PackageVersion Include="Kuestenlogik.Bowire.Protocol.Surgewave" Version="0.1.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
     <!-- Utilities -->
     <PackageVersion Include="Cronos" Version="0.13.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.8" />
     <PackageVersion Include="NuGet.Protocol" Version="6.12.5" />
     <!-- Compression -->
@@ -202,7 +202,7 @@
     <PackageVersion Include="Capnp.Net.Runtime" Version="1.3.118" />
     <!-- Kubernetes -->
     <PackageVersion Include="KubernetesClient" Version="18.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <!-- MCP (Model Context Protocol) -->
     <PackageVersion Include="ModelContextProtocol" Version="0.2.0-preview.1" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="0.2.0-preview.1" />
@@ -244,10 +244,10 @@
     <PackageVersion Include="HotChocolate.AspNetCore" Version="15.1.15" />
     <!-- Admin Web UI (Blazor) -->
     <PackageVersion Include="BlazorMonaco" Version="3.4.0" />
-    <PackageVersion Include="MudBlazor" Version="8.15.0" />
+    <PackageVersion Include="MudBlazor" Version="9.9.0" />
     <PackageVersion Include="Blazored.LocalStorage" Version="4.5.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.11" />
     <!-- MSBuild task authoring -->
     <PackageVersion Include="Microsoft.Build.Framework" Version="18.6.3" />
     <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="18.6.3" />

@@ -211,7 +211,7 @@
 
     private async Task DeleteSubjectAsync(string subject)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Subject",
             $"Are you sure you want to delete subject '{subject}' and all its versions?",
             yesText: "Delete",

@@ -31,14 +31,14 @@
         <CardHeaderActions>
             <MudFileUpload T="IBrowserFile" Accept=".swpkg"
                            FilesChanged="OnPluginFileSelected">
-                <ActivatorContent>
+                <CustomContent Context="upload">
                     <MudButton Variant="Variant.Filled" Color="Color.Secondary"
                                StartIcon="@Icons.Material.Filled.Upload"
                                Disabled="_uploading"
-                               Class="mr-2">
+                               Class="mr-2" OnClick="@(() => upload.OpenFilePickerAsync())">
                         @(_uploading ? "Uploading..." : "Upload .swpkg")
                     </MudButton>
-                </ActivatorContent>
+                </CustomContent>
             </MudFileUpload>
             <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary"
                            OnClick="LoadPackagesAsync" Disabled="_loading" />
@@ -418,7 +418,7 @@ else
 
     private async Task UninstallPackage(PluginInfo package)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Uninstall Connector",
             $"Are you sure you want to uninstall {package.Name}?",
             yesText: "Uninstall",

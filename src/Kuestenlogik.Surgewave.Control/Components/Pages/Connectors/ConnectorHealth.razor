@@ -437,7 +437,7 @@
 
     private async Task RestartFailedAsync(ConnectorHealthInfo connector)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Restart Failed Tasks",
             $"Restart {connector.FailedTasks} failed task(s) of '{connector.Name}'?",
             yesText: "Restart", cancelText: "Cancel");

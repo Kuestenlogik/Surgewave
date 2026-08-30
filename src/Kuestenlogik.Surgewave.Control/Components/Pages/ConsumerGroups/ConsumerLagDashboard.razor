@@ -70,8 +70,8 @@ else
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent Style="height: 250px;">
-                <MudChart ChartType="ChartType.Line" ChartSeries="@_lagTrendSeries"
-                          XAxisLabels="@_lagTrendLabels" Width="100%" Height="220px"
+                <MudChart T="double" ChartType="ChartType.Line" ChartSeries="@_lagTrendSeries"
+                          ChartLabels="@_lagTrendLabels" Width="100%" Height="220px"
                           ChartOptions="@_chartOptions" />
             </MudCardContent>
         </MudCard>
@@ -195,8 +195,8 @@ else
                 @if (_expandedGroup.Partitions.Count > 0)
                 {
                     <div style="height: 300px;" class="mb-4">
-                        <MudChart ChartType="ChartType.Bar" ChartSeries="@_partitionLagSeries"
-                                  XAxisLabels="@_partitionLagLabels" Width="100%" Height="280px"
+                        <MudChart T="double" ChartType="ChartType.Bar" ChartSeries="@_partitionLagSeries"
+                                  ChartLabels="@_partitionLagLabels" Width="100%" Height="280px"
                                   ChartOptions="@_chartOptions" />
                     </div>
                 }
@@ -311,12 +311,12 @@ else
     private List<LagPoint> _lagTrendPoints = [];
 
     // MudChart series
-    private List<ChartSeries> _lagTrendSeries = [];
+    private List<ChartSeries<double>> _lagTrendSeries = [];
     private string[] _lagTrendLabels = [];
-    private List<ChartSeries> _partitionLagSeries = [];
+    private List<ChartSeries<double>> _partitionLagSeries = [];
     private string[] _partitionLagLabels = [];
 
-    private ChartOptions _chartOptions = new() { YAxisLines = true, XAxisLines = true };
+    private LineChartOptions _chartOptions = new() { YAxisLines = true, XAxisLines = true };
 
     // Offset reset
     private bool _showResetDialog;
@@ -406,7 +406,7 @@ else
     private void RebuildLagTrendChart()
     {
         var labelStep = Math.Max(1, _lagTrendPoints.Count / 10);
-        _lagTrendSeries = [new ChartSeries { Name = "Total Lag", Data = _lagTrendPoints.Select(p => p.Value).ToArray() }];
+        _lagTrendSeries = [new ChartSeries<double> { Name = "Total Lag", Data = _lagTrendPoints.Select(p => p.Value).ToArray() }];
         _lagTrendLabels = _lagTrendPoints.Select((p, i) => i % labelStep == 0 ? p.Timestamp.ToString("HH:mm:ss") : "").ToArray();
     }
 
@@ -415,7 +415,7 @@ else
         if (_expandedGroup is null) return;
         var partitions = _expandedGroup.Partitions.OrderBy(p => p.Partition).ToList();
         _partitionLagLabels = partitions.Select(p => $"{p.Topic}[{p.Partition}]").ToArray();
-        _partitionLagSeries = [new ChartSeries { Name = "Lag", Data = partitions.Select(p => (double)p.Lag).ToArray() }];
+        _partitionLagSeries = [new ChartSeries<double> { Name = "Lag", Data = partitions.Select(p => (double)p.Lag).ToArray() }];
     }
 
     private void ExpandGroup(string groupId)

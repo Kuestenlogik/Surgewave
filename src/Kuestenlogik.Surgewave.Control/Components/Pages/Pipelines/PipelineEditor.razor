@@ -140,7 +140,7 @@
     <div class="pipeline-main-content">
         @* Left Panel - Connector Palette / Parameters *@
         <div class="pipeline-panel pipeline-palette">
-            <MudTabs @bind-ActivePanelIndex="_leftPanelTab" Rounded="true" PanelClass="pa-0">
+            <MudTabs @bind-ActivePanelIndex="_leftPanelTab" Rounded="true" TabPanelsClass="pa-0">
                 <MudTabPanel Text="Connectors" Icon="@Icons.Material.Filled.Extension">
                     <NodePalette ConnectorTypes="@_connectorTypes"
                                  OnConnectorSelected="OnConnectorSelectedFromPalette"

@@ -469,7 +469,7 @@ else
     {
         if (_selectedTopic == null) return;
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Purge Queue",
             $"Delete ALL in-flight and queued messages from '{_selectedTopic.Topic}'?\n\nThis action cannot be undone.",
             yesText: "Purge", cancelText: "Cancel");

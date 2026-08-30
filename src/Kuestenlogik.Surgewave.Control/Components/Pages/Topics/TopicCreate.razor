@@ -145,7 +145,7 @@
 
     private async Task CreateTopicAsync()
     {
-        await _form.Validate();
+        await _form.ValidateAsync();
         if (!_formValid) return;
 
         _creating = true;

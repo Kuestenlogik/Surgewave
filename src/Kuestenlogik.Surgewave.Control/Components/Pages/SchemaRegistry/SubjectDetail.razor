@@ -793,7 +793,7 @@
 
     private async Task DeleteSubjectAsync()
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Subject",
             $"Are you sure you want to delete subject '{Subject}' and all its versions?",
             yesText: "Delete",
@@ -816,7 +816,7 @@
 
     private async Task DeleteVersionAsync(int version)
     {
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Version",
             $"Are you sure you want to delete version {version} of '{Subject}'?",
             yesText: "Delete",
