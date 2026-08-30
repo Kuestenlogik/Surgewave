@@ -140,7 +140,9 @@ public sealed class StatelessAgentTests
 
         cts.Cancel();
 
-        await Assert.ThrowsAsync<TaskCanceledException>(async () => await produce);
+        // ThrowsAny: which cancellation type surfaces is the runtime's choice and changed under a
+        // servicing update; the assertion is that it cancels.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await produce);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

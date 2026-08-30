@@ -144,7 +144,9 @@ public sealed class RetryHelperTests
         await cts.CancelAsync();
 
         // Act & Assert
-        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        // ThrowsAny: which cancellation type surfaces is the runtime's choice and changed under a
+        // servicing update; the assertion is that it cancels.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
             await RetryHelper.ExecuteWithBackoffAsync<int>(
                 async () =>
