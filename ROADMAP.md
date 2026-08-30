@@ -56,6 +56,9 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
 - [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
 - [#172](https://github.com/Kuestenlogik/Surgewave/issues/172) **clustering: a multi-broker cluster must declare its quorum, not discover it** `area:clustering` `track:cluster-correctness`
+- [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
+- [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
+- [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
 
 ---
 
