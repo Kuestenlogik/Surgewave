@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Core.Configuration;
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Net.Sockets;
@@ -408,6 +409,10 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             processRoles: config.ProcessRoles,
             controllerQuorumVoters: config.ControllerQuorumVoters
         );
+
+        // #170 — an invalid configuration stops the runtime here rather than surfacing later as a
+        // cluster that will not form. Both configs together, so a caller fixing one sees all of it.
+        ConfigValidator.ThrowIfAnyInvalid(config, clusteringConfig);
 
         // Create cluster state
         _clusterState = new ClusterState();

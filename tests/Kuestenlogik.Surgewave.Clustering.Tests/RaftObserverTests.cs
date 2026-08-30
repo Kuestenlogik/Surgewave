@@ -178,6 +178,27 @@ public sealed class RaftObserverTests : IAsyncDisposable
         Assert.True(node.IsVoterNode);
     }
 
+    [Fact]
+    public async Task ASittingLeaderDoesNotHelpElectARival()
+    {
+        // How a cluster ended up with a leader per broker: a leader never refreshes its own
+        // _lastHeartbeat, because it receives none, so the pre-vote guard "have I heard from a
+        // leader recently" always passed for it and it granted the pre-vote. Each newcomer then
+        // campaigned, the sitting leader voted for it, and every node believed it was controller.
+        var transport = new RecordingTransport(reachable: [], voters: [1]);
+        await using var leader = NewNode(nodeId: 1, voters: [1], transport: transport);
+        await leader.StartAsync(CancellationToken.None);
+
+        var elected = await TestUtilities.WaitForCondition(() => leader.IsLeader, LeadershipTimeout);
+        Assert.True(elected, "the node under test has to reach leadership first");
+
+        var response = await leader.HandlePreVoteAsync(
+            new PreVoteRequest(ProposedTerm: leader.CurrentTerm + 1, CandidateId: 2, LastLogIndex: 99, LastLogTerm: 99),
+            CancellationToken.None);
+
+        Assert.False(response.VoteGranted);
+    }
+
     private RaftNode NewNode(
         int nodeId,
         int[] voters,
