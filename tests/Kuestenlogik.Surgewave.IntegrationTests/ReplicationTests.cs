@@ -68,6 +68,11 @@ public class ReplicationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
+            // Broker 1 is the whole quorum; 2 and 3 are observers, which is a supported KRaft
+            // topology and the one a dynamic-port fixture can express — a declared quorum needs
+            // known addresses, and only broker 1's are known before the others start (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithPartitions(3)
             .WithReplicationFactor(3)
             .WithAutoCreateTopics()
@@ -89,6 +94,8 @@ public class ReplicationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithPartitions(3)
             .WithReplicationFactor(3)
             .WithAutoCreateTopics()

@@ -38,6 +38,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
 
     private SurgewaveRuntime? _controller;
     private SurgewaveRuntime? _survivor;
+    private SurgewaveRuntime? _secondSurvivor;
     private bool _controllerDisposed;
 
     public ControllerFailoverTests(ITestOutputHelper output)
@@ -52,20 +53,51 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        // Broker 1 wins the controller election: it has the lowest id.
-        _controller = await BuildBrokerAsync(brokerId: 1);
-        _survivor = await BuildBrokerAsync(brokerId: 2,
-            $"1:{_controller.Host}:{_controller.Port}:{_controller.ReplicationPort}");
+        // THREE brokers, not two. Losing one of two leaves one of two, which is not a majority,
+        // so a two-node cluster cannot elect a new controller — that is Raft's guarantee, not a
+        // defect to test around (#172). Three voters survive one loss, which is the situation
+        // this class is actually about.
+        //
+        // The quorum has to be declared, and a declaration needs addresses known before any
+        // broker starts — so the replication ports are reserved up front instead of asking the
+        // OS for one per broker as it starts.
+        // Client ports as well as replication ports: a ClusterNodes entry names both, and a peer
+        // told "port 0" can never be dialled.
+        var reserved = ReservePorts(6);
+        var clientPorts = reserved[..3];
+        var replicationPorts = reserved[3..];
 
-        StitchMesh(_controller, _survivor);
-        StitchMesh(_survivor, _controller);
+        var quorum = string.Join(",", replicationPorts.Select((port, i) => $"{i + 1}@127.0.0.1:{port}"));
+        var nodes = Enumerable.Range(0, 3)
+            .Select(i => $"{i + 1}:127.0.0.1:{clientPorts[i]}:{replicationPorts[i]}")
+            .ToArray();
+
+        _controller = await BuildBrokerAsync(1, clientPorts[0], replicationPorts[0], quorum, nodes[1], nodes[2]);
+        _survivor = await BuildBrokerAsync(2, clientPorts[1], replicationPorts[1], quorum, nodes[0], nodes[2]);
+        _secondSurvivor = await BuildBrokerAsync(3, clientPorts[2], replicationPorts[2], quorum, nodes[0], nodes[1]);
+
+        foreach (var self in new[] { _controller, _survivor, _secondSurvivor })
+        {
+            foreach (var peer in new[] { _controller, _survivor, _secondSurvivor })
+            {
+                if (!ReferenceEquals(self, peer)) StitchMesh(self, peer);
+            }
+        }
 
         Assert.True(
-            await TestWaitHelpers.WaitForClusterStabilizationAsync([_controller, _survivor], output: _output),
-            "the two-broker cluster did not stabilise");
+            await TestWaitHelpers.WaitForClusterStabilizationAsync(
+                [_controller, _survivor, _secondSurvivor], output: _output),
+            "the three-broker cluster did not stabilise");
 
-        Assert.True(_controller.IsController, "broker 1 should hold the controller role");
+        // Whoever won, the point is that exactly one did — and that broker 1 is it, so the tests
+        // below can kill a known node.
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => _controller.IsController,
+                timeout: TimeSpan.FromSeconds(60), output: _output),
+            "broker 1 never took the controller role");
         Assert.False(_survivor.IsController);
+        Assert.False(_secondSurvivor.IsController);
 
         // The failure detector only reports brokers it is actually tracking, so a broker killed
         // before the survivor ever saw it would go unnoticed for reasons that have nothing to do
@@ -89,6 +121,11 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
             try { await _survivor.DisposeAsync(); } catch (Exception ex) { _output.WriteLine($"survivor dispose: {ex.Message}"); }
         }
 
+        if (_secondSurvivor is not null)
+        {
+            try { await _secondSurvivor.DisposeAsync(); } catch (Exception ex) { _output.WriteLine($"second survivor dispose: {ex.Message}"); }
+        }
+
         _loggerFactory.Dispose();
     }
 
@@ -97,20 +134,15 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
-        var survivor = _survivor!;
 
         await controller.DisposeAsync();
         _controllerDisposed = true;
-        _output.WriteLine("controller broker disposed; waiting for the survivor to notice");
+        _output.WriteLine("controller broker disposed; waiting for a survivor to take the role");
 
-        // Heartbeat detection has to fire and the survivor has to win the election. Generous
+        // Two of three remain, which is a majority, so an election can conclude. Generous
         // timeout: this asserts that it happens at all, not how fast.
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => survivor.IsController,
-                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
-                ct: cancellationToken, output: _output),
-            "the surviving broker never became controller, so nothing in this cluster can elect a partition leader again");
+        var promoted = await WaitForNewControllerAsync(cancellationToken);
+        _output.WriteLine($"broker {promoted.BrokerId} took the controller role");
     }
 
     [Fact(Timeout = 180_000)]
@@ -120,17 +152,11 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         // operation, so a cluster without one cannot even be extended, let alone repair a partition.
         var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
-        var survivor = _survivor!;
 
         await controller.DisposeAsync();
         _controllerDisposed = true;
 
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => survivor.IsController,
-                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
-                ct: cancellationToken, output: _output),
-            "the surviving broker never became controller");
+        var survivor = await WaitForNewControllerAsync(cancellationToken);
 
         var topic = $"after-failover-{Guid.NewGuid():N}";
         using var admin = new AdminClientBuilder(
@@ -156,6 +182,8 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         // dropping the dead broker out of every ISR — never runs, and no second event ever comes.
         var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
+        // The ISR precondition is watched on a broker that is a replica of the partition; whichever
+        // survivor is promoted afterwards is asserted separately.
         var survivor = _survivor!;
         var topic = $"controller-failover-{Guid.NewGuid():N}";
         var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
@@ -177,27 +205,68 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         await controller.DisposeAsync();
         _controllerDisposed = true;
 
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => survivor.IsController,
-                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
-                ct: cancellationToken, output: _output),
-            "the surviving broker never became controller");
+        var promoted = await WaitForNewControllerAsync(cancellationToken);
+        _output.WriteLine($"broker {promoted.BrokerId} took the controller role");
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
-                () => !survivor.ClusterState!.GetIsrSnapshot(tp).Contains(1),
+                () => !promoted.ClusterState!.GetIsrSnapshot(tp).Contains(1),
                 timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
-            $"the dead broker is still in the ISR ({string.Join(",", survivor.ClusterState!.GetIsrSnapshot(tp))}) — " +
+            $"the dead broker is still in the ISR ({string.Join(",", promoted.ClusterState!.GetIsrSnapshot(tp))}) — " +
             "the promoted controller never processed the failure it was promoted for");
     }
 
-    private async Task<SurgewaveRuntime> BuildBrokerAsync(int brokerId, params string[] clusterNodes)
+    /// <summary>
+    /// The survivor that won the election — either of them may, and which one is not the point.
+    /// </summary>
+    private async Task<SurgewaveRuntime> WaitForNewControllerAsync(CancellationToken ct)
+    {
+        var survivors = new[] { _survivor!, _secondSurvivor! };
+
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => survivors.Any(b => b.IsController),
+                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(250),
+                ct: ct, output: _output),
+            "no surviving broker became controller, so nothing in this cluster can elect a partition leader again");
+
+        return survivors.First(b => b.IsController);
+    }
+
+    /// <summary>Ports nothing is listening on yet, so a quorum can name them before they exist.</summary>
+    /// <remarks>
+    /// Reserved by binding and releasing, which races with anything else on the machine grabbing
+    /// the same port in between. Accepted: the alternative is a quorum that cannot be declared,
+    /// and a declared quorum is the whole point of this fixture.
+    /// </remarks>
+    private static int[] ReservePorts(int count)
+    {
+        var listeners = new List<System.Net.Sockets.TcpListener>(count);
+        try
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+                listener.Start();
+                listeners.Add(listener);
+            }
+
+            return [.. listeners.Select(l => ((System.Net.IPEndPoint)l.LocalEndpoint).Port)];
+        }
+        finally
+        {
+            foreach (var listener in listeners) listener.Stop();
+        }
+    }
+
+    private async Task<SurgewaveRuntime> BuildBrokerAsync(
+        int brokerId, int clientPort, int replicationPort, string quorum, params string[] clusterNodes)
         => await SurgewaveRuntime.CreateBuilder()
             .WithBrokerId(brokerId)
-            .WithPort(0)
-            .WithReplicationPort(0)
+            .WithPort(clientPort)
+            .WithReplicationPort(replicationPort)
             .WithCluster(clusterNodes)
+            .WithControllerQuorum(quorum)
             .WithPartitions(1)
             .WithReplicationFactor(2)
             .WithAutoCreateTopics()
