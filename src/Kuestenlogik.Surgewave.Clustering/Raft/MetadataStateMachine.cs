@@ -208,6 +208,19 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
 
         var tp = new TopicPartition { Topic = cmd.Topic, Partition = cmd.Partition };
         _clusterState.AssignReplicas(tp, cmd.Replicas, cmd.MinIsr);
+
+        // The same half ApplyLeaderChanged was missing (#165), in the place a new topic actually
+        // goes through: creating one commits TopicCreated and PartitionAssigned and NEVER a
+        // LeaderChanged, because AssignReplicas elects the first replica itself. So the assignment
+        // IS the initial leadership — and without acting on it, every broker but the proposer knew
+        // it was a replica and none of them started fetching. The ISR then stayed at {leader}
+        // forever and acks=all could never be satisfied (#176).
+        var state = _clusterState.GetPartitionState(tp);
+        if (state is not null)
+        {
+            _transitions?.EnqueueLeadershipChange(tp, state.LeaderBrokerId, state.LeaderEpoch, state.Replicas);
+        }
+
         LogPartitionAssigned(cmd.Topic, cmd.Partition, string.Join(",", cmd.Replicas));
     }
 
