@@ -551,6 +551,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // live. Wired unconditionally — the filter falling back to "no filter" without a
         // membership authority is for a host that has none, not an opt-in.
         nativeControllerClient.SetMembership(membershipService);
+        // When this broker is both controller and partition leader, its own ISR report has to go
+        // into the metadata log rather than onto the wire (#176).
+        nativeControllerClient.SetIsrUpdateApplier(_clusterController);
 
         // #60 Inc4/Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the
         // ReplicationServer's shared port. It applies decoded native control-plane frames
