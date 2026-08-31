@@ -229,7 +229,14 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(3000);
 
-            connection = await _peerTransport.ConnectAsync(broker.Host, _config.ReplicationPort, cts.Token);
+            // The PEER's replication port, not this node's. Dialling _config.ReplicationPort sent
+            // every Raft RPC to ourselves whenever the peer was on the same host — so each node
+            // answered its own RequestVote, voted for itself and became leader, and a three-broker
+            // cluster produced three leaders in the same term (#176).
+            //
+            // Invisible until now: Raft was off by default and the push path used a different
+            // client with the correct port, and a single-node quorum never dials anyone.
+            connection = await _peerTransport.ConnectAsync(broker.Host, broker.ReplicationPort, cts.Token);
 
             // Replace any stale entry and dispose it if the swap landed on a concurrent winner.
             if (!_connections.TryAdd(peerId, connection))
@@ -239,7 +246,7 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
                 return winner;
             }
 
-            LogConnectedToPeer(peerId, broker.Host, _config.ReplicationPort);
+            LogConnectedToPeer(peerId, broker.Host, broker.ReplicationPort);
             var result = connection;
             connection = null; // ownership transferred to _connections
             return result;

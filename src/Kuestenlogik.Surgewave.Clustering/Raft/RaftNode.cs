@@ -165,13 +165,16 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         if (voters.Count == 0)
         {
-            // Either nothing was configured — combined mode, the default — or nothing in it
-            // could be read, in which case falling back beats running with a quorum this node
-            // cannot reach.
+            // Either nothing was configured, or nothing in it could be read.
             if (parseErrors.Count > 0)
                 LogQuorumUnusable();
 
-            return new TransportDerivedVoterSet(transport, config.BrokerId);
+            // An undeclared quorum means "I am the quorum", not "whoever shows up votes". The set
+            // used to be derived from the transport and therefore GREW as brokers registered: a
+            // seed that started alone found itself needing a majority of nodes that never vote,
+            // and lost the leadership it already held (#176). A cluster of more than one broker
+            // has to declare its voters (#172), so this branch is the lone broker's.
+            return new ConfiguredVoterSet([config.BrokerId]);
         }
 
         if (ControllerQuorum.IsEvenVoterCount(voters))
@@ -351,7 +354,7 @@ public sealed partial class RaftNode : IAsyncDisposable
                 _votedFor = request.CandidateId;
                 _lastHeartbeat = DateTimeOffset.UtcNow;
                 stateChanged = true;
-                LogVotedFor(request.CandidateId, _currentTerm);
+                LogVotedFor(NodeId, request.CandidateId, _currentTerm);
             }
 
             // Capture state for persistence
@@ -650,7 +653,7 @@ public sealed partial class RaftNode : IAsyncDisposable
                 return;
             }
 
-            LogPreVoteSucceeded(preVotes, majority);
+            LogPreVoteSucceeded(NodeId, preVotes, majority);
         }
 
         // ========================================
@@ -676,7 +679,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         // Persist state before sending RequestVote RPCs (Raft correctness requirement)
         await _persistence.SaveStateAsync(termToSave, votedForToSave, ct);
 
-        LogStartedElection(_currentTerm);
+        LogStartedElection(NodeId, _currentTerm);
 
         var votes = 1; // Vote for self
 
@@ -796,7 +799,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         _leaderId = null;
 
         // Cancel heartbeat task if running
-        LogBecameFollower(term);
+        LogBecameFollower(NodeId, term);
     }
 
     private void BecomeLeader()
@@ -823,7 +826,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             _matchIndex[observerId] = 0;
         }
 
-        LogBecameLeader(_currentTerm);
+        LogBecameLeader(NodeId, _currentTerm);
 
         // Start heartbeat loop
         _heartbeatTask = Task.Run(() => HeartbeatLoopAsync(_cts!.Token));
@@ -1220,8 +1223,8 @@ public sealed partial class RaftNode : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Information, Message = "Raft node {NodeId} started (term={Term}, logSize={LogSize})")]
     private partial void LogRaftNodeStarted(int nodeId, int term, int logSize);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Voted for candidate {CandidateId} in term {Term}")]
-    private partial void LogVotedFor(int candidateId, int term);
+    [LoggerMessage(Level = LogLevel.Information, Message = "[node {NodeId}] Voted for candidate {CandidateId} in term {Term}")]
+    private partial void LogVotedFor(int nodeId, int candidateId, int term);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Appended {Count} entries, lastIndex={LastIndex}")]
     private partial void LogEntriesAppended(int count, long lastIndex);
@@ -1229,8 +1232,8 @@ public sealed partial class RaftNode : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "Proposed entry at index {Index}, type={CommandType}")]
     private partial void LogEntryProposed(long index, MetadataCommandType commandType);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Started election for term {Term}")]
-    private partial void LogStartedElection(int term);
+    [LoggerMessage(Level = LogLevel.Information, Message = "[node {NodeId}] Started election for term {Term}")]
+    private partial void LogStartedElection(int nodeId, int term);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Waiting for peer discovery before becoming leader (term={Term}, expecting cluster peers)")]
     private partial void LogWaitingForPeerDiscovery(int term);
@@ -1254,8 +1257,8 @@ public sealed partial class RaftNode : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "Received pre-vote from {PeerId}, total={PreVotes}/{Majority}")]
     private partial void LogReceivedPreVote(int peerId, int preVotes, int majority);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Pre-vote succeeded with {PreVotes}/{Majority} votes, proceeding to election")]
-    private partial void LogPreVoteSucceeded(int preVotes, int majority);
+    [LoggerMessage(Level = LogLevel.Information, Message = "[node {NodeId}] Pre-vote succeeded with {PreVotes}/{Majority} votes, proceeding to election")]
+    private partial void LogPreVoteSucceeded(int nodeId, int preVotes, int majority);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Pre-vote failed with only {PreVotes}/{Majority} votes, aborting election")]
     private partial void LogPreVoteFailed(int preVotes, int majority);
@@ -1266,11 +1269,11 @@ public sealed partial class RaftNode : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "Pre-vote granted to {CandidateId} for proposed term {ProposedTerm}")]
     private partial void LogPreVoteGranted(int candidateId, int proposedTerm);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Became follower in term {Term}")]
-    private partial void LogBecameFollower(int term);
+    [LoggerMessage(Level = LogLevel.Information, Message = "[node {NodeId}] Became follower in term {Term}")]
+    private partial void LogBecameFollower(int nodeId, int term);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Became LEADER in term {Term}")]
-    private partial void LogBecameLeader(int term);
+    [LoggerMessage(Level = LogLevel.Information, Message = "[node {NodeId}] Became LEADER in term {Term}")]
+    private partial void LogBecameLeader(int nodeId, int term);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Commit index advanced to {CommitIndex}")]
     private partial void LogCommitIndexAdvanced(long commitIndex);
