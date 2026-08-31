@@ -223,9 +223,10 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
             topics_count = topicsCount,
             brokers_count = brokersCount,
             controller_id = controllerId,
-            raft_enabled = false,
-            raft_state = (string?)null,
-            raft_leader_id = (int?)null,
+            // The gateway does not reach the broker's Raft state, and reporting a made-up one
+            // was worse than reporting none: raft_enabled sat at a hardcoded false, which the
+            // Control UI reads as "no consensus here" and hides the section for. Metadata is a
+            // replicated log in every configuration now (#163), so there is nothing to enable.
             checks = new
             {
                 broker = isConnected ? "Healthy" : "Unhealthy",

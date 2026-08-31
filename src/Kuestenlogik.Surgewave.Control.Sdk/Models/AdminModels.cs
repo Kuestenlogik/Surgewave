@@ -13,7 +13,6 @@ public sealed class ClusterOverviewInfo
     public int PartitionCount { get; set; }
     public int ConsumerGroupCount { get; set; }
     public int ControllerId { get; set; }
-    public bool RaftEnabled { get; set; }
     public string? RaftState { get; set; }
     public double ThroughputMessagesPerSec { get; set; }
     public double ThroughputBytesPerSec { get; set; }

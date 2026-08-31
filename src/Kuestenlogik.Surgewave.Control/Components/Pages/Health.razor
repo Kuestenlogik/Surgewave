@@ -40,15 +40,14 @@ else if (_healthDetails != null)
         <Stat Label="Controller" Value="@($"Broker {_healthDetails.ControllerId}")" Mono="true" />
         <Stat Label="Brokers / Topics"
               Value="@($"{_healthDetails.BrokersCount} / {_healthDetails.TopicsCount}")" Mono="true" />
-        @if (_healthDetails.RaftEnabled)
-        {
-            <Stat Label="Raft">
-                <span class="surgewave-status @GetRaftStatusClass(_healthDetails.RaftState)">
-                    <span class="surgewave-status-dot"></span>
-                    @($"{_healthDetails.RaftState} · Broker {_healthDetails.RaftLeaderId ?? -1}")
-                </span>
-            </Stat>
-        }
+        @* Metadata is a replicated log in every configuration (#163), so this is always shown. *@
+        <Stat Label="Raft">
+            <span class="surgewave-status @GetRaftStatusClass(_healthDetails.RaftState)">
+                <span class="surgewave-status-dot"></span>
+                @($"{_healthDetails.RaftState} · Broker {_healthDetails.RaftLeaderId ?? -1}")
+            </span>
+        </Stat>
+    
         <Stat Label="Last checked"
               Value="@_healthDetails.Timestamp.ToLocalTime().ToString("HH:mm:ss")"
               Mono="true" />
@@ -96,20 +95,19 @@ else if (_healthDetails != null)
                     </td>
                     <td><MudText Typo="Typo.body2" Color="Color.Secondary">Log segments accessible</MudText></td>
                 </tr>
-                @if (_healthDetails.RaftEnabled)
-                {
-                    var raftHealthy = _healthDetails.RaftState is "Leader" or "Follower";
-                    <tr>
-                        <td><strong>Raft Consensus</strong></td>
-                        <td>
-                            <span class="surgewave-status @(raftHealthy ? "surgewave-status--ok" : "surgewave-status--warn")">
-                                <span class="surgewave-status-dot"></span>
-                                @(_healthDetails.RaftState == "Candidate" ? "Election in progress" : "Healthy")
-                            </span>
-                        </td>
-                        <td><MudText Typo="Typo.body2" Color="Color.Secondary">Cluster replication</MudText></td>
-                    </tr>
-                }
+                @* Always present: there is no configuration without a metadata log (#163). *@
+                @{ var raftHealthy = _healthDetails.RaftState is "Leader" or "Follower"; }
+                <tr>
+                    <td><strong>Raft Consensus</strong></td>
+                    <td>
+                        <span class="surgewave-status @(raftHealthy ? "surgewave-status--ok" : "surgewave-status--warn")">
+                            <span class="surgewave-status-dot"></span>
+                            @(_healthDetails.RaftState == "Candidate" ? "Election in progress" : "Healthy")
+                        </span>
+                    </td>
+                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Cluster replication</MudText></td>
+                </tr>
+            
             </tbody>
         </MudSimpleTable>
     </MudPaper>
