@@ -58,7 +58,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
 - [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
 - [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
-- [#176](https://github.com/Kuestenlogik/Surgewave/issues/176) **clustering: a three-broker cluster does not stabilise, and followers never reach full ISR** `area:clustering` `track:cluster-correctness`
 
 ---
 
