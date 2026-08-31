@@ -37,6 +37,7 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
     private readonly ClusteringConfig _config;
     private readonly ILogger<NativeControllerClient> _logger;
     private Cluster.ClusterMembershipService? _membership;
+    private Replication.IIsrUpdateApplier? _isrApplier;
 
     public NativeControllerClient(
         ConnectionPool connectionPool,
@@ -63,6 +64,16 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
     /// </remarks>
     public void SetMembership(Cluster.ClusterMembershipService membership)
         => _membership = membership;
+
+    /// <summary>
+    /// Supplies the applier used when THIS broker is the controller reporting its own ISR (#176).
+    /// </summary>
+    /// <remarks>
+    /// Set the same way as the membership authority, and for the same reason: the client is built
+    /// before the controller is.
+    /// </remarks>
+    public void SetIsrUpdateApplier(Replication.IIsrUpdateApplier applier)
+        => _isrApplier = applier;
 
     /// <summary>
     /// Send LeaderAndIsr to every affected broker (leader and all replicas), one frame per broker.
@@ -167,11 +178,17 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
 
         if (controllerId == _config.BrokerId)
         {
-            var state = _clusterState.GetPartitionState(tp);
-            if (state != null)
+            // We ARE the controller, so the report does not go on the wire — it goes into the
+            // metadata log, exactly as one arriving from a remote leader does.
+            //
+            // This used to re-broadcast LeaderAndIsr instead, which was the push model's answer.
+            // With the pushes gone (#163 step 3) that made a controller which is ALSO a partition
+            // leader the one node whose ISR changes reached nothing at all (#176).
+            if (_isrApplier is not null)
             {
-                await SendLeaderAndIsrAsync([(tp, state)], ct).ConfigureAwait(false);
+                await _isrApplier.ApplyIsrUpdateAsync(tp, leaderId, leaderEpoch, isr, ct).ConfigureAwait(false);
             }
+
             return;
         }
 

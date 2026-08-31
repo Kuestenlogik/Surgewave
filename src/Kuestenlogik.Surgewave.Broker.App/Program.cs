@@ -939,6 +939,14 @@ clusterState.OnControllerEpochAdvanced = controllerEpochStore.Save;
 var membershipService = app.Services.GetRequiredService<ClusterMembershipService>();
 var registrationCoordinator = app.Services.GetRequiredService<BrokerRegistrationCoordinator>();
 
+// The native controller client needs both of these, and this host wired neither: the membership
+// authority so a fenced broker is left out, and the ISR applier so that when THIS broker is both
+// controller and partition leader its own ISR report reaches the metadata log instead of the wire
+// (#123, #176).
+var nativeControllerClient = app.Services.GetRequiredService<NativeControllerClient>();
+nativeControllerClient.SetMembership(membershipService);
+nativeControllerClient.SetIsrUpdateApplier(clusterController);
+
 replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
     app.Services.GetRequiredService<ILogger<NativeInterBrokerServer>>(),
     new ClusterStateInterBrokerService(
