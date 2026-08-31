@@ -28,11 +28,6 @@ public sealed class ClusterOptions
     public int ReplicationPort { get; set; } = 9094;
 
     /// <summary>
-    /// Use Raft consensus for controller election.
-    /// </summary>
-    public bool UseRaft { get; set; }
-
-    /// <summary>
     /// Rack ID for rack-aware replica placement.
     /// </summary>
     public string? Rack { get; set; }

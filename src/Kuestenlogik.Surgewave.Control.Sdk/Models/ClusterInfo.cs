@@ -78,7 +78,6 @@ public record HealthDetails
     public int TopicsCount { get; init; }
     public int BrokersCount { get; init; }
     public int ControllerId { get; init; }
-    public bool RaftEnabled { get; init; }
     public string? RaftState { get; init; }
     public int? RaftLeaderId { get; init; }
     public HealthChecks? Checks { get; init; }

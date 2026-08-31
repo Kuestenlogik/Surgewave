@@ -85,18 +85,17 @@
                                 <td><MudText Typo="Typo.body2" Color="Color.Secondary">Throughput</MudText></td>
                                 <td><span class="surgewave-mono">@cluster.ThroughputMessagesPerSec.ToString("F0") msg/s</span></td>
                             </tr>
-                            @if (cluster.RaftEnabled)
-                            {
-                                <tr>
-                                    <td><MudText Typo="Typo.body2" Color="Color.Secondary">Raft</MudText></td>
-                                    <td>
-                                        <span class="surgewave-status surgewave-status--info">
-                                            <span class="surgewave-status-dot"></span>
-                                            @(cluster.RaftState ?? "Unknown")
-                                        </span>
-                                    </td>
-                                </tr>
-                            }
+                            @* Always present: there is no configuration without a metadata log (#163). *@
+                            <tr>
+                                <td><MudText Typo="Typo.body2" Color="Color.Secondary">Raft</MudText></td>
+                                <td>
+                                    <span class="surgewave-status surgewave-status--info">
+                                        <span class="surgewave-status-dot"></span>
+                                        @(cluster.RaftState ?? "Unknown")
+                                    </span>
+                                </td>
+                            </tr>
+                        
                             <tr>
                                 <td><MudText Typo="Typo.body2" Color="Color.Secondary">Last checked</MudText></td>
                                 <td><span class="surgewave-mono">@cluster.LastChecked.ToString("HH:mm:ss")</span></td>
@@ -160,7 +159,6 @@
                     PartitionCount = clusterInfo.PartitionCount,
                     ConsumerGroupCount = groups.Count,
                     ControllerId = clusterInfo.ControllerId,
-                    RaftEnabled = healthDetails?.RaftEnabled ?? false,
                     RaftState = healthDetails?.RaftState,
                     ThroughputMessagesPerSec = SimThroughput(clusterInfo.ClusterId),
                     LastChecked = DateTimeOffset.UtcNow
