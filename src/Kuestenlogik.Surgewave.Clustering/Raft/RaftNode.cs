@@ -966,21 +966,43 @@ public sealed partial class RaftNode : IAsyncDisposable
         EnsureReplicationState(peers);
         EnsureReplicationState(observers);
 
-        var tasks = peers.Concat(observers).Select(peerId => SendAppendEntriesAsync(peerId, ct));
-        await Task.WhenAll(tasks);
+        var tasks = peers.Concat(observers)
+            .Select(peerId => SendAppendEntriesAsync(peerId, ct))
+            .ToArray();
 
-        // Update commit index based on match indices
+        // As each send lands, not after ALL of them. A majority is what commits an entry, and
+        // waiting for the rest hands a single unreachable peer the power to hold up the commit:
+        // its send burns three attempts with a 3 s connect and a 5 s RPC bound, so one dead node
+        // stalled every commit for the better part of ten seconds — and a topic created through a
+        // freshly promoted controller timed out waiting for it (#176).
+        // Once before waiting on anyone: a lone voter is its own majority and has no peer whose
+        // completion could ever trigger the check below.
+        TryAdvanceCommitIndex(peers);
+
+        await foreach (var completed in Task.WhenEach(tasks).WithCancellation(ct))
+        {
+            await completed.ConfigureAwait(false);
+            TryAdvanceCommitIndex(peers);
+        }
+    }
+
+    /// <summary>
+    /// Moves the commit index up to the highest entry a majority of the VOTERS holds.
+    /// </summary>
+    /// <remarks>
+    /// Voters only (#167). Counting observers would let their acknowledgements stand in for a
+    /// quorum: three observers ahead of two voters would commit an entry that only one voter
+    /// holds, and losing that voter loses committed metadata.
+    /// </remarks>
+    private void TryAdvanceCommitIndex(IReadOnlyList<int> voters)
+    {
         lock (_lock)
         {
             if (_state != RaftState.Leader)
                 return;
 
-            // Find the highest index replicated on a majority — of the VOTERS (#167).
-            // Counting observers here would let their acknowledgements stand in for a
-            // quorum: three observers behind two voters would commit an entry that only one
-            // voter holds, and losing that voter loses committed metadata.
-            var matchIndices = new List<long>(peers.Count + 1) { LastLogIndex };
-            foreach (var voterId in peers)
+            var matchIndices = new List<long>(voters.Count + 1) { LastLogIndex };
+            foreach (var voterId in voters)
             {
                 matchIndices.Add(_matchIndex.TryGetValue(voterId, out var match) ? match : 0);
             }
@@ -990,16 +1012,18 @@ public sealed partial class RaftNode : IAsyncDisposable
             var majorityIndex = matchIndices.Count / 2;
             var newCommitIndex = matchIndices[majorityIndex];
 
-            if (newCommitIndex > _commitIndex)
-            {
-                var entry = GetLogEntry(newCommitIndex);
-                if (entry != null && entry.Term == _currentTerm)
-                {
-                    _commitIndex = newCommitIndex;
-                    LogCommitIndexAdvanced(_commitIndex);
-                    ApplyCommittedEntries();
-                }
-            }
+            if (newCommitIndex <= _commitIndex)
+                return;
+
+            // Raft only commits an entry from the CURRENT term on the strength of a majority;
+            // an older one follows once a current-term entry does.
+            var entry = GetLogEntry(newCommitIndex);
+            if (entry is null || entry.Term != _currentTerm)
+                return;
+
+            _commitIndex = newCommitIndex;
+            LogCommitIndexAdvanced(_commitIndex);
+            ApplyCommittedEntries();
         }
     }
 
