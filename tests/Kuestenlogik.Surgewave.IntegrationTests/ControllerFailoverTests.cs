@@ -72,41 +72,41 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
             .Select(i => $"{i + 1}:127.0.0.1:{clientPorts[i]}:{replicationPorts[i]}")
             .ToArray();
 
-        _controller = await BuildBrokerAsync(1, clientPorts[0], replicationPorts[0], quorum, nodes[1], nodes[2]);
-        _survivor = await BuildBrokerAsync(2, clientPorts[1], replicationPorts[1], quorum, nodes[0], nodes[2]);
-        _secondSurvivor = await BuildBrokerAsync(3, clientPorts[2], replicationPorts[2], quorum, nodes[0], nodes[1]);
-
-        foreach (var self in new[] { _controller, _survivor, _secondSurvivor })
+        var brokers = new[]
         {
-            foreach (var peer in new[] { _controller, _survivor, _secondSurvivor })
+            await BuildBrokerAsync(1, clientPorts[0], replicationPorts[0], quorum, nodes[1], nodes[2]),
+            await BuildBrokerAsync(2, clientPorts[1], replicationPorts[1], quorum, nodes[0], nodes[2]),
+            await BuildBrokerAsync(3, clientPorts[2], replicationPorts[2], quorum, nodes[0], nodes[1]),
+        };
+
+        foreach (var self in brokers)
+        {
+            foreach (var peer in brokers)
             {
                 if (!ReferenceEquals(self, peer)) StitchMesh(self, peer);
             }
         }
 
         Assert.True(
-            await TestWaitHelpers.WaitForClusterStabilizationAsync(
-                [_controller, _survivor, _secondSurvivor], output: _output),
+            await TestWaitHelpers.WaitForClusterStabilizationAsync(brokers, output: _output),
             "the three-broker cluster did not stabilise");
 
-        // Whoever won, the point is that exactly one did — and that broker 1 is it, so the tests
-        // below can kill a known node.
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => _controller.IsController,
-                timeout: TimeSpan.FromSeconds(60), output: _output),
-            "broker 1 never took the controller role");
-        Assert.False(_survivor.IsController);
-        Assert.False(_secondSurvivor.IsController);
+        // Whichever broker won the election is the one to kill. Raft does not promise the lowest
+        // id wins, and asserting that it does would be testing an accident of timing.
+        _controller = brokers.Single(b => b.IsController);
+        var survivors = brokers.Where(b => !b.IsController).ToArray();
+        _survivor = survivors[0];
+        _secondSurvivor = survivors[1];
+        _output.WriteLine($"broker {_controller.BrokerId} holds the controller role");
 
         // The failure detector only reports brokers it is actually tracking, so a broker killed
         // before the survivor ever saw it would go unnoticed for reasons that have nothing to do
         // with what these tests are about. Make the precondition explicit rather than racing it.
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
-                () => _survivor.PeerHealth.TryGetValue(1, out var health) && health.IsAlive,
+                () => _survivor.PeerHealth.TryGetValue(_controller.BrokerId, out var health) && health.IsAlive,
                 timeout: TimeSpan.FromSeconds(30), output: _output),
-            "the survivor never saw broker 1 as a live peer, so it could never detect its death");
+            $"the survivor never saw broker {_controller.BrokerId} as a live peer, so it could never detect its death");
     }
 
     public async ValueTask DisposeAsync()
@@ -198,9 +198,9 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
-                () => survivor.ClusterState!.GetIsrSnapshot(tp).Contains(1),
+                () => survivor.ClusterState!.GetIsrSnapshot(tp).Contains(controller.BrokerId),
                 timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
-            "the survivor never saw broker 1 in the ISR, so its removal would prove nothing");
+            $"the survivor never saw broker {controller.BrokerId} in the ISR, so its removal would prove nothing");
 
         await controller.DisposeAsync();
         _controllerDisposed = true;
@@ -210,7 +210,7 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
-                () => !promoted.ClusterState!.GetIsrSnapshot(tp).Contains(1),
+                () => !promoted.ClusterState!.GetIsrSnapshot(tp).Contains(controller.BrokerId),
                 timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             $"the dead broker is still in the ISR ({string.Join(",", promoted.ClusterState!.GetIsrSnapshot(tp))}) — " +
             "the promoted controller never processed the failure it was promoted for");

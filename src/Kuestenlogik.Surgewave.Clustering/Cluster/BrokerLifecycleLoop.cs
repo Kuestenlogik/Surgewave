@@ -172,7 +172,12 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
 
         return new BrokerRegistrationInput(
             BrokerId: _config.BrokerId,
-            ClusterId: _config.ClusterId ?? "surgewave-cluster",
+            // The configured id, or none. NOT a literal default: the controller validates against
+            // ClusterIdManager, which GENERATES and persists a random id when none is configured —
+            // so announcing a fixed "surgewave-cluster" made every registration in an unconfigured
+            // cluster fail the check, and no broker could ever join (#176). An empty id is the
+            // documented "no opinion" value the check admits.
+            ClusterId: _config.ClusterId ?? string.Empty,
             IncarnationId: _incarnationId,
             Listeners: listeners,
             Features: features,
