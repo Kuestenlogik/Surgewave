@@ -127,6 +127,22 @@ public sealed record SurgewaveRuntimeOptions
     public List<string> ClusterNodes { get; init; } = [];
 
     /// <summary>
+    /// What this node does — Kafka's <c>process.roles</c>: <c>broker</c>, <c>controller</c>, or
+    /// both (#168). Both by default, which is combined mode.
+    /// </summary>
+    public string ProcessRoles { get; init; } = "broker,controller";
+
+    /// <summary>
+    /// The nodes that vote on metadata, as <c>id@host:port</c> entries (#168).
+    /// </summary>
+    /// <remarks>
+    /// Required once <see cref="ClusterNodes"/> names other brokers: a derived voter set differs
+    /// between brokers and elects one controller each (#172). A lone broker needs none — a
+    /// one-node quorum has nothing to disagree with.
+    /// </remarks>
+    public string ControllerQuorumVoters { get; init; } = "";
+
+    /// <summary>
     /// Minimum election timeout in milliseconds (Raft).
     /// </summary>
     public int RaftElectionTimeoutMinMs { get; init; } = 150;

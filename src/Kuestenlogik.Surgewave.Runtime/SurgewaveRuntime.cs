@@ -228,6 +228,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             // Cluster settings
             ReplicationPort = _actualReplicationPort,
             ClusterNodes = clusterNodesStr,
+            ProcessRoles = _options.ProcessRoles,
+            ControllerQuorumVoters = _options.ControllerQuorumVoters,
             HeartbeatIntervalMs = _options.HeartbeatIntervalMs,
             HeartbeatTimeoutMs = _options.HeartbeatTimeoutMs,
             // Raft settings

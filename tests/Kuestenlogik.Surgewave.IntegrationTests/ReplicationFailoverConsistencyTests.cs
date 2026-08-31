@@ -394,12 +394,31 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         Assert.Equal("1048576", stored.Config["segment.bytes"]);
     }
 
+    /// <summary>
+    /// Broker 1 is the whole controller quorum; anything joining it is an observer (#172).
+    /// </summary>
+    /// <remarks>
+    /// A declared quorum needs known addresses, and in a dynamic-port fixture only the first
+    /// broker's are known before the rest start — so the quorum is the one node that already
+    /// exists. That is a supported KRaft topology, and the partition replication these tests are
+    /// about does not depend on who votes.
+    /// </remarks>
     private async Task<SurgewaveRuntime> BuildBrokerAsync(int brokerId, params string[] clusterNodes)
-        => await SurgewaveRuntime.CreateBuilder()
+    {
+        var builder = SurgewaveRuntime.CreateBuilder()
             .WithBrokerId(brokerId)
             .WithPort(0)
             .WithReplicationPort(0)
-            .WithCluster(clusterNodes)
+            .WithCluster(clusterNodes);
+
+        if (clusterNodes.Length > 0)
+        {
+            builder = builder
+                .WithControllerQuorum($"1@{_leader!.Host}:{_leader.ReplicationPort}")
+                .WithProcessRoles("broker");
+        }
+
+        return await builder
             .WithPartitions(1)
             .WithReplicationFactor(2)
             .WithAutoCreateTopics()
@@ -412,6 +431,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             .WithHeartbeatTimeout(HeartbeatTimeoutMs)
             .Build()
             .StartAsync();
+    }
 
     private static void StitchMesh(SurgewaveRuntime self, SurgewaveRuntime peer)
         => self.ClusterState!.AddBroker(new BrokerNode

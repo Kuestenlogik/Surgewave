@@ -35,6 +35,8 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     private bool _enableCluster = false;
     private bool _enableKafka = true;
     private List<string> _clusterNodes = [];
+    private string _processRoles = "broker,controller";
+    private string _controllerQuorumVoters = "";
     private int _raftElectionTimeoutMinMs = 150;
     private int _raftElectionTimeoutMaxMs = 300;
     private int _raftHeartbeatIntervalMs = 50;
@@ -245,6 +247,33 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
+    /// States which nodes vote on metadata, as <c>id@host:port</c> entries (#168).
+    /// </summary>
+    /// <remarks>
+    /// Required once <see cref="WithCluster(string[])"/> names other brokers: derived voter sets
+    /// disagree between brokers and elect one controller each (#172). Nodes not listed become
+    /// observers — they receive and serve the metadata log without voting on it.
+    /// </remarks>
+    public SurgewaveRuntimeBuilder WithControllerQuorum(string voters)
+    {
+        _controllerQuorumVoters = voters;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets what this node does — <c>broker</c>, <c>controller</c>, or both (#168).
+    /// </summary>
+    /// <remarks>
+    /// A node outside the controller quorum has to say <c>broker</c>: claiming the controller
+    /// role while not being in its own quorum would have it campaign for a vote it does not have.
+    /// </remarks>
+    public SurgewaveRuntimeBuilder WithProcessRoles(string roles)
+    {
+        _processRoles = roles;
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables the Kafka wire protocol (default: enabled). When
     /// disabled the embedded broker runs native-only — no Kafka handler array,
     /// no dispatcher, and Kafka connections are rejected (#58).
@@ -447,6 +476,8 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         EnableCluster = _enableCluster,
         EnableKafka = _enableKafka,
         ClusterNodes = _clusterNodes,
+        ProcessRoles = _processRoles,
+        ControllerQuorumVoters = _controllerQuorumVoters,
         RaftElectionTimeoutMinMs = _raftElectionTimeoutMinMs,
         RaftElectionTimeoutMaxMs = _raftElectionTimeoutMaxMs,
         RaftHeartbeatIntervalMs = _raftHeartbeatIntervalMs,

@@ -54,9 +54,27 @@ public static class ControllerQuorum
         var voters = Parse(config.ControllerQuorumVoters, errors);
         if (voters.Count == 0)
         {
-            // No explicit quorum: every node votes, which is what this cluster did before the
-            // setting existed. A node cannot then be a broker only — there would be nobody
-            // left to decide.
+            // A cluster of more than one broker MUST state its quorum (#172). Deriving it from
+            // each broker's own ClusterNodes gave every broker a DIFFERENT voter set — the seed
+            // knows nobody and is its own majority, the second knows one peer, the third knows
+            // two — and Raft's safety argument needs one agreed configuration. With sets that
+            // disagree, several nodes each collect a majority of their own view at the same
+            // term, and a three-broker cluster ends up with three controllers.
+            //
+            // This is why Kafka requires controller.quorum.voters rather than discovering the
+            // quorum. A lone broker needs no declaration: a one-node quorum has nothing to
+            // disagree with.
+            if (!string.IsNullOrWhiteSpace(config.ClusterNodes))
+            {
+                errors.Add(
+                    $"{nameof(ClusteringConfig.ClusterNodes)} names other brokers but "
+                    + $"{nameof(ClusteringConfig.ControllerQuorumVoters)} is empty. A cluster of more than one "
+                    + "broker has to state which nodes vote, as 'id@host:port' entries — derived voter sets "
+                    + "disagree between brokers and elect one controller each. A single broker needs no entry.");
+            }
+
+            // No quorum and no peers: a lone broker, which votes for itself. It cannot then
+            // refuse the controller role — there would be nobody left to decide.
             if (!roles.HasFlag(NodeRoles.Controller))
             {
                 errors.Add(

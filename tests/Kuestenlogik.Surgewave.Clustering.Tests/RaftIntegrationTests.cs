@@ -730,6 +730,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -744,6 +748,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -779,6 +787,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -793,6 +805,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
             .WithShutdownTimeout(3)
@@ -852,6 +868,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -867,6 +887,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -930,6 +954,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithPort(0)
             .WithReplicationPort(0)
             .WithCluster($"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
@@ -945,6 +973,10 @@ public class RaftIntegrationTests : IAsyncLifetime
             .WithCluster(
                 $"1:{broker1.Host}:{broker1.Port}:{broker1.ReplicationPort}",
                 $"2:{broker2.Host}:{broker2.Port}:{broker2.ReplicationPort}")
+            // Broker 1 is the whole quorum; joiners are observers. A multi-broker cluster has to
+            // state who votes, or each broker derives a different set and elects itself (#172).
+            .WithControllerQuorum($"1@{broker1.Host}:{broker1.ReplicationPort}")
+            .WithProcessRoles("broker")
             .WithRaftPeerDiscoveryTimeout(0)
             .WithStorageEngine(StorageEngines.Memory)
             .WithLogging(_loggerFactory)
