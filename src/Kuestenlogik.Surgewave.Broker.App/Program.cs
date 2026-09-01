@@ -578,21 +578,21 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Transport.IPeerTransport>(s
 builder.Services.AddSingleton(sp => new ConnectionPool(
     sp.GetRequiredService<ILogger<ConnectionPool>>(),
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
-// #60 Inc5: the unkeyed IControllerReplicaRpc is the finalized-level gate — it routes control-plane
-// pushes to the native SRWV client once the whole cluster advertises the native inter-broker
-// protocol, and falls back to the Kafka plugin's wire client (registered KEYED under
+// #60 Inc5: the unkeyed IIsrChangeNotifier is the finalized-level gate — it routes a partition
+// leader's ISR report to the native SRWV client once the whole cluster advertises the native
+// inter-broker protocol, and falls back to the Kafka plugin's wire client (registered KEYED under
 // GatedControllerReplicaRpc.WireFallbackServiceKey) until then. A broker without the Kafka plugin
-// has no fallback: pushes are dropped while the cluster is pinned to the Kafka wire (plugin-free
-// join completes with native registration, Inc6).
+// has no fallback while the cluster is pinned to the Kafka wire (plugin-free join completes with
+// native registration, Inc6).
 builder.Services.AddSingleton(sp => new NativeControllerClient(
     sp.GetRequiredService<ConnectionPool>(),
     sp.GetRequiredService<ClusterState>(),
     sp.GetRequiredService<ClusteringConfig>(),
     sp.GetRequiredService<ILogger<NativeControllerClient>>()));
-builder.Services.AddSingleton<IControllerReplicaRpc>(sp => new GatedControllerReplicaRpc(
+builder.Services.AddSingleton<IIsrChangeNotifier>(sp => new GatedControllerReplicaRpc(
     sp.GetRequiredService<ClusterState>(),
     sp.GetRequiredService<NativeControllerClient>(),
-    sp.GetKeyedService<IControllerReplicaRpc>(GatedControllerReplicaRpc.WireFallbackServiceKey),
+    sp.GetKeyedService<IIsrChangeNotifier>(GatedControllerReplicaRpc.WireFallbackServiceKey),
     sp.GetRequiredService<ILogger<GatedControllerReplicaRpc>>()));
 // #60 Inc7: transaction-marker replication follows the same gate — native SRWV once the cluster is
 // finalized to native, else the Kafka plugin's wire replicator (registered KEYED as the fallback).
@@ -613,7 +613,7 @@ builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<ClusteringConfig>(),
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>(),
     sp.GetRequiredService<BrokerMetrics>(),
-    sp.GetService<IControllerReplicaRpc>()));
+    sp.GetService<IIsrChangeNotifier>()));
 // #122 — the durability gate behind acks=all, registered through the neutral Core contract so the
 // Kafka plugin can resolve it without an edge to Clustering.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(sp =>
@@ -897,15 +897,6 @@ var replicaManager = app.Services.GetRequiredService<ReplicaManager>();
 var clusterController = app.Services.GetRequiredService<ClusterController>();
 var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 
-// Wire the controller client so the controller can push LeaderAndIsr and apply
-// reverse-ISR reports before the cluster starts (#69). This closes the gap
-// where a production broker never pushed LeaderAndIsr at all (only the embedded
-// runtime did), so followers never replicated and the ISR never formed.
-// #60 Inc5: the unkeyed IControllerReplicaRpc is the finalized-level gate (native SRWV client with
-// the Kafka plugin's wire client as fallback while the cluster is pinned to the Kafka wire).
-if (app.Services.GetService<IControllerReplicaRpc>() is { } controllerReplicaRpc)
-    clusterController.SetControllerClient(controllerReplicaRpc);
-
 // #121 — the failure detector. Without it ClusterController._heartbeatManager is null, and since
 // HandleBrokerFailedAsync is reachable ONLY from HeartbeatManager.OnBrokerFailed, the shipped broker
 // never shrank an ISR on failure, never elected a leader away from a dead broker, and never replaced
@@ -939,12 +930,9 @@ clusterState.OnControllerEpochAdvanced = controllerEpochStore.Save;
 var membershipService = app.Services.GetRequiredService<ClusterMembershipService>();
 var registrationCoordinator = app.Services.GetRequiredService<BrokerRegistrationCoordinator>();
 
-// The native controller client needs both of these, and this host wired neither: the membership
-// authority so a fenced broker is left out, and the ISR applier so that when THIS broker is both
-// controller and partition leader its own ISR report reaches the metadata log instead of the wire
-// (#123, #176).
+// When THIS broker is both controller and partition leader, its own ISR report has to reach the
+// metadata log rather than the wire — and this host wired nothing at all (#176).
 var nativeControllerClient = app.Services.GetRequiredService<NativeControllerClient>();
-nativeControllerClient.SetMembership(membershipService);
 nativeControllerClient.SetIsrUpdateApplier(clusterController);
 
 replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(

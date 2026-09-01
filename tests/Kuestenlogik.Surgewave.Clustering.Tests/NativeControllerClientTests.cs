@@ -91,42 +91,6 @@ public class NativeControllerClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SendUpdateMetadata_OverTcp_AppliesStateAndControllerEpochOnReceiver()
-    {
-        var tp = new TopicPartition { Topic = "orders", Partition = 3 };
-        var state = new PartitionState { TopicPartition = tp, LeaderBrokerId = 1, LeaderEpoch = 4, Replicas = [1, 2], Isr = [1] };
-
-        await _client.SendUpdateMetadataAsync([(tp, state)], _cts.Token);
-
-        var applied = _receiverState.GetPartitionState(tp);
-        Assert.NotNull(applied);
-        Assert.Equal(1, applied!.LeaderBrokerId);
-        Assert.Equal(4, applied.LeaderEpoch);
-        Assert.Equal(new[] { 1, 2 }, applied.Replicas);
-
-        // The payload carried the sender's controller identity and the receiver stored it.
-        Assert.Equal(1, _receiverState.ControllerId);
-        Assert.Equal(7, _receiverState.ControllerEpoch);
-
-        // LiveBrokers propagation (#69/Inc5): the push taught the receiver the sender's endpoint.
-        var learnedSender = _receiverState.GetBroker(1);
-        Assert.NotNull(learnedSender);
-        Assert.Equal("localhost", learnedSender!.Host);
-    }
-
-    [Fact]
-    public async Task SendLeaderAndIsr_OverTcp_ReceiverBecomesLeader()
-    {
-        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
-        var state = new PartitionState { TopicPartition = tp, LeaderBrokerId = 2, LeaderEpoch = 5, Replicas = [2], Isr = [2] };
-
-        await _client.SendLeaderAndIsrAsync([(tp, state)], _cts.Token);
-
-        Assert.True(_receiverReplicas.IsLeader(tp));
-        Assert.Equal(2, _receiverState.GetPartitionState(tp)!.LeaderBrokerId);
-    }
-
-    [Fact]
     public async Task NotifyIsrChanged_RemoteController_SendsNativeAlterPartition()
     {
         // Broker 2 (the receiver) is the controller from the sender's point of view.
@@ -145,10 +109,7 @@ public class NativeControllerClientTests : IAsyncLifetime
         Assert.Equal([1, 2], _receiverIsrApplier.LastApply.Value.NewIsr);
     }
 
-    [Fact]
-    public async Task SendStopReplica_UnknownBroker_IsSwallowedBestEffort()
-    {
-        // Best-effort contract: an unknown target logs and returns, never throws.
-        await _client.SendStopReplicaAsync(99, [(new TopicPartition { Topic = "t", Partition = 0 }, 1, false)], _cts.Token);
-    }
+    // The three push tests that stood here went with the pushes (#163 step 3): the controller no
+    // longer sends UpdateMetadata, LeaderAndIsr or StopReplica, so this client no longer has them.
+    // What it still does — reporting a partition leader's ISR to the controller — is above.
 }

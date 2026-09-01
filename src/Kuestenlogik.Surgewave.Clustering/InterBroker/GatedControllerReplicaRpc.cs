@@ -20,24 +20,24 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// to native (plugin-free clustering completes with native registration, Inc6).
 /// </para>
 /// </summary>
-public sealed partial class GatedControllerReplicaRpc : IControllerReplicaRpc
+public sealed partial class GatedControllerReplicaRpc : IIsrChangeNotifier
 {
     /// <summary>
     /// DI service key under which the Kafka plugin registers its wire client
-    /// (keyed <see cref="IControllerReplicaRpc"/>), so the broker host can compose it as this gate's
+    /// (keyed <see cref="IIsrChangeNotifier"/>), so the broker host can compose it as this gate's
     /// fallback without an unkeyed registration clash.
     /// </summary>
     public const string WireFallbackServiceKey = "controller-replica-rpc:kafka-wire";
 
     private readonly ClusterState _clusterState;
-    private readonly IControllerReplicaRpc _nativeClient;
-    private readonly IControllerReplicaRpc? _kafkaWireFallback;
+    private readonly IIsrChangeNotifier _nativeClient;
+    private readonly IIsrChangeNotifier? _kafkaWireFallback;
     private readonly ILogger<GatedControllerReplicaRpc> _logger;
 
     public GatedControllerReplicaRpc(
         ClusterState clusterState,
-        IControllerReplicaRpc nativeClient,
-        IControllerReplicaRpc? kafkaWireFallback,
+        IIsrChangeNotifier nativeClient,
+        IIsrChangeNotifier? kafkaWireFallback,
         ILogger<GatedControllerReplicaRpc> logger)
     {
         _clusterState = clusterState;
@@ -45,22 +45,6 @@ public sealed partial class GatedControllerReplicaRpc : IControllerReplicaRpc
         _kafkaWireFallback = kafkaWireFallback;
         _logger = logger;
     }
-
-    public Task SendLeaderAndIsrAsync(
-        IEnumerable<(TopicPartition Tp, PartitionState State)> partitionChanges,
-        CancellationToken ct = default)
-        => Select()?.SendLeaderAndIsrAsync(partitionChanges, ct) ?? Task.CompletedTask;
-
-    public Task SendUpdateMetadataAsync(
-        IEnumerable<(TopicPartition Tp, PartitionState State)>? partitionStates = null,
-        CancellationToken ct = default)
-        => Select()?.SendUpdateMetadataAsync(partitionStates, ct) ?? Task.CompletedTask;
-
-    public Task SendStopReplicaAsync(
-        int brokerId,
-        IEnumerable<(TopicPartition Tp, int LeaderEpoch, bool DeletePartition)> partitions,
-        CancellationToken ct = default)
-        => Select()?.SendStopReplicaAsync(brokerId, partitions, ct) ?? Task.CompletedTask;
 
     public Task NotifyIsrChangedAsync(
         TopicPartition tp,
@@ -70,7 +54,7 @@ public sealed partial class GatedControllerReplicaRpc : IControllerReplicaRpc
         CancellationToken ct = default)
         => Select()?.NotifyIsrChangedAsync(tp, leaderId, leaderEpoch, isr, ct) ?? Task.CompletedTask;
 
-    private IControllerReplicaRpc? Select()
+    private IIsrChangeNotifier? Select()
     {
         if (_clusterState.FinalizedInterBrokerProtocol >= InterBrokerProtocolFeature.Native)
             return _nativeClient;
@@ -86,6 +70,6 @@ public sealed partial class GatedControllerReplicaRpc : IControllerReplicaRpc
         return _kafkaWireFallback;
     }
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Dropping controller push: cluster is finalized to the Kafka wire but no Kafka-wire client is available (native-only broker)")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Dropping ISR report: cluster is finalized to the Kafka wire but no Kafka-wire client is available (native-only broker)")]
     private partial void LogNoTransport();
 }

@@ -15,21 +15,9 @@ namespace Kuestenlogik.Surgewave.Clustering.Tests;
 /// </summary>
 public class GatedControllerReplicaRpcTests
 {
-    private sealed class RecordingRpc : IControllerReplicaRpc
+    private sealed class RecordingRpc : IIsrChangeNotifier
     {
-        public int LeaderAndIsrCalls;
-        public int UpdateMetadataCalls;
-        public int StopReplicaCalls;
         public int IsrChangeCalls;
-
-        public Task SendLeaderAndIsrAsync(IEnumerable<(TopicPartition Tp, PartitionState State)> partitionChanges, CancellationToken ct = default)
-        { LeaderAndIsrCalls++; return Task.CompletedTask; }
-
-        public Task SendUpdateMetadataAsync(IEnumerable<(TopicPartition Tp, PartitionState State)>? partitionStates = null, CancellationToken ct = default)
-        { UpdateMetadataCalls++; return Task.CompletedTask; }
-
-        public Task SendStopReplicaAsync(int brokerId, IEnumerable<(TopicPartition Tp, int LeaderEpoch, bool DeletePartition)> partitions, CancellationToken ct = default)
-        { StopReplicaCalls++; return Task.CompletedTask; }
 
         public Task NotifyIsrChangedAsync(TopicPartition tp, int leaderId, int leaderEpoch, IReadOnlyList<int> isr, CancellationToken ct = default)
         { IsrChangeCalls++; return Task.CompletedTask; }
@@ -61,27 +49,24 @@ public class GatedControllerReplicaRpcTests
         var (native, fallback) = (new RecordingRpc(), new RecordingRpc());
         var gate = Gate(state, native, fallback);
 
-        await gate.SendUpdateMetadataAsync();
-        await gate.SendLeaderAndIsrAsync([]);
-        await gate.SendStopReplicaAsync(1, []);
         await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0]);
 
-        Assert.Equal((1, 1, 1, 1), (native.UpdateMetadataCalls, native.LeaderAndIsrCalls, native.StopReplicaCalls, native.IsrChangeCalls));
-        Assert.Equal(0, fallback.UpdateMetadataCalls + fallback.LeaderAndIsrCalls + fallback.StopReplicaCalls + fallback.IsrChangeCalls);
+        Assert.Equal(1, native.IsrChangeCalls);
+        Assert.Equal(0, fallback.IsrChangeCalls);
     }
 
     [Fact]
     public async Task OneKafkaWireBroker_PinsToFallback()
     {
-        // The safety anchor: a single old/incapable peer keeps ALL control pushes on the Kafka wire.
+        // The safety anchor: a single old/incapable peer keeps the ISR report on the Kafka wire.
         var state = ClusterWith(InterBrokerProtocolFeature.Native, InterBrokerProtocolFeature.KafkaWire);
         var (native, fallback) = (new RecordingRpc(), new RecordingRpc());
         var gate = Gate(state, native, fallback);
 
-        await gate.SendUpdateMetadataAsync();
+        await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0]);
 
-        Assert.Equal(0, native.UpdateMetadataCalls);
-        Assert.Equal(1, fallback.UpdateMetadataCalls);
+        Assert.Equal(0, native.IsrChangeCalls);
+        Assert.Equal(1, fallback.IsrChangeCalls);
     }
 
     [Fact]
@@ -90,10 +75,10 @@ public class GatedControllerReplicaRpcTests
         var (native, fallback) = (new RecordingRpc(), new RecordingRpc());
         var gate = Gate(new ClusterState(), native, fallback);
 
-        await gate.SendUpdateMetadataAsync();
+        await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0]);
 
-        Assert.Equal(0, native.UpdateMetadataCalls);
-        Assert.Equal(1, fallback.UpdateMetadataCalls);
+        Assert.Equal(0, native.IsrChangeCalls);
+        Assert.Equal(1, fallback.IsrChangeCalls);
     }
 
     [Fact]
@@ -105,10 +90,9 @@ public class GatedControllerReplicaRpcTests
         var native = new RecordingRpc();
         var gate = Gate(state, native, fallback: null);
 
-        await gate.SendUpdateMetadataAsync();
-        await gate.SendLeaderAndIsrAsync([]);
+        await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0]);
 
-        Assert.Equal(0, native.UpdateMetadataCalls + native.LeaderAndIsrCalls);
+        Assert.Equal(0, native.IsrChangeCalls);
     }
 
     [Fact]
@@ -118,14 +102,14 @@ public class GatedControllerReplicaRpcTests
         var (native, fallback) = (new RecordingRpc(), new RecordingRpc());
         var gate = Gate(state, native, fallback);
 
-        await gate.SendUpdateMetadataAsync();
-        Assert.Equal(1, native.UpdateMetadataCalls);
+        await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0]);
+        Assert.Equal(1, native.IsrChangeCalls);
 
         // An old broker registers → the finalized level drops → the very next call falls back.
         state.AddBroker(new BrokerNode { BrokerId = 9, Host = "localhost", Port = 9101, InterBrokerProtocol = InterBrokerProtocolFeature.KafkaWire });
 
-        await gate.SendUpdateMetadataAsync();
-        Assert.Equal(1, native.UpdateMetadataCalls);
-        Assert.Equal(1, fallback.UpdateMetadataCalls);
+        await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0]);
+        Assert.Equal(1, native.IsrChangeCalls);
+        Assert.Equal(1, fallback.IsrChangeCalls);
     }
 }
