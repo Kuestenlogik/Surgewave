@@ -21,7 +21,6 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     private const short HeartbeatApiKey = 100;
     private const short RequestVoteApiKey = 101;
     private const short AppendEntriesApiKey = 102;
-    private const short MetadataUpdateApiKey = 103;
     private const short PreVoteApiKey = 104;
 
     private readonly ILogger<ReplicationServer> _logger;
@@ -32,7 +31,6 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     private readonly IPeerTransport _peerTransport;
     private HeartbeatManager? _heartbeatManager;
     private RaftNode? _raftNode;
-    private MetadataStateMachine? _metadataStateMachine;
     private NativeInterBrokerServer? _nativeInterBrokerServer;
 
     private IPeerListener? _listener;
@@ -76,14 +74,6 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     public void SetRaftNode(RaftNode raftNode)
     {
         _raftNode = raftNode;
-    }
-
-    /// <summary>
-    /// Set the metadata state machine for applying metadata updates.
-    /// </summary>
-    public void SetMetadataStateMachine(MetadataStateMachine stateMachine)
-    {
-        _metadataStateMachine = stateMachine;
     }
 
     /// <summary>
@@ -295,34 +285,8 @@ public sealed partial class ReplicationServer : IAsyncDisposable
             HeartbeatApiKey => ParseHeartbeatRequest(data, offset, correlationId), // Heartbeat
             RequestVoteApiKey => ParseRequestVoteRequest(data, offset, correlationId), // Raft RequestVote
             AppendEntriesApiKey => ParseAppendEntriesRequest(data, offset, correlationId), // Raft AppendEntries
-            MetadataUpdateApiKey => ParseMetadataUpdateRequest(data, offset, correlationId), // Metadata Update
             PreVoteApiKey => ParsePreVoteRequest(data, offset, correlationId), // Raft PreVote
             _ => new ReplicationRequest { ApiKey = apiKey, CorrelationId = correlationId }
-        };
-    }
-
-    private static ReplicationRequest ParseMetadataUpdateRequest(byte[] data, int offset, int correlationId)
-    {
-        var controllerId = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(offset, 4));
-        offset += 4;
-        var controllerEpoch = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(offset, 4));
-        offset += 4;
-        var metadataVersion = BinaryPrimitives.ReadInt64BigEndian(data.AsSpan(offset, 8));
-        offset += 8;
-        var commandType = (MetadataCommandType)BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(offset, 4));
-        offset += 4;
-        var timestamp = BinaryPrimitives.ReadInt64BigEndian(data.AsSpan(offset, 8));
-        offset += 8;
-        var dataLength = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(offset, 4));
-        offset += 4;
-        var commandData = data.AsSpan(offset, dataLength).ToArray();
-
-        return new ReplicationRequest
-        {
-            ApiKey = MetadataUpdateApiKey,
-            CorrelationId = correlationId,
-            MetadataUpdateRequest = new MetadataUpdateRequest(
-                controllerId, controllerEpoch, metadataVersion, commandType, commandData, timestamp)
         };
     }
 
@@ -520,62 +484,9 @@ public sealed partial class ReplicationServer : IAsyncDisposable
             HeartbeatApiKey => HandleHeartbeat(request),
             RequestVoteApiKey => await HandleRequestVoteAsync(request, ct),
             AppendEntriesApiKey => await HandleAppendEntriesAsync(request, ct),
-            MetadataUpdateApiKey => HandleMetadataUpdate(request),
             PreVoteApiKey => await HandlePreVoteAsync(request, ct),
             _ => BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.UnsupportedVersion)
         };
-    }
-
-    private PooledFrame HandleMetadataUpdate(ReplicationRequest request)
-    {
-        if (_metadataStateMachine == null || request.MetadataUpdateRequest == null)
-        {
-            return SerializeMetadataUpdateResponse(request.CorrelationId,
-                new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.Unknown, 0));
-        }
-
-        var req = request.MetadataUpdateRequest;
-
-        // Validate + advance atomically through the shared fence (#72 Inc4): the previous unlocked
-        // check-then-write could interleave two racing frames and regress the epoch, which the
-        // composed broker-epoch mint would amplify. No wire is noted — this legacy ApiKey-103
-        // channel is neither the Kafka client wire nor the SRWV band (and is currently unreachable:
-        // nothing wires SetMetadataStateMachine).
-        if (!_clusterState.TryAdvanceControllerEpoch(req.ControllerId, req.ControllerEpoch))
-        {
-            LogStaleMetadataUpdate(req.ControllerId, req.ControllerEpoch, _clusterState.ControllerEpoch);
-            return SerializeMetadataUpdateResponse(request.CorrelationId,
-                new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.StaleControllerEpoch, _clusterState.MetadataVersion));
-        }
-
-        // Apply the metadata command using the state machine
-        var entry = new RaftLogEntry
-        {
-            Term = 0, // Not Raft-originated
-            Index = req.MetadataVersion,
-            CommandType = req.CommandType,
-            Data = req.CommandData,
-            Timestamp = req.Timestamp
-        };
-
-        _metadataStateMachine.Apply(entry);
-        _clusterState.MetadataVersion = req.MetadataVersion;
-
-        LogMetadataUpdateApplied(req.CommandType, req.MetadataVersion, req.ControllerId);
-
-        return SerializeMetadataUpdateResponse(request.CorrelationId,
-            new MetadataUpdateResponse(_config.BrokerId, (short)ClusterRpcStatus.None, _clusterState.MetadataVersion));
-    }
-
-    private static PooledFrame SerializeMetadataUpdateResponse(int correlationId, MetadataUpdateResponse response)
-    {
-        var frame = NewFrame(18, out var o);
-        var span = frame.Span;
-        BinaryPrimitives.WriteInt32BigEndian(span[o..], correlationId);
-        BinaryPrimitives.WriteInt32BigEndian(span[(o + 4)..], response.BrokerId);
-        BinaryPrimitives.WriteInt16BigEndian(span[(o + 8)..], response.ErrorCode);
-        BinaryPrimitives.WriteInt64BigEndian(span[(o + 10)..], response.MetadataVersion);
-        return frame;
     }
 
     private async Task<PooledFrame> HandleRequestVoteAsync(ReplicationRequest request, CancellationToken ct)
@@ -838,11 +749,6 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Error, Message = "Error handling replica client {Endpoint}")]
     private partial void LogReplicaClientError(string endpoint, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Rejected stale metadata update from controller {ControllerId} (epoch {ReceivedEpoch} < {CurrentEpoch})")]
-    private partial void LogStaleMetadataUpdate(int controllerId, int receivedEpoch, int currentEpoch);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Applied metadata update: {CommandType} (version={Version}, controller={ControllerId})")]
-    private partial void LogMetadataUpdateApplied(MetadataCommandType commandType, long version, int controllerId);
 }
 
 internal sealed class ReplicationRequest
@@ -853,6 +759,5 @@ internal sealed class ReplicationRequest
     public HeartbeatRequest? HeartbeatRequest { get; set; }
     public RequestVoteRequest? RequestVoteRequest { get; set; }
     public AppendEntriesRequest? AppendEntriesRequest { get; set; }
-    public MetadataUpdateRequest? MetadataUpdateRequest { get; set; }
     public PreVoteRequest? PreVoteRequest { get; set; }
 }

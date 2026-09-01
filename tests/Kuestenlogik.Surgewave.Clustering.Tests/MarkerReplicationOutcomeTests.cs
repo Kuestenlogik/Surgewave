@@ -27,7 +27,7 @@ public class MarkerReplicationOutcomeTests
     public async Task Native_NoLeaderPartition_IsRecordedAsSkippedNoLeader_AndSuccessUnchanged()
     {
         var state = new ClusterState();
-        state.TryApplyControllerPartitionState(P0, leaderId: -1, leaderEpoch: 0, replicas: [1, 2], isr: [1, 2]);
+        PartitionStateSetup.Place(state, P0, leaderId: -1, replicas: [1, 2], isr: [1, 2]);
         using var pool = new ConnectionPool(NullLogger<ConnectionPool>.Instance, new TcpPeerTransport());
         var replicator = NewReplicator(state, localBrokerId: 3, pool);
 
@@ -58,7 +58,7 @@ public class MarkerReplicationOutcomeTests
     public async Task Native_LocalLeaderPartition_IsRecordedAsLocalLeader()
     {
         var state = new ClusterState();
-        state.TryApplyControllerPartitionState(P0, leaderId: 3, leaderEpoch: 1, replicas: [3, 1], isr: [3, 1]);
+        PartitionStateSetup.Place(state, P0, leaderId: 3, replicas: [3, 1], isr: [3, 1]);
         using var pool = new ConnectionPool(NullLogger<ConnectionPool>.Instance, new TcpPeerTransport());
         var replicator = NewReplicator(state, localBrokerId: 3, pool); // this broker leads P0 → written locally
 

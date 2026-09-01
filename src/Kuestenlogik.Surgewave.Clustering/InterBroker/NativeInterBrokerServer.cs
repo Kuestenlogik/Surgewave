@@ -51,18 +51,10 @@ public sealed partial class NativeInterBrokerServer
     {
         switch (opcode)
         {
-            case SurgewaveOpCode.InterBrokerLeaderAndIsr:
-                return await HandleAsync<PartitionStatesPayload>(
-                    opcode, payload, static (s, p, ct) => s.ApplyLeaderAndIsrAsync(p, ct), ct).ConfigureAwait(false);
-
-            case SurgewaveOpCode.InterBrokerUpdateMetadata:
-                return await HandleAsync<PartitionStatesPayload>(
-                    opcode, payload, static (s, p, ct) => s.ApplyUpdateMetadataAsync(p, ct), ct).ConfigureAwait(false);
-
-            case SurgewaveOpCode.InterBrokerStopReplica:
-                return await HandleAsync<StopReplicaPayload>(
-                    opcode, payload, static (s, p, ct) => s.ApplyStopReplicaAsync(p, ct), ct).ConfigureAwait(false);
-
+            // LeaderAndIsr, UpdateMetadata and StopReplica were the controller pushes. Nothing
+            // sends them any more (#163 step 3) — metadata is a replicated log that every broker
+            // applies — so the opcodes fall through to UnsupportedVersion like any other retired
+            // one, which is a truthful answer to a peer that still tries.
             case SurgewaveOpCode.InterBrokerAlterPartition:
                 return await HandleAsync<AlterPartitionPayload>(
                     opcode, payload, static (s, p, ct) => s.ApplyIsrChangeAsync(p, ct), ct).ConfigureAwait(false);

@@ -15,33 +15,27 @@ namespace Kuestenlogik.Surgewave.Clustering.Tests;
 /// </summary>
 public class InterBrokerFrameCodecTests
 {
-    private static PartitionStatesPayload SamplePartitionStates()
-    {
-        var tp = new TopicPartition { Topic = "orders", Partition = 0 };
-        return new PartitionStatesPayload(ControllerId: 1, ControllerEpoch: 3, LiveBrokers: [],
-        [
-            (tp, new PartitionState { TopicPartition = tp, LeaderBrokerId = 1, LeaderEpoch = 5, Replicas = [1, 2, 3], Isr = [1, 2] }),
-        ]);
-    }
+    private static AlterPartitionPayload SampleAlterPartition()
+        => new(LeaderId: 1, LeaderEpoch: 5, new TopicPartition { Topic = "orders", Partition = 0 }, NewIsr: [1, 2]);
 
     [Fact]
     public async Task EncodeFrame_ReadFrameAsync_RoundTripsOpcodeAndPayload()
     {
-        var payload = SamplePartitionStates();
-        var frame = InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerUpdateMetadata, payload);
+        var payload = SampleAlterPartition();
+        var frame = InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerAlterPartition, payload);
 
         using var stream = new MemoryStream(frame);
         var read = await InterBrokerFrameCodec.ReadFrameAsync(stream, CancellationToken.None);
 
         Assert.NotNull(read);
-        Assert.Equal(SurgewaveOpCode.InterBrokerUpdateMetadata, read!.Value.Opcode);
+        Assert.Equal(SurgewaveOpCode.InterBrokerAlterPartition, read!.Value.Opcode);
 
         var reader = new SurgewavePayloadReader(read.Value.Payload.Span);
-        var decoded = PartitionStatesPayload.Read(ref reader);
-        Assert.Single(decoded.Entries);
-        Assert.Equal("orders", decoded.Entries[0].Tp.Topic);
-        Assert.Equal(1, decoded.Entries[0].State.LeaderBrokerId);
-        Assert.Equal([1, 2], decoded.Entries[0].State.Isr);
+        var decoded = AlterPartitionPayload.Read(ref reader);
+        Assert.Equal("orders", decoded.Tp.Topic);
+        Assert.Equal(1, decoded.LeaderId);
+        Assert.Equal(5, decoded.LeaderEpoch);
+        Assert.Equal([1, 2], decoded.NewIsr);
     }
 
     [Fact]
@@ -54,7 +48,7 @@ public class InterBrokerFrameCodecTests
     [Fact]
     public async Task ReadFrameAsync_TwoFramesBackToBack_ReadsBothThenEof()
     {
-        var f1 = InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerUpdateMetadata, new InterBrokerStatusPayload(ClusterRpcStatus.None));
+        var f1 = InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerAlterPartition, new InterBrokerStatusPayload(ClusterRpcStatus.None));
         var f2 = InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.Error, new InterBrokerStatusPayload(ClusterRpcStatus.NotController));
         using var stream = new MemoryStream([.. f1, .. f2]);
 
@@ -62,7 +56,7 @@ public class InterBrokerFrameCodecTests
         var r2 = await InterBrokerFrameCodec.ReadFrameAsync(stream, CancellationToken.None);
         var r3 = await InterBrokerFrameCodec.ReadFrameAsync(stream, CancellationToken.None);
 
-        Assert.Equal(SurgewaveOpCode.InterBrokerUpdateMetadata, r1!.Value.Opcode);
+        Assert.Equal(SurgewaveOpCode.InterBrokerAlterPartition, r1!.Value.Opcode);
         Assert.Equal(SurgewaveOpCode.Error, r2!.Value.Opcode);
         Assert.Null(r3);
     }
@@ -76,7 +70,7 @@ public class InterBrokerFrameCodecTests
         Assert.False(NativeInterBrokerServer.IsNativeOpcode(104));  // Raft PreVote
 
         // Native inter-broker/Raft SRWV opcodes are in-band.
-        Assert.True(NativeInterBrokerServer.IsNativeOpcode((ushort)SurgewaveOpCode.InterBrokerUpdateMetadata));
+        Assert.True(NativeInterBrokerServer.IsNativeOpcode((ushort)SurgewaveOpCode.InterBrokerAlterPartition));
         Assert.True(NativeInterBrokerServer.IsNativeOpcode((ushort)SurgewaveOpCode.InterBrokerRegistration));
         Assert.True(NativeInterBrokerServer.IsNativeOpcode((ushort)SurgewaveOpCode.RaftAppendEntries));
     }
