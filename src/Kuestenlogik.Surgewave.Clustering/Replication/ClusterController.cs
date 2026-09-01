@@ -48,7 +48,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private readonly ReplicaAssignmentStrategy _replicaAssignment;
     private HeartbeatManager? _heartbeatManager;
     private RaftNode? _raftNode;
-    private MetadataUpdateClient? _metadataUpdateClient;
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
@@ -118,15 +117,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // This handler is for any additional cleanup or notifications needed.
         _isController = false;
     }
-
-    /// <summary>
-    /// Set the metadata update client for propagating metadata changes to remote brokers.
-    /// </summary>
-    public void SetMetadataUpdateClient(MetadataUpdateClient client)
-    {
-        _metadataUpdateClient = client;
-    }
-
 
     /// <summary>
     /// Set the cluster balancer for automatic partition rebalancing.

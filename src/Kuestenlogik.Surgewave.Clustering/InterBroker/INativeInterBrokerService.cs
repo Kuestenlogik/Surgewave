@@ -16,28 +16,6 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// </summary>
 public interface INativeInterBrokerService
 {
-    /// <summary>
-    /// Apply the partition states carried by a controller UpdateMetadata push to local cluster state,
-    /// returning the outcome status. Mirrors the partition-state application of the Kafka-wire
-    /// UpdateMetadata handler, including controller-epoch fencing (a stale push from a demoted
-    /// controller returns <see cref="ClusterRpcStatus.StaleControllerEpoch"/> and applies nothing).
-    /// </summary>
-    ValueTask<ClusterRpcStatus> ApplyUpdateMetadataAsync(PartitionStatesPayload payload, CancellationToken ct = default);
-
-    /// <summary>
-    /// Apply a controller LeaderAndIsr push: update local cluster state and turn each entry into a
-    /// BecomeLeader/BecomeFollower transition on the replica manager, exactly like the Kafka-wire
-    /// LeaderAndIsr handler. Fenced on the controller epoch like
-    /// <see cref="ApplyUpdateMetadataAsync"/>.
-    /// </summary>
-    ValueTask<ClusterRpcStatus> ApplyLeaderAndIsrAsync(PartitionStatesPayload payload, CancellationToken ct = default);
-
-    /// <summary>
-    /// Apply a controller StopReplica push: stop replication for each partition and, when the delete
-    /// flag is set, remove the partition's log and state. Fenced on the controller epoch, and refused
-    /// (<see cref="ClusterRpcStatus.ReplicaNotAvailable"/>) when the payload targets another broker.
-    /// </summary>
-    ValueTask<ClusterRpcStatus> ApplyStopReplicaAsync(StopReplicaPayload payload, CancellationToken ct = default);
 
     /// <summary>
     /// Apply a leader's reverse ISR report (#69) via the controller-side ISR applier. Returns

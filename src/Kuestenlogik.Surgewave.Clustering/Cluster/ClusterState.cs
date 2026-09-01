@@ -20,11 +20,6 @@ public sealed class ClusterState
     // ConcurrentDictionary. Control-plane only — never taken on the produce/fetch hot path.
     private readonly object _brokerLock = new();
 
-    // #60 Inc6a — serializes a whole controller-push fence-through-apply span across BOTH inter-broker
-    // wires. SemaphoreSlim (not a Monitor) so the applier may await BecomeLeader/FollowerAsync inside
-    // the critical section without holding a sync lock over I/O. Control-plane only.
-    private readonly SemaphoreSlim _controllerPushGate = new(1, 1);
-
     /// <summary>
     /// Current controller broker ID.
     /// </summary>
@@ -36,75 +31,6 @@ public sealed class ClusterState
     public int ControllerEpoch { get; set; }
 
     /// <summary>
-    /// #60 Inc5 — atomically fence-and-advance the controller identity from a controller push.
-    /// Returns <c>false</c> (and changes nothing) when <paramref name="controllerEpoch"/> is older
-    /// than the current <see cref="ControllerEpoch"/> — the push comes from a demoted controller and
-    /// must not be applied. This is the SINGLE fence source for both the Kafka-wire inter-broker
-    /// handler and the native applier: with one shared, lock-guarded check, pushes interleaved over
-    /// both wires during a rolling upgrade cannot regress the epoch past each other (a per-handler
-    /// epoch field could be behind the shared state and let a stale push through).
-    /// </summary>
-    public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch)
-        => TryAdvanceControllerEpoch(controllerId, controllerEpoch, observedWire: null);
-
-    /// <summary>
-    /// As <see cref="TryAdvanceControllerEpoch(int,int)"/>, additionally recording the WIRE the push
-    /// arrived on when it passes the fence — atomically, in the same lock scope (#72 Inc1). A
-    /// Kafka-wire push caps <see cref="FinalizedInterBrokerProtocol"/> at KafkaWire; a native push
-    /// clears a STRICTLY older cap (see the cap field for the tie rule). Pass <c>null</c> for a
-    /// self-delivered push: it proves nothing about a remote controller's wire and must never cap
-    /// the local gate. Fence and cap share one <c>_stateLock</c> scope with
-    /// <see cref="BecomeController"/> and <see cref="Clear"/>, so an election's cap reset can never
-    /// interleave between a push's fence and its cap write.
-    /// </summary>
-    public bool TryAdvanceControllerEpoch(int controllerId, int controllerEpoch, ControllerPushWire? observedWire)
-    {
-        bool advanced;
-        int previousControllerId;
-        lock (_stateLock)
-        {
-            if (controllerEpoch < ControllerEpoch)
-                return false;
-
-            advanced = controllerEpoch > ControllerEpoch;
-            previousControllerId = ControllerId;
-            ControllerEpoch = controllerEpoch;
-            ControllerId = controllerId;
-
-            if (observedWire is ControllerPushWire.KafkaWire)
-            {
-                Volatile.Write(ref _controllerWireCap, PackCap(controllerEpoch));
-            }
-            else if (observedWire is ControllerPushWire.Native)
-            {
-                var cap = Volatile.Read(ref _controllerWireCap);
-                if ((cap & CapFlag) != 0 && controllerEpoch > CapEpoch(cap))
-                    Volatile.Write(ref _controllerWireCap, 0L);
-            }
-        }
-
-        // Persist the high-water OUTSIDE the lock (#72 Inc4): file I/O must not serialize state
-        // readers, and a missed write only shrinks the restart floor (best-effort by contract).
-        if (advanced)
-            OnControllerEpochAdvanced?.Invoke(controllerEpoch);
-
-        // Also outside the lock: this is how a broker learns it has been REPLACED as controller.
-        // The push carries a controller id that passed the epoch fence, so it is authoritative —
-        // and outside Raft nothing else ever tells a controller to stand down.
-        if (controllerId != previousControllerId)
-            OnControllerChanged?.Invoke(controllerId);
-
-        return true;
-    }
-
-    /// <summary>
-    /// Raised when an accepted controller push names a different controller than the one this broker
-    /// believed in — including the case where that used to be this broker. Not raised by
-    /// <see cref="BecomeController"/>: winning an election is not being told about someone else.
-    /// </summary>
-    public Action<int>? OnControllerChanged { get; set; }
-
-    /// <summary>
     /// #72 Inc4 — invoked OUTSIDE the state lock after every STRICT controller-epoch advance
     /// (elections via <see cref="BecomeController"/> and fence-passing pushes). The hosts wire the
     /// node-local <c>ControllerEpochStore</c> here so a restart primes above every observed reign.
@@ -113,7 +39,7 @@ public sealed class ClusterState
 
     /// <summary>
     /// #72 Inc4 — raise the controller epoch to a persisted floor at boot, WITHOUT claiming
-    /// controllership or touching the controller id / Kafka-wire cap. A restarted broker primes from
+    /// controllership and without touching the controller id. A restarted broker primes from
     /// its high-water file before any election, so <see cref="BecomeController"/> takes an epoch
     /// strictly above every reign this node ever observed.
     /// </summary>
@@ -127,54 +53,9 @@ public sealed class ClusterState
     }
 
     /// <summary>
-    /// #60 Inc6a — apply a controller-owned partition state (leader / leader-epoch / replicas / ISR)
-    /// only when its <paramref name="leaderEpoch"/> is not older than the stored one, atomically under
-    /// <c>_stateLock</c>. This is the per-partition ordering fence: a delayed/reordered push carrying
-    /// an older leader epoch is skipped (returns <c>false</c>), while an unrelated partition arriving
-    /// with any epoch still applies — so disjoint partial pushes never fence each other out. Local
-    /// watermarks/log offsets stay follower-owned and are untouched.
-    /// </summary>
-    public bool TryApplyControllerPartitionState(
-        TopicPartition tp, int leaderId, int leaderEpoch, IReadOnlyList<int> replicas, IReadOnlyList<int> isr)
-    {
-        lock (_stateLock)
-        {
-            var state = GetOrCreatePartitionState(tp);
-            if (leaderEpoch < state.LeaderEpoch)
-                return false;
-
-            state.LeaderBrokerId = leaderId;
-            state.LeaderEpoch = leaderEpoch;
-            state.Replicas.Clear();
-            state.Replicas.AddRange(replicas);
-            state.Isr.Clear();
-            state.Isr.AddRange(isr);
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// #60 Inc6a — whether a StopReplica carrying <paramref name="leaderEpoch"/> should be honored for
-    /// <paramref name="tp"/>: rejected when the stored partition has a strictly higher leader epoch (a
-    /// newer re-assignment supersedes a delayed stop). A leader epoch of <c>-1</c> (v0-2 wire, no
-    /// epoch) is always honored, matching the Kafka-wire StopReplica handler.
-    /// </summary>
-    public bool ShouldStopReplica(TopicPartition tp, int leaderEpoch)
-    {
-        lock (_stateLock)
-        {
-            if (leaderEpoch < 0)
-                return true;
-            return !_partitionStates.TryGetValue(tp, out var state) || leaderEpoch >= state.LeaderEpoch;
-        }
-    }
-
-    /// <summary>
     /// Election-time controller assumption: atomically increment the epoch and take the controller
-    /// id, returning the new epoch. Shares <c>_stateLock</c> with
-    /// <see cref="TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/> so a controller push
-    /// racing the election cannot interleave the non-atomic read-increment-write (a lost increment
-    /// or a demoted ControllerId paired with the fresh epoch).
+    /// id, returning the new epoch. Takes <c>_stateLock</c> so a concurrent reader cannot observe the
+    /// non-atomic read-increment-write half-done (a demoted ControllerId paired with the fresh epoch).
     /// </summary>
     public int BecomeController(int controllerId)
     {
@@ -184,39 +65,10 @@ public sealed class ClusterState
             ControllerEpoch++;
             ControllerId = controllerId;
             newEpoch = ControllerEpoch;
-
-            // #72 Inc1 — the Kafka-wire cap models the wire of a REMOTE controller; it is meaningless
-            // (and, uncleaned, an absorbing state: a capped controller pins its own transport gate,
-            // re-caps every receiver with each Kafka-wire push, and never receives the native push
-            // that could clear it — no broker could ever re-finalize to Native) the moment THIS
-            // broker takes controllership, whose own map is registration-authoritative.
-            Volatile.Write(ref _controllerWireCap, 0L);
         }
 
         OnControllerEpochAdvanced?.Invoke(newEpoch); // #72 Inc4 — high-water persist, outside the lock
         return newEpoch;
-    }
-
-    /// <summary>
-    /// #60 Inc6a — acquire the exclusive controller-push scope. Both the native and Kafka-wire
-    /// inter-broker handlers wrap their whole fence-through-apply span in this scope so two pushes
-    /// that both pass the epoch fence cannot interleave their per-partition writes. Dispose the
-    /// returned scope (preferably with <c>await using</c>) to release it.
-    /// </summary>
-    public async ValueTask<IDisposable> AcquireControllerPushScopeAsync(CancellationToken ct = default)
-    {
-        await _controllerPushGate.WaitAsync(ct).ConfigureAwait(false);
-        return new ControllerPushScope(_controllerPushGate);
-    }
-
-    private sealed class ControllerPushScope(SemaphoreSlim gate) : IDisposable
-    {
-        // The scope RELEASES the gate on dispose; it does NOT own or dispose the semaphore (ClusterState
-        // does), so CA2213 (dispose the IDisposable field) does not apply.
-#pragma warning disable CA2213
-        private SemaphoreSlim? _gate = gate;
-#pragma warning restore CA2213
-        public void Dispose() => Interlocked.Exchange(ref _gate, null)?.Release();
     }
 
     /// <summary>
@@ -249,9 +101,7 @@ public sealed class ClusterState
     /// <summary>
     /// #60 Inc3 — the cluster-wide finalized inter-broker protocol level: the MIN of every registered
     /// broker's advertised <see cref="BrokerNode.InterBrokerProtocol"/> (a broker that never advertised
-    /// the feature reads as <see cref="InterBrokerProtocolFeature.KafkaWire"/>), capped by the
-    /// controller-wire cap (see the cap field below and
-    /// <see cref="TryAdvanceControllerEpoch(int,int,ControllerPushWire?)"/>). Returns
+    /// the feature reads as <see cref="InterBrokerProtocolFeature.KafkaWire"/>). Returns
     /// <see cref="InterBrokerProtocolFeature.KafkaWire"/> for an empty cluster.
     /// <para>
     /// This is the safety anchor: the cluster only rises to a higher level once EVERY live or fenced
@@ -280,43 +130,9 @@ public sealed class ClusterState
             if (!any)
                 return InterBrokerProtocolFeature.KafkaWire;
 
-            // #72 Inc1 — a live Kafka-wire cap pins the level to the Kafka wire (lock-free,
-            // alloc-free; see the cap field below for the cap/clear protocol).
-            var cap = Volatile.Read(ref _controllerWireCap);
-            return (cap & CapFlag) != 0 ? InterBrokerProtocolFeature.KafkaWire : finalized;
+            return finalized;
         }
     }
-
-    // #72 Inc1 — the Kafka-wire controller cap, packed into one atomically-readable long:
-    // bit 0 = capped flag, upper bits = the controller epoch of the push that set the cap.
-    // 0 = uncapped. All writers hold _stateLock (the fence overload, BecomeController, Clear);
-    // FinalizedInterBrokerProtocol reads it lock-free.
-    //
-    // WHY: the Kafka UpdateMetadata/LeaderAndIsr DTOs carry no per-broker protocol level, so during
-    // a rolling DOWNGRADE a non-controller's broker map would stay pinned at Native forever (only
-    // the controller sees the downgraded re-registration). A fence-passing Kafka-wire push proves
-    // the controller — whose map IS registration-authoritative — finalized to the Kafka wire, so it
-    // caps the local finalized level.
-    //
-    // TIE RULE: a native push clears the cap only for a STRICTLY newer controller epoch. The fence
-    // makes fence-passing epochs monotone, so the only wire ambiguity is between same-epoch frames
-    // (no per-push ordering exists across the two connections), and there the cap must win — a
-    // wrongly-kept cap degrades to the Kafka wire every capped broker speaks (only the Kafka-wire
-    // handler can cap, so a plugin-free broker is never capped), while a wrongly-cleared cap would
-    // send native frames at a downgraded peer that cannot decode them. Errors are downward-only.
-    //
-    // The strictly-newer epoch a clear needs is guaranteed to appear: elections bump via
-    // BecomeController, and the controller bumps itself when its finalized level rises to Native
-    // (ClusterStateInterBrokerService.RegisterBrokerAsync), so an upgrade re-converges within the
-    // reign that completed it. Known residual window: an election that lands exactly ON the cap's
-    // epoch (a newly elected controller that missed the capping push entirely — non-durable local
-    // epoch counter, #72 Inc4 tightens this) keeps followers on the Kafka wire until the following
-    // election; degraded, never incorrect.
-    private long _controllerWireCap;
-    private const long CapFlag = 1L;
-
-    private static long PackCap(int controllerEpoch) => ((long)controllerEpoch << 1) | CapFlag;
-    private static int CapEpoch(long cap) => (int)(cap >> 1);
 
     /// <summary>
     /// All topics.
@@ -577,32 +393,6 @@ public sealed class ClusterState
     }
 
     /// <summary>
-    /// Deep-copy a partition state under <c>_stateLock</c> so a concurrent ISR/replica mutation
-    /// cannot tear the copied lists (mirrors <see cref="GetIsrSnapshot"/>). Used by the native
-    /// controller client before its two-pass frame encode (#60 Inc5): the source lists are the live
-    /// shared ones, and a plain <c>[.. list]</c> copy racing a Clear+AddRange can throw or observe a
-    /// partial list.
-    /// </summary>
-    public PartitionState CopyPartitionStateLocked(PartitionState state)
-    {
-        lock (_stateLock)
-        {
-            return new PartitionState
-            {
-                TopicPartition = state.TopicPartition,
-                LeaderBrokerId = state.LeaderBrokerId,
-                LeaderEpoch = state.LeaderEpoch,
-                Replicas = [.. state.Replicas],
-                Isr = [.. state.Isr],
-                OfflineReplicas = [.. state.OfflineReplicas],
-                MinInSyncReplicas = state.MinInSyncReplicas,
-                HighWatermark = state.HighWatermark,
-                LogStartOffset = state.LogStartOffset,
-            };
-        }
-    }
-
-    /// <summary>
     /// Update ISR for a partition.
     /// </summary>
     public void UpdateIsr(TopicPartition tp, List<int> isr)
@@ -676,7 +466,6 @@ public sealed class ClusterState
             _partitionStates.Clear();
             ControllerId = -1;
             ControllerEpoch = 0;
-            Volatile.Write(ref _controllerWireCap, 0L); // #72 Inc1 — no stale cap across a reset/restore
         }
     }
 

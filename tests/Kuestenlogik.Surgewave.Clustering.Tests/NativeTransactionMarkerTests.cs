@@ -52,7 +52,7 @@ public class NativeTransactionMarkerTests
     {
         var state = new ClusterState();
         var tp = new TopicPartition { Topic = "orders", Partition = 0 };
-        state.TryApplyControllerPartitionState(tp, leaderId: 1, leaderEpoch: 3, replicas: [1, 2], isr: [1, 2]);
+        PartitionStateSetup.Place(state, tp, leaderId: 1, replicas: [1, 2], isr: [1, 2]);
         var sink = new StubMarkerSink();
         var service = NewService(state, localBrokerId: 1, NewLogs(), sink);
 
@@ -69,7 +69,7 @@ public class NativeTransactionMarkerTests
     {
         var state = new ClusterState();
         var tp = new TopicPartition { Topic = "orders", Partition = 0 };
-        state.TryApplyControllerPartitionState(tp, leaderId: 2, leaderEpoch: 3, replicas: [2, 1], isr: [2, 1]); // led by broker 2
+        PartitionStateSetup.Place(state, tp, leaderId: 2, replicas: [2, 1], isr: [2, 1]); // led by broker 2
         var sink = new StubMarkerSink();
         var service = NewService(state, localBrokerId: 1, NewLogs(), sink); // this broker is 1, not the leader
 
@@ -86,8 +86,8 @@ public class NativeTransactionMarkerTests
         var state = new ClusterState();
         var a = new TopicPartition { Topic = "orders", Partition = 0 };
         var b = new TopicPartition { Topic = "orders", Partition = 1 };
-        state.TryApplyControllerPartitionState(a, leaderId: 1, leaderEpoch: 3, replicas: [1, 2], isr: [1, 2]);
-        state.TryApplyControllerPartitionState(b, leaderId: 1, leaderEpoch: 3, replicas: [1, 2], isr: [1, 2]);
+        PartitionStateSetup.Place(state, a, leaderId: 1, replicas: [1, 2], isr: [1, 2]);
+        PartitionStateSetup.Place(state, b, leaderId: 1, replicas: [1, 2], isr: [1, 2]);
         var sink = new StubMarkerSink();
         var service = NewService(state, localBrokerId: 1, NewLogs(), sink);
 
@@ -104,8 +104,8 @@ public class NativeTransactionMarkerTests
         var state = new ClusterState();
         var a = new TopicPartition { Topic = "orders", Partition = 0 };
         var b = new TopicPartition { Topic = "orders", Partition = 1 };
-        state.TryApplyControllerPartitionState(a, leaderId: 1, leaderEpoch: 3, replicas: [1, 2], isr: [1, 2]); // led by us
-        state.TryApplyControllerPartitionState(b, leaderId: 2, leaderEpoch: 3, replicas: [2, 1], isr: [2, 1]); // led by broker 2
+        PartitionStateSetup.Place(state, a, leaderId: 1, replicas: [1, 2], isr: [1, 2]); // led by us
+        PartitionStateSetup.Place(state, b, leaderId: 2, replicas: [2, 1], isr: [2, 1]); // led by broker 2
         var sink = new StubMarkerSink();
         var service = NewService(state, localBrokerId: 1, NewLogs(), sink);
 
@@ -177,7 +177,7 @@ public class NativeTransactionMarkerTests
 
         // Leader (broker 1): applies the marker, behind a TCP listener.
         var leaderState = new ClusterState();
-        leaderState.TryApplyControllerPartitionState(tp, leaderId: 1, leaderEpoch: 3, replicas: [1, 2], isr: [1, 2]);
+        PartitionStateSetup.Place(leaderState, tp, leaderId: 1, replicas: [1, 2], isr: [1, 2]);
         var leaderLogs = NewLogs();
         var sink = new StubMarkerSink();
         var leaderReplicas = new ReplicaManager(NullLogger<ReplicaManager>.Instance, leaderState, leaderLogs, new ClusteringConfig { BrokerId = 1 }, transport);
@@ -196,7 +196,7 @@ public class NativeTransactionMarkerTests
 
         // Sender (broker 2): the partition is led by broker 1 at the listener's replication port.
         var senderState = new ClusterState();
-        senderState.TryApplyControllerPartitionState(tp, leaderId: 1, leaderEpoch: 3, replicas: [1, 2], isr: [1, 2]);
+        PartitionStateSetup.Place(senderState, tp, leaderId: 1, replicas: [1, 2], isr: [1, 2]);
         senderState.AddBroker(new BrokerNode { BrokerId = 1, Host = "127.0.0.1", Port = 9092, ReplicationPort = listener.LocalEndPoint.Port });
         using var pool = new ConnectionPool(NullLogger<ConnectionPool>.Instance, transport);
         var replicator = new NativeTransactionMarkerReplicator(pool, senderState, localBrokerId: 2, NullLogger<NativeTransactionMarkerReplicator>.Instance);
