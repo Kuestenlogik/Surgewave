@@ -19,11 +19,11 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// Every send stamps the payload with this broker's id and the current
 /// <see cref="ClusterState.ControllerEpoch"/> so receivers can fence stale pushes from a demoted
 /// controller. All sends are best-effort fire-and-forget (matching the neutral
-/// <see cref="IControllerReplicaRpc"/> contract): failures are logged, never thrown — state
+/// <see cref="Replication.IIsrChangeNotifier"/> contract): failures are logged, never thrown — state
 /// reconciles on the next push or fetch cycle.
 /// </para>
 /// </summary>
-public sealed partial class NativeControllerClient : IControllerReplicaRpc
+public sealed partial class NativeControllerClient : Replication.IIsrChangeNotifier
 {
     /// <summary>
     /// Upper bound on a single controller-to-broker round-trip, mirroring the Kafka-wire
@@ -36,7 +36,6 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
     private readonly ClusterState _clusterState;
     private readonly ClusteringConfig _config;
     private readonly ILogger<NativeControllerClient> _logger;
-    private Cluster.ClusterMembershipService? _membership;
     private Replication.IIsrUpdateApplier? _isrApplier;
 
     public NativeControllerClient(
@@ -51,19 +50,6 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
         _logger = logger;
     }
 
-    /// <summary>
-    /// Supplies the membership authority so pushes can leave out fenced brokers (#123).
-    /// </summary>
-    /// <remarks>
-    /// A setter rather than a constructor parameter because the runtime builds this
-    /// client before it builds the membership service, and reordering that is a larger
-    /// change than this needs. Same pattern as SetRaftNode / SetNativeInterBrokerServer.
-    /// Unset means no filter, which is the behaviour that existed before — but the
-    /// runtime wires it unconditionally, so that is a fallback for a host that has no
-    /// membership authority at all, not an opt-in.
-    /// </remarks>
-    public void SetMembership(Cluster.ClusterMembershipService membership)
-        => _membership = membership;
 
     /// <summary>
     /// Supplies the applier used when THIS broker is the controller reporting its own ISR (#176).
@@ -74,90 +60,6 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
     /// </remarks>
     public void SetIsrUpdateApplier(Replication.IIsrUpdateApplier applier)
         => _isrApplier = applier;
-
-    /// <summary>
-    /// Send LeaderAndIsr to every affected broker (leader and all replicas), one frame per broker.
-    /// </summary>
-    public async Task SendLeaderAndIsrAsync(
-        IEnumerable<(TopicPartition Tp, PartitionState State)> partitionChanges,
-        CancellationToken ct = default)
-    {
-        if (!TrySnapshot(partitionChanges, out var changes))
-            return;
-
-        var brokerPartitions = GroupByAffectedBroker(changes);
-
-        var controllerEpoch = _clusterState.ControllerEpoch;
-        var liveBrokers = SnapshotLiveBrokers();
-        var tasks = brokerPartitions
-            .Where(kvp => kvp.Key != _config.BrokerId) // don't send to self
-            .Select(kvp => SendFrameAsync(
-                kvp.Key,
-                SurgewaveOpCode.InterBrokerLeaderAndIsr,
-                new PartitionStatesPayload(_config.BrokerId, controllerEpoch, liveBrokers, kvp.Value, SnapshotTopicIds(kvp.Value)),
-                ct));
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Send UpdateMetadata to all brokers (all partitions if <paramref name="partitionStates"/> is null).
-    /// </summary>
-    public async Task SendUpdateMetadataAsync(
-        IEnumerable<(TopicPartition Tp, PartitionState State)>? partitionStates = null,
-        CancellationToken ct = default)
-    {
-        if (!TrySnapshot(partitionStates ?? _clusterState.GetAllPartitionStates(), out var partitions))
-            return;
-
-        var payload = new PartitionStatesPayload(
-            _config.BrokerId, _clusterState.ControllerEpoch, SnapshotLiveBrokers(), partitions, SnapshotTopicIds(partitions));
-
-        var tasks = _clusterState.Brokers.Values
-            .Where(b => b.BrokerId != _config.BrokerId)
-            .Select(b => SendFrameAsync(b.BrokerId, SurgewaveOpCode.InterBrokerUpdateMetadata, payload, ct));
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Name→id for the topics named in <paramref name="entries"/>, as far as the controller knows
-    /// them. A receiving broker has no other way to learn a topic's identity for a partition it only
-    /// replicates, and without it a promoted broker cannot map an assignment back to a topic id
-    /// (#118 follow-up). Topics whose id the controller does not know are simply left out — the
-    /// receiver then keeps whatever it had rather than being handed an empty id.
-    /// </summary>
-    private IReadOnlyList<(string Topic, Guid TopicId)> SnapshotTopicIds(
-        IReadOnlyList<(TopicPartition Tp, PartitionState State)> entries)
-    {
-        var seen = new Dictionary<string, Guid>(StringComparer.Ordinal);
-
-        foreach (var (tp, _) in entries)
-        {
-            if (seen.ContainsKey(tp.Topic))
-                continue;
-
-            var topicId = _clusterState.GetTopic(tp.Topic)?.TopicId ?? Guid.Empty;
-            if (topicId != Guid.Empty)
-                seen[tp.Topic] = topicId;
-        }
-
-        return [.. seen.Select(kvp => (kvp.Key, kvp.Value))];
-    }
-
-    /// <summary>
-    /// Send StopReplica to a specific broker.
-    /// </summary>
-    public async Task SendStopReplicaAsync(
-        int brokerId,
-        IEnumerable<(TopicPartition Tp, int LeaderEpoch, bool DeletePartition)> partitions,
-        CancellationToken ct = default)
-    {
-        var payload = new StopReplicaPayload(
-            _config.BrokerId, _clusterState.ControllerEpoch, brokerId, partitions.ToList());
-
-        await SendFrameAsync(brokerId, SurgewaveOpCode.InterBrokerStopReplica, payload, ct).ConfigureAwait(false);
-    }
 
     /// <summary>
     /// Reverse ISR propagation (#69): a partition leader reports its new ISR to the controller. If
@@ -197,86 +99,6 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
             SurgewaveOpCode.InterBrokerAlterPartition,
             new AlterPartitionPayload(leaderId, leaderEpoch, tp, isr),
             ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Snapshot every known broker as a <see cref="LiveBrokerSpec"/> — the native counterpart of
-    /// LiveLeaders/LiveBrokers on the Kafka wire (#69): the push that makes a peer a follower must
-    /// also teach it the leader's endpoint. Carries the REAL replication port and the advertised
-    /// protocol level. Iterates the concurrent map directly (no .Values copy).
-    /// </summary>
-    /// <remarks>
-    /// "Live" used to mean "registered at some point": every broker in cluster state went
-    /// into every UpdateMetadata and LeaderAndIsr push, including one that had been silent
-    /// for hours (#123). A fenced broker is left out now, which is what makes session
-    /// expiry observable at all — fencing had no production reader before it.
-    /// </remarks>
-    private List<LiveBrokerSpec> SnapshotLiveBrokers()
-    {
-        var brokers = new List<LiveBrokerSpec>();
-        foreach (var kvp in _clusterState.Brokers)
-        {
-            var b = kvp.Value;
-
-            // IsKnownFenced, not IsBrokerFenced: the latter answers "fenced" for a broker
-            // it has never heard of, and the native path registers followers only, on the
-            // controller only. Using it here would drop this controller itself, every
-            // Kafka-wire peer and everyone during startup — an empty push rather than a
-            // filtered one.
-            if (_membership?.IsKnownFenced(b.BrokerId) == true)
-                continue;
-
-            brokers.Add(new LiveBrokerSpec(
-                b.BrokerId, b.Host, b.Port, b.ReplicationPort, b.InterBrokerProtocol, b.Rack));
-        }
-        return brokers;
-    }
-
-    /// <summary>
-    /// Deep-copy the partition states ONCE per send. The inputs are live <see cref="ClusterState"/>
-    /// references whose Replicas/Isr lists mutate concurrently; the frame codec passes over the
-    /// payload twice (EstimateSize + Write) and once per target broker, so serializing the live
-    /// objects could tear or throw mid-encode. Each entry is cloned under the cluster-state lock
-    /// (<see cref="ClusterState.CopyPartitionStateLocked"/>) so the copy itself cannot tear; the
-    /// try/catch is a backstop. Best-effort: a failure is logged and the push skipped — state
-    /// reconciles on the next push.
-    /// </summary>
-    private bool TrySnapshot(
-        IEnumerable<(TopicPartition Tp, PartitionState State)> source,
-        out List<(TopicPartition Tp, PartitionState State)> snapshot)
-    {
-        try
-        {
-            snapshot = source
-                .Select(e => (e.Tp, _clusterState.CopyPartitionStateLocked(e.State)))
-                .ToList();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogSnapshotFailed(ex);
-            snapshot = [];
-            return false;
-        }
-    }
-
-    private static Dictionary<int, List<(TopicPartition Tp, PartitionState State)>> GroupByAffectedBroker(
-        IEnumerable<(TopicPartition Tp, PartitionState State)> partitionChanges)
-    {
-        var brokerPartitions = new Dictionary<int, List<(TopicPartition Tp, PartitionState State)>>();
-        foreach (var (tp, state) in partitionChanges)
-        {
-            foreach (var brokerId in state.Replicas)
-            {
-                if (!brokerPartitions.TryGetValue(brokerId, out var list))
-                {
-                    list = [];
-                    brokerPartitions[brokerId] = list;
-                }
-                list.Add((tp, state));
-            }
-        }
-        return brokerPartitions;
     }
 
     /// <summary>
@@ -368,7 +190,4 @@ public sealed partial class NativeControllerClient : IControllerReplicaRpc
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Native {Opcode} to broker {BrokerId} answered with mismatched opcode {ResponseOpcode} — discarding poisoned connection")]
     private partial void LogResponseMismatch(SurgewaveOpCode opcode, SurgewaveOpCode responseOpcode, int brokerId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Skipping controller push: partition-state snapshot raced a concurrent mutation")]
-    private partial void LogSnapshotFailed(Exception ex);
 }

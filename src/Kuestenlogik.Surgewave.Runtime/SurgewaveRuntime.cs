@@ -550,7 +550,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // And what makes the fencing observable: a fenced broker stops being pushed as
         // live. Wired unconditionally — the filter falling back to "no filter" without a
         // membership authority is for a host that has none, not an opt-in.
-        nativeControllerClient.SetMembership(membershipService);
         // When this broker is both controller and partition leader, its own ISR report has to go
         // into the metadata log rather than onto the wire (#176).
         nativeControllerClient.SetIsrUpdateApplier(_clusterController);
@@ -602,7 +601,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // LeaderAndIsr to remote brokers when topology changes (topic create, reelection).
         // Without this the controller updates only its own local state and
         // followers never learn to fetch, so the ISR never grows past {leader}.
-        _clusterController.SetControllerClient(controllerRpc);
 
         // Register the inter-broker API handler now that the cluster components
         // exist. It handles LeaderAndIsr / StopReplica / UpdateMetadata pushed

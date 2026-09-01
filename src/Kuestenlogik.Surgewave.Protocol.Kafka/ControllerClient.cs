@@ -12,7 +12,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Replication;
 /// Used by the controller to broadcast LeaderAndIsr, UpdateMetadata, and StopReplica
 /// requests when partition topology changes.
 /// </summary>
-public sealed partial class ControllerClient : IDisposable, IControllerReplicaRpc
+public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
 {
     private readonly ConnectionPool _connectionPool;
     private readonly ClusterState _clusterState;
@@ -188,11 +188,10 @@ public sealed partial class ControllerClient : IDisposable, IControllerReplicaRp
 
         if (controllerId == _config.BrokerId)
         {
-            var state = _clusterState.GetPartitionState(tp);
-            if (state != null)
-            {
-                await SendLeaderAndIsrAsync([(tp, state)], ct).ConfigureAwait(false);
-            }
+            // We ARE the controller, so this does not go on the wire. It used to re-broadcast
+            // LeaderAndIsr, which was the push model's answer; the native client routes the same
+            // case into the metadata log through IIsrUpdateApplier (#176), and this wire client
+            // has no applier — the caller on this broker is the native path.
             return;
         }
 
@@ -435,26 +434,6 @@ public sealed partial class ControllerClient : IDisposable, IControllerReplicaRp
             return null;
         }
     }
-
-    // Neutral IControllerReplicaRpc surface (#59 b5): the public methods above keep
-    // their Kafka DTO return types (callers that want the per-broker responses use the
-    // concrete type); these explicit implementations expose the same operations as bare
-    // Task, since C# has no return-type covariance for implicit interface implementation.
-    Task IControllerReplicaRpc.SendLeaderAndIsrAsync(
-        IEnumerable<(TopicPartition Tp, PartitionState State)> partitionChanges,
-        CancellationToken ct)
-        => SendLeaderAndIsrAsync(partitionChanges, ct);
-
-    Task IControllerReplicaRpc.SendUpdateMetadataAsync(
-        IEnumerable<(TopicPartition Tp, PartitionState State)>? partitionStates,
-        CancellationToken ct)
-        => SendUpdateMetadataAsync(partitionStates, ct);
-
-    Task IControllerReplicaRpc.SendStopReplicaAsync(
-        int brokerId,
-        IEnumerable<(TopicPartition Tp, int LeaderEpoch, bool DeletePartition)> partitions,
-        CancellationToken ct)
-        => SendStopReplicaAsync(brokerId, partitions, ct);
 
     /// <summary>
     /// Send a request and receive a response using the Kafka protocol.

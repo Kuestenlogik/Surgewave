@@ -208,10 +208,10 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             sp.GetRequiredService<ILogger<RaftApiHandler>>()));
 
         // ── Inter-broker wire codecs (relocated with the plugin, #59 b5) ─────────
-        // #60 Inc5: registered KEYED — the unkeyed IControllerReplicaRpc is now the host's
+        // #60 Inc5: registered KEYED — the unkeyed IIsrChangeNotifier is now the host's
         // GatedControllerReplicaRpc, which picks this wire client up as its Kafka-wire fallback
         // while the cluster is not yet finalized to the native inter-broker protocol.
-        services.AddKeyedSingleton<IControllerReplicaRpc>(
+        services.AddKeyedSingleton<IIsrChangeNotifier>(
             GatedControllerReplicaRpc.WireFallbackServiceKey,
             (sp, _) => new ControllerClient(
                 sp.GetRequiredService<ConnectionPool>(),
