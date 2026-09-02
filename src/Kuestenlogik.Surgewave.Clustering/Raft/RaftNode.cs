@@ -516,7 +516,17 @@ public sealed partial class RaftNode : IAsyncDisposable
         // Persist log entry before considering it proposed (Raft correctness requirement)
         await _persistence.AppendEntriesAsync([entryToSave], ct);
 
-        // Will be replicated via heartbeat loop
+        // Commit what is already on a majority, here rather than on the next heartbeat tick
+        // (#177). For a single-voter quorum this entry IS on a majority the moment it is
+        // persisted — the leader's own log is the majority — and the difference is not academic:
+        // the commit index a follower learns is the one carried in AppendEntries, so a commit
+        // that lands a tick late means the FIRST request carrying the entry tells the follower
+        // to store it and not to apply it. If the leader goes away before the following tick,
+        // the follower holds a committed decision it never acts on. Advancing here closes that
+        // window; for a multi-voter quorum this finds nothing new and costs a lock.
+        TryAdvanceCommitIndex(PeerIds);
+
+        // Replicated via the heartbeat loop
         return resultIndex;
     }
 
@@ -536,6 +546,59 @@ public sealed partial class RaftNode : IAsyncDisposable
         }
 
         return _commitIndex >= index;
+    }
+
+    /// <summary>
+    /// Wait until every node in <paramref name="nodeIds"/> holds the log up to
+    /// <paramref name="index"/>. Returns <see langword="false"/> if the deadline passes first.
+    /// </summary>
+    /// <remarks>
+    /// Committing is not delivering (#177). On a single-voter quorum an entry commits the moment
+    /// it is appended — the leader's own log is the majority — while the peers and observers that
+    /// have to ACT on it only receive it on the next heartbeat tick. That gap is harmless while
+    /// the leader keeps running, and fatal when it is leaving: a departing controller that hands
+    /// a partition to its successor commits the decision, exits, and takes the only copy with it.
+    /// So a caller that is about to walk away asks this instead of asking whether it committed.
+    /// <para>
+    /// Named nodes only, deliberately: waiting on everyone would let one unreachable peer spend
+    /// the whole shutdown budget (the mirror of #176's commit stall), and the nodes that matter
+    /// here are the ones that must act — the successors.
+    /// </para>
+    /// </remarks>
+    public async Task<bool> WaitForReplicationAsync(
+        long index,
+        IReadOnlyList<int> nodeIds,
+        TimeSpan timeout,
+        CancellationToken ct = default)
+    {
+        if (nodeIds.Count == 0)
+            return true;
+
+        var deadline = DateTimeOffset.UtcNow + timeout;
+
+        while (!ct.IsCancellationRequested)
+        {
+            if (AllHold(index, nodeIds))
+                return true;
+
+            if (DateTimeOffset.UtcNow >= deadline)
+                break;
+
+            await Task.Delay(10, ct);
+        }
+
+        return AllHold(index, nodeIds);
+    }
+
+    private bool AllHold(long index, IReadOnlyList<int> nodeIds)
+    {
+        foreach (var nodeId in nodeIds)
+        {
+            if (GetPeerMatchIndex(nodeId) < index)
+                return false;
+        }
+
+        return true;
     }
 
     private async Task ElectionTimeoutLoopAsync(CancellationToken ct)

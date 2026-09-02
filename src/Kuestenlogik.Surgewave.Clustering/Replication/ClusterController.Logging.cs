@@ -142,4 +142,12 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Refused to remove broker {BrokerId}: no such broker is known, so the entry would commit and do nothing")]
     private partial void LogRemoveUnknownRefused(int brokerId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Handover to broker {SuccessorId} confirmed: it holds the metadata log up to index {Index}")]
+    private partial void LogHandoverConfirmed(int successorId, long index);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Handover to broker {SuccessorId} left unconfirmed: it did not acknowledge the leadership decision before the shutdown budget ran out, so it may not know it is the leader")]
+    private partial void LogHandoverNotConfirmed(int successorId);
 }
