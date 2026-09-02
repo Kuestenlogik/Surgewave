@@ -272,6 +272,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         {
             LogTransferringPartitionLeadership(partitionsToTransfer.Count);
 
+            // Who we handed what to, and where the decision sits in the log. A handover the
+            // successor never received is not a handover (#177), so this is checked below
+            // before we walk away.
+            var handovers = new Dictionary<int, long>();
+
             foreach (var tp in partitionsToTransfer)
             {
                 if (ct.IsCancellationRequested || DateTimeOffset.UtcNow >= deadline)
@@ -285,8 +290,18 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     if (eligibleLeaders.Count > 0)
                     {
                         var newLeader = eligibleLeaders.First();
-                        await ElectLeaderAsync(tp, newLeader, ct);
-                        LogPartitionLeadershipTransferred(tp.Topic, tp.Partition, newLeader);
+                        var elected = await ElectLeaderAtAsync(tp, newLeader, ct);
+                        if (elected is null)
+                        {
+                            LogNoEligibleLeaderForPartition(tp.Topic, tp.Partition);
+                            continue;
+                        }
+
+                        var (electedLeader, index) = elected.Value;
+                        if (!handovers.TryGetValue(electedLeader, out var known) || index > known)
+                            handovers[electedLeader] = index;
+
+                        LogPartitionLeadershipTransferred(tp.Topic, tp.Partition, electedLeader);
                     }
                     else
                     {
@@ -294,6 +309,8 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     }
                 }
             }
+
+            await AwaitHandoverDeliveryAsync(handovers, deadline, ct);
         }
 
         // Step 2: Step down from Raft leadership if we're the leader
@@ -326,6 +343,46 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         LogGracefulShutdownCompleted(_config.BrokerId, success);
         return success;
+    }
+
+    /// <summary>
+    /// Blocks until every broker named in <paramref name="handovers"/> holds the log entry that
+    /// makes it a leader, or until the shutdown budget runs out (#177).
+    /// </summary>
+    /// <remarks>
+    /// The step that makes a graceful shutdown graceful. Electing a successor commits a
+    /// <c>LeaderChanged</c>, and on a single-voter quorum an entry commits the instant it is
+    /// appended — the leader's own log IS the majority. Replication to everyone else happens on
+    /// the next heartbeat tick, which never comes once this node is gone. Without this wait the
+    /// departing controller decides who takes over, tells nobody, and leaves: the partition has a
+    /// new leader that does not know it, and no one left to say so.
+    /// <para>
+    /// Best-effort by design. A successor that stops answering costs the remaining budget and
+    /// nothing more — shutdown continues either way, because refusing to leave would be worse
+    /// than leaving an unconfirmed handover behind.
+    /// </para>
+    /// </remarks>
+    private async Task AwaitHandoverDeliveryAsync(
+        Dictionary<int, long> handovers, DateTimeOffset deadline, CancellationToken ct)
+    {
+        if (_raftNode is null || handovers.Count == 0)
+            return;
+
+        foreach (var (successor, index) in handovers)
+        {
+            var budget = deadline - DateTimeOffset.UtcNow;
+            if (budget <= TimeSpan.Zero)
+            {
+                LogHandoverNotConfirmed(successor);
+                continue;
+            }
+
+            var delivered = await _raftNode.WaitForReplicationAsync(index, [successor], budget, ct);
+            if (delivered)
+                LogHandoverConfirmed(successor, index);
+            else
+                LogHandoverNotConfirmed(successor);
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -690,20 +747,29 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Elect a new leader via Raft consensus.
     /// </summary>
-    private async Task<bool> ElectLeaderViaRaftAsync(TopicPartition tp, int newLeader, int leaderEpoch, CancellationToken ct)
+    /// <summary>
+    /// Commits a leadership decision to the metadata log. Returns the index of the committed
+    /// entry, or -1 if it could not be proposed or did not commit in time.
+    /// </summary>
+    /// <remarks>
+    /// The index is the caller's handle on WHERE the decision sits in the log, which a caller
+    /// that is about to leave needs in order to check that its successor actually received it
+    /// (#177). A plain "it committed" cannot answer that on a single-voter quorum.
+    /// </remarks>
+    private async Task<long> ElectLeaderViaRaftAsync(TopicPartition tp, int newLeader, int leaderEpoch, CancellationToken ct)
     {
         if (_raftNode == null || !_raftNode.IsLeader)
         {
-            return false;
+            return -1;
         }
 
         var command = new LeaderChangedCommand(tp.Topic, tp.Partition, newLeader, leaderEpoch);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.LeaderChangedCommand);
 
         var index = await _raftNode.ProposeAsync(MetadataCommandType.LeaderChanged, data, ct);
-        if (index < 0) return false;
+        if (index < 0) return -1;
 
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct) ? index : -1;
     }
 
     /// <summary>
@@ -750,18 +816,27 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// Elect a new leader for a partition.
     /// </summary>
     public async Task<bool> ElectLeaderAsync(TopicPartition tp, int? preferredLeader = null, CancellationToken ct = default)
+        => await ElectLeaderAtAsync(tp, preferredLeader, ct).ConfigureAwait(false) is not null;
+
+    /// <summary>
+    /// As <see cref="ElectLeaderAsync"/>, additionally reporting WHO was elected and WHERE the
+    /// decision sits in the metadata log — what a caller needs to check that the new leader
+    /// actually received it before this node walks away (#177).
+    /// </summary>
+    private async Task<(int NewLeader, long Index)?> ElectLeaderAtAsync(
+        TopicPartition tp, int? preferredLeader, CancellationToken ct)
     {
         if (!_isController)
         {
             LogNotController("ElectLeader");
-            return false;
+            return null;
         }
 
         var partitionState = _clusterState.GetPartitionState(tp);
         if (partitionState == null)
         {
             LogPartitionNotFound(tp.Topic, tp.Partition);
-            return false;
+            return null;
         }
 
         var oldLeader = partitionState.LeaderBrokerId;
@@ -788,7 +863,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             if (aliveReplica < 0)
             {
                 LogNoReplicasAvailable(tp.Topic, tp.Partition);
-                return false;
+                return null;
             }
 
             newLeader = aliveReplica;
@@ -797,17 +872,17 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         else
         {
             LogNoReplicasAvailable(tp.Topic, tp.Partition);
-            return false;
+            return null;
         }
 
         // The decision is a committed log entry that every broker applies; the apply drives
         // the replication transition as well as the state write (#165). There is no second
         // path to keep in step with it.
-        var committed = await ElectLeaderViaRaftAsync(tp, newLeader, newLeaderEpoch, ct);
-        if (!committed)
+        var index = await ElectLeaderViaRaftAsync(tp, newLeader, newLeaderEpoch, ct);
+        if (index < 0)
         {
             LogRaftCommitTimeout("LeaderChanged", 0);
-            return false;
+            return null;
         }
 
         // Notify local replica manager
@@ -821,7 +896,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         }
 
         LogLeaderElected(tp.Topic, tp.Partition, oldLeader, newLeader, newLeaderEpoch);
-        return true;
+        return (newLeader, index);
     }
 
     /// <summary>
