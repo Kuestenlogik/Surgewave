@@ -66,13 +66,13 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private TopicAdminHandler? _topicAdminHandler;
     private MetadataApiHandler? _metadataApiHandler;
     private DataApiHandler? _dataApiHandler;
-    // Kept so the inter-broker handler (registered after the broker is up)
-    // can share the same coordinator instance for WriteTxnMarkers (#69).
-    // Owned and disposed by SurgewaveBroker (see the CA2000 note above), so
-    // the runtime only holds a reference for wiring — not for disposal.
-#pragma warning disable CA2213
+    // Kept so the inter-broker handler (registered after the broker is up) can share the same
+    // coordinator instance for WriteTxnMarkers (#69). This runtime creates it, so this runtime
+    // disposes it — the note that used to stand here said SurgewaveBroker owned it, which was
+    // never true: the broker's DisposeAsync has never touched it, so every embedded runtime left
+    // the coordinator's transaction-timeout timer running after shutdown. Broker.App is unaffected
+    // — there it is a DI singleton and the container disposes it.
     private TransactionCoordinator? _transactionCoordinator;
-#pragma warning restore CA2213
 
     // Cluster components (only initialized when EnableCluster = true)
     private ClusterState? _clusterState;
@@ -881,6 +881,13 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // Dispose the controller client and its connection pool (runtime-owned).
         _controllerClient?.Dispose();
         _connectionPool?.Dispose();
+
+        // Before the broker, not after: the coordinator's timeout timer works against state the
+        // shutdown is dismantling, and stopping it while that state is still whole keeps the
+        // teardown ordered. This runtime creates the coordinator, so this runtime ends it (the
+        // note on the field used to claim SurgewaveBroker did, which was never true).
+        if (_transactionCoordinator is not null)
+            await _transactionCoordinator.DisposeAsync();
 
         // Dispose broker
         if (_broker != null)

@@ -404,7 +404,17 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         if (_raftNode != null)
         {
-            await _raftNode.DisposeAsync();
+            // Detach what this controller attached, and nothing else. The node is the HOST's:
+            // SurgewaveRuntime and Broker.App each create it, hand it to this controller AND to
+            // the replication server, and dispose it themselves. Tearing it down from here ended
+            // the metadata log and the election loops while the replication server still held it
+            // and was still answering peers' RequestVote and AppendEntries with it.
+            //
+            // The subscription, on the other hand, is this controller's own and was never
+            // released: the node keeps a strong reference to a disposed controller through it,
+            // and in Broker.App — where the node is a DI singleton outliving everything — a
+            // quorum loss would still be handled by a controller that had already shut down.
+            _raftNode.OnQuorumLost -= HandleRaftQuorumLost;
         }
 
         _cts?.Dispose();

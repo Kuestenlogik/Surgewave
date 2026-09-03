@@ -160,6 +160,9 @@ public sealed class ServerlessBrokerCoordinator : IDisposable
         _disposed = true;
 
         Interlocked.Exchange(ref _state, (int)ServerlessLifecycleState.Terminated);
-        _metrics.Dispose();
+
+        // Not _metrics: it arrives through the constructor and its Meter serves whoever else
+        // holds it. Callers already treat it as theirs — the tests wrap it in `using` — so
+        // disposing it here was a second owner for one object. Whoever creates it disposes it.
     }
 }

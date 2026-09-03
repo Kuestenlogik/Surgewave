@@ -194,7 +194,9 @@ public sealed partial class InlineTransformManager : IDisposable
         _transforms.Clear();
         _topicBindings.Clear();
         _pipelineCache.Clear();
-        _pluginLoader.Dispose();
+
+        // Not _pluginLoader: it is handed in through the constructor and may be shared by more
+        // than one manager. Whoever creates it disposes it.
     }
 
     private static string BuildBindingKey(string topicName, TransformPhase phase)
