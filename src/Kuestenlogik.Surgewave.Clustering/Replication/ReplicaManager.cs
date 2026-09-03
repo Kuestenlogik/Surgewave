@@ -75,7 +75,8 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             _logManager,
             this,
             _config,
-            _peerTransport);
+            _peerTransport,
+            _metrics);
     }
 
     private readonly Kuestenlogik.Surgewave.Transport.IPeerTransport _peerTransport;

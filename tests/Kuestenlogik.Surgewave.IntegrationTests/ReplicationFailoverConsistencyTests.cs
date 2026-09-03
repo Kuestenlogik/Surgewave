@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
+using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Runtime;
@@ -48,7 +50,10 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
 
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly ReplicationFetchProbe _probe = new();
+
+    // What the fetcher published, collected the way a monitoring system would collect it.
+    private readonly ConcurrentQueue<(string Topic, int Partition, long Offsets)> _fetchSpans = new();
+    private readonly MeterListener _fetchMeter = new();
 
     private SurgewaveRuntime? _leader;
     private SurgewaveRuntime? _follower;
@@ -60,12 +65,33 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         _loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.AddProvider(new XunitLoggerProvider(output));
-            builder.AddProvider(_probe);
-            // The probe needs Debug (the fetch log line is Debug), the xunit sink does not — without
-            // the filter every replication fetch floods the test output.
-            builder.SetMinimumLevel(LogLevel.Debug);
-            builder.AddFilter<XunitLoggerProvider>((_, level) => level >= LogLevel.Information);
+            builder.SetMinimumLevel(LogLevel.Information);
         });
+
+        // The replication fetcher publishes how many offsets each fetch ingested; this listens to
+        // that instrument the way a monitoring system would. Nothing here reads a log line.
+        _fetchMeter.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == BrokerMetrics.MeterName &&
+                instrument.Name == "surgewave_replication_fetch_offsets")
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        _fetchMeter.SetMeasurementEventCallback<long>((_, offsets, tags, _) =>
+        {
+            string? topic = null;
+            var partition = -1;
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "topic") topic = tag.Value as string;
+                else if (tag.Key == "partition" && tag.Value is int index) partition = index;
+            }
+
+            if (topic is not null)
+                _fetchSpans.Enqueue((topic, partition, offsets));
+        });
+        _fetchMeter.Start();
     }
 
     public async ValueTask InitializeAsync()
@@ -100,7 +126,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         }
 
         _loggerFactory.Dispose();
-        _probe.Dispose();
+        _fetchMeter.Dispose();
     }
 
     [Fact(Timeout = 180_000)]
@@ -154,10 +180,9 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             Assert.Equal(i, RecordBatchValidator.GetBaseOffset(stored[i]));
         }
 
-        // Oracle 3: at least one fetch really did carry several batches. Nothing in the product
-        // reports batches-per-fetch, so this is derived from the fetcher's own debug line: the gap
-        // between consecutive fetch base offsets is how many offsets that fetch ingested.
-        var batchesInLargestFetch = LargestFetchSpan(topic, partition: 0, followerLeo: MessageCount);
+        // Oracle 3: at least one fetch really did carry several batches — the span the fetcher
+        // reports for a single round trip, one message per batch here.
+        var batchesInLargestFetch = LargestFetchSpan(topic, partition: 0);
         _output.WriteLine($"largest replication fetch carried {batchesInLargestFetch} batches");
         Assert.True(batchesInLargestFetch >= 2,
             $"no replication fetch carried more than one batch — the concatenated-section path from " +
@@ -548,87 +573,30 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// How many offsets the largest single replication fetch ingested, derived from the fetcher's
-    /// debug line. Consecutive fetch base offsets bound each fetch; the last one is bounded by the
-    /// follower's log end.
+    /// How many offsets the largest single replication fetch ingested, read from the
+    /// <c>surgewave_replication_fetch_offsets</c> metric the fetcher publishes.
     /// </summary>
-    private long LargestFetchSpan(string topic, int partition, long followerLeo)
+    /// <remarks>
+    /// This used to be reconstructed from the fetcher's Debug log line, which made the verdict of
+    /// a correctness test depend on a log level: raise it in production and the check goes blind,
+    /// lower it and it starts reporting. Logs are for people to read. A test asks the same
+    /// instrument an operator would (#177 follow-up).
+    /// </remarks>
+    private long LargestFetchSpan(string topic, int partition)
     {
-        var boundaries = _probe.Fetches
+        var spans = _fetchSpans
             .Where(f => f.Topic == topic && f.Partition == partition)
-            .Select(f => f.BaseOffset)
-            .OrderBy(offset => offset)
+            .Select(f => f.Offsets)
             .ToList();
 
-        Assert.NotEmpty(boundaries);
+        Assert.NotEmpty(spans);
 
-        // Logged rather than only asserted: when this test fails, the shape of the fetches is the
-        // first thing worth seeing — one big fetch means the stall worked, many small ones mean the
+        // Written out, not just asserted: when this fails, the shape of the fetches is the first
+        // thing worth seeing — one big span means the stall worked, many small ones mean the
         // follower kept pace and the multi-batch path was never entered.
-        var sizes = _probe.Fetches.Where(f => f.Topic == topic && f.Partition == partition)
-            .Select(f => f.Size).Take(5).ToList();
         _output.WriteLine(
-            $"replication fetches: {boundaries.Count}, first sizes [{string.Join(", ", sizes)}] bytes, " +
-            $"base offsets [{string.Join(", ", boundaries.Take(8))}]");
+            $"replication fetches: {spans.Count}, spans [{string.Join(", ", spans.Take(8))}] offsets");
 
-        boundaries.Add(followerLeo);
-        return boundaries.Zip(boundaries.Skip(1), (from, to) => to - from).Max();
-    }
-
-    /// <summary>
-    /// Captures the replication fetcher's per-fetch debug line. There is no metric, counter or
-    /// event that reports how many batches a fetch carried, and without that number this test
-    /// cannot tell the multi-batch path from the single-batch one it is meant to cover.
-    /// </summary>
-    private sealed class ReplicationFetchProbe : ILoggerProvider
-    {
-        public ConcurrentQueue<(string Topic, int Partition, long BaseOffset, int Size)> Fetches { get; } = new();
-
-        public ILogger CreateLogger(string categoryName) => new ProbeLogger(this);
-
-        public void Dispose() { }
-
-        private sealed class ProbeLogger(ReplicationFetchProbe owner) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(
-                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-                Func<TState, Exception?, string> formatter)
-            {
-                // The message text is the only unambiguous marker. The category is no help — the
-                // fetcher logs through the ReplicaManager's logger — and matching on the structured
-                // field names alone is worse than useless: the produce path logs "Stored RecordBatch
-                // … baseOffset={BaseOffset}, size={Size}" with the very same keys, so an earlier
-                // version of this probe counted 200 leader-side appends as replication fetches and
-                // reported "no fetch carried more than one batch" while one fetch had carried all 200.
-                if (!formatter(state, exception).StartsWith("Fetched ", StringComparison.Ordinal))
-                    return;
-
-                if (state is not IReadOnlyList<KeyValuePair<string, object?>> values)
-                    return;
-
-                string? topic = null;
-                int? partition = null;
-                long? baseOffset = null;
-                int? size = null;
-
-                foreach (var entry in values)
-                {
-                    switch (entry.Key)
-                    {
-                        case "Topic": topic = entry.Value as string; break;
-                        case "Partition": partition = entry.Value as int?; break;
-                        case "BaseOffset": baseOffset = entry.Value as long?; break;
-                        case "Size": size = entry.Value as int?; break;
-                    }
-                }
-
-                if (topic is not null && partition is { } p && baseOffset is { } offset && size is { } bytes)
-                    owner.Fetches.Enqueue((topic, p, offset, bytes));
-            }
-        }
+        return spans.Max();
     }
 }
