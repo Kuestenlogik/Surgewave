@@ -1606,7 +1606,7 @@ var lagCalculator = new Kuestenlogik.Surgewave.Core.Monitoring.DefaultLagCalcula
     new OffsetStoreProvider(offsetStore, GetGroupInfosForLag),
     new LogManagerWatermarkProvider(logManager));
 
-var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, nativeGroupCoordinator, transactionCoordinator, quotaManager, metrics, brokerLogger, connectionHandlers: kafkaConnectionHandlers, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator);
+var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, nativeGroupCoordinator, transactionCoordinator, quotaManager, metrics, brokerLogger, connectionHandlers: kafkaConnectionHandlers, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator, loggerFactory: app.Services.GetRequiredService<ILoggerFactory>());
 
 // Publish the broker as the Surgewave stream handler so alternative transports
 // (QUIC, shared memory, ...) can pump connections into the shared pipeline.

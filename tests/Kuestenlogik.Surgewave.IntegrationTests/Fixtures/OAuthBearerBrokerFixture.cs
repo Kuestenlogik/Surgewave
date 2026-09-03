@@ -61,11 +61,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
 
     public OAuthBearerBrokerFixture()
     {
-        _loggerFactory = LoggerFactory.Create(b =>
-        {
-            b.SetMinimumLevel(LogLevel.Warning);
-            b.AddConsole();
-        });
+        _loggerFactory = TestLogging.CreateConsoleFactory();
     }
 
     public async ValueTask InitializeAsync()
