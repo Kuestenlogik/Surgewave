@@ -15,6 +15,7 @@ using Kuestenlogik.Surgewave.Protocol;
 using Kuestenlogik.Surgewave.Protocol.Native;
 using Kuestenlogik.Surgewave.Schema.Registry;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using Kuestenlogik.Surgewave.Plugins.Packaging;
 
@@ -90,7 +91,8 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         DlqManager? dlqManager = null,
         Transactions.CrossTopicTransactionManager? crossTopicTxnManager = null,
         KvBucketManager? kvBucketManager = null,
-        Kuestenlogik.Surgewave.Core.Monitoring.ILagCalculator? lagCalculator = null)
+        Kuestenlogik.Surgewave.Core.Monitoring.ILagCalculator? lagCalculator = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _config = config;
         _logManager = logManager;
@@ -140,8 +142,14 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             _tlsHandler = new TlsHandler(_config.Security);
         }
 
-        // Initialize Surgewave native protocol handler
-        _nativeLoggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        // Initialize Surgewave native protocol handler.
+        //
+        // The host's factory, not one built here. A library that news up its own
+        // LoggerFactory.Create(b => b.AddConsole()) writes past every decision the host made:
+        // the levels in its appsettings.json do not reach this subtree, an operator who
+        // configured a file or OTel sink loses these lines, and gets console output nobody
+        // asked for. A host that passes nothing gets silence rather than a surprise sink.
+        _nativeLoggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         // Connector-Repository-Manager fuer SearchPlugins/InstallPlugin Native-Ops.
         // Verwendet den konfigurierten PluginsDirectory (gleich der vom Connect-Plugin
         // gescannt wird), so dass Control's Plugin-Marketplace die installierten
@@ -355,10 +363,16 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         _shutdownCts.Cancel();
 
         Log.ShutdownDisposingResources(_logger);
-        _logManager.Dispose();
+        // Not _logManager: it is the HOST's, handed in through the constructor, and disposing it
+        // here tore down the write pipeline and the retention/compaction tasks underneath an owner
+        // that was still holding it. Every caller — both hosts and all three test fixtures —
+        // already disposes it itself, so this only ever made the teardown order matter. Whoever
+        // creates it disposes it; the same rule as the logger factory above.
         _tlsHandler?.Dispose();
         // Enterprise plugin: Kuestenlogik.Surgewave.Transport.SharedMemory
-        _nativeLoggerFactory.Dispose();
+        // _nativeLoggerFactory is the HOST's and outlives this broker — disposing it would take
+        // the host's logging down with the broker, and a host that runs two brokers would find
+        // the second one silent. Whoever created it disposes it.
         _connectorRepositoryManager.Dispose();
         _shutdownCts.Dispose();
         _listener.Dispose();

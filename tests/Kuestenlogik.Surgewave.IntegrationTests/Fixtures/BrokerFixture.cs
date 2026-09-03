@@ -37,11 +37,7 @@ public sealed class BrokerFixture : IAsyncLifetime, IDisposable
 
     public BrokerFixture()
     {
-        _loggerFactory = LoggerFactory.Create(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Debug);
-            builder.AddConsole();
-        });
+        _loggerFactory = TestLogging.CreateConsoleFactory();
     }
 
     public async ValueTask InitializeAsync()

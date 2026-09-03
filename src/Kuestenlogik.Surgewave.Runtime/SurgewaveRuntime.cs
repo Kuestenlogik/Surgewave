@@ -359,7 +359,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _broker = new SurgewaveBroker(
             config, _logManager, recordBatchSerializer, nativeGroupCoordinator,
             transactionCoordinator, _quotaManager, _metrics, brokerLogger,
-            connectionHandlers: connectionHandlers);
+            connectionHandlers: connectionHandlers, loggerFactory: _loggerFactory);
 
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token), cancellationToken);

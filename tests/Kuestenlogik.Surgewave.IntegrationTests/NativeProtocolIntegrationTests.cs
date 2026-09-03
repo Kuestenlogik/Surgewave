@@ -13,6 +13,8 @@ using Kuestenlogik.Surgewave.Storage.Engine.FileSystem;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
+using Kuestenlogik.Surgewave.IntegrationTests.Fixtures;
+
 namespace Kuestenlogik.Surgewave.IntegrationTests;
 
 /// <summary>
@@ -56,7 +58,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
             DefaultNumPartitions = 1
         };
 
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Warning));
+        _loggerFactory = TestLogging.CreateConsoleFactory();
 
         _logManager = new LogManager(_dataDir, FileLogSegmentFactory.Create());
 

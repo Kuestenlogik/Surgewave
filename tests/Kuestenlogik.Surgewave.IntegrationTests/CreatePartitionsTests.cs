@@ -351,8 +351,15 @@ public class CreatePartitionsTests
         using var consumer = new ConsumerBuilder<string, string>(consumerConfig).Build();
         consumer.Assign(new TopicPartitionOffset(topicName, 0, Offset.Beginning));
 
+        // Until five messages are in hand or the clock runs out — NOT five polls. A poll that
+        // returns null (the assignment is still settling, the fetch has not landed yet) used to
+        // consume one of the five attempts and drop a message from the count, so this test
+        // reported "Expected 5, Actual 3" whenever the machine was fast enough to reach the first
+        // poll before the broker answered. It passed only because the suite's Debug console
+        // flooding slowed every iteration down enough for a message to be ready.
         var consumedMessages = new List<string>();
-        for (int i = 0; i < 5; i++)
+        var consumeDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (consumedMessages.Count < 5 && DateTime.UtcNow < consumeDeadline)
         {
             var result = consumer.Consume(TimeSpan.FromSeconds(5));
             if (result != null)

@@ -5,6 +5,8 @@ using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
+using Kuestenlogik.Surgewave.IntegrationTests.Fixtures;
+
 namespace Kuestenlogik.Surgewave.IntegrationTests;
 
 /// <summary>
@@ -33,11 +35,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _loggerFactory = LoggerFactory.Create(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Warning);
-            builder.AddConsole();
-        });
+        _loggerFactory = TestLogging.CreateConsoleFactory();
 
         // Use dynamic port (0) to avoid port conflicts between test classes
         _surgewave = await SurgewaveRuntime.CreateBuilder()

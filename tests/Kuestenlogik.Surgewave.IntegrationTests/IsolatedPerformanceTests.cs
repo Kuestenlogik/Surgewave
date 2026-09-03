@@ -7,6 +7,8 @@ using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
+using Kuestenlogik.Surgewave.IntegrationTests.Fixtures;
+
 namespace Kuestenlogik.Surgewave.IntegrationTests;
 
 /// <summary>
@@ -30,11 +32,7 @@ public class IsolatedPerformanceTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _loggerFactory = LoggerFactory.Create(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Warning);
-            builder.AddConsole();
-        });
+        _loggerFactory = TestLogging.CreateConsoleFactory();
 
         _surgewave = await SurgewaveRuntime.CreateBuilder()
             .WithPort(0)  // Dynamic port to avoid conflicts

@@ -49,11 +49,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
         // Create unique data directory for each test run
         _dataDirectory = Path.Combine(Path.GetTempPath(), "surgewave-sasl-tests", Guid.NewGuid().ToString("N"));
 
-        _loggerFactory = LoggerFactory.Create(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Warning);
-            builder.AddConsole();
-        });
+        _loggerFactory = TestLogging.CreateConsoleFactory();
     }
 
     public async ValueTask InitializeAsync()
