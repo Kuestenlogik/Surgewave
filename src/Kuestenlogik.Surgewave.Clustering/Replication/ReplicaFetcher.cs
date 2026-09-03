@@ -20,6 +20,7 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
     private readonly ReplicaManager _replicaManager;
     private readonly ClusteringConfig _config;
     private readonly IPeerTransport _peerTransport;
+    private readonly IClusteringMetrics? _metrics;
 
     private readonly ConcurrentDictionary<int, LeaderConnection> _leaderConnections = new();
     private readonly ConcurrentDictionary<TopicPartition, FetchState> _fetchStates = new();
@@ -40,7 +41,8 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
         LogManager logManager,
         ReplicaManager replicaManager,
         ClusteringConfig config,
-        IPeerTransport peerTransport)
+        IPeerTransport peerTransport,
+        IClusteringMetrics? metrics = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -48,6 +50,7 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
         _replicaManager = replicaManager;
         _config = config;
         _peerTransport = peerTransport;
+        _metrics = metrics;
     }
 
     public Task StartAsync(CancellationToken ct)
@@ -342,6 +345,12 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
         {
             _replicaManager.UpdateFollowerFetchPosition(tp, _config.BrokerId, state.FetchOffset);
         }
+
+        // How much ONE fetch ingested. The response may carry several concatenated record
+        // batches, and AppendAsync returns the log end after all of them, so the span is exactly
+        // what this single round trip moved — the difference between a follower keeping pace and
+        // one catching up in bulk, which the byte count alone cannot tell apart (#177 follow-up).
+        _metrics?.RecordReplicationFetch(tp.Topic, tp.Partition, appendedOffset - baseOffset);
 
         LogFetchedData(tp.Topic, tp.Partition, baseOffset, data.Length);
     }

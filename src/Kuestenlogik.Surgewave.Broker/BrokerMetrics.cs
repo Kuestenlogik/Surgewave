@@ -79,6 +79,7 @@ public sealed class BrokerMetrics : IDisposable, IClusteringMetrics, IBrokerMetr
     private readonly UpDownCounter<int> _isrCount;
     private readonly Counter<long> _replicationBytesTotal;
     private readonly Histogram<double> _replicationLag;
+    private readonly Histogram<long> _replicationFetchOffsets;
 
     // === Shared Memory Metrics ===
     private readonly Counter<long> _shmConnectionsTotal;
@@ -290,6 +291,10 @@ public sealed class BrokerMetrics : IDisposable, IClusteringMetrics, IBrokerMetr
             "surgewave_replication_lag_ms",
             unit: "ms",
             description: "Replication lag in milliseconds");
+        _replicationFetchOffsets = _meter.CreateHistogram<long>(
+            "surgewave_replication_fetch_offsets",
+            unit: "{offset}",
+            description: "Offsets ingested by a single replication fetch");
 
         // === Shared Memory Metrics ===
         _shmConnectionsTotal = _meter.CreateCounter<long>(
@@ -679,6 +684,10 @@ public sealed class BrokerMetrics : IDisposable, IClusteringMetrics, IBrokerMetr
     public void RecordReplicationLag(string topic, int partition, double lagMs)
     {
         _replicationLag.Record(lagMs, new TagList { { "topic", topic }, { "partition", partition } });
+    }
+    public void RecordReplicationFetch(string topic, int partition, long offsets)
+    {
+        _replicationFetchOffsets.Record(offsets, new TagList { { "topic", topic }, { "partition", partition } });
     }
 
     // === Shared Memory Tracking ===

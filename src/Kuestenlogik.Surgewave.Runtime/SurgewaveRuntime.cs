@@ -476,6 +476,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _logManager!,
             clusteringConfig,
             peerTransport,
+            // Without this every clustering metric the runtime could emit was dropped on the
+            // floor — ISR joins and departures, replicated bytes, replication lag, fetch spans.
+            // Broker.App has always passed its BrokerMetrics here; the in-process runtime simply
+            // never did, so an embedded host was blind to its own replication.
+            _metrics,
             isrChangeNotifier: controllerRpc);
 
         // Create replication server
