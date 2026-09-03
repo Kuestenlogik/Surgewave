@@ -42,7 +42,6 @@ namespace Kuestenlogik.Surgewave.Runtime;
 ///     .StartAsync();
 /// </code>
 /// </example>
-#pragma warning disable CA2000 // Objects passed to SurgewaveBroker are disposed by the broker
 public sealed class SurgewaveRuntime : IAsyncDisposable
 {
     private readonly SurgewaveRuntimeOptions _options;
@@ -73,6 +72,13 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     // the coordinator's transaction-timeout timer running after shutdown. Broker.App is unaffected
     // — there it is a DI singleton and the container disposes it.
     private TransactionCoordinator? _transactionCoordinator;
+
+    // Created here and therefore ended here. Both used to be locals that nobody disposed — the
+    // queue-view manager holds per-view state, the telemetry ingestor its own Meter — and the
+    // file-wide CA2000 suppression that hid them claimed SurgewaveBroker disposed what it was
+    // passed, which it never did.
+    private Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager? _queueViewManager;
+    private Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor? _telemetryIngestor;
 
     // Cluster components (only initialized when EnableCluster = true)
     private ClusterState? _clusterState;
@@ -283,6 +289,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var nativeGroupCoordinator = new NativeGroupCoordinator(nativeGroupCoordinatorLogger, _offsetStore);
         var queueViewConfig = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewConfig();
         var queueViewManager = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager(queueViewConfig, _loggerFactory, _logManager);
+        _queueViewManager = queueViewManager;
         var shareGroupCoordinatorLogger = _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>();
         var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(shareGroupCoordinatorLogger, _logManager, queueViewManager);
         var consumerGroupV2Coordinator = new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(
@@ -344,7 +351,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 new TelemetryApiHandler(
                     _loggerFactory.CreateLogger<TelemetryApiHandler>(),
                     config.Telemetry,
-                    new Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor(
+                    _telemetryIngestor = new Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor(
                         _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>()))
             ];
             _kafkaConnectionHandler = new KafkaConnectionHandler(
@@ -896,6 +903,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         }
 
         // Dispose other resources
+        if (_queueViewManager is not null)
+            await _queueViewManager.DisposeAsync();
+        _telemetryIngestor?.Dispose();
         _metrics?.Dispose();
         _quotaManager?.Dispose();
         _transactionStateStore?.Dispose();
