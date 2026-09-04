@@ -342,6 +342,17 @@ public class ReplicationTests : IAsyncLifetime
         // The replica assignment is the key fix verified by this test
     }
 
+    // Still quarantined, but no longer for the reason below — both causes #180 named are fixed:
+    // an idle partition now forms an ISR at all, and a departing broker now ASKS the controller to
+    // move its leaderships (controlled shutdown) instead of trying to elect, which only the
+    // controller may do. With both in place this test passes in ~45-77 s where it used to time out.
+    //
+    // What is not established is that it passes RELIABLY: on a loaded dev box one run in three
+    // still hits the 120 s limit, and this test's history is of blocking unrelated PRs. Unskip once
+    // a quiet machine or a CI run shows it green repeatedly — the reason to keep it off is now
+    // caution about the runner, not a known defect.
+    //
+    // Original note:
     // Quarantined until the cluster-reelection-latency roadmap item lands —
     // see the in-line comment at line ~400 about "new leader assignment
     // doesn't reliably propagate back into the admin metadata response under
@@ -350,7 +361,7 @@ public class ReplicationTests : IAsyncLifetime
     // unrelated PRs. Re-enable when ClusterController's HandleBrokerFailedAsync
     // propagation is tightened OR the broker-3-shutdown path is rewritten to
     // wait on partition-leader-changed events instead of admin-metadata polling.
-    [Fact(Timeout = 120000, Skip = "Flaky on Linux CI — cluster-reelection-latency roadmap item")]
+    [Fact(Timeout = 120000, Skip = "Cause fixed with #180; re-enable once it proves stable on a quiet runner")]
     public async Task Cluster_BrokerShutdown_RemainingBrokersContinue()
     {
         // Linked to the ambient test token: the leader/broker-removal waits below poll until this

@@ -934,6 +934,8 @@ var registrationCoordinator = app.Services.GetRequiredService<BrokerRegistration
 // metadata log rather than the wire — and this host wired nothing at all (#176).
 var nativeControllerClient = app.Services.GetRequiredService<NativeControllerClient>();
 nativeControllerClient.SetIsrUpdateApplier(clusterController);
+// #180 — how this broker asks the controller to move its partitions when it leaves.
+clusterController.SetControlledShutdownRequester(nativeControllerClient);
 
 replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
     app.Services.GetRequiredService<ILogger<NativeInterBrokerServer>>(),
@@ -942,7 +944,8 @@ replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
         clusterState, replicaManager, app.Services.GetRequiredService<LogManager>(),
         clusteringConfig.BrokerId, isrUpdateApplier: clusterController, membership: membershipService,
         markerSink: app.Services.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerSink>(),
-        registrationCoordinator: registrationCoordinator)));
+        registrationCoordinator: registrationCoordinator,
+        shutdownCoordinator: clusterController)));
 
 // #60 Inc6b — the native broker-lifecycle loop: a plugin-free broker registers with the controller
 // over the ReplicationPort and heartbeats, so it JOINS the cluster. No-ops on the controller/seed

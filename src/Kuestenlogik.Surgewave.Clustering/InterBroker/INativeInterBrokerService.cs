@@ -43,4 +43,12 @@ public interface INativeInterBrokerService
     /// a targeted partition (mirrors the Kafka-wire WriteTxnMarkers handler).
     /// </summary>
     ValueTask<ClusterRpcStatus> ApplyWriteTxnMarkersAsync(WriteTxnMarkersRequestPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Take a departing broker's partition leaderships away (#180). Returns the partitions it
+    /// still leads — empty when everything moved — and <see cref="ClusterRpcStatus.NotController"/>
+    /// when this broker is not the controller, so the caller retries against the real one.
+    /// </summary>
+    ValueTask<ControlledShutdownResponsePayload> ApplyControlledShutdownAsync(
+        ControlledShutdownPayload payload, CancellationToken ct = default);
 }

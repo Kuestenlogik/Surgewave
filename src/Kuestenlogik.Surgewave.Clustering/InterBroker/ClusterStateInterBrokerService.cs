@@ -24,6 +24,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly ClusterMembershipService? _membership;
     private readonly ITransactionMarkerSink? _markerSink;
     private readonly BrokerRegistrationCoordinator? _registrationCoordinator;
+    private readonly IControlledShutdownCoordinator? _shutdownCoordinator;
 
     public ClusterStateInterBrokerService(
         ILogger<ClusterStateInterBrokerService> logger,
@@ -34,7 +35,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         IIsrUpdateApplier? isrUpdateApplier = null,
         ClusterMembershipService? membership = null,
         ITransactionMarkerSink? markerSink = null,
-        BrokerRegistrationCoordinator? registrationCoordinator = null)
+        BrokerRegistrationCoordinator? registrationCoordinator = null,
+        IControlledShutdownCoordinator? shutdownCoordinator = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -45,6 +47,26 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _membership = membership;
         _markerSink = markerSink;
         _registrationCoordinator = registrationCoordinator;
+        _shutdownCoordinator = shutdownCoordinator;
+    }
+
+    public async ValueTask<ControlledShutdownResponsePayload> ApplyControlledShutdownAsync(
+        ControlledShutdownPayload payload, CancellationToken ct = default)
+    {
+        // Only the controller may elect, so only the controller can answer this. A broker that is
+        // not it says so and the caller finds the real one — the same shape as every other
+        // controller-only op here (#180).
+        if (_shutdownCoordinator is null || !_shutdownCoordinator.IsController)
+        {
+            return new ControlledShutdownResponsePayload(ClusterRpcStatus.NotController, []);
+        }
+
+        var stillLed = await _shutdownCoordinator
+            .MoveLeadershipAwayAsync(payload.BrokerId, ct)
+            .ConfigureAwait(false);
+
+        LogControlledShutdownServed(payload.BrokerId, stillLed.Count);
+        return new ControlledShutdownResponsePayload(ClusterRpcStatus.None, stillLed);
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyIsrChangeAsync(AlterPartitionPayload payload, CancellationToken ct = default)
@@ -136,6 +158,9 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     }
 
     private bool IsController => _isrUpdateApplier?.IsController ?? (_clusterState.ControllerId == _localBrokerId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Served controlled shutdown for broker {BrokerId}: {StillLed} partition(s) still with it")]
+    private partial void LogControlledShutdownServed(int brokerId, int stillLed);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Applied native ISR change for {Topic}-{Partition} from leader {LeaderId} epoch {LeaderEpoch}")]
     private partial void LogIsrChangeApplied(string topic, int partition, int leaderId, int leaderEpoch);

@@ -565,6 +565,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // When this broker is both controller and partition leader, its own ISR report has to go
         // into the metadata log rather than onto the wire (#176).
         nativeControllerClient.SetIsrUpdateApplier(_clusterController);
+        // #180 — how this broker asks the controller to move its partitions when it leaves.
+        _clusterController.SetControlledShutdownRequester(nativeControllerClient);
 
         // #60 Inc4/Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the
         // ReplicationServer's shared port. It applies decoded native control-plane frames
@@ -587,7 +589,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 _clusterState, _replicaManager, _logManager!, clusteringConfig.BrokerId,
                 isrUpdateApplier: _clusterController, membership: membershipService,
                 markerSink: _transactionCoordinator, // #60 Inc7: apply native WriteTxnMarkers to the txn index
-                registrationCoordinator: registrationCoordinator)));
+                registrationCoordinator: registrationCoordinator,
+                shutdownCoordinator: _clusterController)));
 
         // #72 Inc7 — wire best-effort marker replication into the LIVE coordinator over the same native
         // transport (gated by the finalized inter-broker level; no Kafka-wire fallback in the embedded

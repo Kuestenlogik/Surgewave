@@ -138,28 +138,23 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         var topic = $"issue97-{Guid.NewGuid():N}";
         var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
 
-        // ── Stall the follower BEFORE it ever connects ────────────────────────────────────────
-        // Point its view of the leader's replication endpoint at a port nothing listens on. The
-        // ordering is the whole trick: the fetcher opens its connection when it starts following a
-        // partition and then CACHES it, so rewriting the endpoint afterwards reaches nothing — an
-        // earlier version of this test did exactly that and watched the follower replicate 186 of
-        // 200 records "while stalled". Faking the endpoint before the topic exists means the
-        // connection is never established in the first place, and the backlog piles up on the
-        // leader instead of trickling over one batch per round trip.
-        SetLeaderReplicationEndpoint(follower, leader, replicationPort: 1);
-        _output.WriteLine("follower stalled: leader replication endpoint pointed at a dead port");
-
+        // ── Let the follower fall behind on its own ───────────────────────────────────────────
+        // The backlog this test needs comes from acks=leader, not from breaking anything. Under
+        // the librdkafka default of acks=all every produce waits for the follower to acknowledge,
+        // so the follower keeps exact pace and no fetch can ever carry more than one batch — the
+        // concatenated path from #92 would be unreachable. Acknowledging at the leader lets the
+        // producer run ahead of the 500 ms fetch cycle, and the follower picks the backlog up in
+        // whole mouthfuls.
+        //
+        // This replaces a stall that pointed the follower's view of the leader's replication port
+        // at a dead port. Nothing kept that write in place: a broker registration replayed through
+        // the metadata log puts the real port back (ApplyBrokerRegistered), so whether the stall
+        // held was a race the test lost on a loaded machine (#179).
         await CreateReplicatedTopicAsync(leader, topic);
         await ProduceAsync(leader, topic, MessageCount, cancellationToken);
 
-        // Oracle 1: the stall held. Without this the test could pass while the follower had
-        // streamed the backlog one batch per fetch — never touching the concatenated path.
         Assert.Equal(MessageCount, leader.LogManager.GetLog(tp)!.NextOffset);
-        Assert.Equal(0L, follower.LogManager.GetLog(tp)?.NextOffset ?? 0L);
-
-        // ── Repair, and let one fetch carry the whole backlog ─────────────────────────────────
-        SetLeaderReplicationEndpoint(follower, leader, leader.ReplicationPort);
-        _output.WriteLine("follower endpoint repaired; waiting for catch-up");
+        _output.WriteLine($"leader holds {MessageCount} records; waiting for the follower to catch up");
 
         Assert.True(
             await TestWaitHelpers.WaitForConditionAsync(
@@ -467,20 +462,6 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             ReplicationPort = peer.ReplicationPort
         });
 
-    /// <summary>
-    /// Rewrites what <paramref name="follower"/> believes the leader's replication port to be. The
-    /// fetcher dials exactly this value, so a bogus port stalls replication and the real one
-    /// resumes it — the only lever a test has, since the fetch interval is a hard-coded field and
-    /// the fetcher instance is not reachable from outside.
-    /// </summary>
-    private static void SetLeaderReplicationEndpoint(SurgewaveRuntime follower, SurgewaveRuntime leader, int replicationPort)
-        => follower.ClusterState!.AddBroker(new BrokerNode
-        {
-            BrokerId = leader.BrokerId,
-            Host = leader.Host,
-            Port = leader.Port,
-            ReplicationPort = replicationPort
-        });
 
     private static async Task CreateReplicatedTopicAsync(SurgewaveRuntime controller, string topic)
     {
@@ -506,7 +487,11 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             LingerMs = 0,
             BatchNumMessages = 1,
             EnableIdempotence = false,
-            MessageTimeoutMs = 30_000
+            MessageTimeoutMs = 30_000,
+            // Deliberate, and the reason this test can see a multi-batch fetch at all: with
+            // librdkafka's default acks=all every produce waits for the follower, which then never
+            // falls behind by more than one batch (#179).
+            Acks = Acks.Leader
         }).Build();
 
         for (var i = 0; i < count; i++)
