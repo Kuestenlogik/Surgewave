@@ -59,7 +59,9 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
 - [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
 - [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Lizenzzuordnung je Projekt führen und in CI prüfen** `area:multi`
+- [#179](https://github.com/Kuestenlogik/Surgewave/issues/179) **bug(tests): the replication stall is undone by the metadata log, so the failover class passes by luck** `area:clustering`
+- [#180](https://github.com/Kuestenlogik/Surgewave/issues/180) **perf(clustering): re-election and ISR propagation are too slow to assert on within 60s** `area:clustering`
 
 ---
 
-*Generated 2026-09-03 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
+*Generated 2026-09-04 from [Project #4](https://github.com/orgs/Kuestenlogik/projects/4).*
