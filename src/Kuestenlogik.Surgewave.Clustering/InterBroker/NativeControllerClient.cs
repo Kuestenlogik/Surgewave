@@ -23,7 +23,7 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// reconciles on the next push or fetch cycle.
 /// </para>
 /// </summary>
-public sealed partial class NativeControllerClient : Replication.IIsrChangeNotifier
+public sealed partial class NativeControllerClient : Replication.IIsrChangeNotifier, Replication.IControlledShutdownRequester
 {
     /// <summary>
     /// Upper bound on a single controller-to-broker round-trip, mirroring the Kafka-wire
@@ -99,6 +99,88 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
             SurgewaveOpCode.InterBrokerAlterPartition,
             new AlterPartitionPayload(leaderId, leaderEpoch, tp, isr),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ask the controller to take this broker's partition leaderships away before it stops serving
+    /// (#180). Returns the partitions it still leads, or <see langword="null"/> when the controller
+    /// could not be reached or refused — the caller then has to fall back on the heartbeat timeout.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the ISR report this is NOT fire-and-forget: the whole point is the answer. A broker
+    /// that leaves before hearing it has no idea whether its partitions found successors.
+    /// </remarks>
+    public async Task<IReadOnlyList<TopicPartition>?> RequestControlledShutdownAsync(
+        int brokerId, long brokerEpoch, CancellationToken ct = default)
+    {
+        var controllerId = _clusterState.ControllerId;
+        if (controllerId < 0)
+            return null;
+
+        if (controllerId == _config.BrokerId)
+        {
+            // We are the controller ourselves — the shutdown path handles its own partitions
+            // directly and never asks anyone.
+            return null;
+        }
+
+        var broker = _clusterState.GetBroker(controllerId);
+        if (broker is null)
+        {
+            LogBrokerNotFound(controllerId);
+            return null;
+        }
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(RequestTimeout);
+            var token = timeoutCts.Token;
+
+            var frame = InterBrokerFrameCodec.EncodeFrame(
+                SurgewaveOpCode.InterBrokerControlledShutdown,
+                new ControlledShutdownPayload(brokerId, brokerEpoch));
+
+            var connection = await _connectionPool
+                .GetConnectionAsync(broker.Host, broker.ReplicationPort, token).ConfigureAwait(false);
+
+            var exchangeComplete = false;
+            try
+            {
+                await connection.Stream.WriteAsync(frame, token).ConfigureAwait(false);
+                await connection.Stream.FlushAsync(token).ConfigureAwait(false);
+
+                var response = await InterBrokerFrameCodec.ReadFrameAsync(connection.Stream, token).ConfigureAwait(false)
+                    ?? throw new EndOfStreamException("Connection closed while reading controlled-shutdown response");
+
+                if (response.Opcode != SurgewaveOpCode.InterBrokerControlledShutdown)
+                {
+                    LogResponseMismatch(SurgewaveOpCode.InterBrokerControlledShutdown, response.Opcode, controllerId);
+                    return null;
+                }
+
+                exchangeComplete = true;
+                var reader = new SurgewavePayloadReader(response.Payload.Span);
+                var decoded = ControlledShutdownResponsePayload.Read(ref reader);
+
+                if (decoded.Status != ClusterRpcStatus.None)
+                {
+                    LogRejected(SurgewaveOpCode.InterBrokerControlledShutdown, controllerId, decoded.Status);
+                    return null;
+                }
+
+                return decoded.RemainingPartitions;
+            }
+            finally
+            {
+                if (exchangeComplete) connection.Return(); else connection.Discard();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogSendFailed(SurgewaveOpCode.InterBrokerControlledShutdown, controllerId, ex);
+            return null;
+        }
     }
 
     /// <summary>

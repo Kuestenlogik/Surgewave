@@ -68,6 +68,9 @@ public sealed partial class NativeInterBrokerServer
             case SurgewaveOpCode.InterBrokerWriteTxnMarkers:
                 return await HandleWriteTxnMarkersAsync(payload, ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerControlledShutdown:
+                return await HandleControlledShutdownAsync(payload, ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);
@@ -118,6 +121,32 @@ public sealed partial class NativeInterBrokerServer
 
         var outcome = await _service.HeartbeatAsync(request.Input, ct).ConfigureAwait(false);
         return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerHeartbeat, new BrokerHeartbeatResponsePayload(outcome));
+    }
+
+    // #180 — the controlled-shutdown request a departing broker sends to the controller. Its own
+    // response payload rather than the generic status frame, because the answer is a LIST: the
+    // partitions the caller still leads, which it needs in order to decide between waiting and
+    // leaving anyway.
+    private async ValueTask<byte[]> HandleControlledShutdownAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        if (_service is null)
+            return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerControlledShutdown,
+                new ControlledShutdownResponsePayload(ClusterRpcStatus.NotController, []));
+
+        ControlledShutdownPayload request;
+        try
+        {
+            var reader = new SurgewavePayloadReader(payload.Span);
+            request = ControlledShutdownPayload.Read(ref reader);
+        }
+        catch (Exception ex)
+        {
+            LogDecodeError(SurgewaveOpCode.InterBrokerControlledShutdown, ex);
+            return ErrorFrame(ClusterRpcStatus.Unknown);
+        }
+
+        var response = await _service.ApplyControlledShutdownAsync(request, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerControlledShutdown, response);
     }
 
     // #60 Inc7 — WriteTxnMarkers has a dedicated WriteTxnMarkersResponsePayload (rather than the

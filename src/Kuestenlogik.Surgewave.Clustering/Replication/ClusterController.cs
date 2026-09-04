@@ -39,7 +39,7 @@ public interface IClusterTopicCreator
 /// In a multi-broker setup, one broker becomes the controller.
 /// Supports both simple "lowest broker ID" strategy and Raft consensus.
 /// </summary>
-public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IIsrUpdateApplier, IBrokerRegistrar
+public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IIsrUpdateApplier, IBrokerRegistrar, IControlledShutdownCoordinator
 {
     private readonly ILogger<ClusterController> _logger;
     private readonly ClusterState _clusterState;
@@ -48,6 +48,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private readonly ReplicaAssignmentStrategy _replicaAssignment;
     private HeartbeatManager? _heartbeatManager;
     private RaftNode? _raftNode;
+
+    // #180 — how a departing broker that is NOT the controller gets its partitions moved.
+    private IControlledShutdownRequester? _shutdownRequester;
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
@@ -117,6 +120,14 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // This handler is for any additional cleanup or notifications needed.
         _isController = false;
     }
+
+    /// <summary>
+    /// Set the client this broker uses to ask the controller for a controlled shutdown (#180).
+    /// Absent it, a non-controller broker leaves without handing its partitions over and the
+    /// cluster waits out the heartbeat timeout.
+    /// </summary>
+    public void SetControlledShutdownRequester(IControlledShutdownRequester requester)
+        => _shutdownRequester = requester;
 
     /// <summary>
     /// Set the cluster balancer for automatic partition rebalancing.
@@ -258,7 +269,15 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var deadline = DateTimeOffset.UtcNow + timeout;
         var success = true;
 
-        // Step 1: Transfer partition leadership for partitions where we're leader
+        // Step 1: Transfer partition leadership for partitions where we're leader.
+        //
+        // Only the controller may elect, so a departing broker that is NOT the controller cannot
+        // hand its partitions over at all: the cluster only learns it is gone when the heartbeat
+        // times out, and until then those partitions have a leader that has left. Kafka solves
+        // this with a ControlledShutdown request to the controller; the receiving half exists here
+        // (InterBrokerApiHandler.HandleControlledShutdown) but nothing sends it, so this loop is a
+        // no-op on every broker except the controller itself (#180). It used to look like it
+        // worked because the election result was discarded and success logged regardless.
         var partitionsToTransfer = new List<TopicPartition>();
         foreach (var (tp, state) in _clusterState.PartitionStates)
         {
@@ -266,6 +285,24 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             {
                 partitionsToTransfer.Add(tp);
             }
+        }
+
+        // Not the controller: ask the one that is. Electing is the controller's privilege, so
+        // doing it here is a no-op — which is exactly what used to happen, silently (#180).
+        if (partitionsToTransfer.Count > 0 && !_isController && _shutdownRequester is not null)
+        {
+            LogTransferringPartitionLeadership(partitionsToTransfer.Count);
+
+            var remaining = await _shutdownRequester
+                .RequestControlledShutdownAsync(_config.BrokerId, _clusterState.ControllerEpoch, ct)
+                .ConfigureAwait(false);
+
+            if (remaining is null)
+                LogControlledShutdownUnanswered(_config.BrokerId);
+            else if (remaining.Count > 0)
+                LogControlledShutdownIncomplete(remaining.Count);
+
+            partitionsToTransfer.Clear();
         }
 
         if (partitionsToTransfer.Count > 0)
@@ -293,7 +330,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                         var elected = await ElectLeaderAtAsync(tp, newLeader, ct);
                         if (elected is null)
                         {
-                            LogNoEligibleLeaderForPartition(tp.Topic, tp.Partition);
+                            // Not "no eligible leader" — the ISR had one. Either this broker is not
+                            // the controller and may not elect, or the commit did not land.
+                            LogLeadershipHandoverFailed(tp.Topic, tp.Partition, newLeader);
                             continue;
                         }
 
@@ -957,6 +996,69 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Handle broker failure detected by heartbeat manager.
     /// </summary>
+    /// <summary>
+    /// Controller-side controlled shutdown (#180): move every leadership off a departing broker.
+    /// </summary>
+    /// <remarks>
+    /// The same work the failure path does, minus the assumption that anything went wrong — the
+    /// broker is leaving on purpose and is still reachable, so this runs while it can still serve,
+    /// instead of after a heartbeat timeout has already made its partitions unavailable.
+    /// </remarks>
+    public async Task<IReadOnlyList<TopicPartition>> MoveLeadershipAwayAsync(
+        int brokerId, CancellationToken ct = default)
+    {
+        if (!_isController)
+        {
+            LogNotController("ControlledShutdown");
+            return [.. _clusterState.PartitionStates
+                .Where(p => p.Value.LeaderBrokerId == brokerId)
+                .Select(p => p.Key)];
+        }
+
+        LogControlledShutdownRequested(brokerId);
+
+        var stillLed = new List<TopicPartition>();
+
+        foreach (var (tp, state) in _clusterState.PartitionStates)
+        {
+            if (ct.IsCancellationRequested)
+                break;
+
+            if (state.LeaderBrokerId != brokerId)
+            {
+                // Not leading it, but it may be in the ISR — a departing broker must not keep
+                // holding up acks=all for the replicas that stay.
+                if (state.Isr.Contains(brokerId) && state.Isr.Count > 1)
+                    _clusterState.RemoveFromIsr(tp, brokerId);
+
+                continue;
+            }
+
+            var successor = state.Isr.FirstOrDefault(b => b != brokerId, -1);
+            if (successor < 0)
+            {
+                // No in-sync replica but this one. Moving it anyway would be an unclean election,
+                // which is not this path's call to make.
+                stillLed.Add(tp);
+                LogNoEligibleLeaderForPartition(tp.Topic, tp.Partition);
+                continue;
+            }
+
+            if (await ElectLeaderAsync(tp, successor, ct).ConfigureAwait(false))
+            {
+                LogPartitionLeadershipTransferred(tp.Topic, tp.Partition, successor);
+            }
+            else
+            {
+                stillLed.Add(tp);
+                LogLeadershipHandoverFailed(tp.Topic, tp.Partition, successor);
+            }
+        }
+
+        LogControlledShutdownCompleted(brokerId, stillLed.Count);
+        return stillLed;
+    }
+
     private async Task HandleBrokerFailedAsync(int failedBrokerId)
     {
         LogBrokerFailureDetected(failedBrokerId);

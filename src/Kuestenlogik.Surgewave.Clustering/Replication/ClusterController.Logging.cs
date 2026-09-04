@@ -143,6 +143,26 @@ public sealed partial class ClusterController
         Message = "Refused to remove broker {BrokerId}: no such broker is known, so the entry would commit and do nothing")]
     private partial void LogRemoveUnknownRefused(int brokerId);
 
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Controlled shutdown for broker {BrokerId} went unanswered — the controller was unreachable or refused, so its partitions move only once the heartbeat times out")]
+    private partial void LogControlledShutdownUnanswered(int brokerId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Controlled shutdown left {Remaining} partition(s) with this broker — no in-sync successor for them")]
+    private partial void LogControlledShutdownIncomplete(int remaining);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Controlled shutdown requested by broker {BrokerId}: moving its partition leaderships")]
+    private partial void LogControlledShutdownRequested(int brokerId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Controlled shutdown for broker {BrokerId} done, {StillLed} partition(s) left with it")]
+    private partial void LogControlledShutdownCompleted(int brokerId, int stillLed);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Could not hand {Topic}-{Partition} to broker {NewLeaderId}: the ISR had a successor but the election did not happen — this broker is not the controller, or the decision did not commit")]
+    private partial void LogLeadershipHandoverFailed(string topic, int partition, int newLeaderId);
+
     [LoggerMessage(Level = LogLevel.Information,
         Message = "Handover to broker {SuccessorId} confirmed: it holds the metadata log up to index {Index}")]
     private partial void LogHandoverConfirmed(int successorId, long index);

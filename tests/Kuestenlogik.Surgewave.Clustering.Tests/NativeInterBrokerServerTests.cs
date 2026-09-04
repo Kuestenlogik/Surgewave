@@ -135,8 +135,10 @@ public class NativeInterBrokerServerTests
     {
         var fx = NewServer();
 
-        // ControlledShutdown is in the native band but has no handler yet (Inc7).
-        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerControlledShutdown, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
+        // LeaderAndIsr is in the native band and deliberately has no handler: it was a controller
+        // push, and the pushes are gone (#163 step 3). ControlledShutdown used to stand here and no
+        // longer can — it is wired now (#180).
+        var response = await fx.Server.ProcessAsync(SurgewaveOpCode.InterBrokerLeaderAndIsr, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
 
         var (opcode, status) = DecodeStatusFrame(response);
         Assert.Equal(SurgewaveOpCode.Error, opcode);

@@ -308,6 +308,18 @@ public sealed partial class ReplicaFetcher : IAsyncDisposable
                 {
                     await AppendFetchedDataAsync(tp, state, partitionResponse, ct);
                 }
+                else
+                {
+                    // An empty response is a report too: this follower asked, the leader had
+                    // nothing, so the two are level. Saying so is what puts an idle partition's
+                    // followers in the ISR — until now the position was only reported from
+                    // AppendFetchedDataAsync, so a partition that never received a record kept
+                    // ISR = {leader} forever. Which reads as a test nuisance and is an
+                    // availability bug: a graceful shutdown of that leader finds no eligible
+                    // successor ("No eligible leader in ISR"), and the partition is left with no
+                    // leader at all while two healthy, fully caught-up replicas stand by (#180).
+                    _replicaManager.UpdateFollowerFetchPosition(tp, _config.BrokerId, state.FetchOffset);
+                }
 
                 // Update high watermark from leader
                 state.LeaderHighWatermark = partitionResponse.HighWatermark;
