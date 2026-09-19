@@ -528,9 +528,13 @@ jobs:
           cat release-body.md
           echo "----- end -----"
 
-      # Release-Titel-Theme aus dem passenden Milestone-Titel
-      # (`vX.Y[.Z] — <theme>`-Konvention) — der GitHub-Release-Titel
-      # liest sich dann `v0.4.0 — Production hardening & trustworthy admin`.
+      # Release-Titel-Theme aus dem Meilenstein, den dieses Release liefert.
+      # Meilensteine sind Arbeitsabschnitte `M<n> — <theme>` (docs/contributing/
+      # project-board.md, „Milestones and releases“); die Versionsnummer entsteht
+      # beim Schnitt, also nennt die Tag-Nachricht die Abschnitte und
+      # scripts/resolve-milestone.mjs liest sie (Rückfall: Titel beginnt mit
+      # v<base>, dann der vorderste fertige Abschnitt). Nie ein Fehler: ohne
+      # Treffer bleibt der Titel nackt, und das steht im Log.
       - name: Resolve release title from milestone
         id: title
         env:
@@ -538,23 +542,10 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          BASE=$(echo "$VERSION" | sed -E 's/-.*$//')
-          MAJ_MIN=$(echo "$BASE" | cut -d. -f1-2)
-          MS_TITLES=$(gh api "repos/${{ github.repository }}/milestones?state=all&per_page=100" \
-            --jq '.[].title' 2>/dev/null)
-          THEME=""
-          for candidate in "v${BASE}" "v${MAJ_MIN}"; do
-            FULL=$(echo "$MS_TITLES" | grep -E "^${candidate}([[:space:]]+[—-][[:space:]]+.+)?$" | head -n 1 || true)
-            if [[ -n "$FULL" ]]; then
-              CANDIDATE_THEME=$(echo "$FULL" | sed -E "s/^${candidate}[[:space:]]+[—-][[:space:]]+//; t; d")
-              if [[ -n "$CANDIDATE_THEME" ]]; then
-                THEME="$CANDIDATE_THEME"
-                echo "Resolved theme from milestone '${FULL}': ${THEME}"
-                break
-              fi
-            fi
-          done
+          node scripts/resolve-milestone.mjs "$TAG" > resolved.json || echo '{"theme":"","numbers":""}' > resolved.json
+          THEME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('resolved.json','utf8')).theme || '')" || true)
+          NUMBERS=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('resolved.json','utf8')).numbers || '')" || true)
+          echo "milestones=${NUMBERS}" >> "$GITHUB_OUTPUT"
           if [[ -n "$THEME" ]]; then
             echo "title=${TAG} — ${THEME}" >> "$GITHUB_OUTPUT"
           else

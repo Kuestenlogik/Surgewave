@@ -12,12 +12,20 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | Field | Values | Used for |
 |---|---|---|
 | **Status** | `Backlog` · `Next up` · `In progress` · `In review` · `Done` | Kanban swim-lane |
-| **Milestone** *(built-in)* | the repo's open milestones (`v0.5` … `v1.0`) · *(unset)* | Version-targeting — the same Milestone the GitHub issue carries. Unset = backlog (rendered as "Later" in `ROADMAP.md`); no dedicated "Later" milestone, since it would be redundant with the unset state. Note `generate-roadmap.mjs` renders anything outside its `MILESTONE_ORDER` list under "Later" too. |
+| **Milestone** *(built-in)* | the repo's open work sections `M<n> — <theme>` (`M1` … `M6`) | The ordered section the ticket belongs to — see [Milestones and releases](#milestones-and-releases). Every ticket has one; a ticket outside a section's themes goes to the next section. Unset is rendered as "Later" in `ROADMAP.md`. |
 | **Area** | `broker` · `clustering` · `protocol` · `storage` · `security` · `streams` · `connect` · `schema` · `ai` · `cli` · `control` · `observability` · `plugin-sdk` · `docs` · `site` · `multi` | Component filter |
 | **Track** | `kafka-compat` · `performance` · `ai-pipelines` · `cluster-correctness` · `transport` · `plugin-distribution` | Multi-phase initiatives that span releases |
 | **Project Effort** | `Low` · `Medium` · `High` | Sizing |
 | **Effort**, **Priority** | *(fields exist but carry no options)* | Unused today. `sync-project.mjs` still tries to set `Priority`, which is where its `!! Missing option Priority=P1` warnings come from — either add the options or drop them from the script. |
 | **Type** *(native issue field, not a board field)* | `Bug` · `Task` · `Feature` | What it is. Set on the issue itself (org-level GitHub issue types), searchable as `type:Bug`. Replaced the former `kind:*` label family and the board's `Kind` field — do not re-create either. |
+
+## Milestones and releases
+
+Since 2026-09-19 (the convention was rolled out from Bowire) milestones and release versions are decoupled:
+
+- A **milestone is an ordered work section** — `M1 — Hygiene: CI, dependencies, licences`, `M2 — Multi-tenancy & data mesh`, … Its description is one short statement of the themes it contains and ends with the scope rule: *"Umfang festgelegt am <date>: ein Ticket gehört hierher, wenn es in eines dieser Themen fällt — sonst in den nächsten Abschnitt."* A section does not grow: a ticket outside its themes goes to the next section, or a new section is opened behind the last. Every ticket gets a milestone when it is created.
+- A **release gets its version number when it is cut**, by content (SemVer). A finished section *is* the release as a rule; a second section that finished at the same time may ride along. The tag names the sections it ships in its message — `git tag -a v0.6.0 -m "Surgewave v0.6.0 — M1 — Hygiene …"` — and [`scripts/resolve-milestone.mjs`](../../scripts/resolve-milestone.mjs) reads them for the release title and the drafted notes (falling back to a `v<base> — …` milestone for old tags, then to the frontmost complete section). After the cut the milestone is closed with *"Ausgeliefert in v0.6.0"*.
+- **Release due** = the frontmost open milestone has no open ticket, CI is green, no pull request is open. `node scripts/resolve-milestone.mjs v<next>` says which section that is.
 
 ## Recommended views
 
@@ -34,7 +42,7 @@ The board ships with the default *All items* view. The four views below mirror h
 
 - **Layout**: Board
 - **Group by**: `Status`
-- **Filter**: `Milestone` = current (v1.5)
+- **Filter**: `Milestone` = current (the frontmost open section)
 - **Use for**: Operational kanban — what's currently moving
 
 ### 🧩 By Area
@@ -53,7 +61,7 @@ The board ships with the default *All items* view. The four views below mirror h
 
 ## Conventions
 
-- **One field per concept**: `Milestone` is the *when*, `Track` is the *grouped initiative across releases*, `Area` is the *component*. They overlap deliberately — Milestone is enforced (the bar for shipping), Track is editorial (Auth Phase A / B / C).
+- **One field per concept**: `Milestone` is the *which section* (and thereby the *when*), `Track` is the *grouped initiative across releases*, `Area` is the *component*. They overlap deliberately — Milestone is enforced (the bar for shipping), Track is editorial (Auth Phase A / B / C).
 - **`area:*` / `track:*` labels duplicate board fields on purpose**: GitHub issue search needs labels (`is:open label:area:security`). Project filters need fields. Those two families are kept in sync so an issue is findable from either side. This does *not* extend to the nature of the work — that is the native issue **Type** (`type:Bug`), which exists exactly once and must not be mirrored back into a label.
 - **`roadmap` label** flags items that are tracked on the board. Throwaway bug reports don't need it.
 - **`community-vote` label** marks feature requests where reactions on the issue are read as priority signal. Don't comment "+1" — react with 👍.
