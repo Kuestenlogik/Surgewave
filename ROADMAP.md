@@ -14,18 +14,18 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Backlog
 
-### M2 — Multi-tenancy & data mesh
-
-- [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
-- [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
-- [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
-
 ### M1 — Hygiene: CI, dependencies, licences
 
 - [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
 - [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
 - [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
 - [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Lizenzzuordnung je Projekt führen und in CI prüfen** `area:multi`
+
+### M2 — Multi-tenancy & data mesh
+
+- [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
+- [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
+- [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 
 ### M3 — Streams & client parity
 
