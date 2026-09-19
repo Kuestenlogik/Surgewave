@@ -105,22 +105,13 @@ jobs:
           if [ -z "$PREV_TAG" ]; then PREV_TAG=$(git rev-list --max-parents=0 HEAD); fi
           echo "Previous tag: $PREV_TAG"
 
-          # ---- Highlights aus geschlossenen Milestone-Issues ----
+          # ---- Highlights: das gemeinsame Release-Werkzeug (docs/contributing/project-board.md) ----
+          # Geschlossene Tickets des gelieferten Abschnitts in diesem Repo UND in jedem Sibling,
+          # das ihn auf dem Board spiegelt — nach Repository, Typ (Feature / Bug / Task) und
+          # Area gruppiert; dieselbe Liste, die der Schnitt liefert.
           HIGHLIGHTS=""
           if [ -n "$MS_TITLE" ]; then
-            ISSUES_JSON=$(gh issue list --milestone "$MS_TITLE" --state closed \
-              --limit 100 --json number,title,labels)
-            HIGHLIGHTS=$(echo "$ISSUES_JSON" | jq -r '
-              def bucket(labels):
-                ( (labels | map(select(.name | startswith("area:")) | .name | sub("area:"; ""))[0])
-                  // "misc" );
-              [ .[] | { bucket: bucket(.labels), entry: "- #\(.number) \(.title)" } ]
-              | group_by(.bucket)
-              | map({bucket: .[0].bucket, entries: map(.entry)})
-              | sort_by(.bucket)
-              | map("**\(.bucket)**\n\(.entries | join("\n"))\n")
-              | join("\n")
-            ')
+            HIGHLIGHTS=$(node scripts/release.mjs notes "v$VERSION" "$MS_TITLE" --highlights 2>/dev/null || true)
           fi
 
           # ---- Maintenance aus dem Commit-Log ----
