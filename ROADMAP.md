@@ -20,6 +20,11 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
 - [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
 - [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Lizenzzuordnung je Projekt führen und in CI prüfen** `area:multi`
+- [Kuestenlogik/Surgewave.Connectors#12](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/12) **OllamaSharp held at 5.4.25 - 5.4.30 source generator requires newer Roslyn** 
+- [Kuestenlogik/Surgewave.Connectors#11](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/11) **Migrate Parquet connector to Parquet.Net 6 (DataColumn API removed)** 
+- [Kuestenlogik/Surgewave.Connectors#10](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/10) **swpkg release assets carry the Directory.Build.props version floor instead of the tag version** 
+- [Kuestenlogik/Surgewave.Tactical#3](https://github.com/Kuestenlogik/Surgewave.Tactical/issues/3) **This repository packages a .swpkg that contains no plugin, and no project can pack it** 
+- [Kuestenlogik/Surgewave.Edge#5](https://github.com/Kuestenlogik/Surgewave.Edge/issues/5) **This repository packages a .swpkg that contains no plugin** 
 
 ### M2 — Multi-tenancy & data mesh
 
@@ -36,12 +41,14 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### M4 — Protocol plugins & transport
 
+- [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
 - [#19](https://github.com/Kuestenlogik/Surgewave/issues/19) **Plugin SDK E — Roslyn analysers (SRWV-prefix rules)** `area:plugin-sdk` `track:plugin-distribution`
 - [#23](https://github.com/Kuestenlogik/Surgewave/issues/23) **Operator wizard — Plugin marketplace dependency graph** `area:plugin-sdk`
 - [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
 - [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
 - [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
+- [Kuestenlogik/Surgewave.Ai#8](https://github.com/Kuestenlogik/Surgewave.Ai/issues/8) **G26 — AI pipeline cost tracking** 
 
 ### M5 — Correctness & durability
 
@@ -60,10 +67,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
 - [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
-
-### Later
-
-- [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
 
 ---
 
