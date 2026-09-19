@@ -19,6 +19,23 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | **Effort**, **Priority** | *(fields exist but carry no options)* | Unused today. `sync-project.mjs` still tries to set `Priority`, which is where its `!! Missing option Priority=P1` warnings come from — either add the options or drop them from the script. |
 | **Type** *(native issue field, not a board field)* | `Bug` · `Task` · `Feature` | What it is. Set on the issue itself (org-level GitHub issue types), searchable as `type:Bug`. Replaced the former `kind:*` label family and the board's `Kind` field — do not re-create either. |
 
+## The ticket vocabulary, the same in every Küstenlogik repository
+
+| Where | What | Values |
+|---|---|---|
+| **Type** *(built-in issue type)* | What the ticket is | `Bug` · `Feature` · `Task` — every issue carries exactly one; the former `kind:*` labels are retired |
+| **Priority** *(org issue field, on the issue)* | The order within a section | `Urgent` (now — blocks or burns) · `High` (this section) · `Medium` (the next section) · `Low` (someday) |
+| **Effort** *(org issue field)* | Planned size | `Low` (a day or less) · `Medium` (days) · `High` (a week or more — split it) |
+| **Effort (actual)** *(board field)* | What it turned out to be, set at Done | the same scale — plan next to actual, per issue (Bowire's design) |
+| **Milestone** *(built-in)* | The ordered work section | `M<n> — <themes>`; a sibling repo mirrors the product's sections as its own milestones |
+| **Release** *(board field, where the board has one)* | The version a ticket shipped in | `vX.Y`, stamped at the cut; empty while planned |
+| **Area** *(board field)* | The component | per product (`terrain`, `workbench`, `broker`, …); the `area:*` label says the same for issue search |
+| **Status** *(board field)* | Where the work sits in the flow | `Backlog` · `Next up` · `In progress` · `In review` · `Done` |
+| **Assignee** | Who holds it | never empty — unassigned means nobody decided |
+| **Parent issue** *(built-in sub-issues)* | Belongs to / depends on | an epic's slices are its sub-issues; "Folge von #N" in the text is not a link |
+
+**Order inside a section** is the `Priority` field, read by the roadmap generator; manual sorting on a board is the order of one view and nothing else — not on the ticket, not in the API, gone when the view is regrouped. Use it for the last fine ordering within a priority, never instead of one.
+
 ## Milestones and releases
 
 Since 2026-09-19 (the convention was rolled out from Bowire) milestones and release versions are decoupled:
