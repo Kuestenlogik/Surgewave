@@ -8,26 +8,33 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Next up
 
-### v1.0 — first stable
+### M6 — first stable
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `area:broker` `track:performance`
 
 ## Backlog
 
-### v0.6 — Multi-tenancy & data mesh
+### M2 — Multi-tenancy & data mesh
 
 - [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
 - [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
 - [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
 
-### v0.7 — Streams & client parity
+### M1 — Hygiene: CI, dependencies, licences
+
+- [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
+- [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
+- [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
+- [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Lizenzzuordnung je Projekt führen und in CI prüfen** `area:multi`
+
+### M3 — Streams & client parity
 
 - [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
 - [#43](https://github.com/Kuestenlogik/Surgewave/issues/43) **Native client: multi-broker bootstrap & failover** 
 - [#44](https://github.com/Kuestenlogik/Surgewave/issues/44) **StreamsProducer: transactional changelog writes** 
 - [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
 
-### v0.8 — Protocol plugins & transport
+### M4 — Protocol plugins & transport
 
 - [#19](https://github.com/Kuestenlogik/Surgewave/issues/19) **Plugin SDK E — Roslyn analysers (SRWV-prefix rules)** `area:plugin-sdk` `track:plugin-distribution`
 - [#23](https://github.com/Kuestenlogik/Surgewave/issues/23) **Operator wizard — Plugin marketplace dependency graph** `area:plugin-sdk`
@@ -36,11 +43,14 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
 - [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
 
-### v0.9 — Correctness & durability
+### M5 — Correctness & durability
 
 - [#119](https://github.com/Kuestenlogik/Surgewave/issues/119) **bug(clustering): topic configuration never reaches brokers that only host replicas** 
+- [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
+- [#179](https://github.com/Kuestenlogik/Surgewave/issues/179) **bug(tests): the replication stall is undone by the metadata log, so the failover class passes by luck** `area:clustering`
+- [#180](https://github.com/Kuestenlogik/Surgewave/issues/180) **perf(clustering): re-election and ISR propagation are too slow to assert on within 60s** `area:clustering`
 
-### v1.0 — first stable
+### M6 — first stable
 
 - [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `area:multi`
 - [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `area:clustering` `track:cluster-correctness`
@@ -48,19 +58,12 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#26](https://github.com/Kuestenlogik/Surgewave/issues/26) **Branch protection for external PRs** `area:multi`
 - [#27](https://github.com/Kuestenlogik/Surgewave/issues/27) **Getting-started video (5-minute demo)** `area:docs`
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
+- [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
+- [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
 
 ### Later
 
 - [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
-- [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
-- [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
-- [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
-- [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
-- [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
-- [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
-- [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Lizenzzuordnung je Projekt führen und in CI prüfen** `area:multi`
-- [#179](https://github.com/Kuestenlogik/Surgewave/issues/179) **bug(tests): the replication stall is undone by the metadata log, so the failover class passes by luck** `area:clustering`
-- [#180](https://github.com/Kuestenlogik/Surgewave/issues/180) **perf(clustering): re-election and ISR propagation are too slow to assert on within 60s** `area:clustering`
 
 ---
 
