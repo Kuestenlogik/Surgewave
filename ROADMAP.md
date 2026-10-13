@@ -19,7 +19,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
 - [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
 - [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
-- [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Lizenzzuordnung je Projekt führen und in CI prüfen** `area:multi`
+- [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Keep the licence assignment per project and check it in CI** `area:multi`
 - [Kuestenlogik/Surgewave.Connectors#12](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/12) **OllamaSharp held at 5.4.25 - 5.4.30 source generator requires newer Roslyn** 
 - [Kuestenlogik/Surgewave.Connectors#11](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/11) **Migrate Parquet connector to Parquet.Net 6 (DataColumn API removed)** 
 - [Kuestenlogik/Surgewave.Connectors#10](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/10) **swpkg release assets carry the Directory.Build.props version floor instead of the tag version** 
