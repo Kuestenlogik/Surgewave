@@ -38,10 +38,10 @@ public sealed class SearchPluginsOperation : IOperationHandler<SearchPluginsRequ
 
     public async Task<SearchPluginsResult> ExecuteAsync(SearchPluginsRequestPayload request, CancellationToken cancellationToken)
     {
-        // Repository-Search liefert primaer NuGet-Treffer. Fuer die Plugin-Marketplace-UX
-        // muss auch die lokale Installed-Liste in der "default"-Sicht (leere Query) erscheinen,
-        // sonst zeigt der Marketplace "Installed: 0" obwohl Connector-Plugins im pluginsDirectory
-        // liegen. Bei expliziter Query keine Installed-Spurious-Hits — Filter via Query-Match.
+        // The repository search returns mainly NuGet hits. For the plugin marketplace UX
+        // the local installed list must also appear in the "default" view (empty query),
+        // otherwise the marketplace shows "Installed: 0" although connector plugins lie in the
+        // pluginsDirectory. With an explicit query no spurious installed hits — filter via query match.
         var packages = await _repositoryManager.SearchAsync(
             request.Query,
             request.Skip,
@@ -51,16 +51,16 @@ public sealed class SearchPluginsOperation : IOperationHandler<SearchPluginsRequ
         var combined = new List<ConnectorPackageInfo>(packages);
         var packageIds = new HashSet<string>(combined.Select(p => p.PackageId), StringComparer.OrdinalIgnoreCase);
 
-        // ConnectorTypes-Index: aus PluginDiscovery alle entdeckten Klassen pro Package-Prefix
-        // sammeln. Klassen-Konvention: "<packageId>.<TypeName>" -> Package via StartsWith-Match.
-        // Wert: Set von Types ("sink"/"source"/"processor"/...) — pro Card als Badge gerendert.
+        // ConnectorTypes index: collect all classes discovered by PluginDiscovery per package
+        // prefix. Class convention: "<packageId>.<TypeName>" -> package via StartsWith match.
+        // Value: set of types ("sink"/"source"/"processor"/...) — rendered as a badge per card.
         var typesByPackage = BuildTypesByPackageIndex();
 
         foreach (var installed in _repositoryManager.Installer.InstalledConnectors.Values)
         {
             if (packageIds.Contains(installed.PackageId)) continue;
 
-            // Bei leerer Query: alle Installed mitliefern. Bei expliziter Query: nur Treffer.
+            // With an empty query: include all installed ones. With an explicit query: only hits.
             if (!string.IsNullOrEmpty(request.Query)
                 && !installed.PackageId.Contains(request.Query, StringComparison.OrdinalIgnoreCase))
             {
@@ -114,8 +114,8 @@ public sealed class SearchPluginsOperation : IOperationHandler<SearchPluginsRequ
         var result = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         if (_pluginDiscovery is null) return result;
 
-        // InstalledConnectors-PackageId ist der Namespace-Prefix der Plugin-Klassen.
-        // Match: plugin.Class.StartsWith(installed.PackageId + "."). Sammle alle Types.
+        // The InstalledConnectors PackageId is the namespace prefix of the plugin classes.
+        // Match: plugin.Class.StartsWith(installed.PackageId + "."). Collect all types.
         var installedIds = _repositoryManager.Installer.InstalledConnectors.Keys.ToList();
         foreach (var plugin in _pluginDiscovery.GetAllPlugins())
         {

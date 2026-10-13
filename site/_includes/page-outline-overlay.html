@@ -1,9 +1,9 @@
 {%- comment -%}
-Page-Outline-Modal. Wird vom Section-Rail (.section-tools-trigger) auf
-der rechten Bildschirmkante getriggert, main.js populiert <nav#page-outline>
-zur Laufzeit mit einem Link pro <section>. Same idiom wie das Search-
-Overlay (translucent backdrop, three-band panel: title cap / scrollable
-nav / hint footer). Aria-hidden + inert bis geoeffnet.
+Page outline modal. Triggered by the section rail (.section-tools-trigger) on
+the right screen edge; main.js populates <nav#page-outline>
+at runtime with one link per <section>. Same idiom as the search
+overlay (translucent backdrop, three-band panel: title cap / scrollable
+nav / hint footer). Aria-hidden + inert until opened.
 {%- endcomment -%}
 <div class="surgewave-page-overlay" id="surgewave-page-outline-overlay" aria-hidden="true" inert>
   <div class="surgewave-page-overlay-panel" role="dialog" aria-label="On this page">

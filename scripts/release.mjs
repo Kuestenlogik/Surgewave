@@ -22,7 +22,7 @@
 //                                       publishes the drafted notes as the GitHub release unless a
 //                                       release pipeline (.github/workflows/release.yml) does that
 //                                       on the tag; closes the sections and their mirrors with
-//                                       "Ausgeliefert in <tag>"; stamps the board's Release field.
+//                                       "Shipped in <tag>"; stamps the board's Release field.
 //
 // Needs the gh CLI signed in (project scope for the board). Sections are given as M-number ("M1")
 // or full title.
@@ -187,15 +187,15 @@ if (command === 'notes' || command === 'cut') {
 
   if (command === 'notes') {
     for (const s of stillOpen) console.error(`WARNING: still open: ${s.repo}#${s.number} ${s.title}`);
-    let md = `${name} ${tag} — enthält ${titles.join(', ')}.${since ? ` ${git('rev-list', '--count', `${since}..HEAD`)} Commits seit ${since}.` : ''}\n\n## Themen\n\n`;
+    let md = `${name} ${tag} — contains ${titles.join(', ')}.${since ? ` ${git('rev-list', '--count', `${since}..HEAD`)} commits since ${since}.` : ''}\n\n## Themes\n\n`;
     for (const k of keys) md += `### ${k}\n\n${grouped.get(k).map(l => `- ${l}`).join('\n')}\n\n`;
     const others = all.filter(m => m.state === 'open' && !chosen.includes(m));
-    if (others.length) md += `## Nicht drin\n\n${others.map(m => `- ${m.title}: ${m.open_issues} offen`).join('\n')}\n\n`;
+    if (others.length) md += `## Not included\n\n${others.map(m => `- ${m.title}: ${m.open_issues} open`).join('\n')}\n\n`;
     if (since) {
       const sinceDate = git('log', '-1', '--format=%cI', since).slice(0, 10);
       const stray = ghJson('issue', 'list', '--repo', repo, '--state', 'closed', '--limit', '500', '--search', `closed:>${sinceDate}`, '--json', 'number,title,milestone')
         .filter(i => !titles.includes(i.milestone?.title ?? ''));
-      if (stray.length) md += `## Seit ${since} geschlossen, aber nicht in diesen Abschnitten (prüfen)\n\n${stray.map(i => `- #${i.number} ${i.title}${i.milestone ? ` (${i.milestone.title})` : ' (ohne Meilenstein)'}`).join('\n')}\n`;
+      if (stray.length) md += `## Closed since ${since}, but not in these sections (check)\n\n${stray.map(i => `- #${i.number} ${i.title}${i.milestone ? ` (${i.milestone.title})` : ' (no milestone)'}`).join('\n')}\n`;
     }
     mkdirSync('artifacts/release', { recursive: true });
     writeFileSync(notesPath, md);
@@ -220,8 +220,8 @@ if (command === 'notes' || command === 'cut') {
   }
   for (const m of chosen) {
     for (const target of [{ repo, ...m }, ...mirrors(m.title, b)]) {
-      say(`close ${target.repo} milestone '${target.title}': Ausgeliefert in ${tag}`);
-      if (!dry) gh('api', '-X', 'PATCH', `repos/${target.repo}/milestones/${target.number}`, '-f', 'state=closed', '-f', `description=${(target.description ?? '').trim()} Ausgeliefert in ${tag}.`);
+      say(`close ${target.repo} milestone '${target.title}': Shipped in ${tag}`);
+      if (!dry) gh('api', '-X', 'PATCH', `repos/${target.repo}/milestones/${target.number}`, '-f', 'state=closed', '-f', `description=${(target.description ?? '').trim()} Shipped in ${tag}.`);
     }
   }
   if (b?.release) {
@@ -229,7 +229,7 @@ if (command === 'notes' || command === 'cut') {
     say(`stamp Release = ${majMin} on every board item of ${titles.join(', ')}`);
     if (!dry) {
       if (!option) {
-        const inner = [{ name: majMin }, ...b.release.options].map(o => `{${o.id ? `id: "${o.id}", ` : ''}name: ${JSON.stringify(o.name)}, color: GRAY, description: ${JSON.stringify(o.id ? '' : `Ausgeliefert als ${tag}`)}}`).join(',');
+        const inner = [{ name: majMin }, ...b.release.options].map(o => `{${o.id ? `id: "${o.id}", ` : ''}name: ${JSON.stringify(o.name)}, color: GRAY, description: ${JSON.stringify(o.id ? '' : `Shipped as ${tag}`)}}`).join(',');
         graphql(`mutation { updateProjectV2Field(input: {fieldId: "${b.release.id}", name: "Release", singleSelectOptions: [${inner}]}) { projectV2Field { ... on ProjectV2SingleSelectField { id } } } }`);
         option = board().release.options.find(o => o.name === majMin);
       }

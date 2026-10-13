@@ -5,10 +5,10 @@ using Kuestenlogik.Surgewave.Plugins.Packaging;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Packaging;
 
 /// <summary>
-/// End-to-end Roundtrip-Tests fuer den zentralen Pack -> Validate -> Install -> Uninstall
-/// Lifecycle. Erzeugt im temp-Dir einen Mini-Build-Output mit einem stub-Manifest und einer
-/// stub-DLL (leere binary), packt es zu .swpkg, validiert, installiert und prueft den
-/// Disk-State.
+/// End-to-end round-trip tests for the central pack -> validate -> install -> uninstall
+/// lifecycle. Creates a mini build output in the temp dir with a stub manifest and a
+/// stub DLL (empty binary), packs it into a .swpkg, validates, installs and checks the
+/// disk state.
 /// </summary>
 public sealed class PluginPackageManagerTests : IDisposable
 {

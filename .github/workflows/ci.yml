@@ -38,6 +38,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Language guard (English only)
+        run: node scripts/check-english.mjs
+
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'

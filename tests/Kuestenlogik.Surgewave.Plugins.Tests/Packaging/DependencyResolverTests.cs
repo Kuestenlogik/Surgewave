@@ -3,9 +3,9 @@ using Kuestenlogik.Surgewave.Plugins.Packaging;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Packaging;
 
 /// <summary>
-/// Coverage fuer <see cref="DependencyResolver"/> + <see cref="ResolvedDependency"/> +
-/// <see cref="DependencyResolutionResult"/>. Topo-Sort + Cycle-Detection + Already-installed
-/// short-circuiting laufen in beiden Modi (sync via Dict, async via callback).
+/// Coverage for <see cref="DependencyResolver"/> + <see cref="ResolvedDependency"/> +
+/// <see cref="DependencyResolutionResult"/>. Topo sort + cycle detection + already-installed
+/// short-circuiting run in both modes (sync via dict, async via callback).
 /// </summary>
 public sealed class DependencyResolverTests
 {

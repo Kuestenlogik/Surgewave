@@ -1,4 +1,4 @@
-// Visueller Massenschwerpunkt (center of mass) der nicht-transparenten Pixel.
+// Visual center of mass of the non-transparent pixels.
 const sharp = require('sharp');
 
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">

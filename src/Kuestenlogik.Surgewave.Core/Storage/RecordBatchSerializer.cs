@@ -377,7 +377,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 recordsPos += valueLength;
             }
 
-            // Read headers count and skip them (zigzag-signed varints, siehe
+            // Read headers count and skip them (zigzag-signed varints, see
             // WriteHeadersFromNativeBlock).
             var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             for (int h = 0; h < headerCount; h++)
@@ -485,13 +485,13 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
         var srcPos = 0;
         var count = BinaryPrimitives.ReadInt32BigEndian(nativeBlock);
         srcPos += 4;
-        // Kafka v2 RecordBatch headers benutzen signed (zigzag-encoded)
-        // varints fuer count, key-length und value-length. Ohne Zigzag
-        // las ein Kafka-Consumer (Confluent.Kafka) z.B. count=4 als
-        // zigzag-decoded=2 → er sah nur 2 Headers, der Rest des Streams
-        // wurde als naechster Record interpretiert → unendlicher Read
-        // bzw. Linux-Deadlock im Interop-Mix (Issue gefunden 2026-06-01,
-        // war seit Header-Refactor in f609a7e drin).
+        // Kafka v2 RecordBatch headers use signed (zigzag-encoded)
+        // varints for count, key length and value length. Without zigzag
+        // a Kafka consumer (Confluent.Kafka) read e.g. count=4 as
+        // zigzag-decoded=2 → it saw only 2 headers, the rest of the stream
+        // was interpreted as the next record → endless read
+        // or a Linux deadlock in the interop mix (issue found 2026-06-01,
+        // had been in since the header refactor in f609a7e).
         var destPos = destOffset + VarintCodec.WriteVarInt(dest.Slice(destOffset), (int)ZigZag.Encode(count));
         for (var i = 0; i < count; i++)
         {
@@ -507,9 +507,9 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
 
             var valLen = BinaryPrimitives.ReadInt32BigEndian(nativeBlock[srcPos..]);
             srcPos += 4;
-            // Akka tombstones nutzen value-length = 0; Kafka-Spec erlaubt
-            // -1 fuer null. Wir clampen unter Null auf 0 weil Native-Wire
-            // im Kontext keine echten Nulls schickt.
+            // Akka tombstones use value-length = 0; the Kafka spec allows
+            // -1 for null. We clamp below zero to 0 because the native wire
+            // sends no real nulls in this context.
             destPos += VarintCodec.WriteVarInt(dest.Slice(destPos), (int)ZigZag.Encode(Math.Max(0, valLen)));
             if (valLen > 0)
             {

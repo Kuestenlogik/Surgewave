@@ -108,7 +108,7 @@ public sealed class SurgewaveConnectionManager : IAsyncDisposable
                              TimeSpan.FromSeconds(10).Ticks));
 
                 _logger.LogWarning(ex,
-                    "Surgewave broker nicht erreichbar ({Host}:{Port}), Versuch {Attempt}/{MaxRetries}. Retry in {Delay}s",
+                    "Surgewave broker not reachable ({Host}:{Port}), attempt {Attempt}/{MaxRetries}. Retry in {Delay}s",
                     _transportOptions.Host, _transportOptions.Port, attempt, MaxConnectRetries, delay.TotalSeconds);
 
                 await Task.Delay(delay, cancellationToken);

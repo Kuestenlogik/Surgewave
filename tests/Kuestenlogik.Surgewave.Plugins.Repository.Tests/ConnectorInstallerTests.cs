@@ -4,11 +4,11 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Coverage fuer <see cref="ConnectorInstaller"/>. Wir testen die fs-only Pfade direkt
-/// (Constructor erzeugt Install-Dir, LoadInstalledConnectors discovered connector.json
-/// + plugin.json, Uninstall raeumt Files weg, IsInstalled/GetInstalledVersion-Lookups).
-/// Die Install/LoadConnector-Pfade brauchen ein echtes ZIP + ALC und sind im
-/// <c>Kuestenlogik.Surgewave.Plugins.Connectors.Tests</c>-Projekt (E2E).
+/// Coverage for <see cref="ConnectorInstaller"/>. We test the fs-only paths directly
+/// (the constructor creates the install dir, LoadInstalledConnectors discovers connector.json
+/// + plugin.json, Uninstall removes files, IsInstalled/GetInstalledVersion lookups).
+/// The Install/LoadConnector paths need a real ZIP + ALC and live in the
+/// <c>Kuestenlogik.Surgewave.Plugins.Connectors.Tests</c> project (E2E).
 /// </summary>
 public sealed class ConnectorInstallerTests : IDisposable
 {

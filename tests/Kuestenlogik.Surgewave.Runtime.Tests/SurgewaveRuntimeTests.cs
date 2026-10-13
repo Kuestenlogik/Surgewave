@@ -33,7 +33,7 @@ public sealed class SurgewaveRuntimeTests
         Assert.True(options.CleanupOnDispose);
         Assert.Equal(StorageEngines.File, options.StorageEngine);
         Assert.Null(options.DataDirectory);
-        Assert.False(options.EnableDualMode); // opt-in: 127.0.0.1 default, deterministisch ohne Linux-getaddrinfo-Roulette
+        Assert.False(options.EnableDualMode); // opt-in: 127.0.0.1 default, deterministic without Linux getaddrinfo roulette
     }
 
     [Fact]
@@ -448,8 +448,8 @@ public sealed class SurgewaveRuntimeTests
         // Act
         var builder = SurgewaveRuntime.CreateBuilder();
 
-        // Assert: opt-in. Default ist 127.0.0.1/IPv4-only (deterministisch
-        // ueber Linux/CI hinweg), Dual-Stack braucht .WithDualMode().
+        // Assert: opt-in. The default is 127.0.0.1/IPv4-only (deterministic
+        // across Linux/CI), dual stack needs .WithDualMode().
         var options = builder.Build();
         Assert.False(options.EnableDualMode);
     }

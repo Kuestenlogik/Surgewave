@@ -55,12 +55,12 @@ legible against the dark canvas until the user has scrolled past.
     </div>
     <div class="hero-fg-text">
       {%- comment -%}
-      H1 broad — verkauft die ganze Plattform, nicht nur "Kafka aber besser".
-      Lede ohne Tech-Deepdive (librdkafka, Confluent.Kafka, Apache CLI haben
-      hier nichts zu suchen — gehoeren in eine Migrations-Detail-Section
-      weiter unten); Hero macht das Marketing-Pitch in drei Beats: was es ist,
-      wie es laeuft, was eingebaut ist. Bowire-Pattern (klar, ohne
-      Verb-Drilldown).
+      H1 broad — sells the whole platform, not just "Kafka but better".
+      Lede without a tech deep dive (librdkafka, Confluent.Kafka, Apache CLI have
+      no place here — they belong in a migration detail section
+      further down); the hero makes the marketing pitch in three beats: what it is,
+      how it runs, what is built in. Bowire pattern (clear, without a
+      verb drill-down).
       {%- endcomment -%}
       <h1 class="hero-title">Your Streams.<br><span class="hero-accent">At Scale. In&nbsp;Control.</span></h1>
       <p class="hero-lede">
@@ -89,14 +89,14 @@ legible against the dark canvas until the user has scrolled past.
           View on GitHub
         </a>
       </div>
-      <!-- Hero-Badges, Reihenfolge: Live-Hooks (NuGet+Downloads) zuerst —
-           wenn sie gefuellt sind, sind das die staerksten Social-Proof-
-           Signale (Bowire-Pattern). Pre-launch sind sie via CSS-Regel
-           ".hero-badge[data-badge]:not(:has([data-badge-loaded]))" komplett
-           ausgeblendet, sodass im jetzigen Zustand nur die statischen
-           Identity-Chips erscheinen (License → Wire → .NET 10 → Single
-           binary). Stars-Chip bleibt hinter `if false` bis das Repo
-           genug Sterne hat. -->
+      <!-- Hero badges, order: live hooks (NuGet + downloads) first —
+           once they are filled, they are the strongest social-proof
+           signals (Bowire pattern). Pre-launch they are completely hidden
+           via the CSS rule ".hero-badge[data-badge]:not(:has([data-badge-loaded]))",
+           so that in the current state only the static
+           identity chips appear (License → Wire → .NET 10 → Single
+           binary). The stars chip stays behind `if false` until the repo
+           has enough stars. -->
       <div class="hero-badges" aria-label="Project badges">
         {% if false %}
         <a class="hero-badge" href="https://github.com/Kuestenlogik/Surgewave" target="_blank" rel="noopener" data-badge="gh-stars">

@@ -16,13 +16,13 @@
         ErrorControl="normal"
         Account="LocalSystem" />
 
-      <!-- DelayedAutoStart (boot-order-hint) gibt's hier bewusst nicht:
-           WiX v5 blockiert das built-in <ServiceConfig>-Element mit
-           WIX1149 ('not documented to work as expected'). Der Boot-
-           order-Effekt war ohnehin nur ein Hint — `Start="auto"`
-           reicht. Wer's braucht, kann spaeter die
-           WixToolset.Util.wixext-Extension einbinden und
-           <util:ServiceConfig> nutzen. -->
+      <!-- DelayedAutoStart (boot-order hint) is deliberately not used here:
+           WiX v5 blocks the built-in <ServiceConfig> element with
+           WIX1149 ('not documented to work as expected'). The boot-order
+           effect was only a hint anyway — `Start="auto"`
+           is enough. Whoever needs it can later include the
+           WixToolset.Util.wixext extension and use
+           <util:ServiceConfig>. -->
 
       <ServiceControl
         Id="SurgewaveBrokerServiceControl"

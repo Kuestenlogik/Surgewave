@@ -7,10 +7,10 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Tests fuer <see cref="SurgewaveMarketplaceRepository"/>. Die Klasse hat keinen
-/// HttpClient-Hook im Konstruktor — daher wird der interne <c>_httpClient</c> via
-/// Reflection durch eine Instanz mit <see cref="StubHandler"/> ersetzt, bevor die
-/// Methoden gerufen werden.
+/// Tests for <see cref="SurgewaveMarketplaceRepository"/>. The class has no
+/// HttpClient hook in the constructor — so the internal <c>_httpClient</c> is replaced via
+/// reflection by an instance with <see cref="StubHandler"/> before the
+/// methods are called.
 /// </summary>
 public sealed class SurgewaveMarketplaceRepositoryTests
 {

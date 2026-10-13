@@ -147,8 +147,8 @@ internal static class RecordBatchStreamer
                 recordsPos += valueLength;
             }
 
-            // Skip headers — Kafka-v2 header lengths sind zigzag-signed
-            // varints (siehe WriteHeadersFromNativeBlock fuer den Hintergrund).
+            // Skip headers — Kafka v2 header lengths are zigzag-signed
+            // varints (see WriteHeadersFromNativeBlock for the background).
             var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             for (int h = 0; h < headerCount; h++)
             {
@@ -275,9 +275,9 @@ internal static class RecordBatchStreamer
 
             // Translate the Kafka-style headers back into the native wire
             // block (int32 count + int32-prefixed entries) so the client can
-            // decode them with NativeMessageHeaderCodec. Kafka-v2 header
-            // lengths sind zigzag-signed varints, der native Block ist
-            // int32 big-endian (Decoder-friendly).
+            // decode them with NativeMessageHeaderCodec. Kafka v2 header
+            // lengths are zigzag-signed varints, the native block is
+            // int32 big-endian (decoder-friendly).
             var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
             writer.Write(headerCount);
             for (int h = 0; h < headerCount; h++)

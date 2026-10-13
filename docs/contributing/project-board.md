@@ -32,7 +32,7 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | **Area** *(board field)* | The component | per product (`terrain`, `workbench`, `broker`, …); the `area:*` label says the same for issue search |
 | **Status** *(board field)* | Where the work sits in the flow | `Backlog` · `Next up` · `In progress` · `In review` · `Done` |
 | **Assignee** | Who holds it | never empty — unassigned means nobody decided |
-| **Parent issue** *(built-in sub-issues)* | Belongs to / depends on | an epic's slices are its sub-issues; "Folge von #N" in the text is not a link |
+| **Parent issue** *(built-in sub-issues)* | Belongs to / depends on | an epic's slices are its sub-issues; "follow-up of #N" in the text is not a link |
 
 **Order inside a section** is the `Priority` field, read by the roadmap generator; manual sorting on a board is the order of one view and nothing else — not on the ticket, not in the API, gone when the view is regrouped. Use it for the last fine ordering within a priority, never instead of one.
 
@@ -40,8 +40,8 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 
 Since 2026-09-19 (the convention was rolled out from Bowire) milestones and release versions are decoupled:
 
-- A **milestone is an ordered work section** — `M1 — Hygiene: CI, dependencies, licences`, `M2 — Multi-tenancy & data mesh`, … Its description is one short statement of the themes it contains and ends with the scope rule: *"Umfang festgelegt am <date>: ein Ticket gehört hierher, wenn es in eines dieser Themen fällt — sonst in den nächsten Abschnitt."* A section does not grow: a ticket outside its themes goes to the next section, or a new section is opened behind the last. Every ticket gets a milestone when it is created.
-- A **release gets its version number when it is cut**, by content (SemVer). A finished section *is* the release as a rule; a second section that finished at the same time may ride along. The tag names the sections it ships in its message — `git tag -a v0.6.0 -m "Surgewave v0.6.0 — M1 — Hygiene …"` — and [`scripts/resolve-milestone.mjs`](../../scripts/resolve-milestone.mjs) reads them for the release title and the drafted notes (falling back to a `v<base> — …` milestone for old tags, then to the frontmost complete section). After the cut the milestone is closed with *"Ausgeliefert in v0.6.0"*.
+- A **milestone is an ordered work section** — `M1 — Hygiene: CI, dependencies, licences`, `M2 — Multi-tenancy & data mesh`, … Its description is one short statement of the themes it contains and ends with the scope rule: *"Scope fixed on <date>: a ticket belongs here if it falls under one of these themes — otherwise into the next section. The section gets its version number only at the release cut."* A section does not grow: a ticket outside its themes goes to the next section, or a new section is opened behind the last. Every ticket gets a milestone when it is created.
+- A **release gets its version number when it is cut**, by content (SemVer). A finished section *is* the release as a rule; a second section that finished at the same time may ride along. The tag names the sections it ships in its message — `git tag -a v0.6.0 -m "Surgewave v0.6.0 — M1 — Hygiene …"` — and [`scripts/resolve-milestone.mjs`](../../scripts/resolve-milestone.mjs) reads them for the release title and the drafted notes (falling back to a `v<base> — …` milestone for old tags, then to the frontmost complete section). After the cut the milestone is closed with *"Shipped in v0.6.0"*.
 - **Release due** = the frontmost open milestone has no open ticket, CI is green, no pull request is open. `node scripts/resolve-milestone.mjs v<next>` says which section that is.
 
 ## Recommended views

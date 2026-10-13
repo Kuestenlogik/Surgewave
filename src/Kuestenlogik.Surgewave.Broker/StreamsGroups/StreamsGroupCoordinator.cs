@@ -168,9 +168,9 @@ public sealed class StreamsGroupCoordinator(
     // ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Alle Gruppen mit den Source-Topics ihrer Topologie — die Streams-Sicht fuer die
-    /// Schema-Impact-Analyse (#13). Sink-Topics kennt der Broker nicht: das Wire-Protokoll
-    /// traegt nur Subtopology-Sources, finale .To()-Senken bleiben clientseitig.
+    /// All groups with the source topics of their topology — the Streams view for the
+    /// schema impact analysis (#13). The broker does not know sink topics: the wire protocol
+    /// carries only subtopology sources, final .To() sinks stay on the client side.
     /// </summary>
     public IReadOnlyList<(string GroupId, IReadOnlyList<string> SourceTopics)> ListApplications()
     {
@@ -252,10 +252,10 @@ public sealed class StreamsGroupCoordinator(
                     Status = StreamsGroupStatus.Ok,
                     Phase = GetGroupPhase(group),
                     GroupEpoch = group.GroupEpoch,
-                    // StreamsGroup-State haelt KEIN separates AssignmentEpoch-Feld (anders als
-                    // Java/Kafka). AssignmentEpoch == GroupEpoch ist damit by-construction
-                    // garantiert — die KAFKA-20442-Invariante (empty group => epochs gleich) gilt
-                    // trivial.
+                    // The StreamsGroup state keeps NO separate AssignmentEpoch field (unlike
+                    // Java/Kafka). AssignmentEpoch == GroupEpoch is therefore guaranteed by
+                    // construction — the KAFKA-20442 invariant (empty group => epochs equal) holds
+                    // trivially.
                     AssignmentEpoch = group.GroupEpoch,
                     Topology = topology,
                     Members = members

@@ -20,8 +20,8 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
         {
             _avroReader.Read(schemaString);
 
-            // Chr.Avro folgt der Avro-Spec und ignoriert unbekannte logicalTypes — die
-            // vector-Attribute (dim, Elementtyp-Regel) prüft deshalb der Roh-JSON-Inspector.
+            // Chr.Avro follows the Avro spec and ignores unknown logicalTypes — so the
+            // raw-JSON inspector checks the vector attributes (dim, element type rule).
             var inspection = AvroVectorInspector.Inspect(schemaString);
             if (inspection.Errors.Count > 0)
             {
@@ -75,9 +75,9 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
                     errors.AddRange(forwardErrors.Select(e => $"Forward compatibility error with version {existing.Version}: {e}"));
                 }
 
-                // Vector-Evolution ist in beide Richtungen brechend (dim/dtype tragen die
-                // Speicher- und Rechensemantik der Konsumenten) und läuft deshalb außerhalb
-                // des (backward, forward)-Tupels über das Roh-JSON beider Seiten.
+                // Vector evolution is breaking in both directions (dim/dtype carry the
+                // storage and compute semantics of the consumers) and therefore runs outside
+                // the (backward, forward) tuple, over the raw JSON of both sides.
                 errors.AddRange(CheckVectorCompatibility(newSchemaString, existing.SchemaString)
                     .Select(e => $"Vector compatibility error with version {existing.Version}: {e}"));
             }
@@ -91,9 +91,9 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
     }
 
     /// <summary>
-    /// Vergleicht die Vector-Deklarationen beider Schemas pfadweise über das Roh-JSON (der
-    /// Chr.Avro-Baum kennt unbekannte logicalTypes nicht). Regel: auf einem Feldpfad, den beide
-    /// Seiten kennen, darf sich Vector-Sein, dim und dtype nicht ändern.
+    /// Compares the vector declarations of both schemas path by path over the raw JSON (the
+    /// Chr.Avro tree does not know unknown logicalTypes). Rule: on a field path that both
+    /// sides know, being a vector, dim and dtype must not change.
     /// </summary>
     private static List<string> CheckVectorCompatibility(string newSchemaJson, string existingSchemaJson)
     {
@@ -108,8 +108,8 @@ public sealed class AvroSchemaHandler : ISchemaTypeHandler
 
         foreach (var path in newSide.Vectors.Keys.Union(oldSide.Vectors.Keys))
         {
-            // Ein Pfad, den die andere Seite gar nicht als Feld hat, ist add/remove eines
-            // Feldes — das bewertet die reguläre Record-Kompatibilität, nicht die Vector-Regel.
+            // A path the other side does not have as a field at all is the add/remove of a
+            // field — that is judged by the regular record compatibility, not the vector rule.
             if (!newSide.FieldPaths.Contains(path) || !oldSide.FieldPaths.Contains(path))
             {
                 continue;

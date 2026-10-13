@@ -4,9 +4,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Core;
 
 /// <summary>
-/// Tests fuer <see cref="PluginLoader"/>. Wir nehmen die Test-Assembly selbst als
-/// "Plugin"-Assembly — dadurch koennen wir LoadPlugin/Unload/CreateInstance ohne
-/// extra Plugin-DLL pruefen.
+/// Tests for <see cref="PluginLoader"/>. We take the test assembly itself as the
+/// "plugin" assembly — that way we can check LoadPlugin/Unload/CreateInstance without
+/// an extra plugin DLL.
 /// </summary>
 public sealed class PluginLoaderTests
 {

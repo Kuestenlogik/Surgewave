@@ -11,10 +11,10 @@ namespace Kuestenlogik.Surgewave.Control.Security;
 /// </summary>
 public sealed class LdapAuthenticationService(ILogger<LdapAuthenticationService> logger)
 {
-    // Whitelist-Allowlist fuer LDAP-Benutzernamen: Buchstaben, Ziffern,
-    // Punkt, Bindestrich, Unterstrich, At-Zeichen (fuer UPN-Form
-    // user@domain). Backslash, Klammern, Sternchen und andere LDAP-
-    // Metazeichen sind verboten. Max 256 Zeichen.
+    // Allowlist for LDAP user names: letters, digits,
+    // dot, hyphen, underscore, at sign (for the UPN form
+    // user@domain). Backslash, parentheses, asterisks and other LDAP
+    // metacharacters are forbidden. Max 256 characters.
     private static readonly Regex ValidUsername =
         new(@"^[A-Za-z0-9._\-@]{1,256}$", RegexOptions.Compiled);
 
@@ -30,12 +30,12 @@ public sealed class LdapAuthenticationService(ILogger<LdapAuthenticationService>
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             return LdapAuthResult.Failure("Username and password are required.");
 
-        // Defense in depth gegen LDAP-Injection: zusaetzlich zum
-        // RFC-4515-Escaping (EscapeLdapFilterValue) verlangen wir einen
-        // strikten Whitelist-Allowlist fuer den Benutzernamen. Damit
-        // koennen LDAP-Filter-Metazeichen den Filter nicht mehr
-        // erreichen — die `Replace`-basierten Escapes laufen nur noch
-        // als Belt-and-Suspenders.
+        // Defense in depth against LDAP injection: in addition to the
+        // RFC 4515 escaping (EscapeLdapFilterValue) we require a
+        // strict allowlist for the user name. That way
+        // LDAP filter metacharacters can no longer reach the
+        // filter — the `Replace`-based escapes only run
+        // as belt-and-suspenders.
         if (!ValidUsername.IsMatch(username))
         {
             logger.LogWarning("Rejected LDAP authentication: username contains disallowed characters");

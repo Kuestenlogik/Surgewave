@@ -1,65 +1,65 @@
-# Surgewave Public-Benchmark AWS Kosten
+# Surgewave Public Benchmark AWS Costs
 
-> **Stand:** 2026-06-10. AWS-Preise schwanken — Tabelle vor jeder neuen Release-Runde gegen [AWS Pricing](https://aws.amazon.com/ec2/pricing/on-demand/) verifizieren und unten den Stand aktualisieren.
+> **As of:** 2026-06-10. AWS prices fluctuate — verify the table against [AWS Pricing](https://aws.amazon.com/ec2/pricing/on-demand/) before every new release round and update the date below.
 
-Das `Kuestenlogik.Surgewave.Benchmarks.Public`-Tool ist hardware-agnostisch, aber die **Public Reference Numbers** für jede Release laufen auf einer konsistenten AWS-Instanz, damit Vergleichbarkeit zwischen Releases garantiert ist und Externe die Zahlen unabhängig reproducen können.
+The `Kuestenlogik.Surgewave.Benchmarks.Public` tool is hardware-agnostic, but the **public reference numbers** for every release run on a consistent AWS instance, so that comparability between releases is guaranteed and outsiders can reproduce the numbers independently.
 
-## Reference-Hardware (Empfehlung)
+## Reference hardware (recommendation)
 
-| Field | Value | Warum |
+| Field | Value | Why |
 |---|---|---|
-| Instance type | `c7i.4xlarge` | 16 vCPU / 32 GiB RAM — passt zu Surgewave-Topology mit Broker + 2× Container (Kafka+Redpanda). Industriestandard für Broker-Vergleichs-Benchmarks (Redpanda + Confluent benchen auf c-Klasse). |
-| CPU | Intel Xeon 4th-gen Sapphire Rapids @ 3.2-3.8 GHz | Modern + verbreitet, AVX-512 verfügbar (relevant für Surgewave's SIMD-Pfade). |
-| Storage | EBS `gp3` 200 GiB, 10k IOPS, 250 MB/s | Schnell genug dass Disk-I/O nicht der Bottleneck wird, klein genug dass die Reservation nicht das Budget sprengt. |
-| Network | Bis 12.5 Gbps | Verhindert Network-Bottleneck bei high-throughput Tests. |
-| OS | Ubuntu 24.04 LTS x86_64 | Verbreitet, predictable Kernel-Verhalten, .NET 10 supported. |
-| Region | `eu-central-1` (Frankfurt) | Niedrige Latenz für Kuestenlogik-Setup. Andere Regionen ggf. günstiger — kosten unten zeigen Frankfurt-Preise. |
+| Instance type | `c7i.4xlarge` | 16 vCPU / 32 GiB RAM — fits the Surgewave topology with broker + 2× container (Kafka+Redpanda). Industry standard for broker comparison benchmarks (Redpanda + Confluent benchmark on the c class). |
+| CPU | Intel Xeon 4th-gen Sapphire Rapids @ 3.2-3.8 GHz | Modern + widespread, AVX-512 available (relevant for Surgewave's SIMD paths). |
+| Storage | EBS `gp3` 200 GiB, 10k IOPS, 250 MB/s | Fast enough that disk I/O does not become the bottleneck, small enough that the reservation does not blow the budget. |
+| Network | Up to 12.5 Gbps | Prevents a network bottleneck in high-throughput tests. |
+| OS | Ubuntu 24.04 LTS x86_64 | Widespread, predictable kernel behaviour, .NET 10 supported. |
+| Region | `eu-central-1` (Frankfurt) | Low latency for the Kuestenlogik setup. Other regions may be cheaper — the costs below show Frankfurt prices. |
 
-Alternative budgetfreundlich: `c6a.4xlarge` (AMD EPYC 3rd-gen) ~30 % günstiger, ähnliche Single-Thread-Performance, ohne AVX-512. Für die Marketing-Zahlen Intel bleiben, für Dev-Iteration AMD ok.
+Budget-friendly alternative: `c6a.4xlarge` (AMD EPYC 3rd-gen) ~30 % cheaper, similar single-thread performance, without AVX-512. Stay on Intel for the marketing numbers; AMD is fine for dev iteration.
 
-## Kosten pro Public-Run
+## Cost per public run
 
-Ein voller G3-Run umfasst:
-- `throughput-1p1c` scenario × 4 Systems × 3 Payload-Größen (100 B / 1 KB / 10 KB) = 12 Sub-Runs
-- `latency-acks-all` scenario × 4 Systems × 3 Payload-Größen = 12 Sub-Runs
-- Phase 2 scenarios (TailLatency, MultiPartitionFanout, ConsumerLagRecovery) × 4 Systems = ~12 weitere Sub-Runs
+A full G3 run comprises:
+- `throughput-1p1c` scenario × 4 systems × 3 payload sizes (100 B / 1 KB / 10 KB) = 12 sub-runs
+- `latency-acks-all` scenario × 4 systems × 3 payload sizes = 12 sub-runs
+- Phase 2 scenarios (TailLatency, MultiPartitionFanout, ConsumerLagRecovery) × 4 systems = ~12 more sub-runs
 
-Pro Sub-Run: ~3 min Warmup + Measurement + Container-Teardown → ~36 Sub-Runs × 3 min ≈ **108 min**.
-Plus initialer Container-Pull (Kafka + Redpanda Image) + Setup: ~12 min.
-Plus Save-Output + Cleanup: ~5 min.
+Per sub-run: ~3 min warmup + measurement + container teardown → ~36 sub-runs × 3 min ≈ **108 min**.
+Plus the initial container pull (Kafka + Redpanda image) + setup: ~12 min.
+Plus save output + cleanup: ~5 min.
 
-**Gesamtdauer: ~2 h 5 min wall-clock pro Public-Run.**
+**Total duration: ~2 h 5 min wall-clock per public run.**
 
-### Cost-Breakdown
+### Cost breakdown
 
-| Posten | On-Demand (Frankfurt) | Spot (Frankfurt) | Anmerkung |
+| Item | On-demand (Frankfurt) | Spot (Frankfurt) | Note |
 |---|---:|---:|---|
-| `c7i.4xlarge` Compute, 2 h 5 min | **$1.84** | **~$0.68** | `c7i.4xlarge` = $0.886/h on-demand, ~$0.32/h spot (3-tage Mittel) |
-| EBS `gp3` 200 GiB, 1 day Anteil | $0.05 | $0.05 | Volume runs ggf. länger als die Compute-Stunden, ein Tag konservativ |
-| Egress (Markdown/JSON Result-Files, ~2 MB) | < $0.01 | < $0.01 | Vernachlässigbar |
+| `c7i.4xlarge` compute, 2 h 5 min | **$1.84** | **~$0.68** | `c7i.4xlarge` = $0.886/h on-demand, ~$0.32/h spot (3-day average) |
+| EBS `gp3` 200 GiB, 1 day share | $0.05 | $0.05 | The volume may run longer than the compute hours, one day is conservative |
+| Egress (Markdown/JSON result files, ~2 MB) | < $0.01 | < $0.01 | Negligible |
 | **Total** | **~$1.90** | **~$0.74** | |
 
-### Pro-Release-Kosten
+### Cost per release
 
-Ein Public-Run pro Major-Release-Tag:
-- **v0.2 → v1.0**: Annahme 4 Major-Releases (0.2 / 0.3 / 0.4 / 1.0) → **4 × $1.90 = ~$7.60** on-demand, **~$3 spot**, über das ganze Jahr.
-- Plus 2-3 Verification-Runs vor jedem Release-Cut (z.B. nach Performance-PRs): **~$15-20/Jahr** on-demand, **~$6-8/Jahr** spot.
+One public run per major release tag:
+- **v0.2 → v1.0**: assuming 4 major releases (0.2 / 0.3 / 0.4 / 1.0) → **4 × $1.90 = ~$7.60** on-demand, **~$3 spot**, over the whole year.
+- Plus 2-3 verification runs before each release cut (e.g. after performance PRs): **~$15-20/year** on-demand, **~$6-8/year** spot.
 
-**Erwarteter Jahres-Bedarf: $15-25 on-demand / $5-10 spot.** Vernachlässigbar.
+**Expected annual need: $15-25 on-demand / $5-10 spot.** Negligible.
 
-### Was es teurer machen würde
+### What would make it more expensive
 
-- **Mehr Hardware-Profile parallel**: c7i + c7a + c6i würden 3× kosten. Vorschlag: ein Reference-Profil (c7i) + ein „User-might-have-this" Profil (c6a) für Vergleich, mehr nicht.
-- **Längere Iterations**: aktuell 3 Measurement-Rounds pro Scenario. Bei P99.99-Stabilität wären 10 Rounds besser → ~3 h pro Run → ~$2.85 statt $1.90.
-- **GP3 IOPS hochdrehen**: 16k IOPS / 1000 MB/s wären präziser für Storage-bound Scenarios, kosten aber ~$10/Monat zusätzlich solange das Volume existiert. Lieber das Volume nach jedem Run löschen.
-- **Multi-AZ-Setups** (für Replication-Tests): jeder Cross-AZ-Run nimmt 2-3× Compute-Zeit + Cross-AZ-Egress. Erst relevant wenn Replication-Performance gemessen werden soll (nicht G3-Scope).
+- **More hardware profiles in parallel**: c7i + c7a + c6i would cost 3×. Proposal: one reference profile (c7i) + one "user-might-have-this" profile (c6a) for comparison, nothing more.
+- **Longer iterations**: currently 3 measurement rounds per scenario. For P99.99 stability 10 rounds would be better → ~3 h per run → ~$2.85 instead of $1.90.
+- **Turning up GP3 IOPS**: 16k IOPS / 1000 MB/s would be more precise for storage-bound scenarios, but cost ~$10/month extra for as long as the volume exists. Better to delete the volume after each run.
+- **Multi-AZ setups** (for replication tests): every cross-AZ run takes 2-3× the compute time + cross-AZ egress. Only relevant once replication performance is to be measured (not G3 scope).
 
-## Setup-Sequence (manuell, vorerst)
+## Setup sequence (manual, for now)
 
-Bis `terraform.tf` (siehe `main.tf` in diesem Verzeichnis) finalisiert ist:
+Until `terraform.tf` (see `main.tf` in this directory) is finalised:
 
 ```bash
-# 1) Instanz starten (us-east-1 wäre $0.10 günstiger, Frankfurt für niedrige Setup-Latenz)
+# 1) Start the instance (us-east-1 would be $0.10 cheaper, Frankfurt for low setup latency)
 aws ec2 run-instances \
   --image-id ami-XXXXXXXX  # Ubuntu 24.04 LTS x86_64 in eu-central-1
   --instance-type c7i.4xlarge \
@@ -73,7 +73,7 @@ sudo apt-get update && sudo apt-get install -y docker.io
 curl -fsSL https://dot.net/v1/dotnet-install.sh | sudo bash -s -- --version 10.0.7 --install-dir /usr/share/dotnet
 sudo ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
 
-# 3) Tool installieren + Run
+# 3) Install the tool + run
 dotnet tool install -g Kuestenlogik.Surgewave.Benchmarks
 ~/.dotnet/tools/surgewave-bench public \
   --message-count 1000000 \
@@ -81,17 +81,17 @@ dotnet tool install -g Kuestenlogik.Surgewave.Benchmarks
   --output ~/results-v0.2.md \
   --json ~/results-v0.2.json
 
-# 4) Results runter, Instanz terminieren
+# 4) Pull the results down, terminate the instance
 scp ubuntu@<public-ip>:~/results-v0.2.* docs/benchmarks/
 aws ec2 terminate-instances --instance-ids i-XXXXXXXXX
 ```
 
-Geschätzte Hands-on-Zeit: 15 min Setup + ~2 h unattended Run + 5 min Pull-back-and-cleanup. Wenn das via Terraform automatisiert ist, sinkt das auf 5 min Hands-on.
+Estimated hands-on time: 15 min setup + ~2 h unattended run + 5 min pull-back-and-cleanup. Once this is automated via Terraform, it drops to 5 min hands-on.
 
-## Cost-Watch
+## Cost watch
 
-Bei monatlichen Audits sicherstellen, dass:
-- keine vergessene Instance läuft (`aws ec2 describe-instances --filters 'Name=tag:Purpose,Values=surgewave-bench' 'Name=instance-state-name,Values=running'`)
-- keine verwaisten EBS-Volumes existieren (`aws ec2 describe-volumes --filters 'Name=status,Values=available'`)
+During monthly audits make sure that:
+- no forgotten instance is running (`aws ec2 describe-instances --filters 'Name=tag:Purpose,Values=surgewave-bench' 'Name=instance-state-name,Values=running'`)
+- no orphaned EBS volumes exist (`aws ec2 describe-volumes --filters 'Name=status,Values=available'`)
 
-Eine vergessene `c7i.4xlarge`-Instanz für einen Monat = **$640**. Das ist die einzige relevante Fail-Mode dieser Setup-Variante. Terraform mit `terraform destroy` als Mandatory-Cleanup-Step entschärft das.
+A forgotten `c7i.4xlarge` instance for one month = **$640**. That is the only relevant fail mode of this setup variant. Terraform with `terraform destroy` as a mandatory cleanup step defuses it.

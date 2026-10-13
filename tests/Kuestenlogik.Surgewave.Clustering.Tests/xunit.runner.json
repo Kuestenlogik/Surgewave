@@ -1,6 +1,6 @@
 {
   "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
 
-  "// parallelizeTestCollections": "RaftIntegrationTests + RollingUpgradeTests starten Multi-Broker-Cluster im Test-Body. Parallel laufen heisst mehrere Cluster gleichzeitig auf Random-Ports → Linux-Runner Port/Process-Exhaustion (siehe IntegrationTests/xunit.runner.json fuer Hintergrund).",
+  "// parallelizeTestCollections": "RaftIntegrationTests + RollingUpgradeTests start multi-broker clusters in the test body. Running in parallel means several clusters at once on random ports → Linux runner port/process exhaustion (see IntegrationTests/xunit.runner.json for the background).",
   "parallelizeTestCollections": false
 }

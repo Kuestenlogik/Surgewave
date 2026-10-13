@@ -40,9 +40,9 @@ public static class SchemaRegistryRestApi
         // Register the compatibility checker (uses the handler registry)
         services.AddSingleton<CompatibilityChecker>();
 
-        // Impact-Analyse (#13): beantwortet "was bricht, wenn diese Version shippt?".
-        // Die ISchemaLineageSource ist optional - der Broker-Host registriert eine, die
-        // Standalone-Registry hat keine; das Kompatibilitaets-Urteil haengt nie an ihr.
+        // Impact analysis (#13): answers "what breaks when this version ships?".
+        // The ISchemaLineageSource is optional - the broker host registers one, the
+        // standalone registry has none; the compatibility verdict never depends on it.
         services.AddSingleton<SchemaImpactAnalyzer>();
 
         services.AddOpenApi(options =>
@@ -218,8 +218,8 @@ public static class SchemaRegistryRestApi
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict);
 
-        // Surgewave-Erweiterung (#13): Pre-Deploy-Check fuer CI - volle Impact-Analyse
-        // (Kompatibilitaet + betroffene Pipelines + Downstream-Topics), ohne zu registrieren.
+        // Surgewave extension (#13): pre-deploy check for CI - full impact analysis
+        // (compatibility + affected pipelines + downstream topics), without registering.
         group.MapPost("/subjects/{subject}/impact", CheckImpact)
             .WithName("CheckSchemaImpact")
             .WithSummary("Analyze the impact of a schema change without registering it")
@@ -456,7 +456,7 @@ public static class SchemaRegistryRestApi
 
         var schemaType = ParseSchemaType(request.SchemaType);
 
-        // Validate schema - auch mit force: ein syntaktisch kaputtes Schema hilft niemandem.
+        // Validate schema - even with force: a syntactically broken schema helps nobody.
         var (isValid, error) = checker.ValidateSchema(request.Schema, schemaType);
         if (!isValid)
         {
@@ -472,8 +472,8 @@ public static class SchemaRegistryRestApi
             var compatibilityResult = checker.CheckCompatibility(request.Schema, schemaType, existingSchemas, compatibility);
             if (!compatibilityResult.IsCompatible)
             {
-                // #13: nicht abstrakt "inkompatibel", sondern WER bricht - die Impact-Analyse
-                // liefert die Namen der direkten Leser und die Downstream-Topics dazu.
+                // #13: not an abstract "incompatible" but WHO breaks - the impact analysis
+                // supplies the names of the direct readers and the downstream topics.
                 var impact = impactAnalyzer.Analyze(subject, request.Schema, schemaType);
                 var message = string.Join("; ", compatibilityResult.Messages ?? ["Schema is not compatible"]);
                 if (impact.AffectedPipelines.Count > 0)
@@ -498,7 +498,7 @@ public static class SchemaRegistryRestApi
         }
         else if (existingSchemas.Count > 0 && force)
         {
-            // Notausgang fuer den Betreiber: registriert trotz Bruch, aber nie stumm.
+            // Emergency exit for the operator: registers despite the break, but never silently.
             var impact = impactAnalyzer.Analyze(subject, request.Schema, schemaType);
             if (!impact.IsCompatible)
             {
@@ -519,8 +519,8 @@ public static class SchemaRegistryRestApi
     }
 
     /// <summary>
-    /// Pre-Deploy-Check (#13): dieselbe Analyse, die das Register-Gate speist, als eigener
-    /// Endpoint fuer CI - Antwort ist immer 200, das Urteil steht im Report (compatible).
+    /// Pre-deploy check (#13): the same analysis that feeds the register gate, as an endpoint
+    /// of its own for CI - the answer is always 200, the verdict is in the report (compatible).
     /// </summary>
     private static IResult CheckImpact(
         string subject,

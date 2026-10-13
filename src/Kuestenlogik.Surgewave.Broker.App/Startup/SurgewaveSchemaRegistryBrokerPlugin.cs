@@ -84,9 +84,9 @@ public sealed class SurgewaveSchemaRegistryBrokerPlugin : IBrokerPlugin
             DefaultCompatibility = compatibilityMode
         });
 
-        // Lineage-Quelle fuer die Schema-Impact-Analyse (#13): beantwortet on demand aus
-        // OffsetStore, Streams-Topologien und Connect-Pipelines, wer ein Topic liest -
-        // kein Recording, kein Hot-Path. Die Standalone-Registry hat bewusst keine.
+        // Lineage source for the schema impact analysis (#13): answers on demand from the
+        // OffsetStore, Streams topologies and Connect pipelines who reads a topic -
+        // no recording, no hot path. The standalone registry deliberately has none.
         services.AddSingleton<Kuestenlogik.Surgewave.Schema.Registry.Lineage.ISchemaLineageSource,
             BrokerSchemaLineageSource>();
 
@@ -269,13 +269,13 @@ public sealed class SurgewaveSchemaRegistryBrokerPlugin : IBrokerPlugin
             },
             getSchemaTypes: () => compatibilityChecker.GetSupportedTypes().ToList());
 
-        // Map REST + gRPC endpoints. mapBowireWorkbench: false — die Workbench
-        // gehört dem Diagnostics.Bowire-Plugin, nicht mehr der Program.cs. Der
-        // Grund für das Flag bleibt derselbe: ein zweites MapBowire("/bowire")
-        // im selben Host macht jede /bowire-Anfrage zum 500
-        // (AmbiguousMatchException). Dass hier auch dann nicht gemappt wird,
-        // wenn das Plugin gar nicht installiert ist, ist beabsichtigt — sonst
-        // brächte die Installation des Plugins genau diese Route.
+        // Map REST + gRPC endpoints. mapBowireWorkbench: false — the workbench
+        // belongs to the Diagnostics.Bowire plugin, no longer to Program.cs. The
+        // reason for the flag stays the same: a second MapBowire("/bowire")
+        // in the same host turns every /bowire request into a 500
+        // (AmbiguousMatchException). That nothing is mapped here even when
+        // the plugin is not installed at all is intended — otherwise
+        // installing the plugin would bring exactly this route.
         app.MapSurgewaveSchemaRegistry(mapBowireWorkbench: false);
         app.MapGrpcService<SchemaRegistryServiceImpl>();
 

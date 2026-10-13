@@ -288,18 +288,18 @@
 
         try
         {
-            // Single source of truth: derselbe Marketplace-Service der die installierten
-            // Plugins fuer die Marketplace-Page bereitstellt. Filter auf IsInstalled=true
-            // damit der Connectors-Tab nur die lokal installierten zeigt. Vermeidet einen
-            // separaten REST-Endpoint, der mit der Marketplace-Liste divergieren koennte.
+            // Single source of truth: the same marketplace service that provides the installed
+            // plugins for the Marketplace page. Filter on IsInstalled=true
+            // so the Connectors tab shows only the locally installed ones. Avoids a
+            // separate REST endpoint that could diverge from the marketplace list.
             var searchResult = await Marketplace.SearchAsync(query: null, skip: 0, take: 200);
             _plugins = searchResult.Plugins
                 .Where(p => p.IsInstalled)
                 .Select(p => new ConnectorPluginInfo(
                     ClassName: p.Name ?? p.PackageId,
-                    // ConnectorTypes ist die Vereinigung aller Sink/Source/Processor-Klassen
-                    // im Package. Komma-getrennt rendern wir es als ein Badge pro Card,
-                    // statt N Cards pro Package.
+                    // ConnectorTypes is the union of all sink/source/processor classes
+                    // in the package. Comma-separated, we render it as one badge per card
+                    // instead of N cards per package.
                     Type: p.ConnectorTypes is { Count: > 0 }
                         ? string.Join(", ", p.ConnectorTypes)
                         : "unknown",

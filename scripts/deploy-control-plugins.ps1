@@ -1,36 +1,36 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Local dev-loop helper: baut die vier Control-UI-Premium-Plugins
-    (Functions / Replication / Governance / AI) als .swpkg und installiert
-    sie idempotent ueber `surgewave plugins install` in
+    Local dev-loop helper: builds the four premium Control UI plugins
+    (Functions / Replication / Governance / AI) as .swpkg and installs
+    them idempotently via `surgewave plugins install` into
     src/Kuestenlogik.Surgewave.Control/plugins/.
 
 .DESCRIPTION
-    Erwartet die Premium-Repos als Sibling-Klone neben Surgewave/:
+    Expects the premium repos as sibling clones next to Surgewave/:
       ..\Surgewave.Functions
       ..\Surgewave.Replication
       ..\Surgewave.Governance
       ..\Surgewave.Ai
 
-    Pro Plugin:
+    Per plugin:
       1. dotnet publish src/<Plugin>.Control -c Release -p:SurgewavePackPlugin=true
          -> artifacts/pluginPackage/<plugin-id>-<version>.swpkg
       2. surgewave plugins install <swpkg> -d <target-plugins-dir> -f
-         (-f setzt Idempotenz um: ueberschreibt eine evtl. vorhandene
-         alte Installation komplett; SHA256 wird verifiziert)
+         (-f implements idempotency: completely overwrites any existing
+         old installation; SHA256 is verified)
 
-    Identische Pipeline wie der Production-Install-Path: das CLI nutzt
-    `PluginPackageManager.InstallAsync`, das auch der Broker und das
-    Marketplace fuer Remote-Installs verwenden.
+    Same pipeline as the production install path: the CLI uses
+    `PluginPackageManager.InstallAsync`, which the broker and the
+    marketplace also use for remote installs.
 
 .PARAMETER SkipBuild
-    Skip dotnet publish und nur die bereits vorhandenen .swpkg installieren.
+    Skip dotnet publish and only install the .swpkg files that already exist.
 
 .PARAMETER NoClean
-    Komplette plugins/-Folder NICHT vorher leeren. Default: alles weg,
-    sauberer Start; mit -NoClean koennen einzelne Re-Installs getestet
-    werden ohne die anderen Plugins zu verlieren.
+    Do NOT empty the whole plugins/ folder first. Default: everything goes,
+    clean start; with -NoClean individual re-installs can be tested
+    without losing the other plugins.
 
 .EXAMPLE
     pwsh scripts/deploy-control-plugins.ps1
@@ -51,7 +51,7 @@ $PluginsRoot = Join-Path $RepoRoot "src\Kuestenlogik.Surgewave.Control\plugins"
 $SurgewaveCli = Join-Path $RepoRoot "artifacts\bin\Kuestenlogik.Surgewave.Tool\Release\surgewave.exe"
 
 if (-not (Test-Path $SurgewaveCli)) {
-    Write-Host "  surgewave CLI nicht gebaut: $SurgewaveCli" -ForegroundColor Red
+    Write-Host "  surgewave CLI not built: $SurgewaveCli" -ForegroundColor Red
     Write-Host "  → dotnet build src/Kuestenlogik.Surgewave.Tool -c Release" -ForegroundColor Gray
     exit 1
 }
@@ -89,9 +89,9 @@ Write-Host "  Target: $PluginsRoot" -ForegroundColor Gray
 Write-Host "  CLI:    $SurgewaveCli" -ForegroundColor Gray
 Write-Host ""
 
-# Sauberer Start: das ganze plugins/ wegraeumen, sonst koennen
-# umbenannte oder geloeschte Plugins als stale Folder ueberleben.
-# Mit -NoClean kann der Caller das ueberspringen.
+# Clean start: clear out the whole plugins/ folder, otherwise renamed
+# or deleted plugins can survive as stale folders.
+# The caller can skip this with -NoClean.
 if (-not $NoClean -and (Test-Path $PluginsRoot)) {
     Write-Host "  Cleaning $PluginsRoot..." -ForegroundColor Yellow
     Remove-Item -Path $PluginsRoot -Recurse -Force
@@ -101,7 +101,7 @@ foreach ($p in $Plugins) {
     $repoPath = Join-Path $RepoRoot $p.Repo
     $repoPath = (Resolve-Path -Path $repoPath -ErrorAction SilentlyContinue)?.Path
     if (-not $repoPath -or -not (Test-Path $repoPath)) {
-        Write-Host "  [SKIP] $($p.Name) — Repo nicht gefunden: $($p.Repo)" -ForegroundColor Yellow
+        Write-Host "  [SKIP] $($p.Name) — repo not found: $($p.Repo)" -ForegroundColor Yellow
         continue
     }
 
@@ -122,14 +122,14 @@ foreach ($p in $Plugins) {
     }
 
     if (-not (Test-Path $swpkgPath)) {
-        Write-Host "      [ERROR] .swpkg fehlt: $swpkgPath" -ForegroundColor Red
+        Write-Host "      [ERROR] .swpkg missing: $swpkgPath" -ForegroundColor Red
         exit 1
     }
 
-    # `surgewave plugins install` ist derselbe Code-Path wie ein
-    # Marketplace- oder Remote-Install: SHA256-Verify + PluginPackageManager.
-    # `-f` ueberschreibt eine vorhandene gleichnamige Installation, was
-    # diesen lokalen Dev-Loop idempotent macht.
+    # `surgewave plugins install` is the same code path as a
+    # marketplace or remote install: SHA256 verify + PluginPackageManager.
+    # `-f` overwrites an existing installation of the same name, which
+    # makes this local dev loop idempotent.
     Write-Host "      Install...  " -NoNewline
     $installLog = & $SurgewaveCli plugins install $swpkgPath -d $PluginsRoot -f 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -138,8 +138,8 @@ foreach ($p in $Plugins) {
         exit 1
     }
     Write-Host "OK" -ForegroundColor Green
-    # Die "Installed ... v..." -Zeile aus dem CLI durchreichen, ohne
-    # die "Installing plugin..." Spinner-Texte.
+    # Pass through the "Installed ... v..." line from the CLI, without
+    # the "Installing plugin..." spinner texts.
     $installLog |
         Where-Object { $_ -match 'Installed|Upgraded|SHA256' } |
         ForEach-Object { Write-Host "        $_" -ForegroundColor Gray }

@@ -79,7 +79,7 @@ public sealed class VectorSchemaTests
         SchemaString = schemaString,
     };
 
-    // ---- Gemeinsames Modell ----
+    // ---- Shared model ----
 
     [Theory]
     [InlineData("f32", VectorDtype.F32)]
@@ -118,8 +118,8 @@ public sealed class VectorSchemaTests
     [Fact]
     public void Avro_ValidVectorSchema_Validates()
     {
-        // Beweist zugleich, dass Chr.Avro den unbekannten logicalType spec-konform toleriert —
-        // fiele das, wiese Validate jedes Vector-Schema ab und dieser Test schlüge an.
+        // Also proves that Chr.Avro tolerates the unknown logicalType as the spec requires —
+        // if that broke, Validate would reject every vector schema and this test would fail.
         var (isValid, error) = Avro.Validate(AvroSchema(AvroVector768));
         Assert.True(isValid, error);
     }
@@ -146,8 +146,8 @@ public sealed class VectorSchemaTests
 
     [Theory]
     [InlineData(AvroVector1536)]     // dim 768 -> 1536
-    [InlineData(AvroVectorF64)]      // dtype f32 -> f64 (klassisch sogar promotable!)
-    [InlineData(AvroPlainFloatArray)] // Vector-Annotation entfernt
+    [InlineData(AvroVectorF64)]      // dtype f32 -> f64 (classically even promotable!)
+    [InlineData(AvroPlainFloatArray)] // vector annotation removed
     public void Avro_VectorChange_IsIncompatible(string newEmbeddingType)
     {
         var result = Avro.CheckCompatibility(
@@ -161,7 +161,7 @@ public sealed class VectorSchemaTests
     [Fact]
     public void Avro_PlainFloatArrays_StayUnaffected()
     {
-        // Regressionswächter: die Vector-Regel darf gewöhnliche Arrays nicht anfassen.
+        // Regression guard: the vector rule must not touch ordinary arrays.
         var result = Avro.CheckCompatibility(
             AvroSchema(AvroPlainFloatArray),
             [Existing(AvroSchema(AvroPlainFloatArray), SchemaType.Avro)],
@@ -223,8 +223,8 @@ public sealed class VectorSchemaTests
     }
 
     [Theory]
-    [InlineData("float embedding = 2 [(surgewave.vector).dim = 768];")]          // nicht repeated
-    [InlineData("repeated string embedding = 2 [(surgewave.vector).dim = 768];")] // falscher Typ
+    [InlineData("float embedding = 2 [(surgewave.vector).dim = 768];")]          // not repeated
+    [InlineData("repeated string embedding = 2 [(surgewave.vector).dim = 768];")] // wrong type
     [InlineData("repeated float embedding = 2 [(surgewave.vector).dim = 0];")]    // dim 0
     public void Protobuf_MalformedVector_IsRejected(string field)
     {
@@ -244,8 +244,8 @@ public sealed class VectorSchemaTests
     }
 
     [Theory]
-    [InlineData("repeated float embedding = 2 [(surgewave.vector).dim = 1536];")] // dim-Wechsel
-    [InlineData("repeated float embedding = 2;")]                                 // Annotation entfernt
+    [InlineData("repeated float embedding = 2 [(surgewave.vector).dim = 1536];")] // dim change
+    [InlineData("repeated float embedding = 2;")]                                 // annotation removed
     public void Protobuf_VectorChange_IsIncompatible(string newField)
     {
         var result = Protobuf.CheckCompatibility(
@@ -256,7 +256,7 @@ public sealed class VectorSchemaTests
         Assert.Contains(result.Messages!, m => m.Contains("vector", StringComparison.OrdinalIgnoreCase));
     }
 
-    // ---- Client-Attribut -> Schemagenerierung -> Registry-Validierung (end-to-end) ----
+    // ---- Client attribute -> schema generation -> registry validation (end-to-end) ----
 
     private sealed class DocumentChunk
     {
@@ -302,7 +302,7 @@ public sealed class VectorSchemaTests
     [Fact]
     public void Annotators_RejectNonFloatMembers_AtSchemaGeneration()
     {
-        // Fail fast beim ersten Serialisieren statt still ein Schema ohne Garantie zu liefern.
+        // Fail fast on the first serialisation instead of silently delivering a schema without a guarantee.
         Assert.Throws<InvalidOperationException>(() =>
             JsonVectorSchemaAnnotator.Apply(
                 NJsonSchema.JsonSchema.FromType<BrokenChunk>(), typeof(BrokenChunk)));

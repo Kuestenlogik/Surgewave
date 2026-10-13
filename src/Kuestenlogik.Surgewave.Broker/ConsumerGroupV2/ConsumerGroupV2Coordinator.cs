@@ -238,10 +238,10 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
                         ClientId = m.ClientId,
                         ClientHost = m.ClientHost,
                         SubscribedTopicNames = [.. m.SubscribedTopicNames],
-                        // KAFKA-20431: MemberAssignment muss assigned + pending-revocation enthalten,
-                        // sonst "verschwinden" Partitions waehrend der Reconciliation aus Admin-Sicht.
-                        // Pending-Revocation in Surgewave = OwnedTopicPartitions \ Assignment
-                        // (was der Member noch besitzt, aber nicht mehr kommuniziert bekommen soll).
+                        // KAFKA-20431: MemberAssignment must contain assigned + pending revocation,
+                        // otherwise partitions "disappear" from the admin view during reconciliation.
+                        // Pending revocation in Surgewave = OwnedTopicPartitions \ Assignment
+                        // (what the member still owns but should no longer be told about).
                         MemberAssignment = ToNeutralAssignmentWithPendingRevocation(m),
                         TargetAssignment = ToNeutralAssignment(m.TargetAssignment),
                     });
@@ -297,13 +297,13 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     }
 
     /// <summary>
-    /// KAFKA-20434: Aktualisiert <see cref="ConsumerGroupV2State.AssignorName"/>, wenn der vom
-    /// Heartbeat gemeldete <paramref name="serverAssignor"/> vom aktuellen Group-Wert abweicht,
-    /// und bumpt <c>GroupEpoch</c> entsprechend. In Java/Kafka ist der PreferredServerAssignor
-    /// per-Member; Surgewave fuehrt nur einen Group-Level-Wert. Das ist strikter — jeder
-    /// Member-Heartbeat mit abweichendem Assignor triggert einen Recompute, also haben wir das
-    /// Java-Problem "static members rejoin with different assignor recomputed nicht" by-design
-    /// nicht.
+    /// KAFKA-20434: Updates <see cref="ConsumerGroupV2State.AssignorName"/> when the
+    /// <paramref name="serverAssignor"/> reported by the heartbeat differs from the current group value,
+    /// and bumps <c>GroupEpoch</c> accordingly. In Java/Kafka the PreferredServerAssignor is
+    /// per member; Surgewave keeps only one group-level value. That is stricter — every
+    /// member heartbeat with a different assignor triggers a recompute, so by design we do not
+    /// have the Java problem "static members rejoin with different assignor is not
+    /// recomputed".
     /// </summary>
     private static bool TryUpdateAssignor(ConsumerGroupV2State group, string? serverAssignor)
     {

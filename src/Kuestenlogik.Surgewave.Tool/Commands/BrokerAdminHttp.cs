@@ -20,7 +20,7 @@ public static class BrokerAdminHttp
     /// </summary>
     public static HttpClient Create(string bootstrapHost, int apiPort = DefaultApiPort)
     {
-#pragma warning disable CA2000 // Ownership wird via disposeHandler:true an den HttpClient übertragen
+#pragma warning disable CA2000 // Ownership is transferred to the HttpClient via disposeHandler:true
         var handler = new HttpClientHandler
         {
             CheckCertificateRevocationList = true
@@ -32,7 +32,7 @@ public static class BrokerAdminHttp
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
 
-        // disposeHandler: true — der Handler gehört dem Client und wird mit ihm entsorgt.
+        // disposeHandler: true — the handler belongs to the client and is disposed with it.
         return new HttpClient(handler, disposeHandler: true)
         {
             BaseAddress = new Uri($"https://{bootstrapHost}:{apiPort}"),

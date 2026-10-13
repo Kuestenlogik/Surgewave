@@ -77,12 +77,12 @@ if (authConfig.Enabled && authConfig.Providers.Length > 0)
     builder.Services.AddTransient<BearerTokenDelegatingHandler>();
 }
 
-// CascadingAuthenticationState + Authorization-Policies muessen IMMER registriert sein:
-// 19 Pages nutzen <AuthorizeView Policy="XxxManage">. Ohne den Cascading-Provider
-// crasht das Render mit "Authorization requires a cascading parameter of
-// type Task<AuthenticationState>"; ohne registrierte Policies crasht es mit
-// "The AuthorizationPolicy named: 'XxxManage' was not found." — selbst wenn Auth global disabled ist.
-// Bei disabled Auth schlaegt der Role-Check fehl und das <NotAuthorized>-Fragment rendert.
+// CascadingAuthenticationState + authorization policies must ALWAYS be registered:
+// 19 pages use <AuthorizeView Policy="XxxManage">. Without the cascading provider
+// rendering crashes with "Authorization requires a cascading parameter of
+// type Task<AuthenticationState>"; without registered policies it crashes with
+// "The AuthorizationPolicy named: 'XxxManage' was not found." — even when auth is disabled globally.
+// With auth disabled the role check fails and the <NotAuthorized> fragment renders.
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthorizationBuilder()
     .AddSurgewavePolicies(authConfig);
@@ -148,10 +148,10 @@ AddBearerTokenHandler(builder.Services.AddHttpClient<IRepositoryApiClient, Repos
 AddBearerTokenHandler(builder.Services.AddHttpClient<IKvApiClient, KvApiClient>(c => ConfigureHttpClient(c)));
 AddBearerTokenHandler(builder.Services.AddHttpClient<ITransactionsApiClient, TransactionsApiClient>(c => ConfigureHttpClient(c)));
 
-// Named-Client "SurgewaveApi" + Roh-HttpClient (@inject HttpClient) — beide mit
-// Broker-BaseAddress, damit Seiten ohne typisierten SDK-Client (Operations,
-// CDC, Queue, IntentTopicCreator, SchemaEvolution, Wasm) relative /api/*-Pfade
-// gegen den Broker aufrufen können.
+// Named client "SurgewaveApi" + raw HttpClient (@inject HttpClient) — both with the
+// broker BaseAddress, so pages without a typed SDK client (Operations,
+// CDC, Queue, IntentTopicCreator, SchemaEvolution, Wasm) can call relative /api/* paths
+// against the broker.
 AddBearerTokenHandler(builder.Services.AddHttpClient("SurgewaveApi", c => ConfigureHttpClient(c)));
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("SurgewaveApi"));
 
@@ -182,9 +182,9 @@ builder.Services.AddScoped<AssistantState>();
 builder.Services.AddScoped<AssistantSettings>();
 builder.Services.AddScoped<IMetricsAnalyzer, MetricsAnalyzer>();
 builder.Services.AddScoped<ITuningAdvisor, TuningAdvisor>();
-// HttpClient-Factory bleibt static — kein Scoped-Service-Resolve.
-// LlmClient nutzt absolute URLs aus _settings.LlmEndpoint (siehe SendRequestAsync),
-// BaseAddress wird nie gebraucht; AssistantSettings wird via ctor in LlmClient injected.
+// The HttpClient factory stays static — no scoped service resolve.
+// LlmClient uses absolute URLs from _settings.LlmEndpoint (see SendRequestAsync),
+// BaseAddress is never needed; AssistantSettings is injected into LlmClient via the ctor.
 builder.Services.AddHttpClient<ILlmClient, LlmClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(60);
@@ -262,12 +262,12 @@ app.MapStaticAssets();
 // Map SignalR hub for collaborative pipeline editing
 app.MapHub<PipelineCollaborationHub>("/hubs/collaboration");
 
-// MapRazorComponents scannt per Default nur das App-Assembly nach @page-Components.
-// AddAdditionalAssemblies registriert die Plugin-Assemblies aus dem
-// ControlPluginRegistry, damit Premium-Pages (Surgewave.Functions / .Replication
-// / .Governance / .Ai) ihre @page-Routen exposen — sonst liefert /agents,
-// /functions usw. 404, obwohl die Plugins korrekt discovered und im
-// Router.AdditionalAssemblies referenziert sind.
+// MapRazorComponents by default scans only the app assembly for @page components.
+// AddAdditionalAssemblies registers the plugin assemblies from the
+// ControlPluginRegistry so premium pages (Surgewave.Functions / .Replication
+// / .Governance / .Ai) expose their @page routes — otherwise /agents,
+// /functions etc. return 404 although the plugins are correctly discovered and
+// referenced in Router.AdditionalAssemblies.
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies([.. controlPluginRegistry.PageAssemblies]);

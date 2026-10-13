@@ -1,24 +1,24 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    End-to-end capture pipeline — startet Broker + Control, seedet Demo-Data,
-    macht Screenshots + Video, räumt auf. Reproduzierbar, kein manueller Setup.
+    End-to-end capture pipeline — starts Broker + Control, seeds demo data,
+    takes screenshots + video, cleans up. Reproducible, no manual setup.
 
 .DESCRIPTION
     Workflow:
-      1. dotnet build (sicherstellen alles kompiliert)
-      2. Surgewave-Broker im Background starten (Port 9092 + gRPC 5095)
-      3. Auf Broker-Health warten (HTTP-Probe / TCP-Connect)
-      4. Surgewave.Control im Background starten (Port 5050)
-      5. Auf Control-Health warten
-      6. (Optional) Demo-Data seeden via surgewave-CLI
-      7. npm install + Playwright browsers installieren falls noch nicht
-      8. capture-screenshots.js für dark + light themes
-      9. record-demo.js für dark + light themes
-     10. Cleanup: Broker + Control beenden
+      1. dotnet build (make sure everything compiles)
+      2. Start the Surgewave broker in the background (port 9092 + gRPC 5095)
+      3. Wait for broker health (HTTP probe / TCP connect)
+      4. Start Surgewave.Control in the background (port 5050)
+      5. Wait for Control health
+      6. (Optional) Seed demo data via the surgewave CLI
+      7. npm install + install Playwright browsers if not present yet
+      8. capture-screenshots.js for dark + light themes
+      9. record-demo.js for dark + light themes
+     10. Cleanup: stop Broker + Control
 
 .PARAMETER SkipBuild
-    Skip the dotnet build step (faster wenn nur captures neu).
+    Skip the dotnet build step (faster when only the captures are new).
 
 .PARAMETER SkipSeed
     Skip the demo-data seeding step.
@@ -28,11 +28,11 @@
 
 .EXAMPLE
     ./scripts/capture-pipeline.ps1
-    Volle Pipeline: build + start broker/control + seed + capture + cleanup.
+    Full pipeline: build + start broker/control + seed + capture + cleanup.
 
 .EXAMPLE
     ./scripts/capture-pipeline.ps1 -SkipBuild -Theme dark
-    Schnelle Iteration: build überspringen, nur dark theme.
+    Quick iteration: skip the build, dark theme only.
 #>
 [CmdletBinding()]
 param(
@@ -50,9 +50,9 @@ param(
     [int]$WaitTimeout = 60
 )
 
-# Default-Auswahl: Connectoren ohne externe Service-Abhaengigkeit, die im
-# leeren Broker schon plausibel aussehen (Marketplace-Liste, Connectors-Page).
-# Mit -AllConnectors werden alle 118 .swpkg installiert.
+# Default selection: connectors without an external service dependency that
+# already look plausible in an empty broker (marketplace list, connectors page).
+# With -AllConnectors all 118 .swpkg files are installed.
 $DemoConnectorNames = @(
     'Kuestenlogik.Surgewave.Connector.Akka',
     'Kuestenlogik.Surgewave.Connector.Csv',
@@ -75,7 +75,7 @@ Write-Host "  Repo: $repoRoot" -ForegroundColor Gray
 Write-Host "  Theme: $Theme" -ForegroundColor Gray
 Write-Host ""
 
-# ── Helper: HTTP-Health-Probe ───────────────────────────────────────────────
+# ── Helper: HTTP health probe ───────────────────────────────────────────────
 # Accepts any 2xx/3xx/4xx response (including 404) as "service-is-up" — the
 # socket-bind alone is enough; route-existence isn't required for "alive".
 function Wait-ForHealth([string]$url, [string]$service, [int]$timeoutSec) {
@@ -89,7 +89,7 @@ function Wait-ForHealth([string]$url, [string]$service, [int]$timeoutSec) {
                 return $true
             }
         } catch [System.Net.Http.HttpRequestException] {
-            # 4xx auch als "alive" werten — socket antwortet
+            # Count 4xx as "alive" too — the socket answers
             if ($_.Exception.Message -match '4[0-9]{2}') {
                 Write-Host " ready (server responding)" -ForegroundColor Green
                 return $true
@@ -136,10 +136,10 @@ try {
     }
 
     # ── Step 2: Install demo connector plugins ──────────────────────────────
-    # Wir deployen die .swpkg's nach .tmp/broker-plugins/ (ausserhalb des src-Trees) und
-    # ueberreichen den absoluten Pfad als --Surgewave:Connect:PluginsDirectory beim Broker-
-    # Start. Damit es keine Casing-Kollision mit dem existing Plugins/ Source-Dir gibt:
-    # NTFS ist case-insensitive — vorherige Versionen haben versehentlich Sources gelöscht.
+    # We deploy the .swpkg files to .tmp/broker-plugins/ (outside the src tree) and
+    # pass the absolute path as --Surgewave:Connect:PluginsDirectory at broker
+    # start. That way there is no casing collision with the existing Plugins/ source dir:
+    # NTFS is case-insensitive — previous versions accidentally deleted sources.
     if (-not $SkipPlugins) {
         Write-Host "[2/10] Installing demo connector plugins…" -ForegroundColor Yellow
         $brokerPluginsDir = Join-Path $repoRoot ".tmp/broker-plugins"
@@ -168,8 +168,8 @@ try {
             $installed = 0
             $failed = 0
             foreach ($pkg in $toInstall) {
-                # surgewave-CLI lokal via 'dotnet run --project ...' starten — vermeidet, dass
-                # eine global installierte (alte) Version verwendet wird.
+                # Start the surgewave CLI locally via 'dotnet run --project ...' — avoids
+                # using a globally installed (old) version.
                 & dotnet run --project src/Kuestenlogik.Surgewave.Tool --no-build -c Release -- plugins install $pkg.FullName --directory $brokerPluginsDir --force 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     $installed++
@@ -188,8 +188,8 @@ try {
     Write-Host "[3/10] Starting Surgewave-Broker…" -ForegroundColor Yellow
     $brokerLog = Join-Path $repoRoot ".tmp/broker.log"
     New-Item -ItemType Directory -Force -Path (Split-Path $brokerLog) | Out-Null
-    # Override PluginsDirectory damit der Broker im .tmp/broker-plugins-Pfad nach
-    # installierten Connectoren sucht (statt im Standard <CWD>/plugins).
+    # Override PluginsDirectory so that the broker looks for installed connectors
+    # in the .tmp/broker-plugins path (instead of the default <CWD>/plugins).
     $brokerPluginsArg = Join-Path $repoRoot ".tmp/broker-plugins"
     $brokerProc = Start-Process -FilePath dotnet `
         -ArgumentList @('run', '--project', 'src/Kuestenlogik.Surgewave.Broker.App', '--no-build', '-c', 'Release', '--', "--Surgewave:Connect:PluginsDirectory=$brokerPluginsArg") `
@@ -218,13 +218,13 @@ try {
         -RedirectStandardError "$controlLog.err" `
         -NoNewWindow
     Write-Host "  Control PID: $($controlProc.Id)  (log: $controlLog)" -ForegroundColor Gray
-    # TCP-Probe statt HTTP — robuster wenn DI-Issues HTTP-Render brechen
+    # TCP probe instead of HTTP — more robust when DI issues break HTTP rendering
     if (-not (Wait-ForTcp '127.0.0.1' $ControlPort 'Control' $WaitTimeout)) {
         throw "Control did not start within $WaitTimeout sec"
     }
     Write-Host ""
 
-    # ── Step 5: Seed Demo-Data ──────────────────────────────────────────────
+    # ── Step 5: Seed demo data ──────────────────────────────────────────────
     if (-not $SkipSeed) {
         Write-Host "[5/10] Seeding demo data…" -ForegroundColor Yellow
         $seedScript = Join-Path $repoRoot 'scripts/seed-demo-data.ps1'

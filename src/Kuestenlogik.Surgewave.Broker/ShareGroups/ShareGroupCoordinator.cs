@@ -212,10 +212,10 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                     GroupId = groupId,
                     GroupState = GetGroupState(group),
                     GroupEpoch = group.GroupEpoch,
-                    // ShareGroup-State haelt KEIN separates AssignmentEpoch-Feld (anders als
-                    // Java/Kafka). AssignmentEpoch == GroupEpoch ist damit by-construction
-                    // garantiert — die KAFKA-20442-Invariante (empty group => epochs gleich) gilt
-                    // trivial.
+                    // The ShareGroup state keeps NO separate AssignmentEpoch field (unlike
+                    // Java/Kafka). AssignmentEpoch == GroupEpoch is therefore guaranteed by
+                    // construction — the KAFKA-20442 invariant (empty group => epochs equal) holds
+                    // trivially.
                     AssignmentEpoch = group.GroupEpoch,
                     AssignorName = "uniform",
                     Members = members
@@ -252,11 +252,11 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                         topicName, fetchPartition.PartitionIndex, fetchPartition.AcknowledgementBatches, renewEnabled);
                 }
 
-                // KAFKA-20533: Bei Topic-Loeschung waehrend ShareFetch muss der Per-Partition-
-                // Error-Code korrekt UnknownTopicId zurueckgegeben werden (Java's Bug war ein
-                // NPE in brokerTopicStats.updateBytesOut(null, ...) und Mapping auf
-                // UNKNOWN_SERVER_ERROR). Surgewave testet topicName==null hier direkt und
-                // emittiert keine Metrics fuer null-Topics, also kein NPE-Pfad.
+                // KAFKA-20533: When a topic is deleted during ShareFetch, the per-partition
+                // error code must correctly be returned as UnknownTopicId (Java's bug was an
+                // NPE in brokerTopicStats.updateBytesOut(null, ...) and a mapping to
+                // UNKNOWN_SERVER_ERROR). Surgewave tests topicName==null here directly and
+                // emits no metrics for null topics, so there is no NPE path.
                 if (topicName == null)
                 {
                     partitions.Add(new ShareFetchPartitionResult

@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Die Broker-ENGINE als Library: Topics, Partitionen, Koordinatoren (Groups/
-       Transaktionen/Queues/Shares), Quota, Dedup, TTL/Delay, native Control-Plane.
-       Alles, was hier lebt, ist framework-frei (kein ASP.NET, kein OTel, kein gRPC) —
-       das ist die Grenze zu Kuestenlogik.Surgewave.Broker.App, dem Exe-Host mit
-       Program.cs, REST-APIs und Startup-Wiring. Runtime (embedded) und Hosting
-       referenzieren NUR diese Library; niemand referenziert das Exe.
-       Neue Datei hier? Nur wenn sie ohne Host-Frameworks auskommt — eine REST-API
-       oder ein BackgroundService gehört in Broker.App. -->
+  <!-- The broker ENGINE as a library: topics, partitions, coordinators (groups/
+       transactions/queues/shares), quota, dedup, TTL/delay, native control plane.
+       Everything that lives here is framework-free (no ASP.NET, no OTel, no gRPC) —
+       that is the boundary to Kuestenlogik.Surgewave.Broker.App, the exe host with
+       Program.cs, REST APIs and startup wiring. Runtime (embedded) and Hosting
+       reference ONLY this library; nobody references the exe.
+       A new file here? Only if it gets by without host frameworks — a REST API
+       or a BackgroundService belongs in Broker.App. -->
   <PropertyGroup>
     <Description>Surgewave broker engine - topics, partitions, coordinators, quotas. Reference this to embed the broker; the runnable server is the surgewave-broker host.</Description>
     <PackageTags>surgewave;kafka;streaming;broker;engine;embedded</PackageTags>
@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Broker.Tests" />
-    <!-- Der Host war bis zum Split dieselbe Assembly und nutzt interne Engine-Typen. -->
+    <!-- Until the split the host was the same assembly, and it uses internal engine types. -->
     <InternalsVisibleTo Include="surgewave-broker" />
   </ItemGroup>
 

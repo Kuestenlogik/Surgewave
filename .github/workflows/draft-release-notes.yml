@@ -1,22 +1,22 @@
 # Draft the editorial release-notes body for the next release and open a PR.
 #
-# Bowire-Konzept (docs/release-notes/): die kuratierte Prosa der NAECHSTEN
-# Version lebt in docs/release-notes/upcoming.md (Front-matter: title +
-# version). release.yml gated auf dieses File (mind. eine ###-Section) und
-# nutzt es als GitHub-Release-Body; RELEASE_NOTES.md ist nur noch ein
-# generierter Mirror (scripts/ci/generate-release-notes.mjs).
+# Bowire concept (docs/release-notes/): the curated prose of the NEXT
+# version lives in docs/release-notes/upcoming.md (front matter: title +
+# version). release.yml gates on this file (at least one ### section) and
+# uses it as the GitHub release body; RELEASE_NOTES.md is only a
+# generated mirror now (scripts/ci/generate-release-notes.mjs).
 #
-# Dieser Workflow fuellt upcoming.md ~80 % vor: Theme aus dem Milestone-
-# Titel, Highlights aus den geschlossenen Milestone-Issues (gebuckelt nach
-# area/kind), Maintenance aus dem Commit-Log seit dem letzten Tag. Die
-# Bullets sind ABSICHTLICH keine ###-Sections — das Release-Gate erzwingt
-# so die Kuratierung (Bullets zu ###-Prosa umschreiben), bevor ein Tag
-# shippen kann. Review den PR, poliere, merge, dann tagge.
+# This workflow pre-fills ~80 % of upcoming.md: theme from the milestone
+# title, highlights from the closed milestone issues (bucketed by
+# area/kind), maintenance from the commit log since the last tag. The
+# bullets are DELIBERATELY not ### sections — that way the release gate
+# enforces the curation (rewrite bullets into ### prose) before a tag
+# can ship. Review the PR, polish, merge, then tag.
 #
-# Schutz: ein upcoming.md, das bereits kuratierte ###-Sections traegt,
-# wird NICHT ueberschrieben — der Workflow bricht dann mit Hinweis ab.
+# Protection: an upcoming.md that already carries curated ### sections
+# is NOT overwritten — the workflow then aborts with a hint.
 #
-# Trigger: workflow_dispatch mit einer Version wie `0.5.0` (mit oder ohne v).
+# Trigger: workflow_dispatch with a version like `0.5.0` (with or without v).
 
 name: Draft release notes
 
@@ -55,7 +55,7 @@ jobs:
             BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' docs/release-notes/upcoming.md)
             SECTION_COUNT=$(echo "$BODY" | grep -cE '^### ' || true)
             if [ "${SECTION_COUNT:-0}" -gt 0 ]; then
-              echo "::error::docs/release-notes/upcoming.md traegt bereits ${SECTION_COUNT} kuratierte ###-Section(s) — dieser Workflow ueberschreibt keine Kuratierung. Manuell editieren."
+              echo "::error::docs/release-notes/upcoming.md already carries ${SECTION_COUNT} curated ### section(s) — this workflow does not overwrite curation. Edit it by hand."
               exit 1
             fi
           fi
@@ -105,16 +105,16 @@ jobs:
           if [ -z "$PREV_TAG" ]; then PREV_TAG=$(git rev-list --max-parents=0 HEAD); fi
           echo "Previous tag: $PREV_TAG"
 
-          # ---- Highlights: das gemeinsame Release-Werkzeug (docs/contributing/project-board.md) ----
-          # Geschlossene Tickets des gelieferten Abschnitts in diesem Repo UND in jedem Sibling,
-          # das ihn auf dem Board spiegelt — nach Repository, Typ (Feature / Bug / Task) und
-          # Area gruppiert; dieselbe Liste, die der Schnitt liefert.
+          # ---- Highlights: the shared release tool (docs/contributing/project-board.md) ----
+          # Closed tickets of the delivered section in this repo AND in every sibling
+          # that mirrors it on the board — grouped by repository, type (Feature / Bug / Task)
+          # and area; the same list the cut delivers.
           HIGHLIGHTS=""
           if [ -n "$MS_TITLE" ]; then
             HIGHLIGHTS=$(node scripts/release.mjs notes "v$VERSION" "$MS_TITLE" --highlights 2>/dev/null || true)
           fi
 
-          # ---- Maintenance aus dem Commit-Log ----
+          # ---- Maintenance from the commit log ----
           MAINT=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges \
             | grep -E "^(fix|refactor|perf|test|ci|build|chore|docs)(\(.+\))?:" \
             | grep -vE "^chore\(roadmap\):|^chore: bump floor" \
@@ -122,7 +122,7 @@ jobs:
             | sed 's/^/- /' \
             || true)
 
-          # ---- upcoming.md schreiben ----
+          # ---- Write upcoming.md ----
           mkdir -p docs/release-notes
           {
             echo "---"
@@ -138,9 +138,9 @@ jobs:
             echo ""
             echo "## Highlights"
             echo ""
-            echo "<!-- Kuratierung erforderlich: die Bullets unten zu ###-Sections mit"
-            echo "     2-4 Saetzen Prosa umschreiben — das Release-Gate verlangt"
-            echo "     mindestens eine ###-Section. Muster: ### <headline> (#issue) -->"
+            echo "<!-- Curation required: rewrite the bullets below into ### sections with"
+            echo "     2-4 sentences of prose — the release gate requires"
+            echo "     at least one ### section. Pattern: ### <headline> (#issue) -->"
             echo ""
             if [ -n "$HIGHLIGHTS" ]; then
               echo "$HIGHLIGHTS"
@@ -151,7 +151,7 @@ jobs:
             if [ -n "$MAINT" ]; then
               echo "## Fixes"
               echo ""
-              echo "<!-- Aus dem Commit-Log; gruppieren + auf das Nennenswerte kuerzen. -->"
+              echo "<!-- From the commit log; group + trim to what is worth mentioning. -->"
               echo ""
               echo "$MAINT"
               echo ""
@@ -178,7 +178,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # Branch auf Rerun wiederverwenden statt Orphan-Branches zu erzeugen.
+          # Reuse the branch on a rerun instead of creating orphan branches.
           if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
             git fetch origin "$BRANCH"
             git checkout -B "$BRANCH" "origin/$BRANCH"
@@ -196,8 +196,8 @@ jobs:
           git push -u origin "$BRANCH" --force-with-lease
 
           if ! gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' | grep -q .; then
-            # Body via heredoc → file → --body-file (Inline-Markdown in
-            # --body "..." bricht YAMLs literal-block-scalar-Parsing).
+            # Body via heredoc → file → --body-file (inline Markdown in
+            # --body "..." breaks YAML's literal-block-scalar parsing).
             cat > .pr-body.md <<PRBODY
             Auto-drafted \`docs/release-notes/upcoming.md\` for v${VERSION} via the \`Draft release notes\` workflow.
 

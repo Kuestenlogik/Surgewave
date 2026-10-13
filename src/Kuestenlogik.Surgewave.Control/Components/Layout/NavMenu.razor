@@ -23,10 +23,10 @@
         <MudNavLink Href="/bulk" Icon="@Icons.Material.Filled.Checklist">Bulk Operations</MudNavLink>
     </MudNavGroup>
 
-    @* Community: Integration surfaces. Nested sub-groups halten die
-       Schema- und Plugin-Welten zusammen statt 13 Items flach auf einer
-       Ebene auszuwerfen. AI Agents / Functions / ML Scoring kommen per
-       IControlPlugin dazu — siehe ADR-013. *@
+    @* Community: integration surfaces. Nested sub-groups keep the
+       schema and plugin worlds together instead of spilling 13 items flat on one
+       level. AI Agents / Functions / ML Scoring are added via
+       IControlPlugin — see ADR-013. *@
     <MudNavGroup Title="Integration" Icon="@Icons.Material.Filled.Extension" Expanded="true">
         <MudNavGroup Title="Pipelines" Icon="@Icons.Material.Filled.AccountTree" Expanded="false">
             <MudNavLink Href="/pipelines" Icon="@Icons.Material.Filled.List">All pipelines</MudNavLink>

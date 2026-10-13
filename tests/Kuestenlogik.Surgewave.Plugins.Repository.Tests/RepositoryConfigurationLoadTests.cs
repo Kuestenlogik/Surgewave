@@ -3,10 +3,10 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Coverage-Lueckenfueller fuer <see cref="RepositoryConfiguration.Load"/> und
-/// die <see cref="RepositoryConfiguration.SaveTo"/>-Branch ohne directory. Beide Pfade
-/// werden von den bestehenden Tests nicht beruehrt (Load() durchlaeuft normalerweise
-/// User-Home; SaveTo mit reinem Dateinamen geht direkt in die working directory).
+/// Coverage gap filler for <see cref="RepositoryConfiguration.Load"/> and
+/// the <see cref="RepositoryConfiguration.SaveTo"/> branch without a directory. Neither path
+/// is touched by the existing tests (Load() normally goes through the
+/// user home; SaveTo with a bare file name goes straight into the working directory).
 /// </summary>
 public sealed class RepositoryConfigurationLoadTests : IDisposable
 {

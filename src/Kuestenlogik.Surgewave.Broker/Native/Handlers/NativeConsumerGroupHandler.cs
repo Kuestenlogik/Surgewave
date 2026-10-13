@@ -31,9 +31,9 @@ public sealed class NativeConsumerGroupHandler : NativeHandlerBase
         Register<FindCoordinatorRequestPayload, ConsumerGroupOps.FindCoordinatorResult>(
             SurgewaveOpCode.FindCoordinator, ctx => new ConsumerGroupOps.FindCoordinatorOperation(groupCoordinator, ctx));
 
-        // Lag-Ops nur bei vorhandenem Calculator registrieren — Hosts ohne
-        // Lag-Infrastruktur (Tests, Embedded) antworten dann mit UnknownOpCode
-        // statt mit leeren Fake-Daten.
+        // Register the lag ops only when a calculator exists — hosts without
+        // lag infrastructure (tests, embedded) then answer with UnknownOpCode
+        // instead of empty fake data.
         if (lagCalculator is not null)
         {
             Register<GetGroupLagRequestPayload, ConsumerGroupOps.GetGroupLagResult>(

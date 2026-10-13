@@ -1,5 +1,5 @@
-// Visueller Schwerpunkt der nicht-Kreis-Pixel (also nur das Mark) in icon.svg.
-// Detection: alle Pixel die NICHT Navy (#003e60) sind.
+// Visual centroid of the non-circle pixels (i.e. only the mark) in icon.svg.
+// Detection: all pixels that are NOT navy (#003e60).
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');

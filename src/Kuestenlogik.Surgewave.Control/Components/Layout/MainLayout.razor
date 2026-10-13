@@ -105,23 +105,23 @@
     private bool _assistantDrawerOpen;
     private List<string> _clusters = ["surgewave-cluster"];
 
-    // Surgewave-Brand-Palette aus site/assets/css/style.css portiert,
-    // damit die Control-UI die gleichen Cyan/Violet-Toene + Surface-Farben
-    // traegt wie die Marketing-Site (Wave #33bcff / sky-500 als Primary,
-    // helleres Cyan #66cfff im Dark-Mode, Violet #a78bfa als Secondary,
-    // navy-tinted Backgrounds im Dark-Mode).
+    // Surgewave brand palette ported from site/assets/css/style.css,
+    // so the Control UI carries the same cyan/violet tones + surface colours
+    // as the marketing site (Wave #33bcff / sky-500 as primary,
+    // lighter cyan #66cfff in dark mode, violet #a78bfa as secondary,
+    // navy-tinted backgrounds in dark mode).
     private MudTheme _theme = new()
     {
-        // Density-Tuning: MudBlazor-Default ist Mobile-Touch-optimiert.
-        // Desktop-Web-App-Style verlangt engere Spacing, kleinere Schrift,
-        // niedrigere AppBar. Marketing-Site Inter ueber System-Stack —
-        // keine extra Web-Font-Loader im Control.
+        // Density tuning: the MudBlazor default is optimised for mobile touch.
+        // A desktop web app style calls for tighter spacing, a smaller font,
+        // a lower AppBar. Marketing site: Inter over the system stack —
+        // no extra web font loader in Control.
         Typography = new Typography
         {
             Default = new DefaultTypography
             {
                 FontFamily = ["Inter", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-                FontSize = "0.875rem",  // 14px statt MudBlazor-Default 16px
+                FontSize = "0.875rem",  // 14px instead of the MudBlazor default 16px
                 LineHeight = "1.5",
             },
             H1 = new H1Typography { FontSize = "2rem", FontWeight = "700", LineHeight = "1.2" },
@@ -146,11 +146,11 @@
         },
         PaletteLight = new PaletteLight
         {
-            Primary = "#0ea5e9",          // sky-500 — Marketing-Site --accent
-            PrimaryDarken = "#0369a1",    // sky-700 — Hover-Strong
+            Primary = "#0ea5e9",          // sky-500 — marketing site --accent
+            PrimaryDarken = "#0369a1",    // sky-700 — strong hover
             PrimaryLighten = "#7dd3fc",   // sky-300
-            Secondary = "#a78bfa",        // violet — Marketing-Site --accent-secondary
-            Tertiary = "#33bcff",         // Surgewave Wave Cyan (Brand-Logo)
+            Secondary = "#a78bfa",        // violet — marketing site --accent-secondary
+            Tertiary = "#33bcff",         // Surgewave Wave Cyan (brand logo)
             Info = "#0ea5e9",
             Success = "#22c55e",
             Warning = "#f59e0b",
@@ -176,7 +176,7 @@
         },
         PaletteDark = new PaletteDark
         {
-            Primary = "#66cfff",          // helleres Cyan — Hero-Mode
+            Primary = "#66cfff",          // lighter cyan — hero mode
             PrimaryDarken = "#33bcff",
             PrimaryLighten = "#a5e4ff",
             Secondary = "#a78bfa",

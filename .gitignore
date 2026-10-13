@@ -436,13 +436,13 @@ nul
 Kuestenlogik.lnk
 *.lnk
 
-# Claude Code lokaler State (Memory, Skills, Plans) — kein Repo-Inhalt
+# Claude Code local state (memory, skills, plans) — not repo content
 .claude/
-# CLAUDE.md ist lokale Entwickler-Workflow-Doku mit absoluten Pfaden — nicht im Repo
+# CLAUDE.md is local developer workflow documentation with absolute paths — not in the repo
 CLAUDE.md
 
-# Lokales Engineering- und Strategie-Notebook (verschoben nach
-# C:\Projekte\Kuestenlogik\concepts\surgewave\). Kein Repo-Inhalt.
+# Local engineering and strategy notebook (moved to
+# C:\Projekte\Kuestenlogik\concepts\surgewave\). Not repo content.
 concept/
 
 # Capture-Pipeline temp-state (broker/control logs, deployed plugin caches)

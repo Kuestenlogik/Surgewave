@@ -4,9 +4,9 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Coverage for <see cref="RepositoryConfiguration"/> — die Persistenz-Schicht der
-/// `surgewave plugins source`-Subcommands. Roundtrip, Add/Remove, CreateRepositories
-/// factory, plus die Defaults die ueberall greifen wo kein User-Override existiert.
+/// Coverage for <see cref="RepositoryConfiguration"/> — the persistence layer of the
+/// `surgewave plugins source` subcommands. Round trip, add/remove, the CreateRepositories
+/// factory, plus the defaults that apply wherever no user override exists.
 /// </summary>
 public sealed class RepositoryConfigurationTests : IDisposable
 {

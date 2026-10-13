@@ -7,27 +7,27 @@
     <Nullable>enable</Nullable>
     <AssemblyName>surgewave</AssemblyName>
     <!--
-      RootNamespace bleibt explizit Kuestenlogik.Surgewave.Cli (alle ~110
-      .cs Files in diesem Projekt sind unter `namespace Kuestenlogik.
-      Surgewave.Cli.*`). Ohne Override wuerde MSBuild vom csproj-Namen
-      'Kuestenlogik.Surgewave.Tool' ableiten und neue Files mit
-      `namespace Kuestenlogik.Surgewave.Tool` erzeugen — der bestehende
-      .Cli-Namespace ist semantisch fuer die CLI-Implementierung
-      korrekt.
+      RootNamespace stays explicitly Kuestenlogik.Surgewave.Cli (all ~110
+      .cs files in this project are under `namespace Kuestenlogik.
+      Surgewave.Cli.*`). Without the override MSBuild would derive it from the csproj name
+      'Kuestenlogik.Surgewave.Tool' and create new files with
+      `namespace Kuestenlogik.Surgewave.Tool` — the existing
+      .Cli namespace is semantically correct for the CLI
+      implementation.
     -->
     <RootNamespace>Kuestenlogik.Surgewave.Cli</RootNamespace>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <!--
-      Bei PackAsTool=true wuerde MSBuild den AssemblyName als PackageId-
-      Fallback nehmen ('surgewave'). Wir setzen die PackageId explizit
-      auf 'Kuestenlogik.Surgewave.Tool' (dotnet-Konvention fuer Tool-
-      Packages, analog 'Microsoft.EntityFrameworkCore.Tools'). Der
-      Top-Level-Slot 'Kuestenlogik.Surgewave' bleibt frei fuer ein
-      moegliches spaeteres Meta-Bundle. ToolCommandName bleibt
-      'surgewave' — der CLI-Befehl auf der Kommandozeile aendert sich
-      nicht. xunit-Pattern: PackageId, AssemblyName und ToolCommandName
-      sind entkoppelt.
+      With PackAsTool=true MSBuild would take the AssemblyName as the PackageId
+      fallback ('surgewave'). We set the PackageId explicitly
+      to 'Kuestenlogik.Surgewave.Tool' (the dotnet convention for tool
+      packages, like 'Microsoft.EntityFrameworkCore.Tools'). The
+      top-level slot 'Kuestenlogik.Surgewave' stays free for a
+      possible later meta bundle. ToolCommandName stays
+      'surgewave' — the CLI command on the command line does not
+      change. xunit pattern: PackageId, AssemblyName and ToolCommandName
+      are decoupled.
     -->
     <PackageId>Kuestenlogik.Surgewave.Tool</PackageId>
     <ToolCommandName>surgewave</ToolCommandName>

@@ -121,8 +121,8 @@ public static class ClusterLinkRestApi
             return Results.BadRequest(new { message = string.Join(" ", errors) });
         }
 
-        // Der TopicFilter wird spaeter als Regex ausgewertet — ungueltige Muster hier
-        // abfangen, statt sie erst still in der Topic-Discovery scheitern zu lassen.
+        // The TopicFilter is evaluated as a regex later — catch invalid patterns here
+        // instead of letting them fail silently in the topic discovery.
         try
         {
             // Same factory the discovery sink uses, so a filter accepted here cannot

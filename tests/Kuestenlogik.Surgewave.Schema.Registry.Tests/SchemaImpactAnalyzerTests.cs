@@ -23,13 +23,13 @@ public sealed class SchemaImpactAnalyzerTests : IDisposable
             {"name": "id", "type": "long"}, {"name": "amount", "type": "double"}]}
         """;
 
-    /// <summary>id wechselt long→string: klassisch backward-inkompatibel.</summary>
+    /// <summary>id changes long→string: classically backward-incompatible.</summary>
     private const string OrdersIncompatible = """
         {"type": "record", "name": "Order", "fields": [
             {"name": "id", "type": "string"}, {"name": "amount", "type": "double"}]}
         """;
 
-    /// <summary>Optionales Feld mit Default: backward-kompatibel.</summary>
+    /// <summary>Optional field with a default: backward-compatible.</summary>
     private const string OrdersCompatible = """
         {"type": "record", "name": "Order", "fields": [
             {"name": "id", "type": "long"}, {"name": "amount", "type": "double"},
@@ -59,7 +59,7 @@ public sealed class SchemaImpactAnalyzerTests : IDisposable
         new(_store, _checker, _loggerFactory.CreateLogger<SchemaImpactAnalyzer>(), lineage);
 
     /// <summary>orders → Pipeline "enrich" → enriched-orders → Consumer "reporting";
-    /// daneben liest "billing" orders direkt.</summary>
+    /// besides that, "billing" reads orders directly.</summary>
     private sealed class FakeLineage : ISchemaLineageSource
     {
         public IReadOnlyList<TopicReader> GetReaders(string topic) => topic switch
@@ -103,7 +103,7 @@ public sealed class SchemaImpactAnalyzerTests : IDisposable
 
         Assert.True(impact.IsCompatible);
         Assert.Empty(impact.CompatibilityErrors);
-        // Der Report ist Auskunft, kein Urteil: die Leser stehen auch bei Kompatibilität drin.
+        // The report is information, not a verdict: the readers are listed even when compatible.
         Assert.Equal(2, impact.AffectedPipelines.Count);
     }
 
@@ -134,7 +134,7 @@ public sealed class SchemaImpactAnalyzerTests : IDisposable
         Assert.Empty(impact.AffectedPipelines);
     }
 
-    /// <summary>Pipeline A: a→b, Pipeline B: b→a — der Walk muss terminieren.</summary>
+    /// <summary>Pipeline A: a→b, Pipeline B: b→a — the walk must terminate.</summary>
     private sealed class CyclicLineage : ISchemaLineageSource
     {
         public IReadOnlyList<TopicReader> GetReaders(string topic) => topic switch

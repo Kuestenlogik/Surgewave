@@ -3,10 +3,10 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Tests fuer <see cref="ConnectorRepositoryManager"/> — Orchestrierung mehrerer
-/// IConnectorRepository-Implementierungen plus ConnectorInstaller. Wir injizieren
-/// <see cref="FakeRepository"/>-Instanzen via <c>AddRepository</c> und entfernen das
-/// per-default angemeldete <c>nuget.org</c>, sodass keine Netz-Anfragen passieren.
+/// Tests for <see cref="ConnectorRepositoryManager"/> — orchestration of several
+/// IConnectorRepository implementations plus the ConnectorInstaller. We inject
+/// <see cref="FakeRepository"/> instances via <c>AddRepository</c> and remove the
+/// <c>nuget.org</c> registered by default, so no network requests happen.
 /// </summary>
 public sealed class ConnectorRepositoryManagerTests : IDisposable
 {

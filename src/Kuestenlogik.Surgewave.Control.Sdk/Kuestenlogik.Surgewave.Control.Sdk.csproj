@@ -17,9 +17,9 @@
     <PackageTags>surgewave;control-ui;blazor;plugin-sdk</PackageTags>
   </PropertyGroup>
 
-  <!-- Sdk.Razor liefert (anders als Sdk.Web) keine impliziten ASP.NET-Usings;
-       die verschobenen Services nutzen ILogger<> ohne `using Microsoft.
-       Extensions.Logging;` — daher explizit als global using deklarieren. -->
+  <!-- Sdk.Razor (unlike Sdk.Web) provides no implicit ASP.NET usings;
+       the moved services use ILogger<> without `using Microsoft.
+       Extensions.Logging;` — so declare it explicitly as a global using. -->
   <ItemGroup>
     <Using Include="Microsoft.Extensions.Logging" />
   </ItemGroup>

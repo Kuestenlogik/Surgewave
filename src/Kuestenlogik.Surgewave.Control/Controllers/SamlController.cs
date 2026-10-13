@@ -64,15 +64,15 @@ public sealed class SamlController(
     /// Assertion Consumer Service — processes SAML Response from IdP.
     /// </summary>
     /// <remarks>
-    /// SAML POST-Bindings sind inhaerent cross-site (der IdP sendet
-    /// den signierten Response per HTTP-POST an unseren ACS-Endpoint).
-    /// ASP.NET-Anti-Forgery-Tokens funktionieren hier per Konstruktion
-    /// nicht, da der IdP unser Anti-Forgery-Cookie nicht kennt.
-    /// Replay-/Injection-Schutz uebernehmen die SAML-eigenen
-    /// Mechanismen: XML-Signature-Validation, NotBefore/NotOnOrAfter,
-    /// InResponseTo-Match, Audience-Restriction. Diese werden in
+    /// SAML POST bindings are inherently cross-site (the IdP sends
+    /// the signed response via HTTP POST to our ACS endpoint).
+    /// ASP.NET anti-forgery tokens cannot work here by construction,
+    /// since the IdP does not know our anti-forgery cookie.
+    /// Replay/injection protection is provided by SAML's own
+    /// mechanisms: XML signature validation, NotBefore/NotOnOrAfter,
+    /// InResponseTo match, audience restriction. These are enforced in
     /// `Saml2PostBinding.ReadSamlResponse` / `Saml2AuthnResponse`
-    /// (ITfoxtec.Identity.Saml2) erzwungen.
+    /// (ITfoxtec.Identity.Saml2).
     /// </remarks>
     [HttpPost("acs")]
     [IgnoreAntiforgeryToken]
@@ -110,10 +110,10 @@ public sealed class SamlController(
 
         logger.LogInformation("SAML login successful for {NameId} via provider {Provider}", LogSanitizer.Sanitize(claimsIdentity.Name), LogSanitizer.Sanitize(providerName));
 
-        // RelayState kommt vom IdP zurueck — wir hatten ihn zwar selbst
-        // gesetzt, der Round-Trip ueber den IdP hinweg ist aber nicht
-        // garantiert manipulationsfrei. Url.IsLocalUrl verhindert
-        // Open-Redirect auf externe Hosts.
+        // RelayState comes back from the IdP — we did set it ourselves,
+        // but the round trip through the IdP is not
+        // guaranteed to be tamper-free. Url.IsLocalUrl prevents an
+        // open redirect to external hosts.
         var returnUrl = binding.RelayState;
         return Redirect(Url.IsLocalUrl(returnUrl) ? returnUrl! : "/");
     }
@@ -167,10 +167,10 @@ public sealed class SamlController(
     /// Single Logout Service — processes LogoutResponse from IdP.
     /// </summary>
     /// <remarks>
-    /// Wie ACS ein inhaerent cross-site POST-Endpoint. SAML-eigene
-    /// Replay-/Injection-Schutzmechanismen (Signature + Timing)
-    /// uebernehmen den Schutz; ASP.NET-Anti-Forgery-Tokens sind hier
-    /// per Konstruktion nicht anwendbar.
+    /// Like ACS, an inherently cross-site POST endpoint. SAML's own
+    /// replay/injection protection mechanisms (signature + timing)
+    /// provide the protection; ASP.NET anti-forgery tokens are
+    /// not applicable here by construction.
     /// </remarks>
     [HttpPost("slo")]
     [IgnoreAntiforgeryToken]

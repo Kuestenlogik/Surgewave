@@ -627,10 +627,10 @@ public sealed class PluginPackageManager
             return null;
         }
 
-        // Zip-Slip-Schutz: Auch wenn entryPath mit einem der Allowlist-
-        // Prefixes anfaengt (z.B. 'lib/'), koennte der Rest des Pfads
-        // '../../..' enthalten und so aus pluginDir ausbrechen. Wir
-        // resolven beide Pfade absolut und verlangen Containment.
+        // Zip-slip protection: even if entryPath starts with one of the allowlist
+        // prefixes (e.g. 'lib/'), the rest of the path could contain
+        // '../../..' and so break out of pluginDir. We
+        // resolve both paths to absolute ones and require containment.
         var pluginRoot = Path.GetFullPath(pluginDir);
         var resolved = Path.GetFullPath(candidate);
         if (!resolved.StartsWith(pluginRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)

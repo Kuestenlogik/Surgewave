@@ -150,10 +150,10 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         // configured a file or OTel sink loses these lines, and gets console output nobody
         // asked for. A host that passes nothing gets silence rather than a surprise sink.
         _nativeLoggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
-        // Connector-Repository-Manager fuer SearchPlugins/InstallPlugin Native-Ops.
-        // Verwendet den konfigurierten PluginsDirectory (gleich der vom Connect-Plugin
-        // gescannt wird), so dass Control's Plugin-Marketplace die installierten
-        // Connectoren als "installed" listet.
+        // Connector repository manager for the SearchPlugins/InstallPlugin native ops.
+        // Uses the configured PluginsDirectory (the same one the Connect plugin
+        // scans), so that Control's plugin marketplace lists the installed
+        // connectors as "installed".
         // Most specific scope, matching what the Connect plugin scans, so Control's
         // marketplace lists the same connectors the broker actually loaded.
         var pluginsDirAbsolute = SurgewaveConnectorDirectories

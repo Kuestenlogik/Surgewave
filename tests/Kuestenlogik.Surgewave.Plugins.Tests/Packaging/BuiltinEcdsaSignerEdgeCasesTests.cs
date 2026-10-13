@@ -3,9 +3,9 @@ using Kuestenlogik.Surgewave.Plugins.Packaging;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Packaging;
 
 /// <summary>
-/// Edge-case-Tests fuer <see cref="BuiltinEcdsaSigner"/> — gezielt die Error-Pfade
-/// die der Happy-Path-Contract-Test nicht beruehrt: missing private key, missing
-/// trust dir, malformed signature file, malformed key in trust store, unsigned-detection.
+/// Edge-case tests for <see cref="BuiltinEcdsaSigner"/> — specifically the error paths
+/// that the happy-path contract test does not touch: missing private key, missing
+/// trust dir, malformed signature file, malformed key in trust store, unsigned detection.
 /// </summary>
 public sealed class BuiltinEcdsaSignerEdgeCasesTests : IDisposable
 {

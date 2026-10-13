@@ -468,11 +468,11 @@
 // Pulls NuGet (downloads + latest version of Kuestenlogik.Surgewave.Client)
 // and optional GitHub-stars (currently parked behind a Liquid `if false`
 // in hero.html until the repo is public and has enough stars to brag).
-// Failures are silent — wenn die NuGet- oder GitHub-API nicht antwortet
-// (z.B. weil das Package noch nicht published ist), bleibt das Value-
-// Segment leer und die CSS-Regel ".hero-badge-value[data-badge-value]:empty"
-// blendet es aus, sodass das Label allein stehen bleibt.
-// Bowire-Pattern 1:1 portiert.
+// Failures are silent — when the NuGet or GitHub API does not answer
+// (e.g. because the package is not published yet), the value
+// segment stays empty and the CSS rule ".hero-badge-value[data-badge-value]:empty"
+// hides it, so that the label stands on its own.
+// Bowire pattern, ported 1:1.
 // ====================================================================
 (function () {
     const badges = document.querySelectorAll('.hero-badge[data-badge]');
@@ -536,8 +536,8 @@
 // .surgewave-page-overlay modal with the FULL (un-sampled) section
 // list — so even when the dot-nav samples down to MAX_DOTS, every
 // section stays reachable via the modal.
-// 1:1-Port aus Bowire's section-rail + page-outline. Bowire-Accent
-// (#6366f1, indigo-500) -> Surgewave-Accent (rgba(14,165,233,...)).
+// 1:1 port of Bowire's section-rail + page-outline. Bowire accent
+// (#6366f1, indigo-500) -> Surgewave accent (rgba(14,165,233,...)).
 // ====================================================================
 (function () {
     const sections = Array.from(document.querySelectorAll('main section, section'))
@@ -545,9 +545,9 @@
     if (sections.length < 2) return;
 
     function sectionLabel(section) {
-        // Bevorzugt <h2 class="section-title">, fallback auf h2/h1, dann
-        // h3 (deckt Pages mit nur <h3>-Headings ab — sonst zeigt der
-        // Outline-Modal n-mal 'Section'). 'Top' fuer den Hero.
+        // Prefers <h2 class="section-title">, falls back to h2/h1, then
+        // h3 (covers pages with only <h3> headings — otherwise the
+        // outline modal shows 'Section' n times). 'Top' for the hero.
         const title = section.querySelector('h2.section-title, h2, h1, h3');
         const text  = title ? title.textContent.trim() : '';
         if (text) return text;
@@ -563,10 +563,10 @@
     nav.className = 'section-nav';
     nav.setAttribute('aria-label', 'Page sections');
 
-    // Sampling: max 8 dots, immer first + last, gleichmaessige Spreizung.
-    // Bei >8 Sections zeigt eine .section-nav-gap-Markierung an, dass
-    // dazwischen Eintraege ausgelassen wurden (komplette Liste im
-    // Outline-Modal).
+    // Sampling: max 8 dots, always first + last, evenly spread.
+    // With >8 sections a .section-nav-gap marker shows that
+    // entries in between were left out (complete list in the
+    // outline modal).
     const MAX_DOTS = 8;
     let pickedIndexes;
     if (sections.length <= MAX_DOTS) {
@@ -591,8 +591,8 @@
         btn.type = 'button';
         btn.className = 'section-nav-dot';
         btn.setAttribute('aria-label', `Jump to ${label}`);
-        // DOM-APIs statt innerHTML weil sectionLabel() User-content
-        // sein kann — Markup-Injection vermeiden.
+        // DOM APIs instead of innerHTML because sectionLabel() can be
+        // user content — avoid markup injection.
         const dotLabelSpan = document.createElement('span');
         dotLabelSpan.className = 'section-nav-dot-label';
         dotLabelSpan.textContent = label;
@@ -611,9 +611,9 @@
     });
     rail.appendChild(nav);
 
-    // Outline tools-pill — sitzt unter der Dot-Nav auf demselben Rail.
-    // Click oeffnet das Modal mit der vollstaendigen (un-sampled)
-    // Section-Liste — komplementiert die (potenziell sampled) Dot-Nav.
+    // Outline tools pill — sits under the dot nav on the same rail.
+    // A click opens the modal with the complete (un-sampled)
+    // section list — complements the (potentially sampled) dot nav.
     const outlineNav = document.getElementById('page-outline');
     const overlay = document.getElementById('surgewave-page-outline-overlay');
     let outlineLinks = [];
@@ -719,14 +719,14 @@
     document.body.appendChild(rail);
 
     function headerOffset() {
-        // Section-tops landen am Viewport-Top; jedes section-eigene padding
-        // haelt die Headings unter dem translucent sticky-header.
+        // Section tops land at the viewport top; each section's own padding
+        // keeps the headings below the translucent sticky header.
         return 0;
     }
 
     function activeIndexFull() {
-        // Gegen die VOLLE sections-Array (nicht nur picked) so dass
-        // scrollspy auch im sampled-Mode genau bleibt.
+        // Against the FULL sections array (not just the picked ones) so that
+        // the scrollspy stays accurate in sampled mode too.
         const threshold = window.scrollY + headerOffset() + 40;
         let activeSection = 0;
         for (let i = 0; i < sections.length; i++) {
@@ -741,9 +741,9 @@
     }
 
     function activeIndex() {
-        // Mapt activeSection auf den groessten gepickten Dot dessen
-        // section-index <= activeSection ist. Bei voll-gelisteter
-        // Strip ist das derselbe Index.
+        // Maps activeSection to the largest picked dot whose
+        // section index is <= activeSection. With a fully listed
+        // strip that is the same index.
         const activeSection = activeIndexFull();
         let dotIdx = 0;
         for (let j = 0; j < pickedIndexes.length; j++) {

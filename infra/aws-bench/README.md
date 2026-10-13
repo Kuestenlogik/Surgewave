@@ -1,71 +1,71 @@
 # Surgewave Public Benchmark — AWS Infrastructure
 
-Spin up a clean reference instance, run `surgewave-bench public`, pull the results, destroy. Eine voll-Run kostet ~$1.90 on-demand, dauert ~2 h wall-clock.
+Spin up a clean reference instance, run `surgewave-bench public`, pull the results, destroy. A full run costs ~$1.90 on-demand and takes ~2 h wall-clock.
 
 ## Files
 
-| File | Was |
+| File | What |
 |---|---|
 | `COSTS.md` | Detailed cost breakdown per release, fail-modes, monthly-audit checklist. **Read first.** |
-| `main.tf` | Terraform für eine ephemerale c7i.4xlarge in eu-central-1 mit cloud-init das Docker + .NET 10 + surgewave-bench-tool installiert. |
-| (vorerst nicht) `terraform.tfvars.example` | Wird ergänzt, sobald die Tool-NuGet-Package public ist und der Tool-Install ohne weitere Auth funktioniert. |
+| `main.tf` | Terraform for an ephemeral c7i.4xlarge in eu-central-1 with cloud-init that installs Docker + .NET 10 + surgewave-bench-tool. |
+| (not yet) `terraform.tfvars.example` | Will be added as soon as the tool NuGet package is public and the tool install works without further auth. |
 
-## Voraussetzung — User Side
+## Prerequisite — user side
 
 ```bash
-aws configure   # ein IAM-User mit ec2:* + iam:PassRole minimal scope
+aws configure   # an IAM user with ec2:* + iam:PassRole minimal scope
 aws ec2 create-key-pair --key-name surgewave-bench \
   --query KeyMaterial --output text > ~/.ssh/surgewave-bench.pem
 chmod 600 ~/.ssh/surgewave-bench.pem
 ```
 
-## Run-Sequence
+## Run sequence
 
 ```bash
 cd infra/aws-bench
 
 terraform init
 terraform apply -var='key_name=surgewave-bench'
-# Outputs zeigen:
+# Outputs show:
 #   ssh_command           = …
 #   run_command           = …
 #   result_pull_command   = …
 #   destroy_reminder      = "Run terraform destroy when done."
 
-# 1) SSH einloggen (cloud-init dauert ~3 min — falls "command not found", warten)
+# 1) Log in via SSH (cloud-init takes ~3 min — if "command not found", wait)
 $(terraform output -raw ssh_command)
 
-# 2) Auf der Instanz: Bench laufen lassen (~2 h)
+# 2) On the instance: run the bench (~2 h)
 ~/.dotnet/tools/surgewave-bench public \
   --message-count 1000000 --payload 1024 \
   --output ~/results.md --json ~/results.json
 
-# 3) Lokal: Results pullen
+# 3) Locally: pull the results
 $(terraform output -raw result_pull_command)
 
-# 4) MANDATORY: Instance + EBS-Volume zerstören
+# 4) MANDATORY: destroy instance + EBS volume
 terraform destroy
 ```
 
-## Cost-Gate
+## Cost gate
 
-Vor jedem `terraform apply`:
-- Aktuelle AWS-Preise checken (siehe `COSTS.md`)
-- Budget-Alarm im AWS-Account auf $50/Monat setzen (`aws budgets create-budget`) — fängt vergessene Instanzen ab
+Before every `terraform apply`:
+- Check current AWS prices (see `COSTS.md`)
+- Set a budget alarm in the AWS account at $50/month (`aws budgets create-budget`) — catches forgotten instances
 
-Nach jedem `terraform destroy`:
-- Verify keine Reste:
+After every `terraform destroy`:
+- Verify nothing is left over:
   ```bash
   aws ec2 describe-instances --filters 'Name=tag:Purpose,Values=surgewave-bench' \
     'Name=instance-state-name,Values=running,pending,stopping,stopped'
   aws ec2 describe-volumes --filters 'Name=tag:Purpose,Values=surgewave-bench'
   ```
 
-## Was Phase 1 NICHT macht
+## What phase 1 does NOT do
 
-Phase 1 ist Skeleton + Cost-Doc. **Wird nicht ausgeführt** vom CI/Setup-Script automatisch — du startest den Run manuell wenn du eine Release-Public-Number brauchst.
+Phase 1 is skeleton + cost doc. **It is not run automatically** by CI or the setup script — you start the run manually when you need a public number for a release.
 
-Phase 2 ergänzt:
-- Vollständige Scenario-Implementations (aktuell Stubs)
-- Reference-Baselines unter `benchmarks/baselines/` für `--compare`
-- Optionaler `--public` GitHub-Action-Trigger der via OIDC die Instanz hochfährt + den Run startet + Results in eine PR-Commit packt (eliminiert den Hands-on-Step)
+Phase 2 adds:
+- Complete scenario implementations (currently stubs)
+- Reference baselines under `benchmarks/baselines/` for `--compare`
+- An optional `--public` GitHub Action trigger that brings up the instance via OIDC + starts the run + packs the results into a PR commit (eliminates the hands-on step)

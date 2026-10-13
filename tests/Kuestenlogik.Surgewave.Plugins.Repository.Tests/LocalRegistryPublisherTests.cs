@@ -5,10 +5,10 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// End-to-end fuer <see cref="LocalRegistryPublisher"/>. Erzeugt echte .swpkg-Files via
-/// <see cref="PluginPackageManager"/> und publiziert sie in ein temp-Registry-Root.
-/// Coverage zielt auf Publish-Erfolg, Force-Overwrite, force-required-Fehler, packages.json
-/// merge fuer existing-und-new-Entries.
+/// End-to-end tests for <see cref="LocalRegistryPublisher"/>. Creates real .swpkg files via
+/// <see cref="PluginPackageManager"/> and publishes them into a temp registry root.
+/// Coverage targets publish success, force overwrite, the force-required error, and the packages.json
+/// merge for existing and new entries.
 /// </summary>
 public sealed class LocalRegistryPublisherTests : IDisposable
 {

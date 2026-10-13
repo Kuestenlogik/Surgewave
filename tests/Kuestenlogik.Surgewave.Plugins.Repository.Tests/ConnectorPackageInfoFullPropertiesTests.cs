@@ -3,10 +3,10 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Full property-coverage Tests fuer <see cref="ConnectorPackageInfo"/>. Die Klasse hat
-/// viele init-only-Properties, die in den existierenden Smoke-Tests nicht geschrieben
-/// wurden. Hier wird einmal ein vollstaendig populiertes Objekt gebaut und alle Felder
-/// werden ausgelesen.
+/// Full property coverage tests for <see cref="ConnectorPackageInfo"/>. The class has
+/// many init-only properties that the existing smoke tests did not
+/// write. Here a fully populated object is built once and all fields
+/// are read back.
 /// </summary>
 public sealed class ConnectorPackageInfoFullPropertiesTests
 {

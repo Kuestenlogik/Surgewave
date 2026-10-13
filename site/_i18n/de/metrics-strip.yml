@@ -1,0 +1,13 @@
+# German site strings, kept for the planned German version of the site.
+# The site is English first; these are the German originals of strings that
+# were translated to English, keyed by include and element, so the later
+# translation can be seeded from them. Not used by the build (Jekyll skips
+# folders that start with an underscore unless configured).
+
+metrics-strip:
+  # site/_includes/metrics-strip.html — aria-label of each chart's <svg>
+  latency-histogram: "Latency-Histogramm"
+  p99-latency-comparison: "Vergleich P99-Latenz Kafka vs Surgewave"
+  throughput-scaling: "Throughput-Skalierung pro Broker-Anzahl"
+  storage-tiering: "Storage-Tiering-Diagramm"
+  startup-memory-comparison: "Vergleich Startzeit + Memory"

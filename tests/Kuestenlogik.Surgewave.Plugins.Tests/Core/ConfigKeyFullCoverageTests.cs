@@ -3,8 +3,8 @@ using Kuestenlogik.Surgewave.Plugins.Configuration;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Core;
 
 /// <summary>
-/// Trifft die noch nicht abgedeckten Default-Properties auf <see cref="ConfigKey"/>
-/// (88.8 % → 100 %): `with`-Mutationen ueber alle optionalen Felder + Equals/HashCode.
+/// Hits the default properties on <see cref="ConfigKey"/> that were not yet covered
+/// (88.8 % → 100 %): `with` mutations over all optional fields + Equals/HashCode.
 /// </summary>
 public sealed class ConfigKeyFullCoverageTests
 {

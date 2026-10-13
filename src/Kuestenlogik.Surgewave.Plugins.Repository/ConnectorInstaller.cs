@@ -189,8 +189,8 @@ public sealed class ConnectorInstaller : IDisposable
 
         foreach (var dir in Directory.GetDirectories(_installDirectory))
         {
-            // Bevorzugter Fall: connector.json (von ConnectorInstaller selber geschrieben,
-            // typischerweise NuGet-Installs ueber dieses System).
+            // Preferred case: connector.json (written by the ConnectorInstaller itself,
+            // typically NuGet installs through this system).
             var metadataPath = Path.Combine(dir, "connector.json");
             if (File.Exists(metadataPath))
             {
@@ -210,10 +210,10 @@ public sealed class ConnectorInstaller : IDisposable
                 }
             }
 
-            // Fallback: plugin.json (von .swpkg-Plugin-Pakete via PluginPackageManager.InstallAsync
-            // angelegt). Schema: { "id": "...", "version": "...", "name": "...", "authors": [...],
+            // Fallback: plugin.json (created by .swpkg plugin packages via PluginPackageManager.InstallAsync).
+            // Schema: { "id": "...", "version": "...", "name": "...", "authors": [...],
             // "license": "...", "description": "...", "tags": [...] }
-            // Siehe SurgewavePackageConventions.ManifestFileName.
+            // See SurgewavePackageConventions.ManifestFileName.
             var manifestPath = Path.Combine(dir, "plugin.json");
             if (File.Exists(manifestPath))
             {
@@ -343,18 +343,18 @@ public sealed record InstalledConnector
     /// </summary>
     public DateTimeOffset InstalledAt { get; init; }
 
-    /// <summary>Display name (z.B. "Akka") — aus plugin.json:name. Default = PackageId.</summary>
+    /// <summary>Display name (e.g. "Akka") — from plugin.json:name. Default = PackageId.</summary>
     public string Name { get; init; } = string.Empty;
 
-    /// <summary>Erster Author aus plugin.json:authors[] — UI rendert ihn in Plugin-Cards.</summary>
+    /// <summary>First author from plugin.json:authors[] — the UI renders it in plugin cards.</summary>
     public string Author { get; init; } = string.Empty;
 
-    /// <summary>SPDX-License-Identifier aus plugin.json:license. Beispiel: "Apache-2.0".</summary>
+    /// <summary>SPDX license identifier from plugin.json:license. Example: "Apache-2.0".</summary>
     public string License { get; init; } = string.Empty;
 
-    /// <summary>Optional, beschreibt das Plugin (plugin.json:description).</summary>
+    /// <summary>Optional, describes the plugin (plugin.json:description).</summary>
     public string Description { get; init; } = string.Empty;
 
-    /// <summary>Optional, plugin.json:tags[] — fuer Such-/Filter-Logik.</summary>
+    /// <summary>Optional, plugin.json:tags[] — for search/filter logic.</summary>
     public IReadOnlyList<string> Tags { get; init; } = [];
 }

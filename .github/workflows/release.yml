@@ -16,16 +16,16 @@ env:
 
 jobs:
   # ================================================================
-  # verify-notes: Gate — kein Release ohne kuratierten Body
+  # verify-notes: gate — no release without a curated body
   # ================================================================
-  # Bowire-Pattern (docs/release-notes/): der GitHub-Release-Body ist
-  # kuratierte Prosa aus dem Repo, nicht Installations-Boilerplate.
-  # Source-of-truth-Kette:
-  #   1) docs/release-notes/v<tag>.md  (konservierter Body)
-  #   2) docs/release-notes/upcoming.md (kanonischer Pfad vor dem Tag)
-  #   3) Legacy: Body eines GitHub-Draft-Release fuer den Tag
-  # Fail-fast hier spart die komplette Build-Zeit und verhindert das
-  # "mit Platzhalter-Body geshippt, im Nachgang editiert"-Muster.
+  # Bowire pattern (docs/release-notes/): the GitHub release body is
+  # curated prose from the repo, not installation boilerplate.
+  # Source-of-truth chain:
+  #   1) docs/release-notes/v<tag>.md  (preserved body)
+  #   2) docs/release-notes/upcoming.md (canonical path before the tag)
+  #   3) Legacy: body of a GitHub draft release for the tag
+  # Failing fast here saves the entire build time and prevents the
+  # "shipped with a placeholder body, edited afterwards" pattern.
   verify-notes:
     name: Verify curated release notes
     runs-on: ubuntu-latest
@@ -41,9 +41,9 @@ jobs:
           FILE_BODY=""
           for candidate in "docs/release-notes/${TAG}.md" "docs/release-notes/upcoming.md"; do
             if [[ -f "$candidate" ]]; then
-              # Front-matter strippen; "echt" ist ein Body erst mit
-              # mindestens einer ###-Section (Platzhalter-Erkennung —
-              # das Template traegt nur ##-Headings + HTML-Kommentare).
+              # Strip the front matter; a body only counts as "real" with
+              # at least one ### section (placeholder detection —
+              # the template carries only ## headings + HTML comments).
               BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' "$candidate")
               SECTION_COUNT=$(echo "$BODY" | grep -cE '^### ' || true)
               if [[ "${SECTION_COUNT:-0}" -gt 0 ]]; then
@@ -53,30 +53,30 @@ jobs:
             fi
           done
           if [[ -n "$FILE_BODY" ]]; then
-            echo "✓ Kuratierter Body fuer ${TAG} gefunden: ${FILE_BODY}"
+            echo "✓ Curated body for ${TAG} found: ${FILE_BODY}"
             exit 0
           fi
-          # Legacy-Fallback: GitHub-Draft-Release-Body.
+          # Legacy fallback: GitHub draft release body.
           BODY=$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name == \"${TAG}\") | .body" 2>/dev/null | head -c 200 || true)
           if [[ -n "$BODY" ]]; then
-            echo "✓ Kuratierter Body fuer ${TAG} gefunden (legacy: GitHub-Draft-Release)"
+            echo "✓ Curated body for ${TAG} found (legacy: GitHub draft release)"
             exit 0
           fi
-          echo "::error::Kein kuratierter Release-Body fuer ${TAG} gefunden."
+          echo "::error::No curated release body found for ${TAG}."
           echo ""
-          echo "Kuratiere docs/release-notes/upcoming.md (mind. eine ###-Section),"
-          echo "committe + pushe, und pushe den Tag danach erneut."
-          echo "Konvention: docs/release-notes/README.md"
+          echo "Curate docs/release-notes/upcoming.md (at least one ### section),"
+          echo "commit + push, and then push the tag again."
+          echo "Convention: docs/release-notes/README.md"
           exit 1
 
   # ================================================================
   # build-msi: WiX MSI build (Windows-only)
   # ================================================================
-  # WiX v5 ist Windows-only (`warning WIX0000: WiX Toolset only supports
-  # Windows`) — der MSI-Build kann deshalb nicht im linux-basierten
-  # release-Job laufen. Bowire-Pattern: eigenes windows-latest-Job baut
-  # nur die .msi, uploaded sie als Artefakt, und der release-Job
-  # downloaded sie wieder vorm GitHub-Release-Schritt.
+  # WiX v5 is Windows-only (`warning WIX0000: WiX Toolset only supports
+  # Windows`) — so the MSI build cannot run in the Linux-based release
+  # job. Bowire pattern: a separate windows-latest job builds only the
+  # .msi, uploads it as an artefact, and the release job downloads it
+  # again before the GitHub release step.
   build-msi:
     name: Build Windows MSI
     needs: [verify-notes]
@@ -94,9 +94,9 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      # Self-contained win-x64 publishes fuer Broker, CLI, Control —
-      # diese werden direkt von der wixproj per BrokerPublishDir / CliPublishDir
-      # / ControlPublishDir referenziert.
+      # Self-contained win-x64 publishes for Broker, CLI, Control —
+      # the wixproj references these directly via BrokerPublishDir / CliPublishDir
+      # / ControlPublishDir.
       - name: Publish win-x64 binaries (broker / cli / control)
         shell: bash
         env:
@@ -116,12 +116,12 @@ jobs:
             pwsh -NoProfile -File deployments/installer/Kuestenlogik.Surgewave.Installer/generate-icon.ps1
           }
 
-      # Die wixproj nutzt das WixToolset.Sdk (PackageReference auf
-      # WixToolset.UI.wixext), also reicht `dotnet build` — kein
-      # separates `wix`-Tool muss global installiert werden.
+      # The wixproj uses the WixToolset.Sdk (PackageReference on
+      # WixToolset.UI.wixext), so `dotnet build` is enough — no separate
+      # `wix` tool has to be installed globally.
       #
-      # PublishDirs muessen absolute Windows-Pfade sein (`pwd -W` in
-      # Git-Bash auf windows-latest gibt den Windows-Style-Pfad zurueck).
+      # PublishDirs must be absolute Windows paths (`pwd -W` in
+      # Git Bash on windows-latest returns the Windows-style path).
       - name: Build MSI
         shell: bash
         env:
@@ -134,9 +134,9 @@ jobs:
             -p:CliPublishDir="$(pwd -W)/deployments/installer/publish/cli" \
             -p:ControlPublishDir="$(pwd -W)/deployments/installer/publish/control"
           mkdir -p msi-out
-          # Directory.Build.props lenkt BaseOutputPath auf artifacts/bin/...
-          # um, deshalb landet die MSI nicht unter deployments/installer/.
-          # Wir suchen im ganzen Repo nach *.msi (es gibt nur die eine).
+          # Directory.Build.props redirects BaseOutputPath to artifacts/bin/...,
+          # so the MSI does not end up under deployments/installer/.
+          # We search the whole repo for *.msi (there is only the one).
           find . -name '*.msi' -not -path './msi-out/*' -exec cp {} msi-out/surgewave-$V-win-x64.msi \;
           ls -la msi-out
 
@@ -148,16 +148,16 @@ jobs:
           retention-days: 1
 
   # ================================================================
-  # release: NuGets, Container, Linux-/macOS-Binaries, Release-Assembly
+  # release: NuGets, containers, Linux/macOS binaries, release assembly
   # ================================================================
   release:
     runs-on: ubuntu-latest
     needs: [build-msi]
 
-    # Job-level env damit das Secret in step-level `if:`-Ausdruecken sichtbar
-    # ist (der `secrets`-Context ist dort nicht direkt verfuegbar). Empty
-    # string wenn das Org-Secret nicht gesetzt ist, sodass die `env.X != ''`-
-    # Gates korrekt skippen statt zu failen. Bowire-Pattern.
+    # Job-level env so that the secret is visible in step-level `if:`
+    # expressions (the `secrets` context is not directly available there).
+    # Empty string when the org secret is not set, so that the `env.X != ''`
+    # gates skip correctly instead of failing. Bowire pattern.
     env:
       NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -250,23 +250,23 @@ jobs:
         run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------
-      # Multi-arch Container → GHCR (immer) + Docker Hub (optional)
+      # Multi-arch container → GHCR (always) + Docker Hub (optional)
       # ----------------------------------------------------------
-      # `ContainerRuntimeIdentifiers` macht aus einem `dotnet publish`-
-      # Call mehrere arch-spezifische Image-Builds in einem Schwung
-      # und published als Multi-Arch-Manifest. Das Pre-Restore braucht
-      # die gleiche RID-Liste, sonst failed der Container-Publish mit
+      # `ContainerRuntimeIdentifiers` turns one `dotnet publish` call
+      # into several arch-specific image builds in one go and
+      # publishes them as a multi-arch manifest. The pre-restore needs
+      # the same RID list, otherwise the container publish fails with
       # `NETSDK1047: Assets file ... doesn't have a target for
       # 'net10.0/linux-arm64'`.
       #
-      # `ContainerImageTags="$V;latest"` taggt die Images doppelt.
-      # Die innere Quoting-Form ist noetig damit MSBuild das ';' als
-      # Property-Wert sieht statt als Argument-Separator.
+      # `ContainerImageTags="$V;latest"` tags the images twice.
+      # The inner quoting form is needed so that MSBuild sees the ';' as
+      # part of the property value instead of an argument separator.
       #
-      # ContainerRegistry nimmt nur den Host ("ghcr.io"); der org/image-
-      # Pfad geht via ContainerRepository. Beides kombiniert
-      # ("ghcr.io/<owner>") triggert CONTAINER2012 "could not recognise
-      # registry" weil das SDK das als literalen Host nimmt.
+      # ContainerRegistry takes only the host ("ghcr.io"); the org/image
+      # path goes via ContainerRepository. Combining both
+      # ("ghcr.io/<owner>") triggers CONTAINER2012 "could not recognise
+      # registry" because the SDK takes it as a literal host.
       - name: Pre-restore Broker (multi-RID)
         run: |
           dotnet restore src/Kuestenlogik.Surgewave.Broker.App \
@@ -307,9 +307,9 @@ jobs:
             -p:ContainerRegistry=ghcr.io \
             -p:ContainerRepository=${{ steps.ghcr.outputs.owner }}/surgewave-control
 
-      # Docker Hub ist gated: ohne DOCKERHUB_TOKEN + DOCKERHUB_USERNAME
-      # wird skip-ohne-fail gemacht, das GHCR-Image ist die offizielle
-      # Quelle und Docker Hub die zweite Distribution.
+      # Docker Hub is gated: without DOCKERHUB_TOKEN + DOCKERHUB_USERNAME
+      # the steps skip without failing; the GHCR image is the official
+      # source and Docker Hub the second distribution.
       - name: Login to Docker Hub
         if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
         uses: docker/login-action@v4
@@ -317,13 +317,13 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
-      # Die GHCR-Steps oben haben die Multi-RID-Assets bereits aufgebaut,
-      # `--no-restore` reused den Cache. Der einzige zusaetzliche Aufwand
-      # ist der Registry-Push selbst — Image ist byte-identisch zu GHCR.
-      # Namespace ist fix auf `kuestenlogik` — dem Org-Namespace auf
-      # Docker Hub. DOCKERHUB_USERNAME ist nur der Login-User (kann ein
-      # User-Account mit Push-Rechten auf die Org sein), nicht der
-      # Repository-Namespace.
+      # The GHCR steps above have already built the multi-RID assets,
+      # `--no-restore` reuses the cache. The only additional effort
+      # is the registry push itself — the image is byte-identical to GHCR.
+      # The namespace is fixed to `kuestenlogik` — the org namespace on
+      # Docker Hub. DOCKERHUB_USERNAME is only the login user (can be a
+      # user account with push rights on the org), not the
+      # repository namespace.
       - name: Push Broker container to Docker Hub (multi-arch)
         if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
         env:
@@ -381,9 +381,9 @@ jobs:
           dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r osx-x64 --self-contained -o ./publish/surgewave-cli-osx-x64 -p:Version=${{ steps.version.outputs.VERSION }}
           dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -r osx-arm64 --self-contained -o ./publish/surgewave-cli-osx-arm64 -p:Version=${{ steps.version.outputs.VERSION }}
 
-      # Windows MSI kommt aus dem build-msi-Job (Windows-Runner) als Artefakt.
-      # WiX v5 ist Windows-only, deshalb laesst er sich nicht im linux-basierten
-      # release-Job inline bauen — siehe oben.
+      # The Windows MSI comes from the build-msi job (Windows runner) as an artefact.
+      # WiX v5 is Windows-only, so it cannot be built inline in the Linux-based
+      # release job — see above.
       - name: Download MSI artefact
         uses: actions/download-artifact@v8
         with:
@@ -417,10 +417,10 @@ jobs:
       - name: Publish NuGet to GitHub Packages
         run: dotnet nuget push ./artifacts/packages/*.nupkg --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
 
-      # nuget.org: nur auf stabilen Tags (kein `-rc` Suffix) und nur wenn das
-      # Secret konfiguriert ist. NUGET_API_KEY braucht den 'Push new packages
-      # and package versions'-Scope mit Glob `Kuestenlogik.Surgewave.*` bzw.
-      # `surgewave*` (kebab-IDs fuer Executables).
+      # nuget.org: only on stable tags (no `-rc` suffix) and only when the
+      # secret is configured. NUGET_API_KEY needs the 'Push new packages
+      # and package versions' scope with glob `Kuestenlogik.Surgewave.*` or
+      # `surgewave*` (kebab IDs for executables).
       - name: Publish NuGet to nuget.org
         if: ${{ !contains(github.ref, '-rc') && env.NUGET_API_KEY != '' }}
         run: |
@@ -435,11 +435,11 @@ jobs:
           name: release-packages-${{ steps.version.outputs.VERSION }}
           path: artifacts/packages/*.nupkg
 
-      # Bowire-Pattern: der kuratierte Body kommt aus docs/release-notes/
-      # (v<tag>.md → upcoming.md → Legacy-Draft), Front-matter wird
-      # gestrippt, die Installations-Kommandos wandern in einen
-      # eingeklappten <details>-Block, und ein Seam trennt Editorial
-      # von der auto-generierten Commit-Liste.
+      # Bowire pattern: the curated body comes from docs/release-notes/
+      # (v<tag>.md → upcoming.md → legacy draft), the front matter is
+      # stripped, the installation commands move into a collapsed
+      # <details> block, and a seam separates the editorial part
+      # from the auto-generated commit list.
       - name: Pull editorial body (file first, GitHub draft as fallback)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -487,7 +487,7 @@ jobs:
             echo '```bash'
             echo "docker pull kuestenlogik/surgewave-broker:${V}"
             echo "docker pull kuestenlogik/surgewave-control:${V}"
-            echo "# …oder :latest"
+            echo "# …or :latest"
             echo '```'
             echo ""
             echo "**Container — alternative registry (GHCR):**"
@@ -528,13 +528,13 @@ jobs:
           cat release-body.md
           echo "----- end -----"
 
-      # Release-Titel-Theme aus dem Meilenstein, den dieses Release liefert.
-      # Meilensteine sind Arbeitsabschnitte `M<n> — <theme>` (docs/contributing/
-      # project-board.md, „Milestones and releases“); die Versionsnummer entsteht
-      # beim Schnitt, also nennt die Tag-Nachricht die Abschnitte und
-      # scripts/resolve-milestone.mjs liest sie (Rückfall: Titel beginnt mit
-      # v<base>, dann der vorderste fertige Abschnitt). Nie ein Fehler: ohne
-      # Treffer bleibt der Titel nackt, und das steht im Log.
+      # Release title theme from the milestone this release delivers.
+      # Milestones are work sections `M<n> — <theme>` (docs/contributing/
+      # project-board.md, "Milestones and releases"); the version number is
+      # assigned at the cut, so the tag message names the sections and
+      # scripts/resolve-milestone.mjs reads them (fallback: a title starting with
+      # v<base>, then the frontmost finished section). Never an error: without
+      # a match the title stays bare, and the log says so.
       - name: Resolve release title from milestone
         id: title
         env:

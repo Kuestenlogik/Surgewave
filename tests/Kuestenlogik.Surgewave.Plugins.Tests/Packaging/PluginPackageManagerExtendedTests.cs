@@ -5,11 +5,11 @@ using Kuestenlogik.Surgewave.Plugins.Packaging;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Packaging;
 
 /// <summary>
-/// Extended Tests fuer <see cref="PluginPackageManager"/>-Pfade, die der Roundtrip-Suite
-/// fehlen: Signature-Verification (require/optional/invalid), PluginSettings-Bundling
-/// (auto-detect, explicit, missing-erzwungen, Path-Traversal-Reject), Shared/Deps-Layout,
-/// Icon-Autodiscovery, <see cref="PluginPackageManager.EnumerateInstalledPluginSettingsFiles"/>
-/// und Edge-Cases bei <see cref="PluginPackageManager.GetInstalledPluginsAsync"/>.
+/// Extended tests for <see cref="PluginPackageManager"/> paths that the round-trip suite
+/// lacks: signature verification (require/optional/invalid), PluginSettings bundling
+/// (auto-detect, explicit, missing-but-required, path traversal reject), shared/deps layout,
+/// icon autodiscovery, <see cref="PluginPackageManager.EnumerateInstalledPluginSettingsFiles"/>
+/// and edge cases in <see cref="PluginPackageManager.GetInstalledPluginsAsync"/>.
 /// </summary>
 public sealed class PluginPackageManagerExtendedTests : IDisposable
 {

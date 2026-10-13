@@ -5,9 +5,9 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// End-to-end-Coverage fuer <see cref="ConnectorInstaller"/>-Pfade, die echte ZIPs +
-/// FakeRepository.DownloadAsync brauchen: InstallAsync (Fresh, Upgrade ueber existing
-/// install dir), LoadConnector mit lib/{tfm}/* TFM-Selection, Tempdir-Cleanup.
+/// End-to-end coverage for <see cref="ConnectorInstaller"/> paths that need real ZIPs +
+/// FakeRepository.DownloadAsync: InstallAsync (fresh, upgrade over an existing
+/// install dir), LoadConnector with lib/{tfm}/* TFM selection, temp dir cleanup.
 /// </summary>
 public sealed class ConnectorInstallerE2ETests : IDisposable
 {

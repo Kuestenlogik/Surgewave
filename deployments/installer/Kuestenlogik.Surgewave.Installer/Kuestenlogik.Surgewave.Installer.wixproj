@@ -5,11 +5,11 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <!-- Suppress WiX from appearing in solution builds; build via build-installer.ps1 -->
     <IsPackable>false</IsPackable>
-    <!-- ICE60: harmlos fuer self-contained .NET binaries (Bulk-Harvest
-         setzt keine Language pro File). ICE61: Same-Version-Upgrades sind
-         explizit per AllowSameVersionUpgrades=yes erlaubt, ICE checkt
-         das aber pauschal. Beide blockieren nur den Build, nicht das
-         tatsaechliche MSI-Verhalten. -->
+    <!-- ICE60: harmless for self-contained .NET binaries (bulk harvest
+         sets no Language per file). ICE61: same-version upgrades are
+         explicitly allowed via AllowSameVersionUpgrades=yes, but ICE checks
+         it across the board. Both only block the build, not the
+         actual MSI behaviour. -->
     <SuppressIces>ICE60;ICE61</SuppressIces>
   </PropertyGroup>
 
@@ -20,11 +20,11 @@
     <ControlPublishDir Condition="'$(ControlPublishDir)' == ''">..\..\publish\control</ControlPublishDir>
   </PropertyGroup>
 
-  <!-- WiX-Preprocessor-Variablen ($(var.XYZ) in den .wxs-Files) werden
-       aus den MSBuild-Properties oben gespeist. Ohne diesen DefineConstants-
-       Eintrag bricht der Build mit WIX0150 ('Undefined preprocessor
-       variable'), weil das WiX-SDK MSBuild-Properties nicht automatisch
-       als Preprocessor-Konstanten exponiert. -->
+  <!-- The WiX preprocessor variables ($(var.XYZ) in the .wxs files) are
+       fed from the MSBuild properties above. Without this DefineConstants
+       entry the build fails with WIX0150 ('Undefined preprocessor
+       variable'), because the WiX SDK does not automatically expose
+       MSBuild properties as preprocessor constants. -->
   <PropertyGroup>
     <DefineConstants>BrokerPublishDir=$(BrokerPublishDir);CliPublishDir=$(CliPublishDir);ControlPublishDir=$(ControlPublishDir)</DefineConstants>
   </PropertyGroup>

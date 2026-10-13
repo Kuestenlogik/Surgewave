@@ -1,6 +1,6 @@
 /**
  * Captures marketing screenshots from Surgewave.Control by driving the UI
- * with Playwright (analog Bowire's capture-screenshots.js).
+ * with Playwright (modelled on Bowire's capture-screenshots.js).
  *
  * Prerequisites:
  *   1. Surgewave-Broker running (default: HTTPS :9093 + Kafka-wire :9092)
@@ -84,10 +84,10 @@ async function goTo(page, route) {
         await goTo(page, '/plugins');
         await shot(page, 'plugin-marketplace');
 
-        // === Connector Configuration — Available Plugins tab (zeigt installierte .swpkg's)
+        // === Connector Configuration — Available Plugins tab (shows installed .swpkg files)
         await goTo(page, '/connectors');
-        // Click "AVAILABLE PLUGINS" tab — Mat-Tab links sind anchor/button mit dem Tab-Label.
-        // Fallback ist die existing "Running Connectors" Ansicht falls Tab nicht klickbar.
+        // Click "AVAILABLE PLUGINS" tab — Mat-Tab links are anchors/buttons with the tab label.
+        // The fallback is the existing "Running Connectors" view if the tab is not clickable.
         const availableTab = page.locator('text=AVAILABLE PLUGINS').first();
         if (await availableTab.isVisible({ timeout: 1500 }).catch(() => false)) {
             await availableTab.click();

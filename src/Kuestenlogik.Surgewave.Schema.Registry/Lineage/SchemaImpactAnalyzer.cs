@@ -94,8 +94,8 @@ public sealed class SchemaImpactAnalyzer
             }
             catch (Exception ex)
             {
-                // Lineage ist Auskunft, nicht Gate-Bedingung: eine kaputte Quelle darf die
-                // Registrierung nicht blockieren, nur die Namensliste verkürzen.
+                // Lineage is information, not a gate condition: a broken source must not block
+                // the registration, only shorten the list of names.
                 _logger.LogWarning(ex, "Lineage source failed for topic {Topic}; impact list is incomplete", topic);
                 continue;
             }

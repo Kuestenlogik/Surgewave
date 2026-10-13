@@ -389,10 +389,10 @@ public sealed class ApiVersionsResponse : KafkaResponse
                 new SupportedFeature { Name = "group.version", MinVersion = 0, MaxVersion = 1 },
                 new SupportedFeature { Name = "transaction.version", MinVersion = 0, MaxVersion = 2 },
                 new SupportedFeature { Name = "metadata.version", MinVersion = 14, MaxVersion = 22 },
-                // KAFKA-20415 / KIP-1191: share.version=2 fuegt DLQ-Support fuer Share-Groups
-                // hinzu (gated bei IBP_4_4_IV0). Surgewave hat aktuell keine DLQ-Implementierung,
-                // daher advertised wir nur 0-1. Sobald KIP-1191 in ShareGroupCoordinator
-                // umgesetzt ist, MaxVersion auf 2 erhoehen.
+                // KAFKA-20415 / KIP-1191: share.version=2 adds DLQ support for share groups
+                // (gated at IBP_4_4_IV0). Surgewave currently has no DLQ implementation,
+                // so we advertise only 0-1. As soon as KIP-1191 is implemented in
+                // ShareGroupCoordinator, raise MaxVersion to 2.
                 new SupportedFeature { Name = "share.version", MinVersion = 0, MaxVersion = 1 },
             ],
             FinalizedFeaturesEpoch = 1,

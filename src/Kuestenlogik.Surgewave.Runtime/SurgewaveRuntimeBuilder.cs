@@ -13,12 +13,12 @@ namespace Kuestenlogik.Surgewave.Runtime;
 /// </summary>
 public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
 {
-    // Default Host ist die IPv4-Loopback-Adresse (statt "localhost"), weil
-    // Linux getaddrinfo("localhost") gerne ::1 zuerst liefert und ein
-    // librdkafka-Client auf v6-deaktivierten oder dual-stack-roulette
-    // Setups dann am Connect scheitert. Wer Dual-Stack braucht, opt-in
-    // ueber WithDualMode() — das setzt zusaetzlich den Host wieder auf
-    // "localhost" zurueck, damit Clients beide Stacks probieren.
+    // The default host is the IPv4 loopback address (instead of "localhost"), because
+    // Linux getaddrinfo("localhost") likes to return ::1 first and a
+    // librdkafka client on v6-disabled or dual-stack-roulette
+    // setups then fails to connect. Whoever needs dual stack opts in
+    // via WithDualMode() — which also sets the host back to
+    // "localhost" so clients try both stacks.
     private string _host = "127.0.0.1";
     private int _port = 0;
     private int _replicationPort = 0;
@@ -84,13 +84,13 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
-    /// Aktiviert Dual-Stack-Listen (IPv4 + IPv6). Default false; in dem Fall
-    /// bindet der Broker auf 127.0.0.1 und der Host bleibt 127.0.0.1 — der
-    /// deterministische Pfad fuer Tests/Dev/CI ohne IPv6-Roulette. Mit
-    /// `enable: true` wechseln wir auf IPv6Any+DualMode und stellen den
-    /// Default-Host wieder auf "localhost", damit Clients beide Stacks
-    /// probieren koennen. Wer einen anderen Host explizit gesetzt hat,
-    /// bleibt unangetastet.
+    /// Enables dual-stack listening (IPv4 + IPv6). Default false; in that case
+    /// the broker binds to 127.0.0.1 and the host stays 127.0.0.1 — the
+    /// deterministic path for tests/dev/CI without IPv6 roulette. With
+    /// `enable: true` we switch to IPv6Any+DualMode and set the
+    /// default host back to "localhost" so clients can try both
+    /// stacks. A host that was set explicitly to something else
+    /// is left untouched.
     /// </summary>
     public SurgewaveRuntimeBuilder WithDualMode(bool enable = true)
     {

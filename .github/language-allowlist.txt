@@ -1,0 +1,15 @@
+# Language guard allowlist — read by scripts/check-english.mjs.
+# Everything in this repository is English. An entry here excuses German that is
+# payload or domain data, never prose. Format: <path glob> | <line regex or *> | <reason>
+# (fields separated by " | ", so a regex may use | for alternation).
+
+src/Kuestenlogik.Surgewave.Broker/IntentConfig/IntentConfigEngine.cs | Keywords = \[ | Payload: German intent keywords the engine must recognise in user input.
+src/Kuestenlogik.Surgewave.Control.Sdk/Services/Assistant/AssistantService.cs | topic für|hochverfügbar | Payload: German phrases and intent keywords the assistant must recognise in user input.
+src/Kuestenlogik.Surgewave.Control.Sdk/Services/Assistant/NlToSqlTranslator.cs | GeneratedRegex | Payload: German natural-language query patterns the translator must recognise.
+tests/Kuestenlogik.Surgewave.Broker.Tests/IntentConfigTests.cs | hochverfügbar|Datenschutz-konformer | Test input: German user input for the intent keywords.
+tests/Kuestenlogik.Surgewave.Client.Tests/RequestReplyTests.cs | Weltall | Test input: non-ASCII round-trip payload.
+tests/Kuestenlogik.Surgewave.Client.Tests/Serialization/BuiltInSerializerTests.cs | Weltall | Test input: non-ASCII round-trip payload.
+tests/Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka.Tests/Serialization/SerializerRoundTripTests.cs | wave üßé | Test input: non-ASCII round-trip payload.
+tests/Kuestenlogik.Surgewave.Core.Tests/Utf8StringInternCacheTests.cs | bestellungen-müller | Test input: non-ASCII topic name.
+tests/Kuestenlogik.Surgewave.Tests/Util/LogSanitizerTests.cs | täglich | Test input: non-ASCII text for the log sanitizer.
+site/_i18n/de/** | * | Translation resource: German originals of site strings, kept to seed the planned German version of the site.

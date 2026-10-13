@@ -24,7 +24,7 @@ Numbers are conservative measurements from the in-house benchmark suite
           <h3 class="metric-detail-title">P99 produce latency &lt; 1 ms</h3>
           <p class="metric-detail-lede">99 % of producer write requests finish acked under one millisecond on Surgewave's native protocol, single-broker, NVMe-backed.</p>
           <figure class="metric-detail-figure">
-            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Latency-Histogramm">
+            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Latency histogram">
               <g transform="translate(40,20)">
                 <line x1="0" y1="100" x2="320" y2="100" stroke="currentColor" stroke-opacity="0.4" stroke-width="1"/>
                 <line x1="0" y1="0" x2="0" y2="100" stroke="currentColor" stroke-opacity="0.4" stroke-width="1"/>
@@ -70,7 +70,7 @@ Numbers are conservative measurements from the in-house benchmark suite
           <h3 class="metric-detail-title">5&ndash;10&times; lower P99 than Apache Kafka</h3>
           <p class="metric-detail-lede">On identical hardware, Surgewave's native protocol delivers P99 produce latency 5&ndash;10&times; lower than Apache Kafka's Kafka-wire baseline. Same physical box, no special tuning.</p>
           <figure class="metric-detail-figure">
-            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vergleich P99-Latenz Kafka vs Surgewave">
+            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="P99 latency comparison, Kafka vs Surgewave">
               <g transform="translate(40,20)">
                 <line x1="0" y1="120" x2="320" y2="120" stroke="currentColor" stroke-opacity="0.4" stroke-width="1"/>
                 <!-- Kafka bar -->
@@ -102,7 +102,7 @@ Numbers are conservative measurements from the in-house benchmark suite
           <h3 class="metric-detail-title">&gt; 1 million messages per second per broker</h3>
           <p class="metric-detail-lede">A single Surgewave broker on commodity NVMe sustains over one million messages per second in batched-produce mode. Three-broker cluster: linear scale.</p>
           <figure class="metric-detail-figure">
-            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Throughput-Skalierung pro Broker-Anzahl">
+            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Throughput scaling by broker count">
               <g transform="translate(40,20)">
                 <line x1="0" y1="120" x2="320" y2="120" stroke="currentColor" stroke-opacity="0.4" stroke-width="1"/>
                 <line x1="0" y1="0" x2="0" y2="120" stroke="currentColor" stroke-opacity="0.4" stroke-width="1"/>
@@ -139,7 +139,7 @@ Numbers are conservative measurements from the in-house benchmark suite
           <h3 class="metric-detail-title">Petabyte-scale tiered cold storage</h3>
           <p class="metric-detail-lede">Hot data stays on NVMe; once segments are sealed they tier to S3-compatible object storage. Consumers transparently fetch cold segments &mdash; no special client API.</p>
           <figure class="metric-detail-figure">
-            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Storage-Tiering-Diagramm">
+            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Storage tiering diagram">
               <g transform="translate(20,20)" font-family="ui-monospace, monospace">
                 <!-- Hot tier -->
                 <rect x="10"  y="50" width="80" height="40" rx="4" fill="var(--accent)" opacity="0.9"/>
@@ -185,7 +185,7 @@ Numbers are conservative measurements from the in-house benchmark suite
           <h3 class="metric-detail-title">Zero JVM. Pure .NET 10.</h3>
           <p class="metric-detail-lede">No JVM. No GC tuning. No heap sizing. Surgewave is a single .NET 10 executable, optionally Native-AOT compiled to a ~40 MB binary that starts in under a second.</p>
           <figure class="metric-detail-figure">
-            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vergleich Startzeit + Memory">
+            <svg viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Startup time + memory comparison">
               <g transform="translate(40,20)" font-family="ui-monospace, monospace">
                 <line x1="0" y1="120" x2="320" y2="120" stroke="currentColor" stroke-opacity="0.4" stroke-width="1"/>
                 <text x="0" y="14" fill="currentColor" opacity="0.7" font-size="10">Cold-start to ready</text>

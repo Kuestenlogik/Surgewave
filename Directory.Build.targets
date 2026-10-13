@@ -30,35 +30,35 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
-  <!-- Coverage-Fix: Coverlet/Cecil muss beim Instrumentieren die CustomAttribute-
-       Signaturen aufloesen; die [LoggerMessage]-Attribute tragen LogLevel-Enum-
-       Argumente aus Microsoft.Extensions.Logging.Abstractions. Ohne die
-       Compilation-Context-Referenzen in der deps.json wirft Cecil auf dem Linux-
-       Runner eine AssemblyResolutionException und Coverlet UEBERSPRINGT genau die
-       logging-schweren Module — Core/Clustering/Protocol.Kafka standen dadurch
-       uniform auf 0 % Coverage (Coverlets dokumentierter Fix fuer
-       CecilAssemblyResolutionException). In targets evaluiert, damit IsTestProject
-       aus dem csproj bereits aufgeloest ist. -->
+  <!-- Coverage fix: while instrumenting, Coverlet/Cecil has to resolve the custom attribute
+       signatures; the [LoggerMessage] attributes carry LogLevel enum
+       arguments from Microsoft.Extensions.Logging.Abstractions. Without the
+       compilation context references in the deps.json, Cecil throws an
+       AssemblyResolutionException on the Linux runner and Coverlet SKIPS exactly the
+       logging-heavy modules — Core/Clustering/Protocol.Kafka therefore stood
+       uniformly at 0 % coverage (Coverlet's documented fix for
+       CecilAssemblyResolutionException). Evaluated in targets, so that IsTestProject
+       from the csproj is already resolved. -->
   <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
     <PreserveCompilationContext>true</PreserveCompilationContext>
   </PropertyGroup>
 
-  <!-- Microsoft.Testing.Platform-Extensions, die jedes Testprojekt braucht:
-       CodeCoverage ersetzt den "XPlat Code Coverage"-DataCollector, HangDump
-       die frueheren blame-hang-Optionen. Beide MUESSEN hier stehen und nicht
-       in tests/Directory.Build.props: die vier Sample-Testprojekte liegen unter
-       samples/<Sample>/tests/ und sehen die nur. Ohne die HangDump-Extension
-       lehnt ein Modul die hangdump-Option ab und meldet "Zero tests ran" -
-       der Testlauf faellt dann aus, ohne dass ein Test fehlschlaegt.
-       In targets, damit IsTestProject aus dem csproj aufgeloest ist. -->
+  <!-- Microsoft.Testing.Platform extensions that every test project needs:
+       CodeCoverage replaces the "XPlat Code Coverage" data collector, HangDump
+       the former blame-hang options. Both MUST be here and not
+       in tests/Directory.Build.props: the four sample test projects live under
+       samples/<Sample>/tests/ and only see this file. Without the HangDump extension
+       a module rejects the hangdump option and reports "Zero tests ran" -
+       the test run then fails without any test failing.
+       In targets, so that IsTestProject from the csproj is resolved. -->
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
   </ItemGroup>
 
-  <!-- Die Coverage-Extension bekommt nur, wer auch gemessen wird. coverage.yml
-       nimmt die IntegrationTests aus der Coverage-Solution heraus; das Projekt
-       setzt darum ExcludeFromCoverage und bleibt damit auch frei von der
-       Instrumentierung. -->
+  <!-- Only projects that are actually measured get the coverage extension. coverage.yml
+       takes IntegrationTests out of the coverage solution; the project
+       therefore sets ExcludeFromCoverage and thereby also stays free of
+       instrumentation. -->
   <ItemGroup Condition="'$(IsTestProject)' == 'true' AND '$(ExcludeFromCoverage)' != 'true'">
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
   </ItemGroup>

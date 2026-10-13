@@ -139,7 +139,7 @@ public static class MessageBrowserRestApi
             return Results.NotFound(new { message = $"Partition {topic}-{partition} not found" });
         }
 
-        // Timestamp nach der letzten Nachricht → NextOffset, damit die UI ans Log-Ende springt.
+        // A timestamp after the last message → NextOffset, so the UI jumps to the end of the log.
         var offset = log.FindOffsetByTimestamp(timestamp) ?? log.NextOffset;
         return Results.Ok(new OffsetForTimestampResponse(topic, partition, timestamp, offset));
     }

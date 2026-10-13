@@ -22,9 +22,9 @@ internal sealed class TargetAssignmentComputer(LogManager logManager)
         if (group.Members.Count == 0)
         {
             // KAFKA-20442 invariant: empty group => GroupEpoch == AssignmentEpoch.
-            // Java/Kafka schreibt hier ein TargetAssignmentMetadataRecord(groupEpoch, ts=0);
-            // bei uns reicht das Feld-Update, weil Persistence der gesamten Group-State
-            // beim Caller passiert.
+            // Java/Kafka writes a TargetAssignmentMetadataRecord(groupEpoch, ts=0) here;
+            // for us the field update is enough, because persisting the whole group state
+            // happens at the caller.
             group.AssignmentEpoch = group.GroupEpoch;
             return;
         }

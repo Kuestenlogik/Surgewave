@@ -174,11 +174,11 @@ public static class PluginRestApi
         // GET /api/plugins/{id}/{version}/download â€” download a cached .swpkg package
         group.MapGet("/{id}/{version}/download", (string id, string version) =>
         {
-            // Path-Injection-Schutz: Route-Parameter werden direkt in
-            // den Dateinamen geschrieben — ohne Allowlist koennte ein
-            // Angreifer `id=../../../etc` schicken und aus dem Cache-Dir
-            // ausbrechen. Plugin-IDs sind kebab-case ASCII, Versionen
-            // sind SemVer (Zahlen, Punkte, optional `-rc.N`).
+            // Path injection protection: route parameters are written directly into
+            // the file name — without an allowlist an
+            // attacker could send `id=../../../etc` and break out of the cache dir.
+            // Plugin IDs are kebab-case ASCII, versions
+            // are SemVer (digits, dots, optionally `-rc.N`).
             if (!IsValidPluginId(id) || !IsValidPluginVersion(version))
             {
                 return Results.BadRequest(new { error = "Invalid plugin id or version." });
@@ -188,8 +188,8 @@ public static class PluginRestApi
             var cacheRoot = Path.GetFullPath(packageCacheDir);
             var filePath = Path.GetFullPath(Path.Combine(cacheRoot, fileName));
 
-            // Belt-and-suspenders: auch nach Validation muss das
-            // aufgeloeste File innerhalb des Cache-Roots liegen.
+            // Belt-and-suspenders: even after validation the
+            // resolved file must lie inside the cache root.
             if (!filePath.StartsWith(cacheRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             {
                 return Results.BadRequest(new { error = "Resolved path escapes the package cache directory." });
@@ -226,8 +226,8 @@ public static class PluginRestApi
         return app;
     }
 
-    // Plugin-IDs sind kebab-case ASCII (lowercase, optional Punkte
-    // fuer Namespace-aehnliche IDs wie 'kuestenlogik.surgewave.connector.akka').
+    // Plugin IDs are kebab-case ASCII (lowercase, optionally dots
+    // for namespace-like IDs such as 'kuestenlogik.surgewave.connector.akka').
     private static readonly Regex PluginIdPattern =
         new(@"^[a-z0-9](?:[a-z0-9.\-]{0,127})$", RegexOptions.Compiled);
 

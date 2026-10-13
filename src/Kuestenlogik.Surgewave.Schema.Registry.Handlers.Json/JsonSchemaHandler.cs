@@ -17,8 +17,8 @@ public sealed class JsonSchemaHandler : ISchemaTypeHandler
         {
             NJsonSchema.JsonSchema.FromJsonAsync(schemaString).GetAwaiter().GetResult();
 
-            // Vector-Deklarationen (#14) prueft der Roh-JSON-Walker, damit auch Vektoren in
-            // definitions/oneOf/items erfasst sind, nicht nur was das Objektmodell besucht.
+            // Vector declarations (#14) are checked by the raw-JSON walker, so vectors in
+            // definitions/oneOf/items are covered too, not only what the object model visits.
             var vectorErrors = JsonSchemaVectors.ValidateRaw(schemaString);
             if (vectorErrors.Count > 0)
             {
@@ -92,8 +92,8 @@ public sealed class JsonSchemaHandler : ISchemaTypeHandler
             errors.Add($"Type mismatch: reader expects {readerSchema.Type}, writer has {writerSchema.Type}");
         }
 
-        // Vector-Regel (#14): Vector-Sein, dim und dtype duerfen sich nicht aendern — in beide
-        // Richtungen brechend, deshalb hier im symmetrisch aufgerufenen Rekursionskern.
+        // Vector rule (#14): being a vector, dim and dtype must not change — breaking in both
+        // directions, hence here in the symmetrically called recursion core.
         if (Kuestenlogik.Surgewave.Schema.Registry.Vectors.VectorType.CheckCompatible(
                 JsonSchemaVectors.FromSchema(readerSchema),
                 JsonSchemaVectors.FromSchema(writerSchema)) is { } vectorError)

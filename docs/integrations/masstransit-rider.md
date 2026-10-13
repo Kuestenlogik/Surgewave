@@ -1,112 +1,112 @@
-# MassTransit Rider für Kuestenlogik.Surgewave – Konzeptübersicht
+# MassTransit Rider for Kuestenlogik.Surgewave – Concept overview
 
-**Status:** Konzept / Entwurf (Rev. 1)  
-**Datum:** 2026-04  
-**Kontext:** Kuestenlogik.Surgewave – Community-Integration und Ökosystem-Erschließung
+**Status:** Concept / draft (Rev. 1)  
+**Date:** 2026-04  
+**Context:** Kuestenlogik.Surgewave – community integration and ecosystem development
 
 ---
 
 ## Motivation
 
-MassTransit ist das meistverbreitete Messaging-Framework im .NET-Ökosystem. Tausende Produktionssysteme nutzen es als Abstraktionsschicht über Message Brokern (RabbitMQ, Azure Service Bus, Amazon SQS, ActiveMQ) und als Anwendungsframework für Consumers, Sagas, Routing Slips und Request/Response-Pattern. Die Community ist groß, aktiv und technisch versiert.
+MassTransit is the most widely used messaging framework in the .NET ecosystem. Thousands of production systems use it as an abstraction layer over message brokers (RabbitMQ, Azure Service Bus, Amazon SQS, ActiveMQ) and as an application framework for consumers, sagas, routing slips and request/response patterns. The community is large, active and technically savvy.
 
-Mit dem Übergang von MassTransit v9 auf ein kommerzielles Lizenzmodell (Massient, Inc., April 2025) bleibt MassTransit v8 unter Apache 2.0 offen und wird bis mindestens Ende 2026 gepflegt. Viele Teams evaluieren aktuell ihre Architektur-Entscheidungen neu — ein idealer Moment, Surgewave als performante Alternative zu Kafka in bestehende MassTransit-Infrastrukturen einzuführen.
+With the move of MassTransit v9 to a commercial licensing model (Massient, Inc., April 2025), MassTransit v8 stays open under Apache 2.0 and is maintained until at least the end of 2026. Many teams are currently re-evaluating their architecture decisions — an ideal moment to introduce Surgewave as a high-performance alternative to Kafka into existing MassTransit infrastructures.
 
-### Strategische Ziele
+### Strategic goals
 
-1. **Reichweite:** Surgewave wird dort sichtbar, wo Entwickler bereits Transport-Entscheidungen treffen — in der MassTransit-Konfiguration neben RabbitMQ, Azure Service Bus und Kafka.
-2. **Zero-Friction-Einstieg:** Bestehende MassTransit-Nutzer können Surgewave ausprobieren, ohne ihre Consumer, Sagas oder Geschäftslogik zu ändern.
-3. **Migrationspfad:** Teams, die von Kafka auf Surgewave migrieren wollen, können dies innerhalb von MassTransit tun — eine Konfigurationsänderung, kein Redesign.
-4. **Doppelter Angriffsvektor:** Zusammen mit der bestehenden `Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka`-Schicht und der Akka.NET-Persistence-Integration erschließt der MassTransit-Rider die dritte und größte .NET-Messaging-Community.
+1. **Reach:** Surgewave becomes visible where developers already make transport decisions — in the MassTransit configuration next to RabbitMQ, Azure Service Bus and Kafka.
+2. **Zero-friction entry:** Existing MassTransit users can try Surgewave without changing their consumers, sagas or business logic.
+3. **Migration path:** Teams that want to migrate from Kafka to Surgewave can do so within MassTransit — a configuration change, not a redesign.
+4. **Two-pronged approach:** Together with the existing `Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka` layer and the Akka.NET persistence integration, the MassTransit rider opens up the third and largest .NET messaging community.
 
 ---
 
-## Architekturentscheidung: Rider, nicht Transport
+## Architecture decision: rider, not transport
 
-MassTransit unterscheidet zwischen **Transports** und **Riders**:
+MassTransit distinguishes between **transports** and **riders**:
 
-| Eigenschaft | Transport | Rider |
+| Property | Transport | Rider |
 |-------------|-----------|-------|
-| Broker-Modell | Queue-basiert (Dispatch) | Log-basiert (Pull) |
-| Beispiele | RabbitMQ, Azure Service Bus, SQS | Kafka, Azure Event Hubs |
-| Topologie | Automatisch (Exchanges, Queues, Subscriptions) | Manuell (Topics existieren vorab) |
-| Consumer-Modell | Nachrichten werden dispatched und gelockt | Partitionen werden einem Consumer zugewiesen |
-| Offset-Management | Broker verwaltet Delivery | Consumer verwaltet Commit |
-| MassTransit-API | `UsingRabbitMq()`, `UsingAzureServiceBus()` | `AddRider()` → `UsingKafka()` |
+| Broker model | Queue-based (dispatch) | Log-based (pull) |
+| Examples | RabbitMQ, Azure Service Bus, SQS | Kafka, Azure Event Hubs |
+| Topology | Automatic (exchanges, queues, subscriptions) | Manual (topics exist beforehand) |
+| Consumer model | Messages are dispatched and locked | Partitions are assigned to a consumer |
+| Offset management | Broker manages delivery | Consumer manages commit |
+| MassTransit API | `UsingRabbitMq()`, `UsingAzureServiceBus()` | `AddRider()` → `UsingKafka()` |
 
-Surgewave ist architektonisch ein Log-basierter Broker mit Kafka-kompatiblem Protokoll. Die semantische Zuordnung ist eindeutig: **Surgewave ist ein Rider**, analog zum bestehenden Kafka-Rider. Der Vorteil: Die Rider-API ist explizit auf Topic/Partition/Offset-Semantik ausgelegt — genau das, was Surgewave nativ liefert.
+Architecturally, Surgewave is a log-based broker with a Kafka-compatible protocol. The semantic mapping is unambiguous: **Surgewave is a rider**, analogous to the existing Kafka rider. The advantage: the rider API is explicitly designed for topic/partition/offset semantics — exactly what Surgewave delivers natively.
 
 ---
 
-## Ist-Zustand in Surgewave
+## Current state in Surgewave
 
-### Relevante Bausteine
+### Relevant building blocks
 
-| Baustein | Paket | Funktion |
+| Building block | Package | Function |
 |----------|-------|----------|
-| `ISurgewaveClient` | `Kuestenlogik.Surgewave.Client` | Unified Client mit Protocol-Selection (Auto/Native/Kafka) |
-| `IProducer<TKey, TValue>` | `Kuestenlogik.Surgewave.Client` | Typed Producer mit Topic/Partition/Headers-Support |
-| `IConsumer<TKey, TValue>` | `Kuestenlogik.Surgewave.Client` | Typed Consumer mit Subscribe/Assign/Seek/Commit |
-| `SurgewaveClientBuilder` | `Kuestenlogik.Surgewave.Client` | Fluent Builder mit `UseSurgewaveProtocol()` / `UseKafkaProtocol()` |
-| `SurgewaveClientExtensions` | `Kuestenlogik.Surgewave.Hosting` | DI-Integration (`AddSurgewaveProducer<>`, `AddSurgewaveConsumer<>`) |
-| `SurgewaveRequestReplyClient` | `Kuestenlogik.Surgewave.Client` | Request/Reply-Pattern über Topics |
-| `Confluent.Kafka`-Wrapper | `Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka` | Drop-in-Replacement für `Confluent.Kafka` |
+| `ISurgewaveClient` | `Kuestenlogik.Surgewave.Client` | Unified client with protocol selection (Auto/Native/Kafka) |
+| `IProducer<TKey, TValue>` | `Kuestenlogik.Surgewave.Client` | Typed producer with topic/partition/headers support |
+| `IConsumer<TKey, TValue>` | `Kuestenlogik.Surgewave.Client` | Typed consumer with Subscribe/Assign/Seek/Commit |
+| `SurgewaveClientBuilder` | `Kuestenlogik.Surgewave.Client` | Fluent builder with `UseSurgewaveProtocol()` / `UseKafkaProtocol()` |
+| `SurgewaveClientExtensions` | `Kuestenlogik.Surgewave.Hosting` | DI integration (`AddSurgewaveProducer<>`, `AddSurgewaveConsumer<>`) |
+| `SurgewaveRequestReplyClient` | `Kuestenlogik.Surgewave.Client` | Request/reply pattern over topics |
+| `Confluent.Kafka` wrapper | `Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka` | Drop-in replacement for `Confluent.Kafka` |
 
-### Protokoll-Optionen
+### Protocol options
 
-| Protokoll | Latenz | Beschreibung |
+| Protocol | Latency | Description |
 |-----------|--------|--------------|
-| `SurgewaveNative` | low (target) | Proprietäres Binärprotokoll, maximale Performance |
-| `Kafka` | Kafka-protocol baseline | Kafka-Wire-Protokoll, Kompatibilität mit existierender Infrastruktur |
-| `Auto` | Optimal | Versucht Surgewave Native, fällt auf Kafka zurück |
+| `SurgewaveNative` | low (target) | Proprietary binary protocol, maximum performance |
+| `Kafka` | Kafka-protocol baseline | Kafka wire protocol, compatibility with existing infrastructure |
+| `Auto` | Optimal | Tries Surgewave Native, falls back to Kafka |
 
-Der Rider nutzt `Kuestenlogik.Surgewave.Client` direkt — **nicht** den `Confluent.Kafka`-Wrapper. Begründung: Der Wrapper simuliert die Confluent-API mit synchronen Polling-Semantiken, während der Rider die nativen async-Abstraktionen von `IProducer`/`IConsumer` direkt nutzen kann und sollte.
+The rider uses `Kuestenlogik.Surgewave.Client` directly — **not** the `Confluent.Kafka` wrapper. Rationale: the wrapper emulates the Confluent API with synchronous polling semantics, while the rider can and should use the native async abstractions of `IProducer`/`IConsumer` directly.
 
 ---
 
-## Zielarchitektur
+## Target architecture
 
-### Paketstruktur
+### Package structure
 
 ```
-Kuestenlogik.Surgewave.Integration.MassTransit/         ← NuGet-Paket
+Kuestenlogik.Surgewave.Integration.MassTransit/         ← NuGet package
 ├── Configuration/
 │   ├── SurgewaveRiderRegistrationExtensions.cs    ← AddRider(r => r.UsingSurgewave(...))
-│   ├── ISurgewaveRiderConfigurator.cs             ← Top-Level-Konfiguration
-│   ├── ISurgewaveTopicEndpointConfigurator.cs     ← Consumer-Endpoint-Konfiguration
-│   └── ISurgewaveProducerConfigurator.cs          ← Producer-Konfiguration
+│   ├── ISurgewaveRiderConfigurator.cs             ← top-level configuration
+│   ├── ISurgewaveTopicEndpointConfigurator.cs     ← consumer endpoint configuration
+│   └── ISurgewaveProducerConfigurator.cs          ← producer configuration
 ├── Transport/
-│   ├── SurgewaveRider.cs                          ← IRider-Implementierung
-│   ├── SurgewaveTopicReceiveEndpoint.cs           ← Partition-Consumer-Pump
-│   ├── SurgewaveReceiveContext.cs                 ← MassTransit ReceiveContext-Adapter
-│   ├── SurgewaveConsumeContext.cs                 ← Message → ConsumeContext<T> Mapping
-│   ├── SurgewaveHeaderAdapter.cs                  ← Surgewave Headers ↔ MT Headers
-│   └── SurgewaveSendTransport.cs                  ← ITopicProducer → Surgewave Producer
+│   ├── SurgewaveRider.cs                          ← IRider implementation
+│   ├── SurgewaveTopicReceiveEndpoint.cs           ← partition consumer pump
+│   ├── SurgewaveReceiveContext.cs                 ← MassTransit ReceiveContext adapter
+│   ├── SurgewaveConsumeContext.cs                 ← message → ConsumeContext<T> mapping
+│   ├── SurgewaveHeaderAdapter.cs                  ← Surgewave headers ↔ MT headers
+│   └── SurgewaveSendTransport.cs                  ← ITopicProducer → Surgewave producer
 ├── Serialization/
-│   ├── SurgewaveMessageSerializer.cs              ← MT Envelope → Surgewave Value
-│   └── SurgewaveMessageDeserializer.cs            ← Surgewave Value → MT Envelope
+│   ├── SurgewaveMessageSerializer.cs              ← MT envelope → Surgewave value
+│   └── SurgewaveMessageDeserializer.cs            ← Surgewave value → MT envelope
 └── Diagnostics/
-    ├── SurgewaveRiderHealthCheck.cs               ← IHealthCheck für Consumer/Producer
-    └── SurgewaveActivitySource.cs                 ← OpenTelemetry-Integration
+    ├── SurgewaveRiderHealthCheck.cs               ← IHealthCheck for consumer/producer
+    └── SurgewaveActivitySource.cs                 ← OpenTelemetry integration
 ```
 
-### Abhängigkeiten
+### Dependencies
 
 ```
 Kuestenlogik.Surgewave.Integration.MassTransit
-├── Kuestenlogik.Surgewave.Client           (Surgewave-Zugriff)
-├── Kuestenlogik.Surgewave.Hosting          (DI-Integration, optional)
+├── Kuestenlogik.Surgewave.Client           (Surgewave access)
+├── Kuestenlogik.Surgewave.Hosting          (DI integration, optional)
 ├── MassTransit               (>= 8.0, < 10.0)
-└── MassTransit.Abstractions  (Rider-Interfaces)
+└── MassTransit.Abstractions  (rider interfaces)
 ```
 
-Die Zielversion ist **MassTransit v8** (Apache 2.0). Kompatibilität mit v9 (kommerziell) ist wünschenswert, aber sekundär — v8 hat die größere installierte Basis und ist lizenzkostenfrei. Die API-Oberfläche der Rider-Abstraktion ist zwischen v8 und v9 stabil, sodass ein Upgrade voraussichtlich keine Breaking Changes erfordert.
+The target version is **MassTransit v8** (Apache 2.0). Compatibility with v9 (commercial) is desirable but secondary — v8 has the larger installed base and is free of licence costs. The API surface of the rider abstraction is stable between v8 and v9, so an upgrade is not expected to require breaking changes.
 
 ---
 
-## API-Design
+## API design
 
-### Registrierung (Developer-Facing)
+### Registration (developer-facing)
 
 ```csharp
 services.AddMassTransit(bus =>
@@ -115,34 +115,34 @@ services.AddMassTransit(bus =>
 
     bus.AddRider(rider =>
     {
-        // Consumer registrieren
+        // Register the consumer
         rider.AddConsumer<OrderEventConsumer>();
 
-        // Producer registrieren
+        // Register the producer
         rider.AddProducer<string, OrderEvent>("order-events");
 
-        // Surgewave als Rider konfigurieren
+        // Configure Surgewave as the rider
         rider.UsingSurgewave((context, surgewave) =>
         {
             surgewave.Host("localhost:9092");
 
-            // Optionale Protokoll-Auswahl (default: Auto)
-            surgewave.UseSurgewaveProtocol();  // oder: UseKafkaProtocol(), UseAutoProtocol()
+            // Optional protocol selection (default: Auto)
+            surgewave.UseSurgewaveProtocol();  // or: UseKafkaProtocol(), UseAutoProtocol()
 
-            // Consumer-Endpoint
+            // Consumer endpoint
             surgewave.TopicEndpoint<OrderEvent>("order-events", "order-service", e =>
             {
                 e.ConfigureConsumer<OrderEventConsumer>(context);
                 e.AutoOffsetReset = AutoOffsetReset.Earliest;
                 e.ConcurrentConsumerLimit = 4;
-                e.ConcurrentDeliveryLimit = 1;  // Ordering innerhalb Key
+                e.ConcurrentDeliveryLimit = 1;  // ordering within a key
             });
         });
     });
 });
 ```
 
-### Producer-Nutzung
+### Producer usage
 
 ```csharp
 public class OrderService(ITopicProducer<string, OrderEvent> producer)
@@ -162,7 +162,7 @@ public class OrderService(ITopicProducer<string, OrderEvent> producer)
 }
 ```
 
-### Consumer-Implementierung
+### Consumer implementation
 
 ```csharp
 public class OrderEventConsumer : IConsumer<OrderEvent>
@@ -172,107 +172,107 @@ public class OrderEventConsumer : IConsumer<OrderEvent>
         var order = context.Message;
         var correlationId = context.Headers.Get<string>("correlation-id");
 
-        // Geschäftslogik — identisch zu Kafka-Rider oder jedem anderen Transport
+        // Business logic — identical to the Kafka rider or any other transport
         await ProcessOrderAsync(order);
     }
 }
 ```
 
-### Vergleich mit Kafka-Rider
+### Comparison with the Kafka rider
 
-| Aspekt | Kafka-Rider | Surgewave-Rider |
+| Aspect | Kafka rider | Surgewave rider |
 |--------|-------------|-------------|
-| Host-Konfiguration | `k.Host("localhost:9092")` | `s.Host("localhost:9092")` |
+| Host configuration | `k.Host("localhost:9092")` | `s.Host("localhost:9092")` |
 | TopicEndpoint | `k.TopicEndpoint<T>(...)` | `s.TopicEndpoint<T>(...)` |
 | AddProducer | `rider.AddProducer<T>(topic)` | `rider.AddProducer<TKey,TValue>(topic)` |
-| Client-Bibliothek | `Confluent.Kafka` | `Kuestenlogik.Surgewave.Client` |
-| Protokoll-Wahl | Nur Kafka | Surgewave Native / Kafka / Auto |
-| Performance | Kafka-Latenz | Bis zu geringere Latenz (Surgewave Native) |
+| Client library | `Confluent.Kafka` | `Kuestenlogik.Surgewave.Client` |
+| Protocol choice | Kafka only | Surgewave Native / Kafka / Auto |
+| Performance | Kafka latency | Up to lower latency (Surgewave Native) |
 
-Die API-Oberfläche ist bewusst nahezu identisch zum Kafka-Rider. Entwickler, die MassTransit mit Kafka kennen, sollen den Surgewave-Rider sofort verstehen. Der einzige sichtbare Unterschied ist `UsingSurgewave()` statt `UsingKafka()` und die optionale Protokoll-Auswahl.
+The API surface is deliberately almost identical to the Kafka rider. Developers who know MassTransit with Kafka should understand the Surgewave rider immediately. The only visible difference is `UsingSurgewave()` instead of `UsingKafka()` and the optional protocol selection.
 
 ---
 
-## Komponentendesign
+## Component design
 
 ### 1. SurgewaveRider (IRider)
 
-Der `SurgewaveRider` implementiert MassTransits `IRider`-Interface und ist verantwortlich für:
+The `SurgewaveRider` implements MassTransit's `IRider` interface and is responsible for:
 
-- Lifecycle-Management: Start/Stop des `ISurgewaveClient` mit dem Host
-- Endpoint-Verwaltung: Starten der konfigurierten TopicEndpoints als Consumer-Pumpen
-- Producer-Registry: Verwaltung der registrierten `ITopicProducer<TKey, TValue>`-Instanzen
-- Health-Reporting: Aggregierter Health-Status aller Endpoints
+- Lifecycle management: start/stop of the `ISurgewaveClient` with the host
+- Endpoint management: starting the configured TopicEndpoints as consumer pumps
+- Producer registry: management of the registered `ITopicProducer<TKey, TValue>` instances
+- Health reporting: aggregated health status of all endpoints
 
 ```
 IRider
-├── Start()      → SurgewaveClient.ConnectAsync() + alle TopicEndpoints starten
-├── Stop()       → alle TopicEndpoints stoppen + SurgewaveClient.DisposeAsync()
-└── GetProducer() → ITopicProducer<TKey, TValue> aus Registry
+├── Start()      → SurgewaveClient.ConnectAsync() + start all TopicEndpoints
+├── Stop()       → stop all TopicEndpoints + SurgewaveClient.DisposeAsync()
+└── GetProducer() → ITopicProducer<TKey, TValue> from the registry
 ```
 
 ### 2. SurgewaveTopicReceiveEndpoint
 
-Jeder konfigurierte TopicEndpoint wird zu einer `SurgewaveTopicReceiveEndpoint`-Instanz:
+Every configured TopicEndpoint becomes a `SurgewaveTopicReceiveEndpoint` instance:
 
 ```
 SurgewaveTopicReceiveEndpoint
-├── Consumer-Pool:  N Consumer-Instanzen (ConcurrentConsumerLimit)
-├── Partition-Loop: Pro Partition eine ConsumeAsync-Schleife
-├── Delivery:       ConsumeResult → SurgewaveConsumeContext → MassTransit Pipeline
-├── Commit:         Nach erfolgreicher Verarbeitung → CommitAsync
-└── Error:          Bei Fault → Retry/DLQ nach MT-Konfiguration
+├── Consumer pool:  N consumer instances (ConcurrentConsumerLimit)
+├── Partition loop: one ConsumeAsync loop per partition
+├── Delivery:       ConsumeResult → SurgewaveConsumeContext → MassTransit pipeline
+├── Commit:         after successful processing → CommitAsync
+└── Error:          on fault → retry/DLQ according to the MT configuration
 ```
 
-**Concurrency-Modell:**
+**Concurrency model:**
 
-Der Kafka-Rider nutzt `ConcurrentConsumerLimit` zur Skalierung über Partitionen und `ConcurrentDeliveryLimit` für parallele Verarbeitung innerhalb einer Partition (nach Key). Der Surgewave-Rider übernimmt dieses Modell:
+The Kafka rider uses `ConcurrentConsumerLimit` to scale across partitions and `ConcurrentDeliveryLimit` for parallel processing within a partition (by key). The Surgewave rider adopts this model:
 
-- `ConcurrentConsumerLimit = N` → N Surgewave-Consumer-Instanzen, jede liest von eigenen Partitionen
-- `ConcurrentDeliveryLimit = 1` (default) → Ordering innerhalb Key garantiert
-- `ConcurrentDeliveryLimit > 1` → Parallele Delivery, Ordering nur innerhalb Key
+- `ConcurrentConsumerLimit = N` → N Surgewave consumer instances, each reading from its own partitions
+- `ConcurrentDeliveryLimit = 1` (default) → ordering within a key guaranteed
+- `ConcurrentDeliveryLimit > 1` → parallel delivery, ordering only within a key
 
-### 3. SurgewaveSendTransport (Producer)
+### 3. SurgewaveSendTransport (producer)
 
-Der `SurgewaveSendTransport` adaptiert MassTransits `ITopicProducer<T>` auf Surgewaves `IProducer<TKey, TValue>`:
+The `SurgewaveSendTransport` adapts MassTransit's `ITopicProducer<T>` to Surgewave's `IProducer<TKey, TValue>`:
 
 ```mermaid
 flowchart TB
     A["ITopicProducer&lt;T&gt;.Produce(message, context)"]
-    B["Serialisierung<br/>MT Envelope &rarr; byte[]"]
-    C["Header-Mapping<br/>MT Headers &rarr; Surgewave Headers"]
+    B["Serialisation<br/>MT envelope &rarr; byte[]"]
+    C["Header mapping<br/>MT headers &rarr; Surgewave headers"]
     D["IProducer&lt;TKey, TValue&gt;.ProduceAsync<br/>(topic, key, value, headers)"]
-    E["DeliveryReport &rarr; MT Send-Pipeline Completion"]
+    E["DeliveryReport &rarr; MT send pipeline completion"]
 
     A --> B --> C --> D --> E
 ```
 
-### 4. Serialisierung
+### 4. Serialisation
 
-MassTransit nutzt ein eigenes Envelope-Format mit Message-Type-URN, Headers, Conversation-ID, Correlation-ID und weiteren Metadaten. Der Surgewave-Rider muss diese Envelope transparent serialisieren:
+MassTransit uses its own envelope format with a message type URN, headers, conversation ID, correlation ID and further metadata. The Surgewave rider must serialise this envelope transparently:
 
-**Empfohlene Strategie: MassTransit-native Serialisierung**
+**Recommended strategy: MassTransit-native serialisation**
 
-- **Value:** MassTransit-Envelope als JSON (oder MessagePack, wenn konfiguriert) in den Surgewave-Message-Value. Das entspricht dem Verhalten des Kafka-Riders.
-- **Headers:** MassTransit-Transport-Headers (MessageId, ConversationId, CorrelationId, SourceAddress, DestinationAddress, MessageType) als Surgewave-Message-Headers.
-- **Key:** Konfigurierbarer Key-Selector, default: CorrelationId oder MessageId.
+- **Value:** the MassTransit envelope as JSON (or MessagePack, if configured) in the Surgewave message value. This matches the behaviour of the Kafka rider.
+- **Headers:** MassTransit transport headers (MessageId, ConversationId, CorrelationId, SourceAddress, DestinationAddress, MessageType) as Surgewave message headers.
+- **Key:** configurable key selector, default: CorrelationId or MessageId.
 
-Diese Strategie gewährleistet, dass MassTransit-Consumers die vollen MT-Metadaten erhalten und Features wie Sagas, Retry und Fault-Handling korrekt funktionieren.
+This strategy ensures that MassTransit consumers receive the full MT metadata and that features such as sagas, retry and fault handling work correctly.
 
-### 5. Offset-Commit-Strategie
+### 5. Offset commit strategy
 
-| Modus | Verhalten | Einsatz |
+| Mode | Behaviour | Use |
 |-------|-----------|---------|
-| `AutoCommit` | Commit nach jeder erfolgreichen Delivery | Default, einfach |
-| `BatchCommit` | Commit nach N Nachrichten oder Zeitintervall | Throughput-optimiert |
-| `ManualCommit` | Consumer kontrolliert Commit explizit | Exakt-once-Semantik |
+| `AutoCommit` | Commit after every successful delivery | Default, simple |
+| `BatchCommit` | Commit after N messages or a time interval | Throughput-optimised |
+| `ManualCommit` | The consumer controls the commit explicitly | Exactly-once semantics |
 
-Der Default ist `AutoCommit` nach erfolgreicher Consumer-Pipeline-Completion — analog zum Kafka-Rider.
+The default is `AutoCommit` after successful consumer pipeline completion — analogous to the Kafka rider.
 
-### 6. Health Checks und Diagnostics
+### 6. Health checks and diagnostics
 
 ```csharp
-// Automatisch registriert via AddRider
+// Registered automatically via AddRider
 services.AddHealthChecks()
     .AddSurgewaveRiderHealthCheck("surgewave-rider");
 
@@ -281,19 +281,19 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(t => t.AddSource("Kuestenlogik.Surgewave.MassTransit"));
 ```
 
-Der Health Check meldet:
+The health check reports:
 
-- **Healthy:** Alle Consumer verbunden, alle Partitionen zugewiesen
-- **Degraded:** Einige Partitionen nicht zugewiesen (Rebalance in progress)
-- **Unhealthy:** Keine Verbindung zum Broker
+- **Healthy:** all consumers connected, all partitions assigned
+- **Degraded:** some partitions not assigned (rebalance in progress)
+- **Unhealthy:** no connection to the broker
 
-OpenTelemetry-Spans werden für Produce und Consume erstellt, mit Propagation der TraceContext-Header über Surgewave-Message-Headers.
+OpenTelemetry spans are created for produce and consume, with propagation of the TraceContext headers via Surgewave message headers.
 
 ---
 
-## Migrationspfade
+## Migration paths
 
-### Pfad 1: Kafka → Surgewave (innerhalb MassTransit)
+### Path 1: Kafka → Surgewave (within MassTransit)
 
 ```diff
  bus.AddRider(rider =>
@@ -313,20 +313,20 @@ OpenTelemetry-Spans werden für Produce und Consume erstellt, mit Propagation de
  });
 ```
 
-Consumer-Code, Saga-Code, Routing-Slips — alles bleibt unverändert. Nur die Rider-Konfiguration ändert sich.
+Consumer code, saga code, routing slips — everything stays unchanged. Only the rider configuration changes.
 
-### Pfad 2: Confluent.Kafka → Surgewave (Migration auf MassTransit)
+### Path 2: Confluent.Kafka → Surgewave (migration to MassTransit)
 
-Für Teams, die bisher `Confluent.Kafka` direkt nutzen und auf MassTransit migrieren wollen, bietet der Surgewave-Rider einen Anreiz: Sie bekommen MassTransit-Features (Sagas, Retry, Outbox-Pattern) und Surgewave-Performance in einem Schritt.
+For teams that have so far used `Confluent.Kafka` directly and want to migrate to MassTransit, the Surgewave rider offers an incentive: they get MassTransit features (sagas, retry, outbox pattern) and Surgewave performance in one step.
 
-### Pfad 3: Dual-Rider (Kafka + Surgewave parallel)
+### Path 3: Dual rider (Kafka + Surgewave in parallel)
 
-MassTransit unterstützt mehrere Rider nebeneinander. Ein Team kann Kafka und Surgewave parallel betreiben und schrittweise migrieren:
+MassTransit supports several riders side by side. A team can run Kafka and Surgewave in parallel and migrate step by step:
 
 ```csharp
 bus.AddRider(rider =>
 {
-    // Legacy-Topics auf Kafka
+    // Legacy topics on Kafka
     rider.UsingKafka((context, k) =>
     {
         k.Host("kafka:9092");
@@ -336,7 +336,7 @@ bus.AddRider(rider =>
 
 bus.AddRider(rider =>
 {
-    // Neue Topics auf Surgewave
+    // New topics on Surgewave
     rider.UsingSurgewave((context, s) =>
     {
         s.Host("surgewave:9092");
@@ -347,127 +347,127 @@ bus.AddRider(rider =>
 
 ---
 
-## Feature-Parität mit Kafka-Rider
+## Feature parity with the Kafka rider
 
-| Feature | Kafka-Rider | Surgewave-Rider (Ziel) | Priorität |
+| Feature | Kafka rider | Surgewave rider (target) | Priority |
 |---------|-------------|---------------------|-----------|
-| TopicEndpoint mit Consumer | ✓ | ✓ | P0 |
+| TopicEndpoint with consumer | ✓ | ✓ | P0 |
 | ITopicProducer | ✓ | ✓ | P0 |
-| Consumer Groups | ✓ | ✓ | P0 |
-| Offset-Commit (Auto/Manual) | ✓ | ✓ | P0 |
-| Headers-Propagation | ✓ | ✓ | P0 |
+| Consumer groups | ✓ | ✓ | P0 |
+| Offset commit (auto/manual) | ✓ | ✓ | P0 |
+| Headers propagation | ✓ | ✓ | P0 |
 | ConcurrentConsumerLimit | ✓ | ✓ | P0 |
 | ConcurrentDeliveryLimit | ✓ | ✓ | P1 |
-| Retry / Kill Switch | ✓ | ✓ | P1 |
-| Health Checks | ✓ | ✓ | P1 |
-| OpenTelemetry-Spans | ✓ | ✓ | P1 |
-| CreateIfMissing (Topic) | ✓ | ✓ | P2 |
+| Retry / kill switch | ✓ | ✓ | P1 |
+| Health checks | ✓ | ✓ | P1 |
+| OpenTelemetry spans | ✓ | ✓ | P1 |
+| CreateIfMissing (topic) | ✓ | ✓ | P2 |
 | Schema Registry | ✓ (Confluent) | ✓ (Surgewave Schema Registry) | P2 |
-| Avro/Protobuf-Serializer | ✓ | ✓ (via Surgewave SchemaRegistry-Pakete) | P2 |
-| Multiple Types per Topic | ✓ (Custom) | ✓ | P3 |
+| Avro/Protobuf serializer | ✓ | ✓ (via the Surgewave SchemaRegistry packages) | P2 |
+| Multiple types per topic | ✓ (custom) | ✓ | P3 |
 
 ---
 
-## Lizenzierung und Veröffentlichung
+## Licensing and publication
 
-### Paketlizenz
+### Package licence
 
-`Kuestenlogik.Surgewave.Integration.MassTransit` wird unter **Apache 2.0** veröffentlicht. Begründung:
+`Kuestenlogik.Surgewave.Integration.MassTransit` is published under **Apache 2.0**. Rationale:
 
-- MassTransit v8 ist Apache 2.0 — ein Apache-2.0-Rider passt lizenzrechtlich nahtlos
-- Apache 2.0 eliminiert Adoptionshürden für Anwender vollständig
-- Das Paket hat eine Runtime-Abhängigkeit auf `Kuestenlogik.Surgewave.Client`, das Teil des Apache-2.0 Surgewave-Cores ist — sowohl die Integration als auch Client und Broker sind kostenfrei und permissiv lizenziert
+- MassTransit v8 is Apache 2.0 — an Apache 2.0 rider fits seamlessly in licensing terms
+- Apache 2.0 removes adoption barriers for users completely
+- The package has a runtime dependency on `Kuestenlogik.Surgewave.Client`, which is part of the Apache 2.0 Surgewave core — the integration as well as the client and broker are free of charge and permissively licensed
 
-### NuGet-Paketname
+### NuGet package name
 
-**Empfehlung:** `Kuestenlogik.Surgewave.Integration.MassTransit`
+**Recommendation:** `Kuestenlogik.Surgewave.Integration.MassTransit`
 
-Alternativen:
-- `MassTransit.Surgewave` — stärker in der MassTransit-Welt verankert, aber suggeriert Zugehörigkeit zum MassTransit-Projekt
-- `Kuestenlogik.Surgewave.MassTransit` — kürzer, aber unklar ob es sich um einen Consumer oder ein Tool handelt
+Alternatives:
+- `MassTransit.Surgewave` — more firmly anchored in the MassTransit world, but suggests membership of the MassTransit project
+- `Kuestenlogik.Surgewave.MassTransit` — shorter, but unclear whether it is a consumer or a tool
 
-Der Name `Kuestenlogik.Surgewave.Integration.MassTransit` folgt dem Namensschema des Küstenlogik-Ökosystems und signalisiert klar die Richtung der Abhängigkeit.
+The name `Kuestenlogik.Surgewave.Integration.MassTransit` follows the naming scheme of the Küstenlogik ecosystem and clearly signals the direction of the dependency.
 
-### NuGet-Veröffentlichung
+### NuGet publication
 
-Das Paket wird auf nuget.org publiziert mit:
+The package is published on nuget.org with:
 - Tags: `masstransit`, `surgewave`, `kafka`, `messaging`, `event-streaming`, `rider`
-- README mit Migrationspfad-Dokumentation
-- Icon: Surgewave-Logo
-- Minimum-Dependencies: MassTransit >= 8.0, Kuestenlogik.Surgewave.Client
+- README with migration path documentation
+- Icon: Surgewave logo
+- Minimum dependencies: MassTransit >= 8.0, Kuestenlogik.Surgewave.Client
 
 ---
 
-## Implementierungsplan
+## Implementation plan
 
-### Phase 1: Core Rider (P0)
+### Phase 1: core rider (P0)
 
-**Ziel:** Funktionale Parität für Produce/Consume mit dem Kafka-Rider.
+**Goal:** functional parity for produce/consume with the Kafka rider.
 
-1. `ISurgewaveRiderConfigurator` — Host, Protocol, Client-Optionen
-2. `SurgewaveRider : IRider` — Lifecycle, Client-Management
-3. `SurgewaveTopicReceiveEndpoint` — Consumer-Pump mit Partition-Assignment
-4. `SurgewaveSendTransport` — Producer mit MT-Envelope-Serialisierung
-5. `SurgewaveConsumeContext` / `SurgewaveReceiveContext` — Message-Pipeline-Adapter
-6. `SurgewaveHeaderAdapter` — Bidirektionales Header-Mapping
-7. Registrierungs-Extensions: `UsingSurgewave()`, `TopicEndpoint<T>()`, `AddProducer<>()`
+1. `ISurgewaveRiderConfigurator` — host, protocol, client options
+2. `SurgewaveRider : IRider` — lifecycle, client management
+3. `SurgewaveTopicReceiveEndpoint` — consumer pump with partition assignment
+4. `SurgewaveSendTransport` — producer with MT envelope serialisation
+5. `SurgewaveConsumeContext` / `SurgewaveReceiveContext` — message pipeline adapters
+6. `SurgewaveHeaderAdapter` — bidirectional header mapping
+7. Registration extensions: `UsingSurgewave()`, `TopicEndpoint<T>()`, `AddProducer<>()`
 
-**Ergebnis:** Ein MassTransit-Nutzer kann Surgewave als Rider konfigurieren, Nachrichten produzieren und konsumieren.
+**Result:** a MassTransit user can configure Surgewave as a rider, produce and consume messages.
 
-### Phase 2: Production-Readiness (P1)
+### Phase 2: production readiness (P1)
 
-1. ConcurrentDeliveryLimit mit Key-basierter Parallelisierung
-2. Retry-Integration (MassTransit Retry-Pipeline)
-3. Kill-Switch-Support
-4. Health Checks (`IHealthCheck`)
-5. OpenTelemetry-Instrumentation (`ActivitySource`)
-6. Testcontainers-Integration (`Testcontainers.Surgewave` + MassTransit Test Harness)
+1. ConcurrentDeliveryLimit with key-based parallelisation
+2. Retry integration (MassTransit retry pipeline)
+3. Kill switch support
+4. Health checks (`IHealthCheck`)
+5. OpenTelemetry instrumentation (`ActivitySource`)
+6. Testcontainers integration (`Testcontainers.Surgewave` + MassTransit test harness)
 
-**Ergebnis:** Produktionsreif mit Observability und Resilience.
+**Result:** production-ready with observability and resilience.
 
-### Phase 3: Ökosystem-Integration (P2/P3)
+### Phase 3: ecosystem integration (P2/P3)
 
-1. Schema-Registry-Integration (Surgewave Schema Registry ↔ MT Serializer)
-2. CreateIfMissing via Surgewave Admin API
-3. Topic-Konfiguration (Partitionen, Retention) über Endpoint-Config
-4. Multiple Message Types per Topic
-5. Saga-State-Machine-Support (Validierung/Dokumentation)
+1. Schema registry integration (Surgewave Schema Registry ↔ MT serializer)
+2. CreateIfMissing via the Surgewave Admin API
+3. Topic configuration (partitions, retention) via the endpoint config
+4. Multiple message types per topic
+5. Saga state machine support (validation/documentation)
 
-**Ergebnis:** Feature-vollständig, vergleichbar mit dem Kafka-Rider.
+**Result:** feature-complete, comparable with the Kafka rider.
 
 ---
 
-## Community-Strategie
+## Community strategy
 
-### Sichtbarkeit
+### Visibility
 
-1. **NuGet-Paket** als primärer Entdeckungsvektor — Entwickler suchen nach "MassTransit" + Transport-Name
-2. **MassTransit GitHub Discussions** — Ankündigung als Community-Transport, nicht als PR
-3. **Blog-Post** auf dem Surgewave-Blog: "Using Surgewave with MassTransit" — vollständiges Tutorial
-4. **Beispiel-Repository** (`surgewave-samples/masstransit`) mit Docker Compose, Surgewave-Broker, MassTransit-Consumer/Producer
+1. **NuGet package** as the primary discovery vector — developers search for "MassTransit" + transport name
+2. **MassTransit GitHub Discussions** — announcement as a community transport, not as a PR
+3. **Blog post** on the Surgewave blog: "Using Surgewave with MassTransit" — a complete tutorial
+4. **Example repository** (`surgewave-samples/masstransit`) with Docker Compose, Surgewave broker, MassTransit consumer/producer
 
 ### Timing
 
-Der optimale Zeitpunkt ist **jetzt** (Q2 2026):
-- MassTransit v8 wird Ende 2026 End-of-Life — Teams evaluieren aktiv Alternativen
-- MassTransit v9 ist kommerziell ($400+/Monat) — preissensitive Teams suchen Apache-2.0-Optionen
-- Die Kombination "Surgewave (Apache 2.0, kostenfrei und permissiv) + MassTransit v8 (Apache 2.0)" ist ein starkes Argument gegen "Kafka + MassTransit v9 ($$$)"
+The optimal moment is **now** (Q2 2026):
+- MassTransit v8 reaches end-of-life at the end of 2026 — teams are actively evaluating alternatives
+- MassTransit v9 is commercial ($400+/month) — price-sensitive teams are looking for Apache 2.0 options
+- The combination "Surgewave (Apache 2.0, free of charge and permissive) + MassTransit v8 (Apache 2.0)" is a strong argument against "Kafka + MassTransit v9 ($$$)"
 
-### Differenzierung gegenüber Kafka-Rider
+### Differentiation from the Kafka rider
 
-| Argument | Kafka-Rider | Surgewave-Rider |
+| Argument | Kafka rider | Surgewave rider |
 |----------|-------------|-------------|
-| Broker-Setup | ZooKeeper/KRaft + JVM | Single Binary, .NET-native |
-| Latenz | ms-Bereich | µs-Bereich (Surgewave Native) |
-| Protokoll-Flexibilität | Nur Kafka | Surgewave Native + Kafka |
-| .NET-Ökosystem | Confluent-Client (C-Wrapper) | Nativer .NET-Client |
-| Operational Overhead | Hoch (JVM-Tuning, GC, Partitions) | Niedrig (Single Process) |
+| Broker setup | ZooKeeper/KRaft + JVM | Single binary, .NET-native |
+| Latency | ms range | µs range (Surgewave Native) |
+| Protocol flexibility | Kafka only | Surgewave Native + Kafka |
+| .NET ecosystem | Confluent client (C wrapper) | Native .NET client |
+| Operational overhead | High (JVM tuning, GC, partitions) | Low (single process) |
 
 ---
 
-## Offene Fragen
+## Open questions
 
-1. **MassTransit v9-Kompatibilität:** Soll das Paket aktiv gegen v9 getestet werden, obwohl v9 kommerziell ist? Empfehlung: Ja, aber v8 als Primärziel.
-2. **Confluent.Kafka-Fallback:** Soll der Rider optional den `Confluent.Kafka`-Wrapper nutzen können, um mit echten Kafka-Clustern über MassTransit zu sprechen? Das würde Surgewave als "besseren Kafka-Client" positionieren, auch wenn der Broker Kafka ist.
-3. **Separate Repository oder Monorepo:** Lebt das Paket im Surgewave-Repo oder in einem eigenen `surgewave-integrations`-Repo? Empfehlung: Eigenes Repo (`Kuestenlogik.Surgewave.Integrations`) mit eigenem Release-Zyklus, da MassTransit-Versionssprünge unabhängig von Surgewave-Releases passieren.
-4. **Chris-Patterson-Kontakt:** Soll Surgewave aktiv als Community-Transport bei MassTransit vorgestellt werden? Ein Mention in der MassTransit-Dokumentation wäre der stärkste Sichtbarkeits-Hebel.
+1. **MassTransit v9 compatibility:** Should the package be actively tested against v9, even though v9 is commercial? Recommendation: yes, but with v8 as the primary target.
+2. **Confluent.Kafka fallback:** Should the rider optionally be able to use the `Confluent.Kafka` wrapper to talk to real Kafka clusters via MassTransit? That would position Surgewave as the "better Kafka client", even when the broker is Kafka.
+3. **Separate repository or monorepo:** Does the package live in the Surgewave repo or in its own `surgewave-integrations` repo? Recommendation: its own repo (`Kuestenlogik.Surgewave.Integrations`) with its own release cycle, since MassTransit version jumps happen independently of Surgewave releases.
+4. **Contact with Chris Patterson:** Should Surgewave be actively presented to MassTransit as a community transport? A mention in the MassTransit documentation would be the strongest visibility lever.

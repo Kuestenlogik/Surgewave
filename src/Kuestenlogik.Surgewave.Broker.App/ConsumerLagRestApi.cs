@@ -72,15 +72,15 @@ public static class ConsumerLagRestApi
             return Results.BadRequest(new { message = "topic is required" });
         }
 
-        // Wie bei Kafka: Offsets nur fuer Gruppen ohne aktive Member zuruecksetzen,
-        // sonst ueberschreibt der naechste Commit des laufenden Consumers den Reset.
+        // As in Kafka: reset offsets only for groups without active members,
+        // otherwise the next commit of the running consumer overwrites the reset.
         if (getActiveMemberCount(groupId) > 0)
         {
             return Results.Conflict(new { message = $"Consumer group '{groupId}' has active members — stop consumers before resetting offsets" });
         }
 
-        // Zielpartitionen: die Partitionen mit committeten Offsets fuer das Topic;
-        // ohne Commits alle Partitionen laut Topic-Metadaten.
+        // Target partitions: the partitions with committed offsets for the topic;
+        // without commits, all partitions according to the topic metadata.
         var committed = offsetStore.GetAllOffsets(groupId);
         var partitions = committed.Keys
             .Select(key => key.Split(':'))

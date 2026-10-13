@@ -4,8 +4,8 @@ using Kuestenlogik.Surgewave.Plugins.Configuration;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Core;
 
 /// <summary>
-/// Coverage fuer die "POCO"-Schicht des Plugins-Assemblys: <see cref="ConfigDef"/>-Builder,
-/// <see cref="ConfigKey"/>-Record, <see cref="PluginInfo"/>, <see cref="PluginMetadataAttribute"/>,
+/// Coverage for the "POCO" layer of the Plugins assembly: the <see cref="ConfigDef"/> builder,
+/// the <see cref="ConfigKey"/> record, <see cref="PluginInfo"/>, <see cref="PluginMetadataAttribute"/>,
 /// <see cref="ControlNavItem"/>.
 /// </summary>
 public sealed class PluginsCoreRecordsTests

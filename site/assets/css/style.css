@@ -319,9 +319,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   flex-wrap: wrap;
   margin-bottom: 16px;
 }
-/* Reassurance-Microcopy unter den CTA-Buttons — kleinere Schrift,
-   reduzierte Auffaelligkeit, dient als "trust-anchor" (Estuary-Pattern:
-   "No credit card required / 30-day free trial"; bei uns:
+/* Reassurance microcopy under the CTA buttons — smaller font,
+   reduced prominence, serves as a "trust anchor" (Estuary pattern:
+   "No credit card required / 30-day free trial"; for us:
    "Single binary. No JVM. Runs in 30 seconds.") */
 .hero-reassurance {
   margin: 0 0 48px;
@@ -363,9 +363,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   color: var(--accent);
 }
 
-/* Bowire-Style Secondary-Button — solid surface mit Border + Lift-on-Hover.
-   Anders als ghost: hat einen sichtbaren Background, damit der Button auch
-   ohne Hover als "Button" erkennbar ist (nicht wie ein Text-Link). */
+/* Bowire-style secondary button — solid surface with border + lift on hover.
+   Unlike ghost: it has a visible background, so that the button is
+   recognisable as a "button" even without hover (not like a text link). */
 .btn-secondary {
   background: var(--surface);
   color: var(--text);
@@ -381,11 +381,11 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   transition: color 0.15s;
 }
 
-/* Disabled-Variante fuer Buttons die noch nicht fertig sind (z.B.
-   Bootcamp-CTA pre-Launch). Visuell gedaempft, kein Hover-Lift, Click
-   funktioniert nicht (pointer-events: none). Bleibt als Anchor im DOM,
-   damit die "Upcoming"-Banderole drueber liegen kann und Screen-Reader
-   das aria-disabled vorlesen. */
+/* Disabled variant for buttons that are not finished yet (e.g. the
+   Bootcamp CTA pre-launch). Visually muted, no hover lift, click
+   does not work (pointer-events: none). Stays an anchor in the DOM,
+   so that the "Upcoming" ribbon can sit on top of it and screen readers
+   read out the aria-disabled. */
 .btn-disabled,
 .btn-disabled:hover,
 .btn-disabled:focus,
@@ -400,9 +400,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
 }
 .btn-disabled svg { color: var(--text-secondary); }
 
-/* Hero-Badges (Apache 2.0 / .NET 10 etc.) — Bowire-Pattern: Pill-Form,
-   Icon + Label + Value, hover-lift. Eingesetzt im Hero unter den CTAs
-   anstelle der vorherigen middot-separierten Reassure-Zeile. */
+/* Hero badges (Apache 2.0 / .NET 10 etc.) — Bowire pattern: pill shape,
+   icon + label + value, hover lift. Used in the hero under the CTAs
+   in place of the previous middot-separated reassurance line. */
 .hero-badges {
   display: flex;
   flex-wrap: wrap;
@@ -423,8 +423,8 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   text-decoration: none;
   transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
 }
-/* Override globaler a:hover { text-decoration: underline } — Badges sollen
-   Pill-Buttons bleiben, kein Link-Style mit Unterstreichung. */
+/* Override of the global a:hover { text-decoration: underline } — badges should
+   stay pill buttons, no link style with underline. */
 .hero-badge:hover,
 .hero-badge:focus,
 .hero-badge:active {
@@ -457,24 +457,24 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   border-left: 1px solid var(--border);
   margin-left: 2px;
 }
-/* Pre-launch: Live-Badges (data-badge="nuget-version" / "nuget-downloads"
-   / "gh-stars") komplett verstecken, solange main.js noch keinen Wert
-   via API gesetzt hat (kein [data-badge-loaded]-Attribut). Sonst stehen
-   bare "Downloads" / "NuGet"-Labels ohne Wert im Hero rum. Sobald JS
-   die Antwort verarbeitet, setzt es data-badge-loaded=true und der Chip
-   wird sichtbar.
+/* Pre-launch: hide the live badges (data-badge="nuget-version" / "nuget-downloads"
+   / "gh-stars") completely as long as main.js has not set a value
+   via the API yet (no [data-badge-loaded] attribute). Otherwise bare
+   "Downloads" / "NuGet" labels without a value sit around in the hero. As soon as JS
+   has processed the response, it sets data-badge-loaded=true and the chip
+   becomes visible.
 
-   :has() ist Baseline-CSS (Chrome 105+, Safari 15.4+, Firefox 121+) —
-   bewusst kein Fallback noetig: Worst-Case ist ein leerer Whitespace
-   im Hero, kein Layout-Bruch. */
+   :has() is baseline CSS (Chrome 105+, Safari 15.4+, Firefox 121+) —
+   deliberately no fallback needed: the worst case is empty whitespace
+   in the hero, not a broken layout. */
 .hero-badge[data-badge]:not(:has([data-badge-value][data-badge-loaded])) {
   display: none;
 }
 
-/* Dark-Hero-Scope: auf dem dunklen Force-Graph-Canvas brauchen Badges
-   einen anderen Background damit sie nicht im Schwarz verschwinden,
-   und die Border-Mid-Tone-Variante (was es im Light-Theme ist) wirkt
-   im Dark-Hero zu dunkel. */
+/* Dark hero scope: on the dark force-graph canvas badges need
+   a different background so that they do not disappear into the black,
+   and the border mid-tone variant (what it is in the light theme) looks
+   too dark in the dark hero. */
 .hero-fg-content .hero-badges { justify-content: flex-start; }
 .hero-fg-content .hero-badge {
   background: rgba(230, 236, 245, 0.06);
@@ -562,9 +562,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
 }
-/* Eyebrow + Headline — kompakter als die "section-title"-Variante der
-   anderen Sections, damit der Strip noch als Bridge zwischen Hero und
-   Features liest und nicht als eigenstaendige Section konkurriert. */
+/* Eyebrow + headline — more compact than the "section-title" variant of the
+   other sections, so that the strip still reads as a bridge between hero and
+   features and does not compete as a section of its own. */
 .metrics-strip-eyebrow {
   margin: 0 0 6px;
   text-align: center;
@@ -795,11 +795,11 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   font-weight: 500;
 }
 
-/* === Kafka-Migration-Section ===========================================
-   Bridge zwischen Numbers/Proof und Screenshots. Sitzt direkt nach
-   metrics-strip in index.html; betont den Wire-Compat-Hook ohne den
-   Hero damit zu monopolisieren. Pattern: Redpanda /platform "Migrate
-   without application code changes" als eigene Section.
+/* === Kafka migration section ===========================================
+   Bridge between numbers/proof and screenshots. Sits directly after
+   metrics-strip in index.html; emphasises the wire-compat hook without
+   monopolising the hero with it. Pattern: Redpanda /platform "Migrate
+   without application code changes" as a section of its own.
 */
 .kafka-migration {
   padding: 56px 0 64px;
@@ -868,9 +868,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   text-align: left;
 }
 
-/* "Built to learn from"-Section — Tile-Grid mit Bootcamp/Samples/CLI+MCP.
-   Hover-Lift, Accent-CTA-Arrow, gleicher Spacing-Beat wie .kafka-migration
-   damit die zwei Sections visuell zusammen lesen. */
+/* "Built to learn from" section — tile grid with Bootcamp/Samples/CLI+MCP.
+   Hover lift, accent CTA arrow, same spacing beat as .kafka-migration
+   so that the two sections read together visually. */
 .learn {
   padding: 56px 0 64px;
   background: var(--bg);
@@ -961,9 +961,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
 }
 .learn-tile:hover .learn-tile-cta svg { transform: translateX(3px); }
 
-/* "Sovereign by design"-Section — adressiert die EU-Tech-Souveraenitaets-
-   Debatte. Etwas dezenter als der Kafka-Migration-Beat: leicht abgedunkelt,
-   damit der Frame seriose Trust-Story-Wirkung entfaltet, nicht Marketing-Sale. */
+/* "Sovereign by design" section — addresses the EU tech sovereignty
+   debate. Somewhat more subdued than the Kafka migration beat: slightly darkened,
+   so that the frame comes across as a serious trust story, not a marketing sale. */
 .sovereign {
   padding: 56px 0 64px;
   background: var(--bg-elevated);
@@ -1023,7 +1023,7 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   border-radius: 50%;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  /* Inset checkmark via box-shadow trick — kein extra SVG-Inline noetig. */
+  /* Inset checkmark via box-shadow trick — no extra inline SVG needed. */
   box-shadow: inset 0 0 0 4px var(--bg-elevated), 0 0 0 0 transparent;
 }
 .sovereign-points li strong {
@@ -1116,9 +1116,9 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   justify-content: center;
   flex-wrap: wrap;
 }
-/* Reassurance-Microcopy direkt unter den CTA-Buttons — Trust-Anchor
-   gegenueber Skepsis ("nochmal eine neue Infrastruktur?"). Subtil
-   sekundaer in Typografie. */
+/* Reassurance microcopy directly under the CTA buttons — a trust anchor
+   against scepticism ("yet another new infrastructure?"). Subtly
+   secondary in typography. */
 .cta-reassurance {
   margin: 16px 0 0;
   text-align: center;
@@ -1126,8 +1126,8 @@ body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill:
   color: var(--text-secondary);
   letter-spacing: 0.01em;
 }
-/* Sekundaerer Kontakt-Block — fuer Enterprise-Plugins, paid support etc.
-   Liegt unter der primaeren OSS-CTA-Gruppe, deutlich kleiner. */
+/* Secondary contact block — for enterprise plugins, paid support etc.
+   Sits under the primary OSS CTA group, clearly smaller. */
 .cta-talk {
   margin: 24px 0 0;
   text-align: center;
@@ -1482,8 +1482,8 @@ html[data-theme="light"] {
 }
 
 /* === PagefindUI Result-Hover, Clear-Button, Highlight (ported from Bowire) ===
-   Bowire's site/assets/css/style.css Zeilen 5933-6120, mit Bowire-Accent
-   (#6366f1 Indigo) ersetzt durch Surgewave-Accent (var(--accent), Cyan). */
+   Bowire's site/assets/css/style.css lines 5933-6120, with the Bowire accent
+   (#6366f1 indigo) replaced by the Surgewave accent (var(--accent), cyan). */
 
 .pagefind-ui__search-input:focus-visible {
     outline: none !important;
@@ -2086,9 +2086,9 @@ html[data-theme="light"] {
   font-weight: 500;
   color: var(--text);
 }
-/* Group-Header-Zeilen — visuell als Section-Separator zwischen den 5 Bloecken
-   (Admin / Performance / Cost / Reliability / Capability). Linksbuendig,
-   Uppercase, accent-Eyebrow-Style. */
+/* Group header rows — visually a section separator between the 5 blocks
+   (Admin / Performance / Cost / Reliability / Capability). Left-aligned,
+   uppercase, accent eyebrow style. */
 .comparison-group-header th {
   background: var(--surface);
   color: var(--accent);
@@ -2738,12 +2738,12 @@ html[data-theme="light"] {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-/* .hero-fg-text ist der eigentliche Text-Container (H1 + Lede + CTA +
-   Badges) in Spalte 2 des Hero-Grids. Ohne max-width hier nimmt er die
-   volle 1fr-Spaltenbreite ein und die per-Element max-widths (.hero-lede,
-   .hero-title) bleiben wirkungslos solange sie groesser sind als der
-   verfuegbare Spalten-Platz. Mit 560px wird der ganze Text-Block enger
-   gefasst und die laengeren Lede-Saetze brechen kompakter um. */
+/* .hero-fg-text is the actual text container (H1 + lede + CTA +
+   badges) in column 2 of the hero grid. Without a max-width here it takes
+   the full 1fr column width and the per-element max-widths (.hero-lede,
+   .hero-title) have no effect as long as they are larger than the
+   available column space. With 560px the whole text block is set
+   tighter and the longer lede sentences wrap more compactly. */
 .hero-fg-content .hero-fg-text {
   max-width: 560px;
 }
@@ -3214,7 +3214,7 @@ html[data-theme="light"] {
 }
 
 /* ===========================================================
-   Section-Rail + Page-Outline-Modal (Bowire-Port, Welle C.2)
+   Section-Rail + Page-Outline-Modal (Bowire port, wave C.2)
 
    .section-rail sits on the right edge, vertical-centred. It carries:
      1. .section-nav — one .section-nav-dot per top-level <section>,
@@ -3380,17 +3380,17 @@ html[data-theme="light"] {
 }
 
 @media (max-width: 768px) {
-    /* Mobile: floating rail kollidiert mit Article-Text auf der rechten
-       Kante (kein fester Gutter). Mobile-Nutzer bekommen Outline-Funktion
-       ueber den Burger-Menue + Anchor-Links im Article. */
+    /* Mobile: the floating rail collides with the article text on the right
+       edge (no fixed gutter). Mobile users get the outline function
+       through the burger menu + anchor links in the article. */
     .section-rail { display: none; }
 }
 
-/* Page-Outline-Modal — geoeffnet vom .section-tools-trigger.
-   Same idiom wie das Search-Overlay (translucent backdrop, three-band
-   panel: title cap / scrollable nav / hint footer). Listet alle
-   <section>s (full, nicht sampled) so dass der Modal die Dot-Nav
-   komplementiert. */
+/* Page outline modal — opened by the .section-tools-trigger.
+   Same idiom as the search overlay (translucent backdrop, three-band
+   panel: title cap / scrollable nav / hint footer). Lists all
+   <section>s (full, not sampled) so that the modal complements the
+   dot nav. */
 .surgewave-page-overlay {
     position: fixed;
     inset: 0;
@@ -3487,9 +3487,9 @@ html[data-theme="light"] {
     font-weight: 600;
     background: var(--bg-elevated);
 }
-/* Keyboard / Hover-Highlight — separat vom "you are here"-Marker
-   damit beide koexistieren. Selber Idiom wie .pagefind-ui__result.
-   is-highlighted im Search-Overlay. */
+/* Keyboard / hover highlight — separate from the "you are here" marker
+   so that both coexist. Same idiom as .pagefind-ui__result.
+   is-highlighted in the search overlay. */
 .surgewave-page-overlay nav.page-outline a.is-highlighted {
     color: var(--accent);
     background: rgba(14, 165, 233, 0.08);

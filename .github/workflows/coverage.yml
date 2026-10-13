@@ -115,25 +115,25 @@ jobs:
           echo "excluded: $EXCLUDE"
 
       - name: Run tests with coverage
-        # Test-Assemblies SERIELL, konsistent mit ci.yml/release.yml.
-        # Coverage kommt aus Microsoft.Testing.Extensions.CodeCoverage. Coverlet
-        # scheidet aus: der Collector war VSTest-only, und coverlet.msbuild
-        # laeuft im MTP-Modus ebenfalls nicht, weil dotnet test /p:-Argumente
-        # an die Test-App reicht statt an MSBuild - der Lauf erzeugt dann still
-        # gar keinen Report.
+        # Test assemblies SERIALLY, consistent with ci.yml/release.yml.
+        # Coverage comes from Microsoft.Testing.Extensions.CodeCoverage. Coverlet
+        # is out: the collector was VSTest-only, and coverlet.msbuild does not
+        # run in MTP mode either, because dotnet test passes /p: arguments
+        # to the test app instead of MSBuild - the run then silently produces
+        # no report at all.
         #
-        # Die Engine wechselt damit, die Zahlen sind also nicht 1:1 mit den frueher
-        # von Coverlet gemessenen vergleichbar. Erste Messung 2026-08-22:
-        # 42 % Line / 37.8 % Branch gegen 37.7 % / 34.9 % vorher, der Floor unten
-        # behaelt damit reichlich Luft und bleibt wie er ist.
+        # This changes the engine, so the numbers are not 1:1 comparable with
+        # the ones Coverlet measured before. First measurement 2026-08-22:
+        # 42 % line / 37.8 % branch against 37.7 % / 34.9 % before, so the floor
+        # below keeps plenty of headroom and stays as it is.
         #
-        # Kein fixes --coverage-output: jedes Testprojekt schriebe sonst in
-        # dieselbe Datei. Die Extension vergibt pro Projekt einen <guid>-Namen,
-        # ReportGenerator sammelt sie per Glob ein.
+        # No fixed --coverage-output: every test project would otherwise write
+        # to the same file. The extension gives each project a <guid> name,
+        # ReportGenerator collects them by glob.
         #
-        # Bei 0%-Assemblies: --diagnostic anhaengen und das Log im
-        # results-directory pruefen - Instrumentierungsfehler landen nicht auf
-        # der Konsole.
+        # For 0% assemblies: append --diagnostic and check the log in the
+        # results directory - instrumentation errors do not show up on
+        # the console.
         run: |
           dotnet test --solution coverage.slnx -c Release --no-build \
             --max-parallel-test-modules 1 \

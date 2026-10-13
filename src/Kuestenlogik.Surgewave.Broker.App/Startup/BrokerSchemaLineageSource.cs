@@ -37,8 +37,8 @@ internal sealed class BrokerSchemaLineageSource : ISchemaLineageSource
 
         foreach (var groupId in _offsetStore.GetGroupIds())
         {
-            // Offset-Keys sind "topic:partition"; Topic-Namen dürfen ':' nicht enthalten,
-            // der letzte Doppelpunkt trennt (gleiches Muster wie LoadAllOffsets).
+            // Offset keys are "topic:partition"; topic names must not contain ':',
+            // the last colon separates (the same pattern as LoadAllOffsets).
             foreach (var key in _offsetStore.GetAllOffsets(groupId).Keys)
             {
                 var sep = key.LastIndexOf(':');
@@ -77,8 +77,8 @@ internal sealed class BrokerSchemaLineageSource : ISchemaLineageSource
         return readers;
     }
 
-    /// <summary>Entry-Knoten (ohne eingehende Verbindung) lesen, Exit-Knoten (ohne
-    /// ausgehende) schreiben — die Heuristik der Control-Lineage-Ansicht.</summary>
+    /// <summary>Entry nodes (without an incoming connection) read, exit nodes (without
+    /// an outgoing one) write — the heuristic of the Control lineage view.</summary>
     private static (List<string> Sources, List<string> Sinks) ExtractTopics(
         PipelineDefinition pipeline)
     {

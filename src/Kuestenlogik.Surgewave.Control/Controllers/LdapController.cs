@@ -40,10 +40,10 @@ public sealed class LdapController(
         var providerConfig = GetProviderConfig(providerName);
         var result = await ldapService.AuthenticateAsync(username, password, providerConfig);
 
-        // Open-Redirect-Schutz: returnUrl muss eine *lokale* URL sein.
-        // Url.IsLocalUrl lehnt absolute URLs (http://evil.com) und
-        // protokoll-relative URLs (//evil.com) ab; akzeptiert sind
-        // pfad-relative URLs ("/foo") und Fragmentes.
+        // Open redirect protection: returnUrl must be a *local* URL.
+        // Url.IsLocalUrl rejects absolute URLs (http://evil.com) and
+        // protocol-relative URLs (//evil.com); accepted are
+        // path-relative URLs ("/foo") and fragments.
         var safeReturnUrl = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/";
 
         if (!result.Succeeded)

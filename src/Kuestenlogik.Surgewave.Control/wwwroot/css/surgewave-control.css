@@ -1,18 +1,18 @@
 /* =========================================================================
- * Surgewave-Brand-Skin fuer MudBlazor 8
+ * Surgewave brand skin for MudBlazor 8
  * -------------------------------------------------------------------------
- * Aufbau:
- *   1. Custom Properties — Brand-Tokens analog site/assets/css/style.css
- *   2. MudBlazor-CSS-Variablen-Overrides — Spacing, Shadows, Radii
- *   3. Component-Class-Overrides — AppBar, Drawer, Cards, Tables, Buttons
- *   4. Custom Scrollbars
- *   5. Density / Compactness
- *   6. PageHeader-Pattern (Helper-Klassen statt Per-Page-H4-Block)
+ * Structure:
+ *   1. Custom properties — brand tokens matching site/assets/css/style.css
+ *   2. MudBlazor CSS variable overrides — spacing, shadows, radii
+ *   3. Component class overrides — AppBar, Drawer, Cards, Tables, Buttons
+ *   4. Custom scrollbars
+ *   5. Density / compactness
+ *   6. PageHeader pattern (helper classes instead of a per-page H4 block)
  *
- * Wird in App.razor NACH MudBlazor.min.css eingebunden.
+ * Included in App.razor AFTER MudBlazor.min.css.
  * ========================================================================= */
 
-/* 1. Brand-Tokens ========================================================= */
+/* 1. Brand tokens ========================================================= */
 :root {
   --sw-wave: #33bcff;           /* Surgewave Wave / Brand Cyan */
   --sw-wave-light: #66cfff;     /* Dark-Mode Hero-Glow */
@@ -44,8 +44,8 @@ body {
   letter-spacing: -0.005em;
 }
 
-/* MudBlazor Schatten-Stack subtiler — Marketing-Site nutzt 0 6px 18px-6px
- * Pattern. Material-Default ist zu hart fuer eine moderne Web-App. */
+/* MudBlazor shadow stack, more subtle — the marketing site uses the 0 6px 18px -6px
+ * pattern. The Material default is too harsh for a modern web app. */
 .mud-elevation-1  { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06) !important; }
 .mud-elevation-2  { box-shadow: 0 2px 4px -1px rgba(15, 23, 42, 0.06), 0 2px 6px rgba(15, 23, 42, 0.05) !important; }
 .mud-elevation-4  { box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 4px 16px rgba(15, 23, 42, 0.06) !important; }
@@ -60,7 +60,7 @@ body {
 
 /* 3. Component-Overrides ================================================== */
 
-/* --- AppBar: schlanker, leichter Bottom-Border statt Material-Elevation */
+/* --- AppBar: slimmer, light bottom border instead of Material elevation */
 .mud-appbar {
   border-bottom: 1px solid var(--sw-border-light);
   backdrop-filter: saturate(180%) blur(8px);
@@ -72,14 +72,14 @@ body {
 .mud-appbar.mud-elevation-1 {
   box-shadow: none !important;
 }
-/* AppBar-Title (h5) — kompakter, normales Text-Color statt Gradient. */
+/* AppBar title (h5) — more compact, normal text colour instead of a gradient. */
 .mud-appbar .mud-typography-h5 {
   font-size: 1rem !important;
   font-weight: 700 !important;
   letter-spacing: -0.01em;
 }
 
-/* --- Drawer: schlanker, Brand-Cyan-Linie rechts statt grauer Trenner */
+/* --- Drawer: slimmer, brand-cyan line on the right instead of a grey divider */
 .mud-drawer {
   border-right: 1px solid var(--sw-border-light);
 }
@@ -89,7 +89,7 @@ body {
 }
 .mud-drawer.mud-elevation-2 { box-shadow: none !important; }
 
-/* --- NavMenu: kompakter, Brand-Hover, aktive Items mit Cyan-Akzent-Border */
+/* --- NavMenu: more compact, brand hover, active items with a cyan accent border */
 .mud-nav-item .mud-nav-link {
   padding: 7px 14px !important;
   font-size: 0.8125rem !important;
@@ -139,10 +139,10 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* --- Cards: weicherer Look, dezente Borders, Hover-Lift wie auf der Site.
-       Aber: nur EIN Container darf eine Border tragen — Nesting (Card in
-       Card, Paper in Paper, Table in Card) flacht die inneren raus damit
-       kein "Rahmen im Rahmen im Rahmen"-Effekt entsteht. */
+/* --- Cards: softer look, subtle borders, hover lift as on the site.
+       But: only ONE container may carry a border — nesting (card in
+       card, paper in paper, table in card) flattens the inner ones so
+       no "frame in a frame in a frame" effect appears. */
 .mud-card,
 .mud-paper {
   border: 1px solid var(--sw-border-light);
@@ -154,16 +154,16 @@ body {
   border-color: var(--sw-border-dark);
 }
 
-/* MudPaper als reiner Layout-Helper (elevation=0) traegt oft eine Border
-   die im Layout-Kontext stoert — flach machen. */
+/* MudPaper as a pure layout helper (elevation=0) often carries a border
+   that gets in the way in the layout context — flatten it. */
 .mud-paper.mud-elevation-0 {
   border: none !important;
   background: transparent !important;
 }
 
-/* Nested Container: innere Paper/Cards verlieren Border + Shadow, weil
-   der aeussere Container die Abgrenzung schon liefert. Verhindert das
-   verschachtelte-Rahmen-Pattern. */
+/* Nested containers: inner papers/cards lose border + shadow, because
+   the outer container already provides the separation. Prevents the
+   nested-frames pattern. */
 .mud-card .mud-paper,
 .mud-paper .mud-paper,
 .mud-card .mud-card,
@@ -172,8 +172,8 @@ body {
   box-shadow: none !important;
 }
 
-/* MudTable in einer Card: Tabelle ist transparent, die Card-Border
-   uebernimmt die Abgrenzung. Innere Tabelle-Schatten weg. */
+/* MudTable inside a card: the table is transparent, the card border
+   provides the separation. No inner table shadow. */
 .mud-card .mud-table,
 .mud-paper .mud-table,
 .mud-card .mud-table-root,
@@ -183,9 +183,9 @@ body {
   border: none !important;
 }
 
-/* MudExpansionPanel: keine eigene Border, nur subtile Trennlinie
-   zwischen benachbarten Panels — sonst sieht es aus wie ein Stapel
-   Karteikarten in einer Karteikarte. */
+/* MudExpansionPanel: no border of its own, only a subtle dividing line
+   between neighbouring panels — otherwise it looks like a stack of
+   index cards inside an index card. */
 .mud-expand-panel {
   background: transparent !important;
   border: none !important;
@@ -209,9 +209,9 @@ body {
   border-color: var(--sw-border-dark);
 }
 
-/* MainContent + Container: weniger Padding-Stacking. AppBar-Hoehe
-   bleibt 56px, dann gleich 16px Container statt 20px MainContent + 24px
-   Container. */
+/* MainContent + Container: less padding stacking. The AppBar height
+   stays 56px, then straight 16px of container instead of 20px MainContent + 24px
+   container. */
 .mud-main-content {
   padding: 0 !important;
 }
@@ -220,7 +220,7 @@ body {
   max-width: none !important;
 }
 
-/* --- Tables: kompakter, Brand-tinted Striped + Hover */
+/* --- Tables: more compact, brand-tinted stripes + hover */
 .mud-table .mud-table-cell,
 .mud-table .mud-table-head-cell {
   padding: 8px 12px !important;
@@ -237,7 +237,7 @@ body {
   border-bottom-color: var(--sw-border-dark);
 }
 
-/* --- Buttons: Marketing-Site-Look (kompakter, font-weight 600, Hover-Lift) */
+/* --- Buttons: marketing-site look (more compact, font-weight 600, hover lift) */
 .mud-button-root {
   text-transform: none !important;
   letter-spacing: 0 !important;
@@ -260,14 +260,14 @@ body {
 }
 .mud-icon-button { transition: background 0.12s; }
 
-/* --- Chips: Pill-Look mit Brand */
+/* --- Chips: pill look in brand colours */
 .mud-chip {
   font-weight: 500;
   letter-spacing: 0.005em;
   border-radius: 999px !important;
 }
 
-/* --- Tabs: dezenter Indicator + Brand-Cyan */
+/* --- Tabs: subtle indicator + brand cyan */
 .mud-tabs .mud-tab {
   text-transform: none !important;
   font-weight: 600 !important;
@@ -284,7 +284,7 @@ body {
   background: var(--sw-wave-light) !important;
 }
 
-/* --- Inputs: subtilere Borders, Brand-Focus */
+/* --- Inputs: more subtle borders, brand focus */
 .mud-input-control .mud-input-outlined-border {
   border-color: var(--sw-border-light);
   transition: border-color 0.12s;
@@ -298,7 +298,7 @@ body {
   box-shadow: 0 0 0 3px rgba(102, 207, 255, 0.18);
 }
 
-/* --- Dividers: dezenter */
+/* --- Dividers: more subtle */
 .mud-divider {
   border-color: var(--sw-border-light);
 }
@@ -339,23 +339,23 @@ body {
 .mud-main-content { padding-top: 56px !important; }  /* matches AppbarHeight */
 .mud-container { padding-left: 20px !important; padding-right: 20px !important; }
 
-/* MudDialog kompakter */
+/* MudDialog more compact */
 .mud-dialog-content { padding: 16px 20px !important; }
 .mud-dialog-actions { padding: 8px 20px 16px !important; }
 
-/* MudAlert kompakter */
+/* MudAlert more compact */
 .mud-alert { padding: 8px 14px !important; border-radius: 8px !important; }
 
-/* MudExpansionPanel kompakter */
+/* MudExpansionPanel more compact */
 .mud-expand-panel-header { padding: 10px 16px !important; }
 .mud-expand-panel-content { padding: 12px 16px !important; }
 
-/* 6. PageHeader-Pattern ================================================== *
- * Statt MudText Typo.h4 + MudText Typo.body2 fuer JEDEN Page-Block,
- * koennen Pages diese .surgewave-page-head-Klasse auf einem div nutzen
- * und damit Title + Subtitle + optionale Action-Slot in einer kompakten
- * Reihe darstellen. Liest sich wie ein PageHeader-Bar statt einer
- * H1-Heading-Section.                                                       */
+/* 6. PageHeader pattern ================================================== *
+ * Instead of MudText Typo.h4 + MudText Typo.body2 for EVERY page block,
+ * pages can use this .surgewave-page-head class on a div
+ * and so show title + subtitle + an optional action slot in one compact
+ * row. Reads like a PageHeader bar instead of an
+ * H1 heading section.                                                       */
 .surgewave-page-head {
   display: flex;
   align-items: center;
@@ -396,14 +396,14 @@ body {
 }
 
 /* 7. Hopscotch-style Density Helpers ====================================== *
- * Aufgeraeumt + klar patterns die Pages opt-in nutzen koennen statt der
- * MudCard-Grid-mit-grossen-Icons Dashboard-Stock-Look. Wichtig: alle
- * Farben kommen aus den MudBlazor-Theme-Variablen (--mud-palette-*)
- * statt aus eigenen --sw-*-light/dark-Pairs. MudBlazor 8 setzt KEINE
- * .mud-theme-dark-Klasse auf body/html — der Theme-Provider injectiert
- * stattdessen einen inline <style class="mud-theme-provider">-Tag der
- * die CSS-Variablen rotiert. Direkt-Mapping ueber MudBlazor-Variablen
- * gibt uns gratis Theme-Switching ohne eigene Light/Dark-Selektoren.    */
+ * Tidy, clear patterns that pages can opt into instead of the
+ * MudCard-grid-with-big-icons stock dashboard look. Important: all
+ * colours come from the MudBlazor theme variables (--mud-palette-*)
+ * instead of our own --sw-*-light/dark pairs. MudBlazor 8 sets NO
+ * .mud-theme-dark class on body/html — the theme provider instead injects
+ * an inline <style class="mud-theme-provider"> tag that
+ * swaps the CSS variables. Mapping directly onto the MudBlazor variables
+ * gives us theme switching for free without our own light/dark selectors. */
 
 .surgewave-summary-strip {
   display: flex;
@@ -496,9 +496,9 @@ body {
   padding: 20px 24px;
 }
 
-/* PageHead-Override: ersetzt die hartkodierten --sw-text-light/dark
- * Pairs durch MudBlazor-Variablen damit der Title im Dark-Mode lesbar
- * bleibt. */
+/* PageHead override: replaces the hard-coded --sw-text-light/dark
+ * pairs with MudBlazor variables so the title stays readable in dark
+ * mode. */
 .surgewave-page-head { border-bottom-color: var(--mud-palette-lines-default); }
 .surgewave-page-head-title { color: var(--mud-palette-text-primary); }
 .surgewave-page-head-subtitle { color: var(--mud-palette-text-secondary); }

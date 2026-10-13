@@ -444,8 +444,8 @@ var activatedFeatures = new HashSet<string>(activatedPlugins.Select(p => p.Featu
 // plugins no longer need Program.cs locals passed in as constructor args.
 builder.Services.AddSingleton<BrokerMetrics>();
 builder.Services.AddSingleton<ClusterState>();
-// Singleton, weil er cluster.id auf Platte persistiert — zwei Instanzen
-// wären ein Race auf dieselbe Datei.
+// Singleton, because it persists cluster.id to disk — two instances
+// would race on the same file.
 builder.Services.AddSingleton<ClusterIdManager>();
 
 // #60 Inc6b — the shared cluster-membership authority (broker registration epochs + fencing),
@@ -1030,8 +1030,8 @@ AdminServiceImplHolder.Instance = new AdminServiceImpl(
     },
     describeBrokerConfig: () =>
     {
-        // Effektive Broker-Config aus DynamicBrokerConfig (statische Werte +
-        // persistierte dynamische Overrides) statt des frueheren In-Memory-Fakes.
+        // Effective broker config from DynamicBrokerConfig (static values +
+        // persisted dynamic overrides) instead of the former in-memory fake.
         var dyn = app.Services.GetRequiredService<DynamicBrokerConfig>();
         var overrides = dyn.GetDynamicConfigs();
         var entries = new List<BrokerConfigEntryDto>();
@@ -1150,9 +1150,9 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
     },
     listBrokers: () =>
     {
-        // Echte Broker-Liste aus dem ClusterState statt hartkodiertem
-        // Single-Broker-Eintrag; im Single-Node-Betrieb registriert der
-        // ClusterController diesen Broker selbst.
+        // Real broker list from the ClusterState instead of a hard-coded
+        // single-broker entry; in single-node operation the
+        // ClusterController registers this broker itself.
         // IsAlive was hardcoded true because nothing in this process knew any better. With the
         // failure detector wired (#121) it can answer honestly — and must, since a dead broker now
         // stays in Brokers while its health record says otherwise.
@@ -1188,8 +1188,8 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
     },
     alterReassignments: (reassignments) =>
     {
-        // Echte Ausführung über den PartitionReassignmentManager (gleicher
-        // Pfad wie der Kafka-Wire ClusterAdminHandler) statt Fake-Erfolg.
+        // Real execution through the PartitionReassignmentManager (the same
+        // path as the Kafka wire ClusterAdminHandler) instead of a fake success.
         var manager = app.Services.GetRequiredService<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>();
         var plan = new Kuestenlogik.Surgewave.Clustering.Cluster.ReassignmentPlan
         {
@@ -1445,7 +1445,7 @@ SecurityServiceImplHolder.Instance = new SecurityServiceImpl(
     createAcls: (acls) =>
     {
         if (aclAuthorizer == null)
-            // Ehrlich statt Fake-Erfolg — gleiche Semantik wie SecurityApiHandler (SECURITY_DISABLED).
+            // Honest instead of a fake success — the same semantics as SecurityApiHandler (SECURITY_DISABLED).
             return acls.Select(_ => AclErrorCodes.SecurityDisabled).ToList();
 
         var errorCodes = new List<int>();
@@ -1580,20 +1580,20 @@ var crossTopicTxnManager = app.Services.GetService<Kuestenlogik.Surgewave.Broker
 
 // Create KV Bucket Manager (broker-native Key-Value Store)
 var kvBucketManagerLogger = app.Services.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.KeyValue.KvBucketManager>>();
-// Ownership liegt beim Host: SurgewaveBroker.DisposeAsync fasst den Manager nicht an
-// (er reicht ihn nur in den Handler-Graphen durch), also gehoert das Dispose an den
-// App-Stop. Vor dem Assembly-Split hat der Analyzer die Kette interprozedural gesehen
-// und geschwiegen; jetzt macht die Registrierung die Lebenszeit explizit.
-#pragma warning disable CA2000 // Lebenszeit = Prozess, Dispose via ApplicationStopped
+// Ownership lies with the host: SurgewaveBroker.DisposeAsync does not touch the manager
+// (it only passes it through into the handler graph), so the dispose belongs to the
+// app stop. Before the assembly split the analyzer saw the chain interprocedurally
+// and stayed quiet; now the registration makes the lifetime explicit.
+#pragma warning disable CA2000 // Lifetime = process, disposed via ApplicationStopped
 var kvBucketManager = new Kuestenlogik.Surgewave.Broker.KeyValue.KvBucketManager(logManager, kvBucketManagerLogger);
 #pragma warning restore CA2000
 app.Lifetime.ApplicationStopped.Register(kvBucketManager.Dispose);
 await kvBucketManager.RestoreFromTopicsAsync(app.Lifetime.ApplicationStopping);
 
-// Consumer-Lag-Berechnung: ein Calculator ueber dem gemeinsamen OffsetStore
-// (Kafka- UND Native-Consumer committen dorthin). Gruppen-Metadaten kommen aus
-// beiden Koordinatoren; Gruppen, die nur noch Offsets haben (keine aktiven
-// Member), erscheinen als "Empty".
+// Consumer lag calculation: one calculator over the shared OffsetStore
+// (Kafka AND native consumers commit there). Group metadata comes from
+// both coordinators; groups that only have offsets left (no active
+// members) appear as "Empty".
 IEnumerable<(string GroupId, string State, int MemberCount)> GetGroupInfosForLag()
 {
     var result = new Dictionary<string, (string GroupId, string State, int MemberCount)>(StringComparer.Ordinal);

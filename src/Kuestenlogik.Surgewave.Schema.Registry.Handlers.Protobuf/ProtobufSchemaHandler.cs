@@ -113,7 +113,7 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
                 }
             }
 
-            // Vector-Felder (#14): [(surgewave.vector).dim = N] nur auf repeated float/double.
+            // Vector fields (#14): [(surgewave.vector).dim = N] only on repeated float/double.
             foreach (var (msgName, message) in parsed.Messages)
             {
                 foreach (var (_, field) in message.Fields)
@@ -134,9 +134,9 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
     }
 
     /// <summary>
-    /// Liest die Field-Option <c>[(surgewave.vector).dim = N]</c> (#14). dtype ist durch den
-    /// Skalartyp bestimmt (float → f32, double → f64) — eine eigene dtype-Option gibt es
-    /// bewusst nicht, sie könnte dem Wire-Typ nur widersprechen.
+    /// Reads the field option <c>[(surgewave.vector).dim = N]</c> (#14). dtype is determined by the
+    /// scalar type (float → f32, double → f64) — there is deliberately no dtype option of its own,
+    /// it could only contradict the wire type.
     /// </summary>
     private static (VectorType? Vector, string? Error) ReadVectorOption(
         string optionsText, string fieldType, bool isRepeated)
@@ -323,9 +323,9 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
                 }
             }
 
-            // Vector-Regel (#14): auf einer Feldnummer, die beide Seiten kennen, darf sich
-            // Vector-Sein, dim und dtype nicht aendern — in beide Richtungen brechend,
-            // deshalb unabhaengig vom (backward, forward)-Tupel.
+            // Vector rule (#14): on a field number that both sides know, being a vector,
+            // dim and dtype must not change — breaking in both directions,
+            // therefore independent of the (backward, forward) tuple.
             foreach (var (number, newField) in newFields)
             {
                 if (!existingFields.TryGetValue(number, out var existingField))
@@ -395,7 +395,7 @@ public sealed partial class ProtobufSchemaHandler : ISchemaTypeHandler
     [GeneratedRegex(@"(optional|required|repeated)?\s*(\w+)\s+(\w+)\s*=\s*(\d+)\s*(?:\[([^\]]*)\])?", RegexOptions.IgnoreCase)]
     private static partial Regex FieldPatternRegex();
 
-    // Field-Option [(surgewave.vector).dim = 768] — die einzige akzeptierte Schreibweise.
+    // Field option [(surgewave.vector).dim = 768] — the only accepted notation.
     [GeneratedRegex(@"\(\s*surgewave\.vector\s*\)\s*\.\s*dim\s*=\s*(\d+)")]
     private static partial Regex VectorOptionRegex();
 

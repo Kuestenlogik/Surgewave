@@ -1,21 +1,21 @@
 # Reference Baselines
 
-JSON-Sidecar-Files (`*.json`) aus offiziellen Public-Runs auf der Reference-Hardware (siehe `infra/aws-bench/COSTS.md`). Werden von `surgewave-bench public --compare <file>.json` als Vergleichsbasis genutzt.
+JSON sidecar files (`*.json`) from official public runs on the reference hardware (see `infra/aws-bench/COSTS.md`). Used by `surgewave-bench public --compare <file>.json` as the basis for comparison.
 
-## Naming-Convention
+## Naming convention
 
 `reference-<hardware>-<surgewave-version>.json`
 
-Beispiele:
+Examples:
 - `reference-c7i-4xl-v0.2.json` — c7i.4xlarge AWS, Surgewave v0.2
-- `reference-c7i-4xl-v0.3.json` — gleicher Hardware, neuere Surgewave-Version
+- `reference-c7i-4xl-v0.3.json` — same hardware, newer Surgewave version
 
-User auf abweichender Hardware kann dasselbe Reference-File nutzen, muss aber im Compare-Output die Hardware-Snapshot-Differenz mit einbeziehen — die Reports rendern beide Hardware-Snapshots.
+A user on different hardware can use the same reference file, but has to take the hardware snapshot difference into account in the compare output — the reports render both hardware snapshots.
 
-## Quelldaten
+## Source data
 
-Jede Baseline kommt von einem einzelnen `surgewave-bench public`-Run, dessen Markdown-Report unter `docs/benchmarks/results-vX.Y.md` committed wird. Die JSON-Sidecar hier ist die maschinen-lesbare Variante desselben Runs (durch `--json <file>.json` während dem Run erzeugt).
+Each baseline comes from a single `surgewave-bench public` run whose Markdown report is committed under `docs/benchmarks/results-vX.Y.md`. The JSON sidecar here is the machine-readable variant of the same run (produced by `--json <file>.json` during the run).
 
-## Aktuell
+## Current state
 
-Phase 1 (jetzt): leer. Phase 2 ergänzt die ersten Baselines sobald die Scenarios vollständig sind und ein erster Reference-Run gefahren wurde.
+Phase 1 (now): empty. Phase 2 adds the first baselines as soon as the scenarios are complete and a first reference run has been made.

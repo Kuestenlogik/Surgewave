@@ -6,9 +6,9 @@ using Kuestenlogik.Surgewave.Plugins.Repository;
 namespace Kuestenlogik.Surgewave.Plugins.Repository.Tests;
 
 /// <summary>
-/// Tests fuer <see cref="HttpConnectorRepository"/> in beiden Modi (StaticIndex + RestApi).
-/// Beide Pfade werden via <see cref="StubHandler"/> abgedeckt — ein HttpMessageHandler, der
-/// pro Request-URL eine vordefinierte Response liefert. Keine Netz-Anfragen.
+/// Tests for <see cref="HttpConnectorRepository"/> in both modes (StaticIndex + RestApi).
+/// Both paths are covered via <see cref="StubHandler"/> — an HttpMessageHandler that
+/// returns a predefined response per request URL. No network requests.
 /// </summary>
 public sealed class HttpConnectorRepositoryTests
 {

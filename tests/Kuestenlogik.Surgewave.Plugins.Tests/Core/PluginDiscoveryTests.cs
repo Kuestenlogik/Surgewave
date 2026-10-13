@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Core;
 
 /// <summary>
-/// Tests fuer <see cref="PluginDiscovery"/> — Registrierung von Built-in-Assemblies,
-/// Verzeichnis-Scan, Dedupe via GetAllPlugins, LoadPluginType-Fallback und die
-/// internal-aber-rein-funktionalen Helpers (DeriveCategory, ImplementsPluginInterface,
+/// Tests for <see cref="PluginDiscovery"/> — registration of built-in assemblies,
+/// directory scan, dedupe via GetAllPlugins, the LoadPluginType fallback and the
+/// internal but purely functional helpers (DeriveCategory, ImplementsPluginInterface,
 /// DeterminePluginType).
 /// </summary>
 public sealed class PluginDiscoveryTests : IDisposable

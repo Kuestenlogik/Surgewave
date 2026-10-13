@@ -3,8 +3,8 @@ using Kuestenlogik.Surgewave.Plugins.Pipeline;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Core;
 
 /// <summary>
-/// Tests fuer <see cref="PipelineValidator"/> — Port-Constraints, Cycle-Detection,
-/// unknown-node-references und Start/End-Node-Requirement.
+/// Tests for <see cref="PipelineValidator"/> — port constraints, cycle detection,
+/// unknown node references and the start/end node requirement.
 /// </summary>
 public sealed class PipelineValidatorTests
 {

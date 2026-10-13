@@ -16,8 +16,8 @@
       tasks in Kuestenlogik.Surgewave.Build, which are now pulled in transitively here.
 
       Future expansion lives in this same meta-package: a Roslyn analyzers
-      package (SRWV001-SRWV010 lint rules — synchron zum Native-Protocol
-      Magic-Byte SRWV), `dotnet new` templates from the Surgewave.Templates
+      package (SRWV001-SRWV010 lint rules — in step with the native-protocol
+      magic byte SRWV), `dotnet new` templates from the Surgewave.Templates
       repo, schema-validation build tasks, etc. Plugin authors keep one
       PackageReference; new versions of the SDK pull new tooling in
       transitively without touching their csproj.
@@ -39,10 +39,10 @@
     -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Build\Kuestenlogik.Surgewave.Build.csproj" />
 
-    <!-- Testing ist hier bewusst NICHT dabei: das Testing-Paket bettet den kompletten Broker
-         ein (via Runtime) und gehoert in das TEST-Projekt des Plugin-Autors, nicht in die
-         Compile-Closure des Plugins selbst. Ein Sdk-Ref mit Testing zog Broker + Confluent.Kafka
-         in jedes Plugin. -->
+    <!-- Testing is deliberately NOT included here: the Testing package embeds the complete broker
+         (via Runtime) and belongs in the plugin author's TEST project, not in the
+         compile closure of the plugin itself. An Sdk reference with Testing pulled the broker + Confluent.Kafka
+         into every plugin. -->
   </ItemGroup>
 
 </Project>

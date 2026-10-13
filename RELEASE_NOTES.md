@@ -160,7 +160,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.5.1
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.5.1
 docker pull kuestenlogik/surgewave-control:0.5.1
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -412,7 +412,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.5.0
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.5.0
 docker pull kuestenlogik/surgewave-control:0.5.0
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -537,7 +537,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.4.0
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.4.0
 docker pull kuestenlogik/surgewave-control:0.4.0
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -597,7 +597,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.3.1
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.3.1
 docker pull kuestenlogik/surgewave-control:0.3.1
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -646,7 +646,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.3.0
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.3.0
 docker pull kuestenlogik/surgewave-control:0.3.0
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -700,7 +700,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.2.0
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.2.0
 docker pull kuestenlogik/surgewave-control:0.2.0
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -753,7 +753,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.13
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.13
 docker pull kuestenlogik/surgewave-control:0.1.13
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -806,7 +806,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.12
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.12
 docker pull kuestenlogik/surgewave-control:0.1.12
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -859,7 +859,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.11
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.11
 docker pull kuestenlogik/surgewave-control:0.1.11
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -908,7 +908,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.10
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.10
 docker pull kuestenlogik/surgewave-control:0.1.10
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -957,7 +957,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.9
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.9
 docker pull kuestenlogik/surgewave-control:0.1.9
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -1006,7 +1006,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.6
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.6
 docker pull kuestenlogik/surgewave-control:0.1.6
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -1055,7 +1055,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.5
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.5
 docker pull kuestenlogik/surgewave-control:0.1.5
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -1104,7 +1104,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.4
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.4
 docker pull kuestenlogik/surgewave-control:0.1.4
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -1153,7 +1153,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.3
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.3
 docker pull kuestenlogik/surgewave-control:0.1.3
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -1202,7 +1202,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.2
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.2
 docker pull kuestenlogik/surgewave-control:0.1.2
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**
@@ -1251,7 +1251,7 @@ dotnet add package Kuestenlogik.Surgewave.Client --version 0.1.1
 ```bash
 docker pull kuestenlogik/surgewave-broker:0.1.1
 docker pull kuestenlogik/surgewave-control:0.1.1
-# …oder :latest
+# …or :latest
 ```
 
 **Container — alternative registry (GHCR):**

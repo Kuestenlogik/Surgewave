@@ -1,7 +1,7 @@
 # Post-release floor bump. After a successful `v*` release, raise the
 # Directory.Build.props `<Version>` floor to the NEXT patch version +
-# `-dev` (v0.5.0 released -> floor 0.5.1-dev) and open a PR. (AssemblyVersion/FileVersion leiten sich in diesem
-# Repo per Regex aus $(Version) ab und brauchen keinen eigenen Bump.)
+# `-dev` (v0.5.0 released -> floor 0.5.1-dev) and open a PR. (In this repo AssemblyVersion/FileVersion are
+# derived from $(Version) by regex and need no bump of their own.)
 #
 # Why a workflow? The floor is used by every non-tag build (local + CI
 # without a tag) as the "this is not a released version" marker. If it
@@ -108,9 +108,9 @@ jobs:
         env:
           NEXT: ${{ steps.ver.outputs.next }}
         run: |
-          # Idempotent: only writes if the file actually changes. Nur
-          # <Version> wird gepatcht — AssemblyVersion/FileVersion folgen in
-          # Directory.Build.props per Regex aus $(Version).
+          # Idempotent: only writes if the file actually changes. Only
+          # <Version> is patched — AssemblyVersion/FileVersion follow from
+          # $(Version) by regex in Directory.Build.props.
           sed -i -E "s|<Version>[^<]+</Version>|<Version>${NEXT}-dev</Version>|" Directory.Build.props
           if git diff --quiet Directory.Build.props; then
             echo "::warning::no diff — floor already at ${NEXT}, skipping PR"

@@ -1,15 +1,15 @@
 /**
- * Rendert scripts/icon.svg zu icon.png (128x128) im Repo-Root.
- * Diese Datei wird via Directory.Build.props in jedes NuGet-Package
- * eingebettet (<PackageIcon>icon.png</PackageIcon>).
+ * Renders scripts/icon.svg to icon.png (128x128) in the repo root.
+ * This file is embedded into every NuGet package via Directory.Build.props
+ * (<PackageIcon>icon.png</PackageIcon>).
  *
  * Usage:   node scripts/generate-icon.js
  * Output:  ./icon.png
  *
- * Bewusst auf 'sharp' (native libvips, ~5 MB) und nicht auf Playwright —
- * fuer ein SVG → PNG ohne HTML-/CSS-Layout ist ein headless Browser
- * (~350 MB Chromium) deutlich Overkill. Playwright bleibt nur fuer
- * scripts/generate-og-image.js (HTML-Template mit CSS-Layout).
+ * Deliberately built on 'sharp' (native libvips, ~5 MB) and not on Playwright —
+ * for an SVG → PNG without HTML/CSS layout a headless browser
+ * (~350 MB Chromium) is clearly overkill. Playwright stays only for
+ * scripts/generate-og-image.js (HTML template with CSS layout).
  */
 const sharp = require('sharp');
 const path = require('path');

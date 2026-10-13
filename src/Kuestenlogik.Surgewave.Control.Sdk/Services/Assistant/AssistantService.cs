@@ -439,7 +439,7 @@ public sealed class AssistantService : IAssistantService
         sb.AppendLine("- **Tuning** — \"How can I improve performance?\" / \"Give me recommendations\"");
         sb.AppendLine("- **Query Data** — \"Show messages from my-topic\" / \"Count messages in orders\"");
         sb.AppendLine("- **Explain Issues** — \"Why is latency high?\" / \"Explain the current anomalies\"");
-        sb.AppendLine("- **Create Topics** — \"Create a topic for payment processing\" / \"Erstelle einen Topic für IoT Sensoren\"");
+        sb.AppendLine("- **Create Topics** — \"Create a topic for payment processing\" / \"Create a topic for IoT sensors\"");
         sb.AppendLine();
         sb.AppendLine("Try asking one of these, or describe what you need help with.");
 

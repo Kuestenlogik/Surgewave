@@ -548,9 +548,9 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     {
         try
         {
-            // Direkte Broker-REST-Route (ConsumerLagRestApi), nicht /v3-Transcoding —
-            // dort wuerde /consumer-groups/lag die DescribeGroup-Route mit
-            // group_id="lag" matchen und still eine leere Antwort liefern.
+            // Direct broker REST route (ConsumerLagRestApi), not /v3 transcoding —
+            // there /consumer-groups/lag would match the DescribeGroup route with
+            // group_id="lag" and silently return an empty answer.
             var url = "/api/consumer-groups/lag";
             var response = await _httpClient.GetFromJsonAsync<ConsumerLagListDto>(url, _jsonOptions, ct);
             return response?.Groups?.Select(MapConsumerGroupLag).ToList() ?? [];
@@ -601,9 +601,9 @@ public class SurgewaveApiClient : ISurgewaveApiClient
     {
         try
         {
-            // Transcodierte gRPC-Route (AdminService.DescribeBrokerConfig) —
-            // liefert die effektive Broker-Config aus DynamicBrokerConfig.
-            // Bei Fehlern ehrlich leer statt der frueheren Fake-Kafka-Defaults.
+            // Transcoded gRPC route (AdminService.DescribeBrokerConfig) —
+            // returns the effective broker config from DynamicBrokerConfig.
+            // On errors honestly empty instead of the former fake Kafka defaults.
             var url = BuildUrl($"/brokers/{brokerId}/configs", clusterId);
             var response = await _httpClient.GetFromJsonAsync<DescribeBrokerConfigResponseDto>(url, _jsonOptions, ct);
             if (response?.Configs == null) return [];

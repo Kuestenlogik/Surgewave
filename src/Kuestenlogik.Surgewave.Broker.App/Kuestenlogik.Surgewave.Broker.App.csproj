@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <!-- Der Broker-HOST: Program.cs, REST-APIs, Startup-Wiring, eingebaute Host-Plugins
-       (AutoTuning, CruiseControl, AdaptiveCompression, Cross-Topic-Transaktionen).
-       Ein Host wie Control, Gateway und Marketplace: er wird gestartet, nicht
-       referenziert — die Engine dahinter ist die Library Kuestenlogik.Surgewave.Broker.
-       Die Typen hier behalten ihre Kuestenlogik.Surgewave.Broker.*-Namespaces aus der
-       Zeit vor dem Split: Namespace beschreibt die fachliche Heimat, die Assembly die
-       Auslieferung; ein Rename haette jede Test- und Programmdatei angefasst, ohne
-       etwas zu verbessern. -->
+  <!-- The broker HOST: Program.cs, REST APIs, startup wiring, built-in host plugins
+       (AutoTuning, CruiseControl, AdaptiveCompression, cross-topic transactions).
+       A host like Control, Gateway and Marketplace: it is started, not
+       referenced — the engine behind it is the library Kuestenlogik.Surgewave.Broker.
+       The types here keep their Kuestenlogik.Surgewave.Broker.* namespaces from the
+       time before the split: the namespace describes the functional home, the assembly the
+       delivery; a rename would have touched every test and program file without
+       improving anything. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -39,10 +39,10 @@
 
   <!-- Container Publishing (.NET Native) -->
   <!-- Usage: dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release /t:PublishContainer
-       Bei `dotnet publish` ohne -p:ContainerImageTag(s) wird die Project-Version
-       (default 1.0.0, in CI via -p:Version=X.Y.Z gesetzt) als Tag verwendet.
-       Die Release-Pipeline setzt ContainerImageTags="$V;latest" und darf
-       deshalb hier KEIN ContainerImageTag finden — sonst CONTAINER2008
+       With `dotnet publish` without -p:ContainerImageTag(s) the project version
+       (default 1.0.0, set in CI via -p:Version=X.Y.Z) is used as the tag.
+       The release pipeline sets ContainerImageTags="$V;latest" and must
+       therefore find NO ContainerImageTag here — otherwise CONTAINER2008
        ('Both ContainerImageTag and ContainerImageTags were provided'). -->
   <PropertyGroup>
     <ContainerRepository>kuestenlogik/surgewave-broker</ContainerRepository>
@@ -109,9 +109,9 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <PackageReference Include="OpenTelemetry" />
-    <!-- VersionOverride statt zentralem Pin: der Exporter existiert upstream nur als -beta, und ein
-         zentraler Eintrag wuerde via CentralPackageTransitivePinning in die nuspec jedes packbaren
-         Downstream-Projekts promotet (NU5104 beim stabilen Release-Pack). -->
+    <!-- VersionOverride instead of a central pin: upstream the exporter only exists as -beta, and a
+         central entry would be promoted via CentralPackageTransitivePinning into the nuspec of every packable
+         downstream project (NU5104 on the stable release pack). -->
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" VersionOverride="1.15.3-beta.1" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />

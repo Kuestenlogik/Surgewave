@@ -59,7 +59,7 @@ internal static class AvroVectorSchemaAnnotator
 
     private static void ApplyToField(JsonObject field, string name, (int Dim, string ItemType) vector, Type type)
     {
-        // Feld-Typ kann das Array-Objekt direkt sein oder eine Union ["null", {array}].
+        // The field type can be the array object directly or a union ["null", {array}].
         var typeNode = field["type"];
         var arrayNode = typeNode switch
         {
@@ -82,7 +82,7 @@ internal static class AvroVectorSchemaAnnotator
     private static bool IsArrayNode(JsonObject node) =>
         node["type"]?.GetValue<string>() == "array";
 
-    /// <summary>Feldname (case-insensitiv) → (dim, Avro-Elementtyp "float"/"double").</summary>
+    /// <summary>Field name (case-insensitive) → (dim, Avro element type "float"/"double").</summary>
     private static Dictionary<string, (int Dim, string ItemType)> CollectVectorMembers(Type type)
     {
         var result = new Dictionary<string, (int, string)>(StringComparer.OrdinalIgnoreCase);

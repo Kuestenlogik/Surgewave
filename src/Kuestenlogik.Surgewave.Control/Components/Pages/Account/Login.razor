@@ -100,11 +100,11 @@ else if (_showProviderSelection)
         if (HttpContext is null)
             return;
 
-        // Open-Redirect-Schutz: ReturnUrl kommt aus dem Query-String
-        // und wird sowohl in <a href="..."> als auch in
-        // HttpContext.Response.Redirect verwendet. Wir akzeptieren
-        // nur pfad-relative URLs ("/foo"), keine absoluten
-        // ("http://evil.com") und keine protokoll-relativen
+        // Open redirect protection: ReturnUrl comes from the query string
+        // and is used both in <a href="..."> and in
+        // HttpContext.Response.Redirect. We accept
+        // only path-relative URLs ("/foo"), no absolute ones
+        // ("http://evil.com") and no protocol-relative ones
         // ("//evil.com").
         _returnUrl = IsLocalReturnUrl(ReturnUrl) ? ReturnUrl! : "/";
         var authConfig = AuthOptions.Value;

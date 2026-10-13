@@ -39,24 +39,24 @@
     <PublishDir>$(ArtifactsPath)pub\$(MSBuildProjectName)\$(Configuration)\</PublishDir>
   </PropertyGroup>
 
-  <!-- Was gehoert auf nuget.org?
-       Ein Projekt ist paketierbar, solange es etwas ist, das jemand REFERENZIEREN kann. Das ist
-       der Default, und er ist richtig: Libraries, Plugins und das dotnet-Tool gehen alle ueber
-       NuGet raus - Plugins ausdruecklich auch: `surgewave plugins install` laedt ein Plugin mit
-       der Option `from-nuget` von einem konfigurierten Feed.
+  <!-- What belongs on nuget.org?
+       A project is packable as long as it is something someone can REFERENCE. That is
+       the default, and it is right: libraries, plugins and the dotnet tool all ship through
+       NuGet - plugins explicitly too: `surgewave plugins install` loads a plugin with
+       the `from-nuget` option from a configured feed.
 
-       Genau eine Kategorie faellt raus: HOSTS. Ein Exe- bzw. Web-SDK-Projekt, das gestartet und
-       nicht referenziert wird, laesst sich nicht konsumieren - ein Paket davon waere eine ID, die
-       niemand sinnvoll installieren kann. Diese Projekte setzen `IsPackable=false` und werden
-       ueber scripts/publish.ps1 und das Container-Image ausgeliefert: Broker.App, Control,
+       Exactly one category drops out: HOSTS. An Exe or Web SDK project that is started and
+       not referenced cannot be consumed - a package of it would be an ID that
+       nobody can meaningfully install. These projects set `IsPackable=false` and are
+       shipped through scripts/publish.ps1 and the container image: Broker.App, Control,
        Gateway, Marketplace, Connect.Worker, Schema.Registry.App.
 
-       (Broker war frueher die dokumentierte Ausnahme - Exe und trotzdem paketierbar, weil die
-       Engine-Logik im Exe-Projekt lag und Runtime/Hosting sie referenzieren mussten. Seit dem
-       Engine/Host-Split ist Kuestenlogik.Surgewave.Broker eine normale Library und Broker.App
-       der Host; die Ausnahme existiert nicht mehr.)
+       (Broker used to be the documented exception - an Exe and packable nonetheless, because the
+       engine logic lived in the Exe project and Runtime/Hosting had to reference it. Since the
+       engine/host split Kuestenlogik.Surgewave.Broker is a normal library and Broker.App
+       the host; the exception no longer exists.)
 
-       Beim Anlegen eines neuen Projekts also nur die Frage: Host oder nicht? -->
+       So when creating a new project the only question is: host or not? -->
 
   <!-- Generate XML documentation for packable projects (API reference) -->
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">
@@ -80,29 +80,29 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!-- Version information. <Version> ist der Floor für Builds ohne Tag (lokal +
-       CI ohne Tag); die Release-Pipeline überschreibt per -p:Version=$V aus dem
-       Git-Tag. Floor = zuletzt released + Patch + "-dev" (nach v0.5.0 also
-       0.5.1-dev), wird nach jedem Release durch
-       .github/workflows/post-release-floor-bump.yml angehoben.
+  <!-- Version information. <Version> is the floor for builds without a tag (local +
+       CI without a tag); the release pipeline overrides it with -p:Version=$V from the
+       Git tag. Floor = last released + patch + "-dev" (so after v0.5.0
+       0.5.1-dev), raised after every release by
+       .github/workflows/post-release-floor-bump.yml.
 
-       Warum die NAECHSTE Patch-Version und nicht die gerade released: unter
-       SemVer sortiert 0.5.0-dev UNTER 0.5.0. Ein main-Build nach dem Tag wuerde
-       sich damit aelter nennen als das Release, das er enthaelt. 0.5.1-dev
-       sortiert dazwischen - ueber dem letzten Release, unter dem naechsten -
-       und bleibt bei Major.Minor 0.5, was der VersionCompatibilityChecker
-       braucht: der lehnt Minor-Abweichung ab, ein Dev-Build soll aber weiter
-       in einen 0.5-Cluster mischen duerfen. Gilt bewusst für
-       ALLE Projekte (auch IsPackable=false), damit Exe-Banner und
-       Rolling-Upgrade-Checks dieselbe Version tragen. -->
+       Why the NEXT patch version and not the one just released: under
+       SemVer 0.5.0-dev sorts BELOW 0.5.0. A main build after the tag would
+       thereby call itself older than the release it contains. 0.5.1-dev
+       sorts in between - above the last release, below the next one -
+       and stays at Major.Minor 0.5, which the VersionCompatibilityChecker
+       needs: it rejects a minor mismatch, but a dev build should still be
+       allowed to mix into a 0.5 cluster. Deliberately applies to
+       ALL projects (including IsPackable=false), so that exe banners and
+       rolling-upgrade checks carry the same version. -->
   <PropertyGroup>
     <Version>0.5.2-dev</Version>
-    <!-- AssemblyVersion + FileVersion folgen $(Version), damit der
-         Release-Workflow per -p:Version=$V alle drei synchron bumpt.
-         Padding auf vier Stellen erledigt MSBuild (0.1.6 -> 0.1.6.0).
-         SemVer-Prerelease-Suffix (z.B. "-ci.37.abc" aus ci.yml) wird
-         gestripped, weil AssemblyVersionAttribute strikt nur
-         major.minor.build.revision akzeptiert. -->
+    <!-- AssemblyVersion + FileVersion follow $(Version), so that the
+         release workflow bumps all three in sync with -p:Version=$V.
+         MSBuild pads to four parts (0.1.6 -> 0.1.6.0).
+         The SemVer prerelease suffix (e.g. "-ci.37.abc" from ci.yml) is
+         stripped, because AssemblyVersionAttribute strictly accepts only
+         major.minor.build.revision. -->
     <AssemblyVersion>$([System.Text.RegularExpressions.Regex]::Replace($(Version), '-.*$', ''))</AssemblyVersion>
     <FileVersion>$([System.Text.RegularExpressions.Regex]::Replace($(Version), '-.*$', ''))</FileVersion>
     <SourceRevisionId>$(SourceRevisionId)</SourceRevisionId>

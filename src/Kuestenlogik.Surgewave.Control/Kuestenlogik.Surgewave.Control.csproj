@@ -29,9 +29,9 @@
 
   <!-- Container Publishing (.NET Native) -->
   <!-- Usage: dotnet publish src/Kuestenlogik.Surgewave.Control -c Release /t:PublishContainer
-       Tag = Project-Version (via -p:Version=… in CI). Pipeline darf hier
-       KEIN ContainerImageTag finden, weil sie ContainerImageTags="$V;latest"
-       setzt — sonst CONTAINER2008. -->
+       Tag = project version (via -p:Version=… in CI). The pipeline must find
+       NO ContainerImageTag here, because it sets ContainerImageTags="$V;latest"
+       — otherwise CONTAINER2008. -->
   <PropertyGroup>
     <ContainerRepository>kuestenlogik/surgewave-control</ContainerRepository>
     <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>

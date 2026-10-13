@@ -4,8 +4,8 @@ using Kuestenlogik.Surgewave.Plugins;
 namespace Kuestenlogik.Surgewave.Plugins.Tests.Core;
 
 /// <summary>
-/// Tests fuer <see cref="PluginAssemblyScanner"/>. Verwendet die Test-Assembly selbst als
-/// Scan-Target, so dass keine zusaetzlichen Plugin-DLLs gepackt werden muessen.
+/// Tests for <see cref="PluginAssemblyScanner"/>. Uses the test assembly itself as the
+/// scan target, so no additional plugin DLLs have to be packed.
 /// </summary>
 public sealed class PluginAssemblyScannerTests
 {

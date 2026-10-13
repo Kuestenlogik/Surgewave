@@ -8,11 +8,11 @@ namespace Kuestenlogik.Surgewave.Marketplace.Storage;
 /// </summary>
 public sealed class FileSystemPackageStorage : IPackageStorageService
 {
-    // Plugin-IDs: kebab-case ASCII, optional dotted namespaces.
+    // Plugin IDs: kebab-case ASCII, optionally dotted namespaces.
     private static readonly Regex IdPattern =
         new(@"^[a-z0-9](?:[a-z0-9.\-]{0,127})$", RegexOptions.Compiled);
 
-    // SemVer-Subset ohne Path-Trennzeichen.
+    // SemVer subset without path separators.
     private static readonly Regex VersionPattern =
         new(@"^[0-9]+(?:\.[0-9]+)*(?:-[A-Za-z0-9.]+)?$", RegexOptions.Compiled);
 
@@ -68,13 +68,13 @@ public sealed class FileSystemPackageStorage : IPackageStorageService
         return Task.FromResult(File.Exists(path) ? new FileInfo(path).Length : 0L);
     }
 
-    // Validation + Containment-Check sind zentralisiert in den
-    // beiden Path-Helpers, damit jede Aufrufstelle automatisch gegen
-    // Path-Injection geschuetzt ist. Selbst wenn 'id' oder 'version'
-    // ../ enthielten, wuerde ValidateId/ValidateVersion das schon im
-    // Pattern-Matcher ablehnen — der EnsureContained-Check ist
-    // belt-and-suspenders gegen unicode/normalization-Tricks und gegen
-    // zukuenftige Aufrufer, die den Pfad selbst bauen.
+    // Validation + the containment check are centralised in the
+    // two path helpers, so every call site is automatically protected against
+    // path injection. Even if 'id' or 'version'
+    // contained ../, ValidateId/ValidateVersion would already reject it in the
+    // pattern matcher — the EnsureContained check is
+    // belt-and-suspenders against unicode/normalisation tricks and against
+    // future callers that build the path themselves.
     private string GetPackageDir(string id, string version)
     {
         var path = Path.Combine(_rootDir, ValidateId(id), ValidateVersion(version));

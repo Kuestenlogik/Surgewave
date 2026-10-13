@@ -27,11 +27,11 @@ param(
     [string]$BaseUrl = ''
 )
 
-# Production build laeuft jetzt mit leerem baseurl, weil GitHub Pages den
-# Site unter der Custom Domain https://surgewave.io serviert (site/CNAME).
-# -Local laesst die Default-Konfiguration unveraendert (auch leer), das ist
-# hier nur ein historischer No-Op damit Aufrufe wie `-Local -SkipDotnet -Serve`
-# weiter funktionieren ohne Argument-Parsing-Brueche.
+# The production build now runs with an empty baseurl, because GitHub Pages serves
+# the site under the custom domain https://surgewave.io (site/CNAME).
+# -Local leaves the default configuration unchanged (empty as well); here it is
+# only a historical no-op so that calls like `-Local -SkipDotnet -Serve`
+# keep working without argument-parsing breaks.
 if ($Local) { $BaseUrl = '' }
 
 $ErrorActionPreference = 'Stop'

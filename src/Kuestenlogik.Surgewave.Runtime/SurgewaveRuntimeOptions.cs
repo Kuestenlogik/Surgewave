@@ -35,10 +35,10 @@ public sealed record SurgewaveRuntimeOptions
     /// When true and Host is "localhost", binds to IPv6Any with DualMode enabled,
     /// and the runtime advertises "localhost" so clients can pick either stack.
     /// When false (default), binds to IPv4 loopback (127.0.0.1) and advertises
-    /// 127.0.0.1 explicitly — deterministisch fuer Tests, Dev-Setups und CI-
-    /// Container, in denen Linux getaddrinfo("localhost") gerne ::1 zuerst
-    /// liefert, der ::1-Connect aber je nach Routing/Kernel-Config refused
-    /// werden kann. Opt-in fuer Dual-Stack-Setups.
+    /// 127.0.0.1 explicitly — deterministic for tests, dev setups and CI
+    /// containers, in which Linux getaddrinfo("localhost") likes to return ::1 first,
+    /// while the ::1 connect can be refused depending on the routing/kernel
+    /// config. Opt-in for dual-stack setups.
     /// </summary>
     public bool EnableDualMode { get; init; } = false;
 

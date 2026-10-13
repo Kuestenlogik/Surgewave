@@ -46,12 +46,12 @@ public class CliIntegrationTests : IAsyncLifetime
         // appears in the test's own BaseDirectory path.
         var preferRelease = AppContext.BaseDirectory.Contains(
             Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar);
-        // `bin/` explizit verlangen — sonst matcht der Pattern auch das
-        // obj/-Zwischenartefakt, das keine `surgewave.runtimeconfig.json`
-        // hat. Dotnet startet die DLL dann als self-contained app, findet
-        // libhostpolicy.so nicht und stirbt mit Exit 131 (SIGQUIT). Auf
-        // Windows fand Directory.GetFiles zufaellig die bin/-Variante
-        // zuerst, auf Linux die obj/-Variante.
+        // Require `bin/` explicitly — otherwise the pattern also matches the
+        // obj/ intermediate artefact, which has no `surgewave.runtimeconfig.json`.
+        // Dotnet then starts the DLL as a self-contained app, does not find
+        // libhostpolicy.so and dies with exit 131 (SIGQUIT). On
+        // Windows Directory.GetFiles happened to find the bin/ variant
+        // first, on Linux the obj/ variant.
         var binMarker = Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar;
         var matches = Directory.GetFiles(artifactsRoot, "surgewave.dll", SearchOption.AllDirectories)
             .Where(p => p.Contains(Path.DirectorySeparatorChar + "Kuestenlogik.Surgewave.Tool" + Path.DirectorySeparatorChar)

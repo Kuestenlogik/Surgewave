@@ -69,7 +69,7 @@ builder.Services.AddSingleton(_ => ConnectServiceHolder.Instance
 var app = builder.Build();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
-// Version aus der Assembly (SemVer inkl. Prerelease, Build-Metadaten nach '+' entfernt)
+// Version from the assembly (SemVer incl. prerelease, build metadata after '+' removed)
 var workerVersion = typeof(Program).Assembly
     .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion is { } informational
     ? informational.Split('+')[0]

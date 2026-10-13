@@ -47,10 +47,10 @@
   <ItemGroup>
     <None Include="build\Kuestenlogik.Surgewave.Build.targets" Pack="true" PackagePath="build\" />
     <None Include="build\Kuestenlogik.Surgewave.Build.targets" Pack="true" PackagePath="buildMultiTargeting\" />
-    <!-- buildTransitive: ohne diese beiden Zeilen importiert NuGet die Targets NUR bei direkter
-         Paketreferenz. Das Sdk-Metapaket verspricht aber genau den transitiven Fluss ("Reference
-         once ... MSBuild tasks pulled in transitively") - hinter dem Metapaket waeren die
-         .swpkg-Tasks sonst nie importiert worden. -->
+    <!-- buildTransitive: without these two lines NuGet imports the targets ONLY on a direct
+         package reference. But the Sdk metapackage promises exactly the transitive flow ("Reference
+         once ... MSBuild tasks pulled in transitively") - behind the metapackage the
+         .swpkg tasks would otherwise never have been imported. -->
     <None Include="build\Kuestenlogik.Surgewave.Build.targets" Pack="true" PackagePath="buildTransitive\" />
     <None Include="build\Kuestenlogik.Surgewave.Build.targets" Pack="true" PackagePath="buildTransitive\buildMultiTargeting\" />
   </ItemGroup>

@@ -18,8 +18,8 @@ public sealed class FileSystemMetadataService : IPackageMetadataService
         WriteIndented = true
     };
 
-    // Plugin-IDs sind kebab-case ASCII (lowercase, optional dotted
-    // Namespaces). Path-Trennzeichen sind ausgeschlossen.
+    // Plugin IDs are kebab-case ASCII (lowercase, optionally dotted
+    // namespaces). Path separators are excluded.
     private static readonly Regex IdPattern =
         new(@"^[a-z0-9](?:[a-z0-9.\-]{0,127})$", RegexOptions.Compiled);
 
@@ -107,10 +107,10 @@ public sealed class FileSystemMetadataService : IPackageMetadataService
         return Task.CompletedTask;
     }
 
-    // Zentralisierte Path-Konstruktion mit Whitelist-Validation +
-    // Containment-Check. Verhindert Path-Injection ueber den
-    // 'id'-Parameter: ohne diese Funktion wuerde Path.Combine(_rootDir, "../../etc")
-    // den Root-Dir verlassen.
+    // Centralised path construction with allowlist validation +
+    // containment check. Prevents path injection via the
+    // 'id' parameter: without this function Path.Combine(_rootDir, "../../etc")
+    // would leave the root dir.
     private string GetMetadataDir(string id)
     {
         if (string.IsNullOrEmpty(id) || !IdPattern.IsMatch(id))

@@ -39,7 +39,7 @@ internal static class AvroVectorInspector
     {
         switch (node.ValueKind)
         {
-            case JsonValueKind.Array: // Union: jeder Zweig kann den Vektor tragen.
+            case JsonValueKind.Array: // Union: every branch can carry the vector.
                 foreach (var branch in node.EnumerateArray())
                 {
                     Walk(branch, path, vectors, fieldPaths, errors);
@@ -49,7 +49,7 @@ internal static class AvroVectorInspector
             case JsonValueKind.Object:
                 break;
 
-            default: // Primitive als String ("float", Namensreferenzen) tragen nie Attribute.
+            default: // Primitives as a string ("float", name references) never carry attributes.
                 return;
         }
 
@@ -67,7 +67,7 @@ internal static class AvroVectorInspector
 
         if (type.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
         {
-            // Feld-Form {"name": x, "type": {...}} oder geschachtelte Typ-Objekte.
+            // Field form {"name": x, "type": {...}} or nested type objects.
             Walk(type, path, vectors, fieldPaths, errors);
             return;
         }
