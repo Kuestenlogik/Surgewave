@@ -26,7 +26,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Tactical#3](https://github.com/Kuestenlogik/Surgewave.Tactical/issues/3) **This repository packages a .swpkg that contains no plugin, and no project can pack it** 
 - [Kuestenlogik/Surgewave.Edge#5](https://github.com/Kuestenlogik/Surgewave.Edge/issues/5) **This repository packages a .swpkg that contains no plugin** 
 - [Kuestenlogik/Surgewave.Ai#36](https://github.com/Kuestenlogik/Surgewave.Ai/issues/36) **Security: MCP HTTP server exposes its tools without authentication; MCP SDK still 0.2.0-preview.1** 
-- [#182](https://github.com/Kuestenlogik/Surgewave/issues/182) **Remove internal notes from the public repository** 
 
 ### M2 — Multi-tenancy & data mesh
 
