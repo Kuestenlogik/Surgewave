@@ -7,8 +7,7 @@ namespace Kuestenlogik.Surgewave.Wasm;
 
 /// <summary>
 /// Hot-path implementation of <see cref="IRecordTransformPipeline"/> backed by the
-/// Surgewave WASM runtime — Surgewave's analogue of Redpanda Data Transforms (G7 of the
-/// competitive gap analysis). A topic opts in by setting the
+/// Surgewave WASM runtime — Surgewave's analogue of Redpanda Data Transforms. A topic opts in by setting the
 /// <see cref="ConfigKey"/> entry in its config to the id of a loaded
 /// <see cref="WasmPluginInstance"/>; on every produce-batch the broker invokes
 /// the plugin's <c>plugin_process</c> entry point against the raw record-batch

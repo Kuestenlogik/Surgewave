@@ -658,7 +658,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                 // run a rebalance that relocated or revoked this partition. A result
                 // fetched for the old position must be discarded, never written back —
                 // otherwise it would overwrite the rejoined position and re-serve stale
-                // records (found by the #80 C2 adversarial review; the underlying
+                // records (found in the review of #80 C2; the underlying
                 // background-mutation model is tracked separately).
                 if (!_offsets.TryGetValue((topic, partition), out var currentOffset) || currentOffset != offset)
                     continue;

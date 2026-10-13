@@ -100,7 +100,7 @@ as Control-routes solidify.
 Bowire ships:
 
 - `scripts/capture-screenshots.js` — drives Bowire.Samples.Combined SPA
-- `scripts/record-demo.js` (in worktrees) — same shape, 3 beats
+- `scripts/record-demo.js` — same shape, 3 beats
 
 Differences for Surgewave:
 

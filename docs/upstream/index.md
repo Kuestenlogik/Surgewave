@@ -4,10 +4,6 @@ Investigations into Kafka wire protocol and coordinator compatibility: which
 changes in the Kafka trunk matter for Surgewave, which were checked and discarded,
 and which are open as an implementation plan.
 
-These documents previously lived in the strategy repository `Kuestenlogik`. They are
-implementation work on *one* product and therefore belong here — the strategy repository
-keeps what binds several products or justifies the relationship to third-party products.
-
 | Document | Content |
 |---|---|
 | [`kafka-trunk-2026-04-to-05-relevance.md`](kafka-trunk-2026-04-to-05-relevance.md) | 193 trunk commits reviewed, 26 classified as relevant |

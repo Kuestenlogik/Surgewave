@@ -515,7 +515,7 @@ The Surgewave client resolves `auto` / `native` / `kafka` per connection and the
 
 ### Correctness & durability fixes from the modern-.NET perf audit (#73, #74, #75, #76, #77)
 
-A 7-subsystem, adversarially verified audit of the zero-copy/pooling paths surfaced five real defects, all fixed in this release: a span-hash intern-cache collision that could route produced records to the **wrong topic**; two pooled-buffer leaks (decompression rent on the native fetch path, LOH-sized rent on trimmed storage reads); a flush path whose fsync **never reached the disk** (durability was page-cache-only); and a replication size-prefix short-read that desynced the connection.
+An audit of the zero-copy/pooling paths across seven subsystems surfaced five real defects, all fixed in this release: a span-hash intern-cache collision that could route produced records to the **wrong topic**; two pooled-buffer leaks (decompression rent on the native fetch path, LOH-sized rent on trimmed storage reads); a flush path whose fsync **never reached the disk** (durability was page-cache-only); and a replication size-prefix short-read that desynced the connection.
 
 ### Packaging & CI hygiene (#54, #55, #56)
 
@@ -523,7 +523,7 @@ Vulnerable transitives are pinned (Microsoft.OpenApi 2.9.0; the unpatched SQLite
 
 ## Acknowledgements
 
-The perf-audit fixes in this release were found by an exhaustive multi-agent review of the transport, codec, storage, SIMD and client layers — the remaining (non-correctness) findings are tracked as #78–#87 for v0.8.
+The perf-audit fixes in this release were found by a review of the transport, codec, storage, SIMD and client layers — the remaining (non-correctness) findings are tracked as #78–#87 for v0.8.
 
 <details>
 <summary><b>Installation</b> — NuGet, Container, MSI, Linux, Helm</summary>

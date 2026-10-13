@@ -2,7 +2,7 @@
 
 **Status:** Concept / draft (Rev. 1)  
 **Date:** 2026-04  
-**Context:** Kuestenlogik.Surgewave – community integration and ecosystem development
+**Context:** Kuestenlogik.Surgewave – MassTransit integration
 
 ---
 
@@ -10,14 +10,13 @@
 
 MassTransit is the most widely used messaging framework in the .NET ecosystem. Thousands of production systems use it as an abstraction layer over message brokers (RabbitMQ, Azure Service Bus, Amazon SQS, ActiveMQ) and as an application framework for consumers, sagas, routing slips and request/response patterns. The community is large, active and technically savvy.
 
-With the move of MassTransit v9 to a commercial licensing model (Massient, Inc., April 2025), MassTransit v8 stays open under Apache 2.0 and is maintained until at least the end of 2026. Many teams are currently re-evaluating their architecture decisions — an ideal moment to introduce Surgewave as a high-performance alternative to Kafka into existing MassTransit infrastructures.
+With the move of MassTransit v9 to a commercial licensing model (Massient, Inc., April 2025), MassTransit v8 stays open under Apache 2.0 and is maintained until at least the end of 2026.
 
-### Strategic goals
+### Goals
 
-1. **Reach:** Surgewave becomes visible where developers already make transport decisions — in the MassTransit configuration next to RabbitMQ, Azure Service Bus and Kafka.
-2. **Zero-friction entry:** Existing MassTransit users can try Surgewave without changing their consumers, sagas or business logic.
-3. **Migration path:** Teams that want to migrate from Kafka to Surgewave can do so within MassTransit — a configuration change, not a redesign.
-4. **Two-pronged approach:** Together with the existing `Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka` layer and the Akka.NET persistence integration, the MassTransit rider opens up the third and largest .NET messaging community.
+1. **Zero-friction entry:** Existing MassTransit users can try Surgewave without changing their consumers, sagas or business logic.
+2. **Migration path:** Teams that want to migrate from Kafka to Surgewave can do so within MassTransit — a configuration change, not a redesign.
+3. **Consistent integration surface:** The rider complements the existing `Kuestenlogik.Surgewave.Compatibility.Confluent.Kafka` layer and the Akka.NET persistence integration.
 
 ---
 
@@ -437,37 +436,8 @@ The package is published on nuget.org with:
 
 ---
 
-## Community strategy
-
-### Visibility
-
-1. **NuGet package** as the primary discovery vector — developers search for "MassTransit" + transport name
-2. **MassTransit GitHub Discussions** — announcement as a community transport, not as a PR
-3. **Blog post** on the Surgewave blog: "Using Surgewave with MassTransit" — a complete tutorial
-4. **Example repository** (`surgewave-samples/masstransit`) with Docker Compose, Surgewave broker, MassTransit consumer/producer
-
-### Timing
-
-The optimal moment is **now** (Q2 2026):
-- MassTransit v8 reaches end-of-life at the end of 2026 — teams are actively evaluating alternatives
-- MassTransit v9 is commercial ($400+/month) — price-sensitive teams are looking for Apache 2.0 options
-- The combination "Surgewave (Apache 2.0, free of charge and permissive) + MassTransit v8 (Apache 2.0)" is a strong argument against "Kafka + MassTransit v9 ($$$)"
-
-### Differentiation from the Kafka rider
-
-| Argument | Kafka rider | Surgewave rider |
-|----------|-------------|-------------|
-| Broker setup | ZooKeeper/KRaft + JVM | Single binary, .NET-native |
-| Latency | ms range | µs range (Surgewave Native) |
-| Protocol flexibility | Kafka only | Surgewave Native + Kafka |
-| .NET ecosystem | Confluent client (C wrapper) | Native .NET client |
-| Operational overhead | High (JVM tuning, GC, partitions) | Low (single process) |
-
----
-
 ## Open questions
 
 1. **MassTransit v9 compatibility:** Should the package be actively tested against v9, even though v9 is commercial? Recommendation: yes, but with v8 as the primary target.
-2. **Confluent.Kafka fallback:** Should the rider optionally be able to use the `Confluent.Kafka` wrapper to talk to real Kafka clusters via MassTransit? That would position Surgewave as the "better Kafka client", even when the broker is Kafka.
+2. **Confluent.Kafka fallback:** Should the rider optionally be able to use the `Confluent.Kafka` wrapper to talk to real Kafka clusters via MassTransit?
 3. **Separate repository or monorepo:** Does the package live in the Surgewave repo or in its own `surgewave-integrations` repo? Recommendation: its own repo (`Kuestenlogik.Surgewave.Integrations`) with its own release cycle, since MassTransit version jumps happen independently of Surgewave releases.
-4. **Contact with Chris Patterson:** Should Surgewave be actively presented to MassTransit as a community transport? A mention in the MassTransit documentation would be the strongest visibility lever.

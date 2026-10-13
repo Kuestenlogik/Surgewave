@@ -297,9 +297,8 @@ by Apache Kafka 4.2 — they match unless noted.
 Surgewave ships its own Schema Registry under `src/Kuestenlogik.Surgewave.Schema.Registry`. To
 be a drop-in replacement for Confluent Schema Registry, Surgewave must match two
 verifiable contracts: the magic-byte wire format embedded in every record, and
-the REST API surface that schema-aware clients call. Both have been audited
-(G16 of the competitive gap analysis); this section is the per-contract
-status statement.
+the REST API surface that schema-aware clients call. Both have been audited;
+this section is the per-contract status statement.
 
 ### Magic-byte wire format
 

@@ -347,7 +347,7 @@ public class ReplicationTests : IAsyncLifetime
     // move its leaderships (controlled shutdown) instead of trying to elect, which only the
     // controller may do. With both in place this test passes in ~45-77 s where it used to time out.
     //
-    // What is not established is that it passes RELIABLY: on a loaded dev box one run in three
+    // What is not established is that it passes RELIABLY: on a loaded machine one run in three
     // still hits the 120 s limit, and this test's history is of blocking unrelated PRs. Unskip once
     // a quiet machine or a CI run shows it green repeatedly — the reason to keep it off is now
     // caution about the runner, not a known defect.

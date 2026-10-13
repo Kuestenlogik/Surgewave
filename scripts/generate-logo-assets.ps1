@@ -1,6 +1,6 @@
 #requires -Version 5.1
 # Generate the full Surgewave logo asset set, mirroring the Küstenlogik
-# convention in C:\Projekte\Kuestenlogik\Brand\assets:
+# brand asset naming convention:
 #
 #   mark_<variant>.svg / .png / @2x.png        — icon only
 #   surgewave_lockup_h_<variant>.svg / .png / @2x  — mark + Surgewave right
@@ -13,7 +13,7 @@
 #   adaptive  — CSS classes + prefers-color-scheme media query so the
 #               same file renders correctly on both light and dark.
 #
-# Outputs land in C:\Projekte\Kuestenlogik\Surgewave\images\  and are
+# Outputs land in <repo>\images\ and are
 # copied into the served paths (site/assets/images, docs/templates/...)
 # by the build script.
 [CmdletBinding()]

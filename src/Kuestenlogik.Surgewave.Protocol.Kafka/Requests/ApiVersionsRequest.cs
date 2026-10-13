@@ -267,7 +267,7 @@ public sealed class ApiVersionsResponse : KafkaResponse
     /// <summary>
     /// Create a default response with supported API versions.
     /// These ranges match Kafka 4.2 (trunk) for drop-in compatibility.
-    /// Source: C:\Projekte\kafka\clients\src\main\resources\common\message\*Request.json
+    /// Source: apache/kafka clients/src/main/resources/common/message/*Request.json
     /// </summary>
     public static ApiVersionsResponse CreateDefault(int correlationId, short apiVersion)
     {

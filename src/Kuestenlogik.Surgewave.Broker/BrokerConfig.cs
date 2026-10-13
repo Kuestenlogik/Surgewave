@@ -1205,8 +1205,7 @@ public sealed class AuditConfig
     /// Mirror audit events to a Surgewave topic in addition to the file sink. When
     /// enabled, every event written to <c>audit.log</c> is also produced to
     /// <see cref="TopicName"/> so a downstream SIEM / compliance pipeline can
-    /// consume it through the standard Kafka wire (G13 of the Surgewave
-    /// competitive gap analysis — Confluent Audit Logs parity). Default
+    /// consume it through the standard Kafka wire (Confluent Audit Logs parity). Default
     /// <c>false</c>: file-only sink, no topic side effect.
     /// </summary>
     public bool TopicSinkEnabled { get; set; } = false;

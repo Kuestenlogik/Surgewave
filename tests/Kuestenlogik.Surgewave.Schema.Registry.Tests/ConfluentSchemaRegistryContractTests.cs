@@ -8,7 +8,7 @@ namespace Kuestenlogik.Surgewave.Schema.Registry.Tests;
 /// Pins down the JSON-shape contract that Confluent Schema Registry clients
 /// (Confluent.SchemaRegistry .NET, librdkafka, the JVM Kafka client) expect
 /// when talking to Surgewave's REST API. Surgewave has been audited as wire-compatible
-/// (G16 of the competitive gap analysis) — these tests guard against silent
+/// — these tests guard against silent
 /// regressions: a stray `errorCode` (camelCase) instead of `error_code`
 /// (snake_case) would break every Confluent client without showing up as a
 /// type or unit-test failure elsewhere.
