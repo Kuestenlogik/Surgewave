@@ -26,6 +26,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Tactical#3](https://github.com/Kuestenlogik/Surgewave.Tactical/issues/3) **This repository packages a .swpkg that contains no plugin, and no project can pack it** 
 - [Kuestenlogik/Surgewave.Edge#5](https://github.com/Kuestenlogik/Surgewave.Edge/issues/5) **This repository packages a .swpkg that contains no plugin** 
 - [Kuestenlogik/Surgewave.Ai#36](https://github.com/Kuestenlogik/Surgewave.Ai/issues/36) **Security: MCP HTTP server exposes its tools without authentication; MCP SDK still 0.2.0-preview.1** 
+- [Kuestenlogik/Surgewave.Ai#38](https://github.com/Kuestenlogik/Surgewave.Ai/issues/38) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
+- [#183](https://github.com/Kuestenlogik/Surgewave/issues/183) **deps: packages with known advisories (MessagePack, SSH.NET, SQLitePCLRaw, SourceLink, WebAssembly.Server); 10.0.x pins to 10.0.13** 
 
 ### M2 — Multi-tenancy & data mesh
 
@@ -66,6 +68,12 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [#66](https://github.com/Kuestenlogik/Surgewave/issues/66) **Fine-grained role authorization on the broker REST/gRPC surface** 
 - [#153](https://github.com/Kuestenlogik/Surgewave/issues/153) **Extract the client-side runtime (Core / Protocol / Transport / Client) into its own repository** `area:multi`
 - [#155](https://github.com/Kuestenlogik/Surgewave/issues/155) **Publish reference assemblies for the commercial packages so their code compiles without shipping the implementation** `area:plugin-sdk`
+
+### Later
+
+- [Kuestenlogik/Surgewave.Samples.Akka#20](https://github.com/Kuestenlogik/Surgewave.Samples.Akka/issues/20) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
+- [Kuestenlogik/Surgewave.Storage.Parquet#4](https://github.com/Kuestenlogik/Surgewave.Storage.Parquet/issues/4) **deps: drop the stale SQLitePCLRaw audit suppression** 
+- [Kuestenlogik/Surgewave.Samples#17](https://github.com/Kuestenlogik/Surgewave.Samples/issues/17) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
 
 ---
 
