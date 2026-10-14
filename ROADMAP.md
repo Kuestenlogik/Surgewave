@@ -26,10 +26,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Tactical#3](https://github.com/Kuestenlogik/Surgewave.Tactical/issues/3) **This repository packages a .swpkg that contains no plugin, and no project can pack it** 
 - [Kuestenlogik/Surgewave.Edge#5](https://github.com/Kuestenlogik/Surgewave.Edge/issues/5) **This repository packages a .swpkg that contains no plugin** 
 - [Kuestenlogik/Surgewave.Ai#36](https://github.com/Kuestenlogik/Surgewave.Ai/issues/36) **Security: MCP HTTP server exposes its tools without authentication; MCP SDK still 0.2.0-preview.1** 
-- [Kuestenlogik/Surgewave.Ai#38](https://github.com/Kuestenlogik/Surgewave.Ai/issues/38) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
-- [#183](https://github.com/Kuestenlogik/Surgewave/issues/183) **deps: packages with known advisories (MessagePack, SSH.NET, SQLitePCLRaw, SourceLink, WebAssembly.Server); 10.0.x pins to 10.0.13** 
-- [Kuestenlogik/Surgewave.Edge#12](https://github.com/Kuestenlogik/Surgewave.Edge/issues/12) **deps: 10.0.x Microsoft and System pins to 10.0.13; drop the stale SQLitePCLRaw audit suppression** 
-- [Kuestenlogik/Surgewave.Connectors#28](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/28) **deps: packages with known advisories (Pkcs, Cryptography.Xml, SignalR.Common, RestSharp); 10.0.x pins to 10.0.13** 
+- [Kuestenlogik/Surgewave.Tactical#5](https://github.com/Kuestenlogik/Surgewave.Tactical/issues/5) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
 
 ### M2 — Multi-tenancy & data mesh
 
@@ -74,12 +71,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 ### Later
 
 - [Kuestenlogik/Surgewave.Samples.Akka#20](https://github.com/Kuestenlogik/Surgewave.Samples.Akka/issues/20) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
-- [Kuestenlogik/Surgewave.Storage.Parquet#4](https://github.com/Kuestenlogik/Surgewave.Storage.Parquet/issues/4) **deps: drop the stale SQLitePCLRaw audit suppression** 
 - [Kuestenlogik/Surgewave.Samples#17](https://github.com/Kuestenlogik/Surgewave.Samples/issues/17) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
-- [Kuestenlogik/Surgewave.Fleet#11](https://github.com/Kuestenlogik/Surgewave.Fleet/issues/11) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
-- [Kuestenlogik/Surgewave.Operator#12](https://github.com/Kuestenlogik/Surgewave.Operator/issues/12) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
-- [Kuestenlogik/Surgewave.Functions#5](https://github.com/Kuestenlogik/Surgewave.Functions/issues/5) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
-- [Kuestenlogik/Surgewave.Licensing#9](https://github.com/Kuestenlogik/Surgewave.Licensing/issues/9) **deps: System.Security.Cryptography.Pkcs 9.0.0 carries GHSA-2fmv-rv2c-59x7 and GHSA-846f-f764-76mx** 
+- [Kuestenlogik/Surgewave.Bootcamp#6](https://github.com/Kuestenlogik/Surgewave.Bootcamp/issues/6) **deps: SSH.NET and SQLitePCLRaw with known advisories in the lessons** 
 
 ---
 
