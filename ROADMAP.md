@@ -6,6 +6,12 @@ For what's already shipped, see [GitHub Releases](https://github.com/Kuestenlogi
 
 Field conventions live in [`docs/contributing/project-board.md`](docs/contributing/project-board.md).
 
+## In progress
+
+### v0.5.2 — Dependency security fixes
+
+- [#188](https://github.com/Kuestenlogik/Surgewave/issues/188) **Patch release 0.5.2: dependency security fixes** `area:security`
+
 ## Next up
 
 ### M6 — first stable
