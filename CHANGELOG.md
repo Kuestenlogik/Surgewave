@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Broker REST auth: a token's roles claim now gives the caller the role** — JwtBearer mapped the inbound claims, so `roles` arrived as the long `ClaimTypes.Role` URI and `RestApiAuth:RolesClaim` never matched: with REST auth enabled, every mutation was refused with 403, also for callers that hold `RequiredRole`. The claims are now kept as the token names them (`MapInboundClaims` off).
+
 ### Changed
 - **Everything in English, and a guard that keeps it so (#181)** — the remaining German in docs (the MassTransit rider concept, the Kafka upstream notes, the AWS benchmark cost notes), CHANGELOG, comments and XML docs in `src`/`tests`, site developer comments, build files, workflows, installer files and scripts is translated. Visible strings that changed: the client's retry log message ("Surgewave broker not reachable … attempt …"), a Control natural-language query suggestion ("Latest 5 messages from events"), the assistant's help example, the release body line `release.yml` writes (`… or :latest`), the milestone wording `scripts/release.mjs` writes ("Shipped in <tag>"), and five chart `aria-label`s on the site (their German originals are kept in `site/_i18n/de/` for the planned German version of the site). `docs/upstream/kafka-welle-3-low-priority-verify.md` is now `docs/upstream/kafka-wave-3-low-priority-verify.md`. `scripts/check-english.mjs` runs in the CI build job and fails with `file:line` on German outside `.github/language-allowlist.txt`, where each entry names its reason (German intent keywords and query patterns the broker and the assistant recognise, non-ASCII test inputs).
 

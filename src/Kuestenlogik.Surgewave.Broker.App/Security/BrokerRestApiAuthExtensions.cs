@@ -48,6 +48,9 @@ public static class BrokerRestApiAuthExtensions
             {
                 options.Authority = issuer;
                 options.RequireHttpsMetadata = config.RequireHttpsMetadata;
+                // Keep the claims as the token names them. Mapped, "roles" becomes the long
+                // ClaimTypes.Role URI and RolesClaim never matches, so no caller ever has the role.
+                options.MapInboundClaims = false;
 
                 // Prefer an explicit JWKS metadata endpoint when configured;
                 // otherwise the authority's OIDC discovery document is used.
