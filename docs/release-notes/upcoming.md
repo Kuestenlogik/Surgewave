@@ -54,6 +54,18 @@ every node keeps voting exactly as before.
 
 ## Fixes
 
+### An idempotent producer's records are no longer lost when its first requests race a new partition (#191)
+
+A producer whose requests were reordered while a partition was being
+created could get its later batch appended first; every retry of the
+earlier batch was then out of order, and its records were lost despite
+`enable.idempotence`. On a partition that has never had a record, a
+producer without state must now start at sequence 0; any other first
+sequence is refused with the retriable `OUT_OF_ORDER_SEQUENCE_NUMBER`, and
+the batches land in order. Partitions that have had records accept a
+stateless producer at any sequence as before. Kafka made the same change in
+KAFKA-15591.
+
 ### Broker REST auth: a token's roles claim gives the caller the role
 
 JwtBearer mapped the inbound claims, so `roles` arrived as the long

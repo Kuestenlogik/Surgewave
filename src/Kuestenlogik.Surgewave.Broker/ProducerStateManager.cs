@@ -137,8 +137,13 @@ public sealed class ProducerStateManager
     /// Validates a produce request's sequence number for idempotent delivery, WITHOUT recording it.
     /// <see cref="CommitSequence"/> does the recording, once the batch is actually in the log.
     /// </summary>
+    /// <param name="partitionNeverWritten">
+    /// No record was ever appended to the partition (its log end offset is 0). Then no producer state
+    /// can have been lost, and a producer without state must start at sequence 0 (KAFKA-15591).
+    /// </param>
     public ProduceSequenceCheck ValidateSequence(
-        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition)
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition,
+        bool partitionNeverWritten)
     {
         if (producerId == KafkaConstants.Producer.NoProducerId)
         {
@@ -149,7 +154,7 @@ public sealed class ProducerStateManager
         if (!_producers.TryGetValue(producerId, out var state))
         {
             // Unknown producer - accept; it is registered when the batch lands.
-            return ProduceSequenceCheck.Ok;
+            return FirstSequenceCheck(baseSequence, partitionNeverWritten);
         }
 
         // Validate epoch
@@ -164,8 +169,8 @@ public sealed class ProducerStateManager
         var written = state.GetLastWritten(topicPartition);
         if (written is null)
         {
-            // First batch for this partition - accept any sequence
-            return ProduceSequenceCheck.Ok;
+            // First batch of this producer on this partition.
+            return FirstSequenceCheck(baseSequence, partitionNeverWritten);
         }
 
         // The producer numbers RECORDS, not batches: the batch that follows one spanning sequences
@@ -186,6 +191,19 @@ public sealed class ProducerStateManager
         // Out of order
         return ProduceSequenceCheck.Failed(ProduceSequenceStatus.OutOfOrderSequence);
     }
+
+    /// <summary>
+    /// The first batch of a producer without state on a partition. On a partition that has had records
+    /// any sequence is accepted, because the state may have expired or been cleaned with them. On a
+    /// partition that never had one, only 0 is: a producer whose requests were reordered while the
+    /// partition was created would otherwise get its later batch appended first, and every retry of the
+    /// earlier one would be out of order — its records lost despite idempotence (KAFKA-15591). The
+    /// refusal is retriable; the earlier batch lands, then the later one in order.
+    /// </summary>
+    private static ProduceSequenceCheck FirstSequenceCheck(int baseSequence, bool partitionNeverWritten) =>
+        partitionNeverWritten && baseSequence != 0
+            ? ProduceSequenceCheck.Failed(ProduceSequenceStatus.OutOfOrderSequence)
+            : ProduceSequenceCheck.Ok;
 
     /// <summary>
     /// Records a batch that has been appended, so a retransmit is recognisable and answerable with

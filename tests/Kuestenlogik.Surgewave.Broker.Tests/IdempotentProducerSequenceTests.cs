@@ -138,7 +138,41 @@ public sealed class IdempotentProducerSequenceTests : IDisposable
         Assert.Equal(-1, First(gap).BaseOffset);
     }
 
-    private async Task<ProduceResponse> ProduceAsync(int baseSequence, int recordCount, short acks = 1)
+    [Fact]
+    public async Task OnANeverWrittenPartition_AFirstBatchNotAtSequenceZero_IsRefusedAndTheOrderHolds()
+    {
+        // KAFKA-15591: requests reordered around the partition's creation. The later batch (17-21)
+        // arrives first; appending it would make every retry of the earlier one (0-16) out of order,
+        // and those records would be lost despite idempotence.
+        var tp = new TopicPartition { Topic = Topic, Partition = 0 };
+
+        var later = await ProduceAsync(baseSequence: 17, recordCount: 5);
+        Assert.Equal(ErrorCode.OutOfOrderSequenceNumber, First(later).ErrorCode);
+        Assert.Equal(0, _logManager.GetLog(tp)?.NextOffset ?? 0);
+
+        var earlier = await ProduceAsync(baseSequence: 0, recordCount: 17);
+        Assert.Equal(ErrorCode.None, First(earlier).ErrorCode);
+        Assert.Equal(0, First(earlier).BaseOffset);
+
+        var laterRetried = await ProduceAsync(baseSequence: 17, recordCount: 5);
+        Assert.Equal(ErrorCode.None, First(laterRetried).ErrorCode);
+        Assert.Equal(17, First(laterRetried).BaseOffset);
+    }
+
+    [Fact]
+    public async Task OnAPartitionWithRecords_AProducerWithoutState_IsAcceptedAtAnySequence()
+    {
+        // Its state may have expired or been cleaned with the records; a non-zero first sequence is
+        // no evidence of a lost batch there.
+        await ProduceAsync(baseSequence: 0, recordCount: 2);
+
+        var other = await ProduceAsync(baseSequence: 42, recordCount: 2, producerId: ProducerId + 1);
+
+        Assert.Equal(ErrorCode.None, First(other).ErrorCode);
+        Assert.Equal(2, First(other).BaseOffset);
+    }
+
+    private async Task<ProduceResponse> ProduceAsync(int baseSequence, int recordCount, short acks = 1, long producerId = ProducerId)
     {
         var request = new ProduceRequest
         {
@@ -158,7 +192,7 @@ public sealed class IdempotentProducerSequenceTests : IDisposable
                         new ProduceRequest.PartitionProduceData
                         {
                             Index = 0,
-                            Records = CreateBatch(baseSequence, recordCount)
+                            Records = CreateBatch(baseSequence, recordCount, producerId)
                         }
                     ]
                 }
@@ -175,7 +209,7 @@ public sealed class IdempotentProducerSequenceTests : IDisposable
     private static ProduceResponse.PartitionProduceResponse First(ProduceResponse response)
         => response.Responses[0].PartitionResponses[0];
 
-    private static ReadOnlyMemory<byte> CreateBatch(int baseSequence, int recordCount)
+    private static ReadOnlyMemory<byte> CreateBatch(int baseSequence, int recordCount, long producerId)
     {
         const int size = 100;
         var batch = new byte[size];
@@ -187,7 +221,7 @@ public sealed class IdempotentProducerSequenceTests : IDisposable
         BinaryPrimitives.WriteInt32BigEndian(batch.AsSpan(23, 4), recordCount - 1); // last offset delta
         BinaryPrimitives.WriteInt64BigEndian(batch.AsSpan(27, 8), 1_700_000_000_000);
         BinaryPrimitives.WriteInt64BigEndian(batch.AsSpan(35, 8), 1_700_000_000_000);
-        BinaryPrimitives.WriteInt64BigEndian(batch.AsSpan(43, 8), ProducerId);
+        BinaryPrimitives.WriteInt64BigEndian(batch.AsSpan(43, 8), producerId);
         BinaryPrimitives.WriteInt16BigEndian(batch.AsSpan(51, 2), 0);                // producer epoch
         BinaryPrimitives.WriteInt32BigEndian(batch.AsSpan(53, 4), baseSequence);
         BinaryPrimitives.WriteInt32BigEndian(batch.AsSpan(57, 4), recordCount);

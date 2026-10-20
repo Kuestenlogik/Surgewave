@@ -31,8 +31,13 @@ public interface IProduceTransactionCoordinator
     /// at <c>baseSequence + lastOffsetDelta + 1</c>, so a broker that assumes one record per batch
     /// rejects every multi-record producer's second batch as out of order.
     /// </param>
+    /// <param name="partitionNeverWritten">
+    /// No record was ever appended to the partition (log end offset 0). A producer without state must
+    /// then start at sequence 0; any other first sequence is refused as out of order (KAFKA-15591).
+    /// </param>
     ProduceSequenceCheck ValidateProduceBatch(
-        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition);
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition,
+        bool partitionNeverWritten);
 
     /// <summary>
     /// Records a batch that was actually appended, so a retransmit of it can be recognised and

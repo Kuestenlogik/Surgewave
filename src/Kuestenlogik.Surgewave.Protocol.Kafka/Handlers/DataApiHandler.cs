@@ -422,8 +422,11 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
                     if (producerId != KafkaConstants.Producer.NoProducerId)
                     {
+                        // A log end offset of 0 means no record was ever appended: retention and a
+                        // raised log start offset never take it back (KAFKA-15591).
+                        var partitionNeverWritten = (_logManager.GetLog(topicPartition)?.NextOffset ?? 0) == 0;
                         var check = _transactionCoordinator.ValidateProduceBatch(
-                            producerId, producerEpoch, baseSequence, lastOffsetDelta, topicPartition);
+                            producerId, producerEpoch, baseSequence, lastOffsetDelta, topicPartition, partitionNeverWritten);
 
                         // A retransmit of a batch we already wrote is answered with SUCCESS and the
                         // offset it landed at, which is the whole point of idempotent delivery: the

@@ -131,19 +131,70 @@ public class ProducerStateManagerTests
     public void ValidateSequence_NoProducerId_ReturnsNone()
     {
         var check = _manager.ValidateSequence(
-            KafkaConstants.Producer.NoProducerId, 0, 0, 0, Tp0);
+            KafkaConstants.Producer.NoProducerId, 0, 0, 0, Tp0, partitionNeverWritten: false);
 
         Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
 
     [Fact]
-    public void ValidateSequence_FirstBatch_AcceptsAnySequence()
+    public void ValidateSequence_FirstBatch_OnAPartitionWithRecords_AcceptsAnySequence()
+    {
+        // The producer's state may have expired or been cleaned with the records it described,
+        // so a non-zero first sequence is no evidence of a lost batch.
+        var (id, _) = _manager.AllocateProducerId();
+
+        var check = _manager.ValidateSequence(id, epoch: 0, baseSequence: 42, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false);
+
+        Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
+    }
+
+    [Fact]
+    public void ValidateSequence_FirstBatch_OnANeverWrittenPartition_RefusesANonZeroSequence()
+    {
+        // KAFKA-15591: no record was ever appended, so no producer state can have been lost and the
+        // only valid first sequence is 0.
+        var (id, _) = _manager.AllocateProducerId();
+
+        var check = _manager.ValidateSequence(id, epoch: 0, baseSequence: 17, lastOffsetDelta: 4, Tp0, partitionNeverWritten: true);
+
+        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence, check.Status);
+    }
+
+    [Fact]
+    public void ValidateSequence_FirstBatch_OnANeverWrittenPartition_AcceptsSequenceZero()
     {
         var (id, _) = _manager.AllocateProducerId();
 
-        var check = _manager.ValidateSequence(id, epoch: 0, baseSequence: 42, lastOffsetDelta: 0, Tp0);
+        var check = _manager.ValidateSequence(id, epoch: 0, baseSequence: 0, lastOffsetDelta: 16, Tp0, partitionNeverWritten: true);
 
         Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
+    }
+
+    [Fact]
+    public void ValidateSequence_UnknownProducer_OnANeverWrittenPartition_RefusesANonZeroSequence()
+    {
+        var check = _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 17, lastOffsetDelta: 4, Tp0, partitionNeverWritten: true);
+
+        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence, check.Status);
+    }
+
+    [Fact]
+    public void ValidateSequence_RequestsReorderedOnANewPartition_LandInOrder()
+    {
+        // KAFKA-15591's flow: request A (sequences 0-16) is refused while the partition is still being
+        // created, request B (17-21) arrives once it exists. B must not be appended first, or every
+        // retry of A is out of order and A's records are lost.
+        var (id, _) = _manager.AllocateProducerId();
+
+        Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence,
+            _manager.ValidateSequence(id, 0, baseSequence: 17, lastOffsetDelta: 4, Tp0, partitionNeverWritten: true).Status);
+
+        Assert.Equal(ProduceSequenceStatus.Ok,
+            _manager.ValidateSequence(id, 0, baseSequence: 0, lastOffsetDelta: 16, Tp0, partitionNeverWritten: true).Status);
+        Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0, recordCount: 17);
+
+        Assert.Equal(ProduceSequenceStatus.Ok,
+            _manager.ValidateSequence(id, 0, baseSequence: 17, lastOffsetDelta: 4, Tp0, partitionNeverWritten: false).Status);
     }
 
     [Fact]
@@ -153,7 +204,7 @@ public class ProducerStateManagerTests
 
         Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0);
         // Next expected: 1
-        var check = _manager.ValidateSequence(id, 0, 1, lastOffsetDelta: 0, Tp0);
+        var check = _manager.ValidateSequence(id, 0, 1, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false);
 
         Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
@@ -167,9 +218,9 @@ public class ProducerStateManagerTests
         Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0, recordCount: 3);
 
         Assert.Equal(ProduceSequenceStatus.Ok,
-            _manager.ValidateSequence(id, 0, 3, lastOffsetDelta: 2, Tp0).Status);
+            _manager.ValidateSequence(id, 0, 3, lastOffsetDelta: 2, Tp0, partitionNeverWritten: false).Status);
         Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence,
-            _manager.ValidateSequence(id, 0, 1, lastOffsetDelta: 2, Tp0).Status);
+            _manager.ValidateSequence(id, 0, 1, lastOffsetDelta: 2, Tp0, partitionNeverWritten: false).Status);
     }
 
     [Fact]
@@ -178,7 +229,7 @@ public class ProducerStateManagerTests
         var (id, _) = _manager.AllocateProducerId();
 
         Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 17);
-        var check = _manager.ValidateSequence(id, 0, 0, lastOffsetDelta: 0, Tp0); // repeat seq 0
+        var check = _manager.ValidateSequence(id, 0, 0, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false); // repeat seq 0
 
         Assert.Equal(ProduceSequenceStatus.DuplicateSequence, check.Status);
         Assert.Equal(17, check.DuplicateBaseOffset);
@@ -190,7 +241,7 @@ public class ProducerStateManagerTests
         var (id, _) = _manager.AllocateProducerId();
 
         Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0); // last sequence is 0
-        var check = _manager.ValidateSequence(id, 0, 5, lastOffsetDelta: 0, Tp0); // skipped 1-4
+        var check = _manager.ValidateSequence(id, 0, 5, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false); // skipped 1-4
 
         Assert.Equal(ProduceSequenceStatus.OutOfOrderSequence, check.Status);
     }
@@ -202,7 +253,7 @@ public class ProducerStateManagerTests
         Wrote(id, 0, baseSequence: 0, Tp0, baseOffset: 0);
 
         // Request with future epoch
-        var check = _manager.ValidateSequence(id, epoch: 99, baseSequence: 0, lastOffsetDelta: 0, Tp0);
+        var check = _manager.ValidateSequence(id, epoch: 99, baseSequence: 0, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false);
 
         // Future epoch is treated as UnknownProducerId
         Assert.Equal(ProduceSequenceStatus.UnknownProducerId, check.Status);
@@ -217,7 +268,7 @@ public class ProducerStateManagerTests
         Wrote(id, 0, baseSequence: 1, Tp0, baseOffset: 1);
 
         // Tp1 starts fresh – seq 0 is fine
-        var check = _manager.ValidateSequence(id, 0, 0, lastOffsetDelta: 0, Tp1);
+        var check = _manager.ValidateSequence(id, 0, 0, lastOffsetDelta: 0, Tp1, partitionNeverWritten: false);
 
         Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
     }
@@ -227,11 +278,11 @@ public class ProducerStateManagerTests
     {
         // Accepted, but NOT recorded: registration happens when the batch lands, so a producer whose
         // first batch is refused does not leave state behind that its retry would collide with.
-        var check = _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, lastOffsetDelta: 0, Tp0);
+        var check = _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false);
 
         Assert.Equal(ProduceSequenceStatus.Ok, check.Status);
         Assert.Equal(ProduceSequenceStatus.Ok,
-            _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, lastOffsetDelta: 0, Tp0).Status);
+            _manager.ValidateSequence(42_000, epoch: 0, baseSequence: 0, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false).Status);
     }
 
     // ── Transaction lifecycle ────────────────────────────────────────────────
@@ -388,7 +439,7 @@ public class ProducerStateManagerTests
         Assert.Empty(partitions);
 
         // After epoch reset, seq 0 should be accepted again
-        var seqCheck = _manager.ValidateSequence(id, epoch: 7, baseSequence: 0, lastOffsetDelta: 0, Tp0);
+        var seqCheck = _manager.ValidateSequence(id, epoch: 7, baseSequence: 0, lastOffsetDelta: 0, Tp0, partitionNeverWritten: false);
         Assert.Equal(ProduceSequenceStatus.Ok, seqCheck.Status);
     }
 

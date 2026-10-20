@@ -255,9 +255,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// wire <c>ErrorCode</c> at the boundary (b2).
     /// </summary>
     public ProduceSequenceCheck ValidateProduceBatch(
-        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition)
+        long producerId, short epoch, int baseSequence, int lastOffsetDelta, TopicPartition topicPartition,
+        bool partitionNeverWritten)
     {
-        return _producerStateManager.ValidateSequence(producerId, epoch, baseSequence, lastOffsetDelta, topicPartition);
+        return _producerStateManager.ValidateSequence(producerId, epoch, baseSequence, lastOffsetDelta, topicPartition, partitionNeverWritten);
     }
 
     public void CommitProduceBatch(
