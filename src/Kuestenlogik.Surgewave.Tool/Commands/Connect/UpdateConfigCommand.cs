@@ -26,7 +26,7 @@ public class UpdateConfigCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var name = parseResult.GetValue(_nameArg);
+        var name = parseResult.GetRequiredValue(_nameArg);
         var configJson = parseResult.GetValue(_configOpt);
         var configFile = parseResult.GetValue(_fileOpt);
 

@@ -11,7 +11,7 @@ namespace Kuestenlogik.Surgewave.Cdc.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Written in the shape of <see cref="Audit.AuditTopicSink"/>, which solves the
+/// Written in the shape of <c>Audit.AuditTopicSink</c>, which solves the
 /// same problem for audit events: create the topic on first use, frame the
 /// record into a magic-v2 batch with <see cref="RecordBatchSerializer"/>, and
 /// append through the standard <see cref="LogManager"/> pipeline.

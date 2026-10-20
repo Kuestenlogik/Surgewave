@@ -14,7 +14,7 @@ public interface IBrokerPlugin : IPlugin
     /// Whether this plugin requires a valid licence to run. Apache-2.0 community
     /// plugins return <c>false</c> (default) and load unconditionally. Plugins
     /// shipped as separately-licensed extensions return <c>true</c> in their own
-    /// repository, so the broker calls <see cref="ILicenseProvider.IsFeatureEnabled"/>
+    /// repository, so the broker calls <c>ILicenseProvider.IsFeatureEnabled</c>
     /// with this plugin's <see cref="IPlugin.FeatureId"/> before activation.
     /// The core repo intentionally does not enumerate the licensed-plugin set —
     /// each extension declares its own tier.

@@ -27,7 +27,7 @@ public class DeleteSubjectCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var subject = parseResult.GetValue(_subjectArg);
+        var subject = parseResult.GetRequiredValue(_subjectArg);
         var permanent = parseResult.GetValue(_permanentOpt);
         var localYes = parseResult.GetValue(_yesOpt);
 

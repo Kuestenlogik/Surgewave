@@ -81,7 +81,6 @@ public static class Serializers
     /// </summary>
     /// <typeparam name="TBase">The base type.</typeparam>
     /// <param name="derivedTypes">The derived types to support.</param>
-    /// <param name="options">Optional JSON serializer options.</param>
     /// <example>
     /// <code>
     /// // Define your types with JsonDerivedType attributes

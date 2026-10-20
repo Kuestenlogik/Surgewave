@@ -69,7 +69,7 @@ public sealed record PluginManifest
     /// Path to the plugin's default settings file inside the .swpkg package
     /// (typically <c>"pluginsettings.json"</c>). When the plugin is installed,
     /// this file is extracted next to the plugin's DLLs and the broker layers
-    /// it into its <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>
+    /// it into its <c>Microsoft.Extensions.Configuration.IConfiguration</c>
     /// at a lower priority than the broker's own <c>appsettings.json</c> — so
     /// plugin authors can ship recommended defaults that user overrides still
     /// take precedence over.

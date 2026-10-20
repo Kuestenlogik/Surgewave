@@ -7,8 +7,6 @@
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
-    <!-- Test methods commonly use PascalCase_with_scenario naming. -->
-    <NoWarn>$(NoWarn);CA1707;CA1031</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

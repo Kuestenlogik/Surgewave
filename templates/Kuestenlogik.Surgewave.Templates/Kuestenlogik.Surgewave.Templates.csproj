@@ -8,8 +8,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <IncludeContentInPack>true</IncludeContentInPack>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <!-- Template packages have no lib/ output; suppress the NuGet validator warning. -->
-    <NoWarn>$(NoWarn);NU5128;NU5119</NoWarn>
     <NoDefaultExcludes>true</NoDefaultExcludes>
   </PropertyGroup>
 

@@ -23,7 +23,7 @@ public class DescribeGroupCommand : CommandBase
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
-        var groupId = parseResult.GetValue(_groupArg);
+        var groupId = parseResult.GetRequiredValue(_groupArg);
         var format = GetFormat(parseResult);
 
         try

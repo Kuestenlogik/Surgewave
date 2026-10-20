@@ -5,9 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>annotations</Nullable>
     <RootNamespace>Kuestenlogik.Surgewave.Streams</RootNamespace>
-    <!-- CS: nullable covariance warnings specific to Streams generic variance -->
-    <!-- CS0419: ambiguous cref in XML doc (compiler false-positive on <c> tags in .NET 10) -->
-    <NoWarn>$(NoWarn);CS8714;CS8633;CS8978;CS0419</NoWarn>
     <Description>Surgewave Streams library for real-time stream processing. Supports transformations, aggregations, joins, and windowing.</Description>
     <PackageTags>surgewave;kafka;streams;stream-processing;real-time;aggregation;windowing</PackageTags>
   </PropertyGroup>

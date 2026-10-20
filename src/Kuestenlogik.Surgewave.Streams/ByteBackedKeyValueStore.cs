@@ -232,7 +232,7 @@ public abstract class ByteBackedKeyValueStore<TKey, TValue> : IKeyValueStore<TKe
     /// <inheritdoc />
     public void Close() => CloseBackend();
 
-    /// <summary>Closes the backend. Called by <see cref="Close"/> and <see cref="Dispose"/>.</summary>
+    /// <summary>Closes the backend. Called by <see cref="Close()"/> and <see cref="Dispose()"/>.</summary>
     protected abstract void CloseBackend();
 
     /// <inheritdoc />

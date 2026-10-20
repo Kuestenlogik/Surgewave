@@ -4,7 +4,7 @@ namespace Kuestenlogik.Surgewave.Connect.Eos;
 
 /// <summary>
 /// Base class for source connectors with exactly-once delivery guarantees.
-/// Subclasses must return an <see cref="ExactlyOnceSourceTask"/> from <see cref="TaskClass"/>.
+/// Subclasses must return an <c>ExactlyOnceSourceTask</c> from <c>TaskClass</c>.
 ///
 /// When the Connect worker detects this connector type, it wraps each task in an
 /// <see cref="ExactlyOnceSourcePipeline"/> that uses cross-topic transactions to

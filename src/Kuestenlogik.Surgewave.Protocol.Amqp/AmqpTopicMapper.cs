@@ -9,7 +9,7 @@ namespace Kuestenlogik.Surgewave.Protocol.Amqp;
 /// <list type="bullet">
 ///   <item><b>Direct</b>  — routing key becomes the Surgewave topic name directly.</item>
 ///   <item><b>Fanout</b>  — exchange name becomes the Surgewave topic; all bound queues receive every message.</item>
-///   <item><b>Topic</b>   — routing key patterns (*.orders.#) are matched with <see cref="GlobMatcher"/>.</item>
+///   <item><b>Topic</b>   — routing key patterns (*.orders.#) are matched with <c>GlobMatcher</c>.</item>
 ///   <item><b>Headers</b> — falls back to direct-style routing on the routing key.</item>
 /// </list>
 /// Queue names are used as Surgewave consumer-group names so that each AMQP queue

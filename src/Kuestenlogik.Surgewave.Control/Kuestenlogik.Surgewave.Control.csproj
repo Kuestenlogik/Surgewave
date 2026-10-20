@@ -58,7 +58,6 @@
     <PackageReference Include="ITfoxtec.Identity.Saml2.MvcCore" />
     <PackageReference Include="System.DirectoryServices.Protocols" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
-    <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Msagl" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Z.Blazor.Diagrams" />

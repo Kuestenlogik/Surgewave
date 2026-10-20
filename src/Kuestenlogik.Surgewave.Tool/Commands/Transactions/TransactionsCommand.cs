@@ -133,7 +133,7 @@ public class DescribeTransactionCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var txnId = parseResult.GetValue(_txnIdArg);
+        var txnId = parseResult.GetRequiredValue(_txnIdArg);
 
         try
         {

@@ -9,13 +9,14 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!--
-      Suppress warnings that cannot be handled by .editorconfig:
-      - NU1510: Package reference not trimmed (transitive dependencies)
-      - NU1902: Security vulnerability in transitive dependencies (OpenTelemetry.Api)
-      - CS1572/CS1573/CS1574: XML doc param/cref mismatches (pending doc cleanup)
-      CA-level suppressions are in .editorconfig for better granularity.
+      NuGet audit: every package in the graph, direct and transitive, with an advisory of any severity
+      (NU1901-NU1904) fails the restore through TreatWarningsAsErrors. No NuGet warning is suppressed;
+      an advisory without a patched version would get one NuGetAuditSuppress item with its link and reason.
+      CA-level conventions live in .editorconfig, each with its reason.
     -->
-    <NoWarn>$(NoWarn);NU1510;NU1901;NU1902;NU1903;CS1572;CS1573;CS1574</NoWarn>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
   </PropertyGroup>
 
   <!-- Centralized build output paths -->
@@ -58,10 +59,16 @@
 
        So when creating a new project the only question is: host or not? -->
 
-  <!-- Generate XML documentation for packable projects (API reference) -->
-  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+  <!--
+    XML documentation for the shipped libraries under src/ (API reference). Tests, benchmarks and samples
+    generate none: IsPackable / IsTestProject are only set in the project file, after this file is evaluated,
+    so the condition goes by location.
+    CS1591 / CS1573 stay off for now: 8 898 public members have no doc comment and 58 doc comments lack a
+    <param> tag; the documented members ship their comments. Tracked for removal in #185.
+  -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
   </PropertyGroup>
 
   <!-- Common metadata for library projects.

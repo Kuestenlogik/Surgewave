@@ -13,7 +13,7 @@ namespace Kuestenlogik.Surgewave.Connect;
 
 /// <summary>
 /// The Connect worker manages connectors and their tasks.
-/// Requires an <see cref="ISurgewaveClient"/> — call <see cref="SetSurgewaveClient"/> before starting.
+/// Requires an <c>ISurgewaveClient</c> — call <c>SetSurgewaveClient</c> before starting.
 /// </summary>
 public sealed class ConnectWorker : IAsyncDisposable
 {

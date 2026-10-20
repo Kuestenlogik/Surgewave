@@ -117,7 +117,7 @@ internal static class SurgewaveDiagnostics
         description: "Surgewave's logging pipeline routes through Microsoft.Extensions.Logging. Console.WriteLine bypasses log levels, structured logging, JSON output and OTel correlation — replace with a ctor-injected ILogger<T>.",
         helpLinkUri: HelpLinkBase + "srwv010");
 
-    /// <summary>Flat list — handed to <see cref="DiagnosticAnalyzer.SupportedDiagnostics"/>.</summary>
+    /// <summary>Flat list — handed to <c>DiagnosticAnalyzer.SupportedDiagnostics</c>.</summary>
     public static readonly ImmutableArrayBuilder<DiagnosticDescriptor> All = new(new[]
     {
         SRWV001_PluginShouldBeSealed,

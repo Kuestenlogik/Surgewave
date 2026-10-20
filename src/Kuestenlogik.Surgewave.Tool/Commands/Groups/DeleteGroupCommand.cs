@@ -24,7 +24,7 @@ public class DeleteGroupCommand : CommandBase
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
-        var groupId = parseResult.GetValue(_groupArg);
+        var groupId = parseResult.GetRequiredValue(_groupArg);
         var localYes = parseResult.GetValue(_yesOpt);
         var format = GetFormat(parseResult);
 

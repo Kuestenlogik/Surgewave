@@ -26,7 +26,7 @@ public class SetCompatibilityCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var compatibility = parseResult.GetValue(_compatibilityArg);
+        var compatibility = parseResult.GetRequiredValue(_compatibilityArg);
         var subject = parseResult.GetValue(_subjectOpt);
 
         WriteVerbose(parseResult, $"Setting compatibility to {compatibility}...");

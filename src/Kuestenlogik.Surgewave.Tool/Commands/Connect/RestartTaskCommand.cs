@@ -24,7 +24,7 @@ public class RestartTaskCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var name = parseResult.GetValue(_nameArg);
+        var name = parseResult.GetRequiredValue(_nameArg);
         var taskId = parseResult.GetValue(_taskIdArg);
 
         WriteVerbose(parseResult, $"Restarting task {taskId} for connector '{name}'...");

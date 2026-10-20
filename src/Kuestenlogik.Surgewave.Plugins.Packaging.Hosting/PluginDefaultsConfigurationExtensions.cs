@@ -11,7 +11,7 @@ namespace Kuestenlogik.Surgewave.Plugins.Packaging.Hosting;
 /// <para>
 /// The Surgewave broker, Connect worker, marketplace, control plane and any other host
 /// that loads plugins via the <c>plugins/&lt;id&gt;/</c> convention should call
-/// <see cref="AddPluginDefaults(IConfigurationBuilder, string)"/> immediately after
+/// <c>AddPluginDefaults(IConfigurationBuilder, string)</c> immediately after
 /// <c>WebApplication.CreateBuilder(args)</c>. The helper enumerates every installed
 /// plugin's bundled settings file (looked up via the manifest's <c>pluginSettings</c>
 /// field, defaulting to <c>pluginsettings.json</c>) and inserts each one as a

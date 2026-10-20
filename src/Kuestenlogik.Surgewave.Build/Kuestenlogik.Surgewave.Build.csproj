@@ -12,7 +12,6 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <!-- MSBuild task packages intentionally have no lib/ assemblies — suppress the NuGet validator warning -->
     <NoPackageAnalysis>true</NoPackageAnalysis>
-    <NoWarn>$(NoWarn);NU5128</NoWarn>
     <!-- Ensure all transitive deps land next to the task DLL so MSBuild can load them -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>

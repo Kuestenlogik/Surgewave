@@ -3,6 +3,7 @@ namespace Confluent.Kafka;
 /// <summary>
 /// Kafka error codes (matches Confluent.Kafka ErrorCode enum).
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Drop-in compatibility: the member names (Local_NoOffset, ...) are those of Confluent.Kafka.ErrorCode, which client code compiles against.")]
 public enum ErrorCode
 {
     /// <summary>No error.</summary>

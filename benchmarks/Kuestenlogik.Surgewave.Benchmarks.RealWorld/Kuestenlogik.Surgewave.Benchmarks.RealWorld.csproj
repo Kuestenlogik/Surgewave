@@ -3,8 +3,6 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
-    <!-- CS0618: benchmarks may test deprecated APIs; CA rules in .editorconfig -->
-    <NoWarn>$(NoWarn);CS0618</NoWarn>
     <!-- Server GC for accurate performance measurements -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>

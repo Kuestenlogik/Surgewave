@@ -77,8 +77,7 @@ public static class ContainerManager
             if (_surgewaveContainer == null)
             {
                 Console.WriteLine($"Starting Surgewave container ({image})...");
-                _surgewaveContainer = new ContainerBuilder()
-                    .WithImage(image)
+                _surgewaveContainer = new ContainerBuilder(image)
                     .WithPortBinding(9092, true)
                     .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Broker started"))
                     .Build();

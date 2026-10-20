@@ -31,7 +31,7 @@ public class CheckCompatibilityCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var subject = parseResult.GetValue(_subjectArg);
+        var subject = parseResult.GetRequiredValue(_subjectArg);
         var schemaString = parseResult.GetValue(_schemaOpt);
         var schemaFile = parseResult.GetValue(_fileOpt);
         var schemaType = parseResult.GetValue(_typeOpt)!;

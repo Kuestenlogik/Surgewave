@@ -29,13 +29,13 @@ public abstract class ExactlyOnceSourceTask : SourceTask
 {
     /// <summary>
     /// Gets or sets the offset store used for exactly-once offset tracking.
-    /// Set by the runtime before <see cref="Start"/> is called.
+    /// Set by the runtime before <c>Start</c> is called.
     /// </summary>
     public ISourceOffsetStore? OffsetStore { get; internal set; }
 
     /// <summary>
     /// Gets or sets the connector name for offset tracking.
-    /// Set by the runtime before <see cref="Start"/> is called.
+    /// Set by the runtime before <c>Start</c> is called.
     /// </summary>
     public string? ConnectorName { get; internal set; }
 

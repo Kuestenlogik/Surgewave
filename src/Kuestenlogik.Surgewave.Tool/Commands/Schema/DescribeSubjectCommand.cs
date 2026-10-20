@@ -26,7 +26,7 @@ public class DescribeSubjectCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var subject = parseResult.GetValue(_subjectArg);
+        var subject = parseResult.GetRequiredValue(_subjectArg);
         var includeDeleted = parseResult.GetValue(_includeDeletedOpt);
 
         WriteVerbose(parseResult, $"Describing subject '{subject}'...");

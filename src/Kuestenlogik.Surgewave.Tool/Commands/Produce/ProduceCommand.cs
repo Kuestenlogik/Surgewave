@@ -45,7 +45,7 @@ public class ProduceCommand : CommandBase
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
-        var topic = parseResult.GetValue(_topicArg);
+        var topic = parseResult.GetRequiredValue(_topicArg);
         var key = parseResult.GetValue(_keyOpt);
         var value = parseResult.GetValue(_valueOpt);
         var partition = parseResult.GetValue(_partitionOpt);
@@ -53,7 +53,7 @@ public class ProduceCommand : CommandBase
         var separator = parseResult.GetValue(_separatorOpt);
         var parseKey = parseResult.GetValue(_parseKeyOpt);
         var inputFile = parseResult.GetValue(_inputOpt);
-        var inputFormat = parseResult.GetValue(_inputFormatOpt);
+        var inputFormat = parseResult.GetValue(_inputFormatOpt) ?? "string";
 
         await using var client = new SurgewaveNativeClient(host, port);
         await client.ConnectAsync(ct);
@@ -61,7 +61,7 @@ public class ProduceCommand : CommandBase
         // File input mode
         if (!string.IsNullOrEmpty(inputFile))
         {
-            return await ProduceFromFileAsync(client, topic!, partition, key, inputFile, inputFormat ?? "string", ct);
+            return await ProduceFromFileAsync(client, topic!, partition, key, inputFile, inputFormat, ct);
         }
 
         // Single message mode

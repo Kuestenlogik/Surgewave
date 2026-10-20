@@ -23,7 +23,7 @@ public class StatusConnectorCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var name = parseResult.GetValue(_nameArg);
+        var name = parseResult.GetRequiredValue(_nameArg);
 
         WriteVerbose(parseResult, $"Getting status for connector '{name}'...");
 

@@ -25,7 +25,7 @@ public class CreateTopicCommand : CommandBase
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
-        var topic = parseResult.GetValue(_topicArg);
+        var topic = parseResult.GetRequiredValue(_topicArg);
         var partitions = parseResult.GetValue(_partitionsOpt);
         var replication = parseResult.GetValue(_replicationOpt);
 

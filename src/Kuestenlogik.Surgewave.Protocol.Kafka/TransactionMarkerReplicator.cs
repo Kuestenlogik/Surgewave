@@ -41,7 +41,6 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
     /// Replicates transaction markers to all follower brokers that host replicas
     /// for the partitions involved in the transaction.
     /// </summary>
-    /// <param name="txnMetadata">The transaction metadata.</param>
     /// <param name="commit">True for commit markers, false for abort markers.</param>
     /// <param name="coordinatorEpoch">The coordinator epoch for fencing.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

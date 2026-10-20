@@ -6,8 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- CS0618: benchmarks intentionally test deprecated APIs; CA rules in .editorconfig -->
-    <NoWarn>$(NoWarn);CS0618</NoWarn>
     <!-- Server GC for accurate latency benchmarks -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>

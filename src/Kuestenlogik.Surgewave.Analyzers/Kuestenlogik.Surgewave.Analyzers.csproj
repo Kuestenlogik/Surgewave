@@ -13,8 +13,6 @@
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoPackageAnalysis>true</NoPackageAnalysis>
-    <!-- RS2008: release tracking is overkill while the rule set is in flux; revisit before 1.0. -->
-    <NoWarn>$(NoWarn);NU5128;RS1041;RS2008</NoWarn>
     <!-- Analyzers ship under analyzers/dotnet/cs/ inside the nupkg.
          No build/ targets needed — NuGet picks them up automatically. -->
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
@@ -28,6 +26,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <!-- Analyzer release tracking (RS2008): every rule is listed with its category and severity. -->
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
 
   <ItemGroup>

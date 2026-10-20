@@ -28,8 +28,7 @@ public sealed class RedpandaContainerFixture : IAsyncLifetime
 
     public RedpandaContainerFixture()
     {
-        _container = new RedpandaBuilder()
-            .WithImage("redpandadata/redpanda:v24.1.1")
+        _container = new RedpandaBuilder("redpandadata/redpanda:v24.1.1")
             .Build();
     }
 

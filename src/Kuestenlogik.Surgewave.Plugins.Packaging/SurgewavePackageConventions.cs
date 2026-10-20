@@ -39,7 +39,7 @@ public static class SurgewavePackageConventions
     /// <summary>
     /// Default file name for a plugin's bundled default settings, both inside the
     /// <c>.swpkg</c> archive and in the installed plugin directory. The broker layers
-    /// this file into its <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>
+    /// this file into its <c>Microsoft.Extensions.Configuration.IConfiguration</c>
     /// at a lower priority than the broker's own <c>appsettings.json</c>, so plugin
     /// authors can ship recommended defaults without overriding user values.
     /// </summary>

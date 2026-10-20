@@ -45,7 +45,7 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 
     /// <summary>
     /// Creates a new producer with configuration (connects synchronously).
-    /// Prefer <see cref="CreateAsync(Action{SurgewaveProducerOptions{TKey, TValue}}, CancellationToken)"/> for async contexts.
+    /// Prefer <c>CreateAsync(Action&lt;SurgewaveProducerOptions&lt;TKey, TValue&gt;&gt;, CancellationToken)</c> for async contexts.
     /// </summary>
     public SurgewaveProducer(Action<SurgewaveProducerOptions<TKey, TValue>> configure)
     {
@@ -61,7 +61,7 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 
     /// <summary>
     /// Creates a new producer with options object (connects synchronously).
-    /// Prefer <see cref="CreateAsync(SurgewaveProducerOptions{TKey, TValue}, CancellationToken)"/> for async contexts.
+    /// Prefer <c>CreateAsync(SurgewaveProducerOptions&lt;TKey, TValue&gt;, CancellationToken)</c> for async contexts.
     /// </summary>
     public SurgewaveProducer(SurgewaveProducerOptions<TKey, TValue> options)
     {

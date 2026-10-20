@@ -22,7 +22,7 @@ public class PauseConnectorCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var name = parseResult.GetValue(_nameArg);
+        var name = parseResult.GetRequiredValue(_nameArg);
 
         WriteVerbose(parseResult, $"Pausing connector '{name}'...");
 

@@ -21,7 +21,7 @@ public class DeleteTopicCommand : CommandBase
     private async Task<int> ExecuteAsync(ParseResult parseResult, CancellationToken ct)
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
-        var topic = parseResult.GetValue(_topicArg);
+        var topic = parseResult.GetRequiredValue(_topicArg);
 
         if (!ConfirmDestructive(parseResult, $"Delete topic '[cyan]{topic}[/]'? This cannot be undone."))
         {

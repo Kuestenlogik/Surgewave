@@ -39,8 +39,6 @@
       Explicit `dotnet publish -o <dir>` calls (publish.ps1) override this.
     -->
     <PublishDir>$(BaseIntermediateOutputPath)tool-publish\$(Configuration)\</PublishDir>
-    <!-- CS0618: using deprecated APIs intentionally; CS8602/CS8604: nullable in System.CommandLine -->
-    <NoWarn>$(NoWarn);CS0618;CS8602;CS8604</NoWarn>
 
     <!-- Enable invariant globalization for smaller deployments -->
     <InvariantGlobalization>true</InvariantGlobalization>

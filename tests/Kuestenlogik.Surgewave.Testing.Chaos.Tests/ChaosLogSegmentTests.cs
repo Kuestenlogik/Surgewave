@@ -26,7 +26,11 @@ public class ChaosLogSegmentTests : IDisposable
             NullLogger<ChaosLogSegment>.Instance);
     }
 
-    public void Dispose() => _chaosSegment.Dispose();
+    public void Dispose()
+    {
+        _chaosSegment.Dispose();
+        _innerSegment.Dispose();
+    }
 
     [Fact]
     public async Task AppendBatch_WithDiskError_ThrowsIOException()

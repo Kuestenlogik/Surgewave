@@ -25,7 +25,7 @@ public class DeleteConnectorCommand : CommandBase
     {
         var (host, port) = ParseBootstrapServer(GetBootstrapServers(parseResult));
         var format = GetFormat(parseResult);
-        var name = parseResult.GetValue(_nameArg);
+        var name = parseResult.GetRequiredValue(_nameArg);
         var localYes = parseResult.GetValue(_yesOpt);
 
         if (format == OutputFormat.Table &&

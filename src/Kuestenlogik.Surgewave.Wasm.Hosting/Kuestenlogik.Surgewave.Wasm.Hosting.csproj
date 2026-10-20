@@ -10,12 +10,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Wasm\Kuestenlogik.Surgewave.Wasm.csproj" />
   </ItemGroup>
 

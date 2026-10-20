@@ -4,8 +4,6 @@
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
-    <!-- CA2213: kept as warning in .editorconfig for src; override to none for chaos tests -->
-    <NoWarn>$(NoWarn);CA2213</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

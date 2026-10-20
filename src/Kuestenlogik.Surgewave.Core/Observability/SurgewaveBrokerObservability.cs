@@ -50,7 +50,7 @@ public sealed class SurgewaveBrokerObservability : ISurgewaveBrokerObservability
     /// Lock-free subscriber count surfaced to the broker's hot path via
     /// <see cref="HasSubscribers"/>. Maintained alongside the
     /// <see cref="_subscribers"/> list under <see cref="_subscribersLock"/>;
-    /// callers on the hot path read it via <see cref="Volatile.Read(ref int)"/>
+    /// callers on the hot path read it via <c>Volatile.Read(ref int)</c>
     /// so they never contend with the subscribers lock.
     /// </summary>
     private int _subscriberCount;

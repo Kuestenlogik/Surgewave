@@ -18,7 +18,7 @@ namespace Kuestenlogik.Surgewave.Samples.BrokerPlugin;
 ///  - <see cref="IsConfigEnabled"/> reads <c>SampleBrokerPlugin:Enabled</c>
 ///    with a default of true so the plugin loads when no config is set
 ///  - <see cref="ConfigureServices"/> registers the singleton
-///  - <see cref="Configure"/> is left as the default no-op (no
+///  - <c>Configure</c> is left as the default no-op (no
 ///    endpoints, no middleware to wire up)
 /// </summary>
 public sealed class RequestCounterBrokerPlugin : IBrokerPlugin

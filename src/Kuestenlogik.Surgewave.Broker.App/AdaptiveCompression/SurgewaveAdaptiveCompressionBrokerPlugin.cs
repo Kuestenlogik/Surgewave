@@ -9,7 +9,7 @@ namespace Kuestenlogik.Surgewave.Broker.AdaptiveCompression;
 
 /// <summary>
 /// <see cref="IBrokerPlugin"/> that activates the adaptive-compression
-/// background service. Discovered by <see cref="BrokerPluginActivator"/> at
+/// background service. Discovered by <c>BrokerPluginActivator</c> at
 /// broker startup when <c>Surgewave:AdaptiveCompression:Enabled=true</c>.
 /// </summary>
 public sealed class SurgewaveAdaptiveCompressionBrokerPlugin : IBrokerPlugin

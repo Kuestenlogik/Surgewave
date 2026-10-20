@@ -203,7 +203,10 @@ public static class BrokerPluginActivator
         return activated;
     }
 
-    /// <inheritdoc cref="ConfigureBrokerPlugins"/>
+    /// <summary>
+    /// Calls <see cref="IProtocolPlugin.Configure"/> on all activated protocol plugins after app.Build(),
+    /// so each plugin maps its endpoints and middleware on the host.
+    /// </summary>
     public static void ConfigureProtocols(object host, IServiceProvider services, IReadOnlyList<IProtocolPlugin> activated)
     {
         foreach (var plugin in activated)

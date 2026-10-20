@@ -30,7 +30,6 @@
 
   <ItemGroup>
     <PackageReference Include="MudBlazor" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Blazored.LocalStorage" />
   </ItemGroup>
 

@@ -24,7 +24,6 @@
     -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoPackageAnalysis>true</NoPackageAnalysis>
-    <NoWarn>$(NoWarn);NU5128</NoWarn>
     <DevelopmentDependency>true</DevelopmentDependency>
   </PropertyGroup>
 

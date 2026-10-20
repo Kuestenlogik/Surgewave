@@ -17,12 +17,6 @@
   <Import Project="..\Kuestenlogik.Surgewave.Build\build\Kuestenlogik.Surgewave.Build.targets" />
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Plugins\Kuestenlogik.Surgewave.Plugins.csproj" />
   </ItemGroup>
