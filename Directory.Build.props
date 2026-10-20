@@ -103,7 +103,7 @@
        ALL projects (including IsPackable=false), so that exe banners and
        rolling-upgrade checks carry the same version. -->
   <PropertyGroup>
-    <Version>0.5.2-dev</Version>
+    <Version>0.6.0-dev</Version>
     <!-- AssemblyVersion + FileVersion follow $(Version), so that the
          release workflow bumps all three in sync with -p:Version=$V.
          MSBuild pads to four parts (0.1.6 -> 0.1.6.0).
