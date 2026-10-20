@@ -149,36 +149,16 @@ public sealed class LogManager : IDisposable
             // partition long before anything creates the topic locally: a follower's replication
             // brings the log into being through GetOrCreateLog without ever registering topic
             // metadata, so after that broker is promoted the first client metadata request
-            // auto-creates the topic here. Overwriting the entry would swap a log holding every
+            // auto-creates the topic here. Replacing the entry would swap a log holding every
             // replicated record for an empty one — the data is not deleted, just unreachable, and
             // the partition silently comes back empty (#97).
-            if (_logs.ContainsKey(topicPartition))
-            {
-                continue;
-            }
-
-            IPartitionLog log;
-            if (metadata.CleanupPolicy == CleanupPolicy.Ephemeral)
-            {
-                var bufferBytes = Configuration.ConfigParser.GetEphemeralBufferBytes(metadata.Config);
-                log = new EphemeralPartitionLog(topicPartition, bufferBytes);
-            }
-            else
-            {
-                var segmentBytes = GetSegmentBytesFromConfig(metadata.Config);
-                log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes);
-            }
-
-            // Lost the race against a concurrent creator: drop the log we just built rather than
-            // leaking its handles, and keep whichever one got in first.
-            // Lost the race against a concurrent creator: drop the log we just built rather than
-            // leaking its handles, and keep whichever one got in first.
-            // Lost the race against a concurrent creator: drop the log we just built rather than
-            // leaking its handles, and keep whichever one got in first.
-            if (!_logs.TryAdd(topicPartition, log))
-            {
-                log.Dispose();
-            }
+            //
+            // And never build one outside the per-partition creation lock: with auto-create, the
+            // first produce creates the same log through GetOrCreateLog at the same moment, and two
+            // logs opening one segment file fail on the second open instead of one losing the race.
+            // GetOrCreateLog takes that lock and reads the configuration from the metadata registered
+            // above.
+            GetOrCreateLog(topicPartition);
         }
 
         _metadataPersistence.Save(_topics);
@@ -688,19 +668,8 @@ public sealed class LogManager : IDisposable
         // Create new partition logs
         for (int i = metadata.PartitionCount; i < totalPartitions; i++)
         {
-            var topicPartition = new TopicPartition { Topic = topicName, Partition = i };
-            IPartitionLog log;
-            if (metadata.CleanupPolicy == CleanupPolicy.Ephemeral)
-            {
-                var bufferBytes = Configuration.ConfigParser.GetEphemeralBufferBytes(metadata.Config);
-                log = new EphemeralPartitionLog(topicPartition, bufferBytes);
-            }
-            else
-            {
-                var segmentBytes = GetSegmentBytesFromConfig(metadata.Config);
-                log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes);
-            }
-            _logs[topicPartition] = log;
+            // Through the creation lock, like CreateTopicAsync: a concurrent produce may be creating it.
+            GetOrCreateLog(new TopicPartition { Topic = topicName, Partition = i });
         }
 
         // Update metadata
