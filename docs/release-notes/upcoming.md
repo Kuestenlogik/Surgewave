@@ -1,5 +1,5 @@
 ---
-title: <short theme — keep it under 60 chars; matches the milestone title tail>
+title: <what this delivery is about, as a sentence — it is the release's heading, not its version>
 version: <X.Y.Z, no leading v>
 ---
 
@@ -52,15 +52,37 @@ Combined mode stays the default and nothing changes for a single broker,
 an embedded host, or an existing cluster: leave both settings alone and
 every node keeps voting exactly as before.
 
-### <Headline of the second major change> (#issue)
-
-<...>
-
 ## Fixes
 
-### <Grouped fix headline> (#issue, #issue)
+### Broker REST auth: a token's roles claim gives the caller the role
 
-<1-3 sentences per group.>
+JwtBearer mapped the inbound claims, so `roles` arrived as the long
+`ClaimTypes.Role` URI and `RestApiAuth:RolesClaim` never matched: with REST
+auth enabled, every mutation was refused with 403, also for callers that
+hold `RequiredRole`. The claims are now kept as the token names them.
+
+## Also in this release
+
+### Everything in English, and a guard that keeps it so (#181)
+
+The remaining German in docs, comments, XML docs, build files, workflows,
+installer files and scripts is translated. Visible strings that changed:
+the client's retry log message ("Surgewave broker not reachable … attempt
+…"), a Control natural-language query suggestion ("Latest 5 messages from
+events"), the assistant's help example, and five chart `aria-label`s on
+the site. `docs/upstream/kafka-welle-3-low-priority-verify.md` is now
+`docs/upstream/kafka-wave-3-low-priority-verify.md`.
+`scripts/check-english.mjs` runs in the CI build job and fails with
+`file:line` on German outside `.github/language-allowlist.txt`.
+
+### Release pages carry the notes and the change list
+
+A release is named by its version alone, its notes open with the
+front-matter `title:` as the heading, and the commits since the previous
+tag follow, grouped by kind (`scripts/ci/release-body.mjs`,
+`scripts/ci/generate-changelog.mjs`). `CHANGELOG.md` is now a pointer to the
+releases. The unused `ModelContextProtocol` 0.2.0-preview.1 pins are gone
+from `Directory.Packages.props`.
 
 ## Breaking changes
 
@@ -90,6 +112,16 @@ startup. Raft leadership is the controller role, so a freshly started
 broker is not the controller until an election completes — a matter of
 milliseconds, but no longer instantaneous. Code that assumed a broker was
 the controller immediately after `StartAsync` has to wait for it.
+
+### A cluster of several brokers must declare its controller quorum (#172)
+
+`ClusterNodes` naming other brokers without `ControllerQuorumVoters` is now
+a startup error. Brokers that derived the voter set from the brokers they
+knew held different sets, and a three-broker cluster could form three
+controllers. Name the voters on every broker, as Kafka requires
+`controller.quorum.voters`. A lone broker still needs no declaration. An
+embedded cluster states both with `SurgewaveRuntimeBuilder.WithControllerQuorum`
+and `WithProcessRoles`.
 
 ## Acknowledgements
 

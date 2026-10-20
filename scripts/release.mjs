@@ -14,11 +14,15 @@
 //                                       the main repo AND of every sibling that mirrors the section,
 //                                       grouped by repository, type (Feature / Bug / Task) and area,
 //                                       what is not in, and what closed since the last tag outside
-//                                       the shipped sections. Writes artifacts/release/<tag>.md.
+//                                       the shipped sections. Writes artifacts/release/<tag>.md, the
+//                                       ticket list to curate docs/release-notes/upcoming.md from.
 //                                       --highlights prints only the grouped ticket list.
 //   cut <version> [<section>…] [--dry-run]
 //                                       Refuses while a shipped section (or a mirror) has an open
-//                                       ticket; tags with a message naming the sections and pushes;
+//                                       ticket or the curated notes (docs/release-notes/v<tag>.md or
+//                                       upcoming.md) lack a title or a ### section — the same gate
+//                                       release.yml applies; tags with a message naming the sections
+//                                       and pushes;
 //                                       publishes the drafted notes as the GitHub release unless a
 //                                       release pipeline (.github/workflows/release.yml) does that
 //                                       on the tag; closes the sections and their mirrors with
@@ -28,6 +32,7 @@
 // or full title.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { compose, frontMatterTitle } from './ci/release-body.mjs';
 
 const [command, ...rest] = process.argv.slice(2);
 const valued = new Set(['--since']);
@@ -200,13 +205,17 @@ if (command === 'notes' || command === 'cut') {
     mkdirSync('artifacts/release', { recursive: true });
     writeFileSync(notesPath, md);
     console.log(md);
-    console.log(`→ ${notesPath}  (edit, then: node ${process.argv[1].replace(/\\/g, '/').replace(/^.*\/(scripts\/)/, '$1')} cut ${version} ${names.join(' ')})`);
+    console.log(`→ ${notesPath}  (curate docs/release-notes/upcoming.md from it, then: node ${process.argv[1].replace(/\\/g, '/').replace(/^.*\/(scripts\/)/, '$1')} cut ${version} ${names.join(' ')})`);
     process.exit(0);
   }
 
   // cut
   if (stillOpen.length) { for (const s of stillOpen) console.error(`${s.repo}#${s.number} is still open`); console.error('Not cutting.'); process.exit(1); }
-  if (!existsSync(notesPath)) { console.error(`no ${notesPath} — run 'notes' first`); process.exit(2); }
+  // The notes the release is published with: release.yml takes the first of these that is curated.
+  const curated = [`docs/release-notes/${tag}.md`, 'docs/release-notes/upcoming.md'].filter(existsSync)
+    .find(f => /^### /m.test(compose(readFileSync(f, 'utf8'))));
+  if (!curated) { console.error(`no curated notes: docs/release-notes/${tag}.md or upcoming.md needs at least one ### section`); process.exit(2); }
+  if (!frontMatterTitle(readFileSync(curated, 'utf8'))) { console.error(`${curated}: the front-matter title is missing or a placeholder — it is the release's heading`); process.exit(2); }
   const dry = flags.has('--dry-run');
   const say = s => console.log((dry ? '[dry-run] ' : '') + s);
   const message = `${name} ${tag} — ${titles.join(', ')}`;
@@ -215,8 +224,12 @@ if (command === 'notes' || command === 'cut') {
   if (existsSync('.github/workflows/release.yml')) {
     say('release pipeline (.github/workflows/release.yml) publishes on the tag; the drafted notes are its editorial body');
   } else {
-    say(`gh release create ${tag} --notes-file ${notesPath}`);
-    if (!dry) gh('release', 'create', tag, '--repo', repo, '--title', `${name} ${tag}`, '--notes-file', notesPath);
+    say(`gh release create ${tag} --notes-file ${curated}`);
+    if (!dry) {
+      mkdirSync('artifacts/release', { recursive: true });
+      writeFileSync('artifacts/release/body.md', compose(readFileSync(curated, 'utf8')));
+      gh('release', 'create', tag, '--repo', repo, '--title', tag.slice(1), '--notes-file', 'artifacts/release/body.md');
+    }
   }
   for (const m of chosen) {
     for (const target of [{ repo, ...m }, ...mirrors(m.title, b)]) {

@@ -3,7 +3,8 @@
 How to ship a Surgewave release. The Release workflow (`.github/workflows/release.yml`)
 runs on every `v*` tag push and produces NuGet packages, container images, Windows MSI,
 Linux .deb/.rpm, self-contained binaries for win/linux/macOS, OCI archives, and a
-GitHub Release with auto-generated notes.
+GitHub Release: the curated notes from `docs/release-notes/`, then the commits since the
+previous tag grouped by kind.
 
 ## TL;DR
 
@@ -14,9 +15,9 @@ VERSION=0.1.0
 # 2. Sanity-check local
 dotnet test Kuestenlogik.Surgewave.slnx -c Release
 
-# 3. Update ROADMAP.md if the release shipped a notable feature
-$EDITOR ROADMAP.md
-git commit -am "release: notes for v$VERSION"
+# 3. Curate the notes: title, highlights, fixes, breaking changes
+$EDITOR docs/release-notes/upcoming.md
+git commit -am "docs(release): notes for v$VERSION"
 git push
 
 # 4. Cut and push the tag
@@ -45,9 +46,10 @@ Before tagging, verify in order:
 - [ ] `dotnet test Kuestenlogik.Surgewave.slnx -c Release` all green locally.
 - [ ] No `TODO` / `FIXME` / `XXX` introduced in the diff since the last release that block ship.
 - [ ] `ROADMAP.md` has an entry for the release (or the release is small enough not to warrant one).
-- [ ] The CHANGELOG/Release Notes will be auto-generated from PR titles via
-      `generate_release_notes: true` in `release.yml`. If a notable PR was force-pushed
-      with a bad title, fix it on GitHub first.
+- [ ] `docs/release-notes/upcoming.md` is curated (docs/release-notes/README.md): a
+      `title:` that says what the delivery is about, at least one `###` section, and every
+      breaking change with its migration. The commit list below the notes is generated from
+      the commit subjects since the previous tag (Conventional Commits, `!` for breaking).
 - [ ] If the release contains breaking API changes, the major version bumps (SemVer).
 
 ## Secrets the release needs

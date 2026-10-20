@@ -41,12 +41,17 @@ jobs:
           FILE_BODY=""
           for candidate in "docs/release-notes/${TAG}.md" "docs/release-notes/upcoming.md"; do
             if [[ -f "$candidate" ]]; then
-              # Strip the front matter; a body only counts as "real" with
-              # at least one ### section (placeholder detection —
-              # the template carries only ## headings + HTML comments).
-              BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' "$candidate")
+              # A body only counts as "real" with at least one ### section
+              # (placeholder detection — the template carries only ## headings
+              # + HTML comments) and a title that names the delivery: the
+              # front-matter `title:` becomes the body's one `#` heading.
+              BODY=$(node scripts/ci/release-body.mjs "$candidate")
               SECTION_COUNT=$(echo "$BODY" | grep -cE '^### ' || true)
               if [[ "${SECTION_COUNT:-0}" -gt 0 ]]; then
+                if [[ -z "$(node scripts/ci/release-body.mjs --title "$candidate")" ]]; then
+                  echo "::error file=${candidate}::The front-matter title is missing or a placeholder. It is the release's heading: say what this delivery is about, not its version."
+                  exit 1
+                fi
                 FILE_BODY="$candidate"
                 break
               fi
@@ -84,6 +89,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The change list under the notes reads `git log <previous tag>..<tag>`.
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -436,10 +444,10 @@ jobs:
           path: artifacts/packages/*.nupkg
 
       # Bowire pattern: the curated body comes from docs/release-notes/
-      # (v<tag>.md → upcoming.md → legacy draft), the front matter is
-      # stripped, the installation commands move into a collapsed
-      # <details> block, and a seam separates the editorial part
-      # from the auto-generated commit list.
+      # (v<tag>.md → upcoming.md → legacy draft), headed by its front-matter
+      # title (scripts/ci/release-body.mjs), the installation commands move
+      # into a collapsed <details> block, and a seam separates the editorial
+      # part from the change list the next step appends.
       - name: Pull editorial body (file first, GitHub draft as fallback)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -450,7 +458,7 @@ jobs:
           NOTES=""
           for candidate in "docs/release-notes/${TAG}.md" "docs/release-notes/upcoming.md"; do
             if [[ -f "$candidate" ]]; then
-              CANDIDATE_BODY=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm<2{next} {print}' "$candidate")
+              CANDIDATE_BODY=$(node scripts/ci/release-body.mjs "$candidate")
               SECTION_COUNT=$(echo "$CANDIDATE_BODY" | grep -cE '^### ' || true)
               if [[ "${SECTION_COUNT:-0}" -gt 0 ]]; then
                 NOTES="$CANDIDATE_BODY"
@@ -528,37 +536,31 @@ jobs:
           cat release-body.md
           echo "----- end -----"
 
-      # Release title theme from the milestone this release delivers.
-      # Milestones are work sections `M<n> — <theme>` (docs/contributing/
-      # project-board.md, "Milestones and releases"); the version number is
-      # assigned at the cut, so the tag message names the sections and
-      # scripts/resolve-milestone.mjs reads them (fallback: a title starting with
-      # v<base>, then the frontmost finished section). Never an error: without
-      # a match the title stays bare, and the log says so.
-      - name: Resolve release title from milestone
-        id: title
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The commits since the previous tag, grouped by Conventional Commit type
+      # (scripts/ci/generate-changelog.mjs). GitHub's generate_release_notes lists
+      # merged PRs, and Surgewave is committed to straight on main, so that list
+      # held nothing but the compare link.
+      - name: Append the grouped change list
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          node scripts/resolve-milestone.mjs "$TAG" > resolved.json || echo '{"theme":"","numbers":""}' > resolved.json
-          THEME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('resolved.json','utf8')).theme || '')" || true)
-          NUMBERS=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('resolved.json','utf8')).numbers || '')" || true)
-          echo "milestones=${NUMBERS}" >> "$GITHUB_OUTPUT"
-          if [[ -n "$THEME" ]]; then
-            echo "title=${TAG} — ${THEME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::No theme found on milestone matching v${BASE} or v${MAJ_MIN} — release title will be bare ${TAG}."
-            echo "title=${TAG}" >> "$GITHUB_OUTPUT"
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
+          if [[ -z "$PREV" ]]; then
+            echo "No previous tag — no change list."
+            exit 0
           fi
+          node scripts/ci/generate-changelog.mjs --from "$PREV" --to "$TAG"             --repo-url "${{ github.server_url }}/${{ github.repository }}" >> release-body.md
+          echo "----- release-body.md (with change list) -----"
+          cat release-body.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: ${{ steps.title.outputs.title }}
+          # The version alone: the Releases list truncates the name to about that, and
+          # what the delivery is about is the body's `#` heading (release-body.mjs).
+          name: ${{ steps.version.outputs.VERSION }}
           body_path: release-body.md
-          generate_release_notes: true
+          generate_release_notes: false
           prerelease: ${{ contains(github.ref, '-rc') }}
           files: |
             artifacts/packages/*.nupkg

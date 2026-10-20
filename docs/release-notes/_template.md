@@ -1,5 +1,5 @@
 ---
-title: <short theme — keep it under 60 chars; matches the milestone title tail>
+title: <what this delivery is about, as a sentence — it is the release's heading, not its version>
 version: <X.Y.Z, no leading v>
 ---
 

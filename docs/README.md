@@ -16,7 +16,7 @@ Full documentation for Surgewave.
 - [Getting Started](quickstart/index.md)
 - [Architecture](setup/architecture.md)
 - [Contributing](https://github.com/Kuestenlogik/Surgewave/blob/main/CONTRIBUTING.md)
-- [Changelog](https://github.com/Kuestenlogik/Surgewave/blob/main/CHANGELOG.md)
+- [Changelog](https://github.com/Kuestenlogik/Surgewave/releases)
 
 ## Building Documentation
 

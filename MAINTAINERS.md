@@ -9,7 +9,8 @@ Internal documentation for Surgewave project maintainers.
 # Ensure main is clean and all tests pass
 dotnet test Kuestenlogik.Surgewave.slnx -c Release -v normal
 
-# Review CHANGELOG.md — move [Unreleased] items to new version section
+# Curate docs/release-notes/upcoming.md — title, highlights, fixes, breaking changes
+# (docs/release-notes/README.md)
 ```
 
 ### 2. Tag and Push
@@ -36,9 +37,9 @@ dotnet nuget push "artifacts/packages/*.snupkg" --source nuget.org --api-key <KE
 ```
 
 ### 5. GitHub Release
-```bash
-gh release create v1.0.0 --title "Surgewave 1.0.0" --notes-file CHANGELOG_EXTRACT.md
-```
+The release workflow publishes it on the tag: the curated notes from `docs/release-notes/`,
+then the commits since the previous tag grouped by kind, named by the version. No manual
+`gh release create`.
 
 ## Versioning
 

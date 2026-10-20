@@ -5,7 +5,8 @@ This directory holds the **editorial body** of each upcoming release
 file-driven (ported from Bowire) so we never ship a release whose body
 is just installation boilerplate — the curated prose is the release
 description; the install commands and the auto-generated commit list
-follow below it.
+follow below it. `CHANGELOG.md` points here and to the published releases;
+it holds no entries of its own.
 
 ## Convention
 
@@ -25,16 +26,19 @@ follow below it.
 1. **Before the tag.** Make sure `upcoming.md` is curated — every
    real highlight has a `###` section with 2-4 sentences of prose,
    breaking changes are listed under their own section, and the
-   front-matter `title:` reads well as the release-title theme.
-   The release title itself comes from the matching **milestone
-   title** (`vX.Y — <theme>` convention), so keep the two in sync.
+   front-matter `title:` says what this delivery is about. It becomes
+   the body's `#` heading; the release itself is named by the version
+   alone.
 2. **Push the tag.** `release.yml` verifies a curated body exists
    (`docs/release-notes/v<tag>.md` → `upcoming.md`, placeholder
-   detection = at least one `###` section), assembles
-   `release-body.md` (curated body + collapsed Installation block +
-   seam), resolves the title from the milestone, and publishes with
-   the auto-generated commit list appended below the seam.
-3. **After the publish.** Open a small PR that:
+   detection = at least one `###` section and a `title:` that is not
+   a placeholder or a bare version), assembles `release-body.md`
+   (`scripts/ci/release-body.mjs`: the title as `#`, the curated body,
+   a collapsed Installation block, a seam), appends the commits since
+   the previous tag grouped by Conventional Commit type
+   (`scripts/ci/generate-changelog.mjs`), and publishes it as the
+   release named by the version.
+3. **After the publish.** Commit on `main`:
    - Renames `upcoming.md` → `v<tag>.md` (preserves the body in git).
    - Recreates `upcoming.md` from `_template.md` for the next round.
    - Re-runs `node scripts/ci/generate-release-notes.mjs` to refresh
@@ -49,15 +53,16 @@ version: 0.4.0
 ---
 ```
 
-- `title` — the theme half of the release title
-  (`v<version> — <title>`). Mirrors the milestone-title convention;
-  the pipeline resolves the published title from the milestone.
+- `title` — what the delivery is about, as a sentence. Published as
+  the body's `#` heading. The gate refuses a placeholder, the bare
+  version and "Surgewave v<version>".
 - `version` — optional sanity check against the tag.
 
 Body follows after a blank line. Sections expected:
 - **Highlights** — what's new, written for users, one `###` per theme.
 - **Fixes** — notable bug fixes, grouped.
-- **Breaking changes** — wire / API / package shifts with migration paths.
+- **Breaking changes** — wire / API / package / configuration shifts with migration paths.
+- **Also in this release** — smaller changes worth a line, optional.
 - **Acknowledgements** — short, optional.
 
 ## Related pieces

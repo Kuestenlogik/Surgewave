@@ -41,6 +41,9 @@ jobs:
       - name: Language guard (English only)
         run: node scripts/check-english.mjs
 
+      - name: Release scripts (release body, change list)
+        run: node --test "tests/ci/*.test.mjs"
+
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
