@@ -90,9 +90,17 @@ public sealed record EndTxnCommand
     public required long ProducerId { get; init; }
     public required short ProducerEpoch { get; init; }
     public required bool Committed { get; init; }
+
+    /// <summary>The client's transaction protocol; Kafka's EndTxn v5+ means <see cref="TransactionVersion.Tv2"/>.</summary>
+    public TransactionVersion TransactionVersion { get; init; } = TransactionVersion.Tv0;
 }
 
-public sealed record EndTxnResult(TxnErrorStatus Status);
+/// <summary>
+/// The outcome of EndTxn. Under <see cref="TransactionVersion.Tv2"/> it carries the producer id and epoch
+/// the client continues with (the epoch is bumped on every EndTxn, the id rotated when the epoch is
+/// exhausted); -1 on an error.
+/// </summary>
+public sealed record EndTxnResult(TxnErrorStatus Status, long ProducerId = -1, short ProducerEpoch = -1);
 
 // ── DescribeProducers (KIP-664) ─────────────────────────────────────────────
 

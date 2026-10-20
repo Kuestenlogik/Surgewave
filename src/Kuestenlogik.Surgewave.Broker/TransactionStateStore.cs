@@ -49,37 +49,14 @@ public sealed class TransactionStateStore : IDisposable
     /// <summary>
     /// Persists transaction state after InitProducerId.
     /// </summary>
-    public void SaveTransactionState(
-        string transactionalId,
-        long producerId,
-        short producerEpoch,
-        TransactionState state,
-        int transactionTimeoutMs,
-        IEnumerable<TopicPartition>? partitions = null,
-        IEnumerable<string>? consumerGroups = null,
-        IEnumerable<PendingOffsetEntry>? pendingOffsets = null)
+    public void SaveTransactionState(PersistedTransactionState txnState)
     {
+        ArgumentNullException.ThrowIfNull(txnState);
         lock (_lock)
         {
-            var txnState = new PersistedTransactionState
-            {
-                TransactionalId = transactionalId,
-                ProducerId = producerId,
-                ProducerEpoch = producerEpoch,
-                State = state.ToString(),
-                TransactionTimeoutMs = transactionTimeoutMs,
-                LastModified = DateTimeOffset.UtcNow,
-                Partitions = partitions?.Select(p => new PersistedPartition
-                {
-                    Topic = p.Topic,
-                    Partition = p.Partition
-                }).ToList() ?? [],
-                ConsumerGroups = consumerGroups?.ToList() ?? [],
-                PendingOffsets = pendingOffsets?.ToList() ?? []
-            };
-
-            _transactionStates[transactionalId] = txnState;
-            PersistTransaction(transactionalId, txnState);
+            txnState.LastModified = DateTimeOffset.UtcNow;
+            _transactionStates[txnState.TransactionalId] = txnState;
+            PersistTransaction(txnState.TransactionalId, txnState);
         }
     }
 
@@ -304,6 +281,22 @@ public sealed class PersistedTransactionState
     public short ProducerEpoch { get; set; }
     public string State { get; set; } = string.Empty;
     public int TransactionTimeoutMs { get; set; }
+
+    /// <summary>The epoch before the last bump; -1 when none. Lets a retried request be recognised after a restart.</summary>
+    public short LastProducerEpoch { get; set; } = -1;
+
+    /// <summary>The producer id before the last rotation; -1 when none.</summary>
+    public long PreviousProducerId { get; set; } = -1;
+
+    /// <summary>The producer id a prepared transaction completes onto (epoch exhausted); -1 otherwise.</summary>
+    public long NextProducerId { get; set; } = -1;
+
+    /// <summary>The client's transaction protocol (0, 1, 2) when the transaction was last changed.</summary>
+    public short ClientTransactionVersion { get; set; }
+
+    /// <summary>When the transaction went Ongoing; its timeout counts from here.</summary>
+    public DateTimeOffset TxnStartTime { get; set; }
+
     public DateTimeOffset LastModified { get; set; }
     public List<PersistedPartition> Partitions { get; set; } = [];
     public List<string> ConsumerGroups { get; set; } = [];

@@ -67,7 +67,12 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
         TxnErrorStatus.InvalidTxnState => ErrorCode.InvalidTxnState,
         TxnErrorStatus.UnknownProducerId => ErrorCode.UnknownProducerId,
         TxnErrorStatus.UnknownTopicId => ErrorCode.UnknownTopicId,
-        _ => ErrorCode.None,
+        TxnErrorStatus.ConcurrentTransactions => ErrorCode.ConcurrentTransactions,
+        TxnErrorStatus.ProducerFenced => ErrorCode.ProducerFenced,
+        TxnErrorStatus.InvalidProducerIdMapping => ErrorCode.InvalidProducerIdMapping,
+        TxnErrorStatus.TransactionAbortable => ErrorCode.TransactionAbortable,
+        TxnErrorStatus.InvalidRequest => ErrorCode.InvalidRequest,
+        _ => ErrorCode.Unknown,
     };
 
     // ── InitProducerId ─────────────────────────────────────────────────────
@@ -207,6 +212,8 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
             ProducerId = r.ProducerId,
             ProducerEpoch = r.ProducerEpoch,
             Committed = r.Committed,
+            // Kafka: EndTxn v5+ is sent only by a client running transactions V2.
+            TransactionVersion = r.ApiVersion >= 5 ? TransactionVersion.Tv2 : TransactionVersion.Tv0,
         };
 
     private static EndTxnResponse ToEndTxnResponse(EndTxnResult result, EndTxnRequest r)
@@ -216,6 +223,8 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
             ApiVersion = r.ApiVersion,
             ThrottleTimeMs = 0,
             ErrorCode = ToErrorCode(result.Status),
+            ProducerId = result.ProducerId,
+            ProducerEpoch = result.ProducerEpoch,
         };
 
     // ── DescribeProducers (KIP-664) ────────────────────────────────────────

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Models;
 using Microsoft.Extensions.Logging;
 using TransactionState = Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState;
@@ -49,8 +50,14 @@ internal sealed class TransactionStatePersistence
                 TransactionalId = persisted.TransactionalId,
                 ProducerId = persisted.ProducerId,
                 ProducerEpoch = persisted.ProducerEpoch,
+                LastProducerEpoch = persisted.LastProducerEpoch,
+                PreviousProducerId = persisted.PreviousProducerId,
+                NextProducerId = persisted.NextProducerId,
+                ClientTransactionVersion = (TransactionVersion)persisted.ClientTransactionVersion,
                 State = state,
-                TransactionTimeoutMs = persisted.TransactionTimeoutMs
+                TransactionTimeoutMs = persisted.TransactionTimeoutMs,
+                TxnStartTime = persisted.TxnStartTime == default ? persisted.LastModified : persisted.TxnStartTime,
+                LastActivityTime = persisted.LastModified,
             };
 
             // Restore partitions
@@ -80,21 +87,21 @@ internal sealed class TransactionStatePersistence
 
             // Register with ProducerStateManager
             _producerStateManager.RegisterProducerId(txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
+            if (txnMetadata.NextProducerId != -1)
+            {
+                _producerStateManager.RegisterProducerId(txnMetadata.NextProducerId, 0);
+            }
 
-            // For in-progress transactions, we need to abort them since they may be incomplete
-            if (state == TransactionState.Ongoing ||
-                state == TransactionState.PrepareCommit ||
-                state == TransactionState.PrepareAbort)
+            // As in Kafka: an ongoing transaction stays ongoing (the producer may still end it, or its
+            // timeout aborts it), and a prepared one is completed by the next expiry pass — its outcome was
+            // decided before the restart, only the markers may be missing.
+            if (state is TransactionState.Ongoing or TransactionState.PrepareCommit or TransactionState.PrepareAbort)
             {
                 _logger.LogWarning(
-                    "Found in-progress transaction {TransactionalId} during recovery, will abort. State={State}, Partitions={PartitionCount}",
+                    "Found in-progress transaction {TransactionalId} during recovery. State={State}, Partitions={PartitionCount}",
                     txnMetadata.TransactionalId,
                     state,
                     txnMetadata.Partitions.Count);
-
-                // Mark for abort during next timeout check
-                txnMetadata.State = TransactionState.PrepareAbort;
-                txnMetadata.LastActivityTime = DateTimeOffset.MinValue; // Force timeout
             }
 
             transactionsByTxnId[persisted.TransactionalId] = txnMetadata;
@@ -118,21 +125,28 @@ internal sealed class TransactionStatePersistence
     /// </summary>
     public void PersistState(TransactionMetadata txnMetadata)
     {
-        _stateStore.SaveTransactionState(
-            txnMetadata.TransactionalId,
-            txnMetadata.ProducerId,
-            txnMetadata.ProducerEpoch,
-            txnMetadata.State,
-            txnMetadata.TransactionTimeoutMs,
-            txnMetadata.Partitions,
-            txnMetadata.ConsumerGroups,
-            txnMetadata.PendingOffsets.Select(p => new PendingOffsetEntry
+        _stateStore.SaveTransactionState(new PersistedTransactionState
+        {
+            TransactionalId = txnMetadata.TransactionalId,
+            ProducerId = txnMetadata.ProducerId,
+            ProducerEpoch = txnMetadata.ProducerEpoch,
+            LastProducerEpoch = txnMetadata.LastProducerEpoch,
+            PreviousProducerId = txnMetadata.PreviousProducerId,
+            NextProducerId = txnMetadata.NextProducerId,
+            ClientTransactionVersion = (short)txnMetadata.ClientTransactionVersion,
+            State = txnMetadata.State.ToString(),
+            TransactionTimeoutMs = txnMetadata.TransactionTimeoutMs,
+            TxnStartTime = txnMetadata.TxnStartTime,
+            Partitions = txnMetadata.Partitions.Select(p => new PersistedPartition { Topic = p.Topic, Partition = p.Partition }).ToList(),
+            ConsumerGroups = txnMetadata.ConsumerGroups.ToList(),
+            PendingOffsets = txnMetadata.PendingOffsets.Select(p => new PendingOffsetEntry
             {
                 GroupId = p.GroupId,
                 Topic = p.Topic,
                 Partition = p.Partition,
                 Offset = p.Offset,
                 Metadata = p.Metadata
-            }));
+            }).ToList(),
+        });
     }
 }

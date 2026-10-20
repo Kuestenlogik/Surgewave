@@ -24,4 +24,20 @@ public enum TxnErrorStatus
 
     /// <summary>A supplied topic id could not be resolved to a topic name.</summary>
     UnknownTopicId,
+
+    /// <summary>
+    /// The request carries an epoch other than the transaction's current one: another producer with the
+    /// same transactional id took over, or the coordinator aborted the transaction (timeout) and bumped
+    /// the epoch. Recoverable for the client, unlike <see cref="InvalidTxnState"/>.
+    /// </summary>
+    ProducerFenced,
+
+    /// <summary>The producer id does not belong to the transactional id, or the transactional id is unknown.</summary>
+    InvalidProducerIdMapping,
+
+    /// <summary>The partition or group is not part of the transaction; the client aborts it and may retry.</summary>
+    TransactionAbortable,
+
+    /// <summary>The request is malformed, e.g. a transactional request without a transactional id.</summary>
+    InvalidRequest,
 }

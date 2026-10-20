@@ -98,6 +98,12 @@ public sealed class EndTxnResponse : KafkaResponse
     public int ThrottleTimeMs { get; init; }
     public required ErrorCode ErrorCode { get; init; }
 
+    /// <summary>v5+: the producer id the client continues with (transactions V2), -1 on an error.</summary>
+    public long ProducerId { get; init; } = -1;
+
+    /// <summary>v5+: the producer epoch the client continues with, bumped on every EndTxn under transactions V2.</summary>
+    public short ProducerEpoch { get; init; } = -1;
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         bool isFlexible = ApiVersion >= 3;
@@ -111,6 +117,12 @@ public sealed class EndTxnResponse : KafkaResponse
 
         writer.WriteInt32(ThrottleTimeMs);
         writer.WriteInt16((short)ErrorCode);
+
+        if (ApiVersion >= 5)
+        {
+            writer.WriteInt64(ProducerId);
+            writer.WriteInt16(ProducerEpoch);
+        }
 
         if (isFlexible)
         {

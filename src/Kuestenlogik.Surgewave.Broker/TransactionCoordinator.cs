@@ -61,12 +61,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         // Load persisted transaction state on startup
         _statePersistence.LoadPersistedState(_transactionsByTxnId);
 
-        // Start timeout manager
-        _timeoutManager = new TransactionTimeoutManager(
-            _transactionsByTxnId,
-            _transactionIndex,
-            _markerWriter,
-            logger);
+        // Start timeout manager: aborts expired transactions and finishes prepared ones
+        _timeoutManager = new TransactionTimeoutManager(ExpireTransactionsAsync, logger);
     }
 
     public async ValueTask DisposeAsync()
@@ -295,80 +291,94 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             };
         });
 
-        // KIP-892 Server-Side Defense: the client never raises the epoch. If the request
-        // names a producer-id at all, it must match the current incarnation; an older
-        // epoch from the same producer-id means a zombie that recovered after we already
-        // fenced it.
-        //
-        // A request with ProducerId == -1 (no prior identity) is the "fresh init" path;
-        // we re-allocate / bump on top of the current state instead of trusting client
-        // input. A retry with the exact current (pid, epoch) is idempotent and returns
-        // the current values.
-        const long NoProducerId = -1;
-        const short NoProducerEpoch = -1;
-        if (request.ProducerId != NoProducerId)
+        await txnMetadata.Lock.WaitAsync(cancellationToken);
+        try
         {
-            if (request.ProducerId != txnMetadata.ProducerId
-                || request.ProducerEpoch < txnMetadata.ProducerEpoch)
+            // KIP-892 Server-Side Defense: the client never raises the epoch. If the request
+            // names a producer-id at all, it must match the current incarnation; an older
+            // epoch from the same producer-id means a zombie that recovered after we already
+            // fenced it.
+            //
+            // A request with ProducerId == -1 (no prior identity) is the "fresh init" path;
+            // we re-allocate / bump on top of the current state instead of trusting client
+            // input. A retry with the exact current (pid, epoch) is idempotent and returns
+            // the current values.
+            const long NoProducerId = -1;
+            const short NoProducerEpoch = -1;
+            if (request.ProducerId != NoProducerId)
             {
-                _logger.LogInformation(
-                    "KIP-892 fence: rejecting InitProducerId for {TransactionalId} (zombie pid={ZombiePid}, epoch={ZombieEpoch}; current pid={Pid}, epoch={Epoch})",
-                    txnMetadata.TransactionalId,
-                    request.ProducerId,
-                    request.ProducerEpoch,
-                    txnMetadata.ProducerId,
-                    txnMetadata.ProducerEpoch);
+                if (request.ProducerId != txnMetadata.ProducerId
+                    || request.ProducerEpoch < txnMetadata.ProducerEpoch)
+                {
+                    _logger.LogInformation(
+                        "KIP-892 fence: rejecting InitProducerId for {TransactionalId} (zombie pid={ZombiePid}, epoch={ZombieEpoch}; current pid={Pid}, epoch={Epoch})",
+                        txnMetadata.TransactionalId,
+                        request.ProducerId,
+                        request.ProducerEpoch,
+                        txnMetadata.ProducerId,
+                        txnMetadata.ProducerEpoch);
 
-                return new InitProducerIdResult(TxnErrorStatus.InvalidProducerEpoch, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
+                    return new InitProducerIdResult(TxnErrorStatus.InvalidProducerEpoch, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
+                }
+
+                if (request.ProducerEpoch == txnMetadata.ProducerEpoch
+                    && txnMetadata.State == TransactionState.Empty)
+                {
+                    // Idempotent retry from the current incarnation, nothing in flight — return as-is.
+                    return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
+                }
             }
 
-            if (request.ProducerEpoch == txnMetadata.ProducerEpoch
-                && txnMetadata.State == TransactionState.Empty)
+            // Markers of an ending transaction are being written; the client retries once it completed.
+            if (txnMetadata.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
             {
-                // Idempotent retry from the current incarnation, nothing in flight — return as-is.
-                return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
-            }
-        }
-
-        // Check for existing transaction that needs cleanup (fencing scenario)
-        if (txnMetadata.State == TransactionState.Ongoing ||
-            txnMetadata.State == TransactionState.PrepareCommit ||
-            txnMetadata.State == TransactionState.PrepareAbort)
-        {
-            // Producer crash recovery / fencing - abort pending transaction
-            if (txnMetadata.Partitions.Count > 0)
-            {
-                _logger.LogInformation(
-                    "Fencing producer {TransactionalId}: aborting in-flight transaction with {PartitionCount} partitions",
-                    txnMetadata.TransactionalId,
-                    txnMetadata.Partitions.Count);
-
-                var abortOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, commit: false, cancellationToken);
-                _transactionIndex.AbortTransaction(txnMetadata.ProducerId, txnMetadata.Partitions, abortOffset);
-
-                // #72 Inc7 — replicate the fencing abort markers best-effort before the partitions are cleared.
-                await ReplicateMarkersBestEffortAsync(txnMetadata, commit: false, cancellationToken);
+                return new InitProducerIdResult(TxnErrorStatus.ConcurrentTransactions, NoProducerId, NoProducerEpoch);
             }
 
-            // Bump epoch and reset state
-            txnMetadata.ProducerEpoch++;
+            if (txnMetadata.State == TransactionState.Ongoing)
+            {
+                // Producer crash recovery / fencing: abort the in-flight transaction. The epoch is bumped
+                // first, so the abort markers carry the epoch that fences the previous incarnation; a producer
+                // id rotation (epoch exhausted) applies only after them, since the markers must name the id
+                // the transaction's batches were written with.
+                PrepareEpochBump(txnMetadata);
+
+                if (txnMetadata.Partitions.Count > 0)
+                {
+                    _logger.LogInformation(
+                        "Fencing producer {TransactionalId}: aborting in-flight transaction with {PartitionCount} partitions",
+                        txnMetadata.TransactionalId,
+                        txnMetadata.Partitions.Count);
+
+                    var abortOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, commit: false, cancellationToken);
+                    _transactionIndex.AbortTransaction(txnMetadata.ProducerId, txnMetadata.Partitions, abortOffset);
+
+                    // #72 Inc7 — replicate the fencing abort markers best-effort before the partitions are cleared.
+                    await ReplicateMarkersBestEffortAsync(txnMetadata, commit: false, cancellationToken);
+                }
+
+                ClearTransactionContents(txnMetadata);
+                ApplyEpochBump(txnMetadata);
+            }
+            else if (request.ProducerId == NoProducerId && request.ProducerEpoch == NoProducerEpoch)
+            {
+                // Fresh-init from a brand-new producer over an existing transactional-id
+                // with no in-flight txn: bump the epoch so any zombie still using the
+                // previous epoch is fenced on its very next request. Server-owned, not
+                // client-driven.
+                BumpEpoch(txnMetadata);
+            }
+
             txnMetadata.State = TransactionState.Empty;
-            txnMetadata.Partitions.Clear();
-            _producerStateManager.UpdateEpoch(txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
+            txnMetadata.TransactionTimeoutMs = request.TransactionTimeoutMs;
+            _statePersistence.PersistState(txnMetadata);
+
+            return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
         }
-        else if (request.ProducerId == NoProducerId && request.ProducerEpoch == NoProducerEpoch)
+        finally
         {
-            // Fresh-init from a brand-new producer over an existing transactional-id
-            // with no in-flight txn: bump the epoch so any zombie still using the
-            // previous epoch is fenced on its very next request. Server-owned, not
-            // client-driven.
-            txnMetadata.ProducerEpoch++;
-            _producerStateManager.UpdateEpoch(txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
+            txnMetadata.Lock.Release();
         }
-
-        _statePersistence.PersistState(txnMetadata);
-
-        return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
     }
 
     /// <summary>
@@ -376,53 +386,32 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// </summary>
     public AddPartitionsToTxnResult AddPartitionsToTxn(AddPartitionsToTxnCommand request)
     {
-        // Validate request
-        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (status != TxnErrorStatus.None)
+        TxnErrorStatus Add(TransactionMetadata txn)
         {
-            var errorTopics = new List<AddPartitionsTopicResult>(request.Topics.Count);
             foreach (var topic in request.Topics)
             {
-                var parts = new List<TxnPartitionStatus>(topic.Partitions.Count);
-                foreach (var p in topic.Partitions)
+                foreach (var partition in topic.Partitions)
                 {
-                    parts.Add(new TxnPartitionStatus(p, status));
+                    var status = AddToTransaction(txn, new TopicPartition { Topic = topic.Topic, Partition = partition }, groupId: null);
+                    if (status != TxnErrorStatus.None)
+                        return status;
                 }
-                errorTopics.Add(new AddPartitionsTopicResult(topic.Topic, parts));
             }
-            return new AddPartitionsToTxnResult(errorTopics);
+            return TxnErrorStatus.None;
         }
 
-        // Start transaction if not already started
-        if (txnMetadata!.State == TransactionState.Empty ||
-            txnMetadata.State == TransactionState.CompleteCommit ||
-            txnMetadata.State == TransactionState.CompleteAbort)
-        {
-            txnMetadata.State = TransactionState.Ongoing;
-            txnMetadata.Partitions.Clear();
-            txnMetadata.LastActivityTime = DateTimeOffset.UtcNow;
-        }
-        else
-        {
-            txnMetadata.LastActivityTime = DateTimeOffset.UtcNow;
-        }
+        var status = WithTransaction(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Add);
 
-        // Add partitions
         var results = new List<AddPartitionsTopicResult>(request.Topics.Count);
         foreach (var topic in request.Topics)
         {
             var partitionResults = new List<TxnPartitionStatus>(topic.Partitions.Count);
             foreach (var partition in topic.Partitions)
             {
-                var tp = new TopicPartition { Topic = topic.Topic, Partition = partition };
-                txnMetadata.Partitions.Add(tp);
-                partitionResults.Add(new TxnPartitionStatus(partition, TxnErrorStatus.None));
+                partitionResults.Add(new TxnPartitionStatus(partition, status));
             }
             results.Add(new AddPartitionsTopicResult(topic.Topic, partitionResults));
         }
-
-        _statePersistence.PersistState(txnMetadata);
-
         return new AddPartitionsToTxnResult(results);
     }
 
@@ -431,31 +420,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// </summary>
     public AddOffsetsToTxnResult AddOffsetsToTxn(AddOffsetsToTxnCommand request)
     {
-        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (status != TxnErrorStatus.None)
+        var status = WithTransaction(request.TransactionalId, request.ProducerId, request.ProducerEpoch,
+            txn => AddToTransaction(txn, partition: null, request.GroupId));
+
+        if (status == TxnErrorStatus.None)
         {
-            return new AddOffsetsToTxnResult(status);
+            _logger.LogDebug("Added consumer group {GroupId} to transaction {TransactionalId}",
+                request.GroupId, request.TransactionalId);
         }
-
-        // Transaction must be ongoing or empty
-        if (txnMetadata!.State != TransactionState.Ongoing && txnMetadata.State != TransactionState.Empty)
-        {
-            return new AddOffsetsToTxnResult(TxnErrorStatus.InvalidTxnState);
-        }
-
-        txnMetadata.ConsumerGroups.Add(request.GroupId);
-        if (txnMetadata.State == TransactionState.Empty)
-        {
-            txnMetadata.State = TransactionState.Ongoing;
-        }
-        txnMetadata.LastActivityTime = DateTimeOffset.UtcNow;
-
-        _logger.LogDebug("Added consumer group {GroupId} to transaction {TransactionalId}",
-            request.GroupId, request.TransactionalId);
-
-        _statePersistence.PersistState(txnMetadata);
-
-        return new AddOffsetsToTxnResult(TxnErrorStatus.None);
+        return new AddOffsetsToTxnResult(status);
     }
 
     /// <summary>
@@ -495,148 +468,347 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             resolved.Add((name, topicId, resolveError, t.Partitions));
         }
 
-        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (status != TxnErrorStatus.None)
+        var stagedCount = 0;
+        var partitionStatus = new Dictionary<(int Topic, int Partition), TxnErrorStatus>();
+
+        TxnErrorStatus Stage(TransactionMetadata txn)
         {
-            var errorTopics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
-            foreach (var r in resolved)
+            if (txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
+                return TxnErrorStatus.ConcurrentTransactions;
+
+            for (var i = 0; i < resolved.Count; i++)
             {
-                var parts = new List<TxnOffsetCommitPartitionResult>(r.Partitions.Count);
-                foreach (var p in r.Partitions)
+                var r = resolved[i];
+                foreach (var partition in r.Partitions)
                 {
-                    parts.Add(new TxnOffsetCommitPartitionResult(p.Partition, status));
+                    if (r.ResolveError != TxnErrorStatus.None)
+                    {
+                        partitionStatus[(i, partition.Partition)] = r.ResolveError;
+                        continue;
+                    }
+                    txn.PendingOffsets.Add(new PendingTxnOffset
+                    {
+                        GroupId = request.GroupId,
+                        Topic = r.Name ?? string.Empty,
+                        Partition = partition.Partition,
+                        Offset = partition.CommittedOffset,
+                        Metadata = partition.Metadata,
+                    });
+                    stagedCount++;
                 }
-                errorTopics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = parts });
             }
-            return new TxnOffsetCommitResult(errorTopics);
+            _statePersistence.PersistState(txn);
+            return TxnErrorStatus.None;
         }
 
-        // Store pending offsets
+        var status = WithTransaction(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Stage);
+
         var topics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
-        var stagedCount = 0;
-        foreach (var r in resolved)
+        for (var i = 0; i < resolved.Count; i++)
         {
+            var r = resolved[i];
             var partitionResults = new List<TxnOffsetCommitPartitionResult>(r.Partitions.Count);
-            foreach (var partition in r.Partitions)
+            foreach (var p in r.Partitions)
             {
-                if (r.ResolveError != TxnErrorStatus.None)
-                {
-                    partitionResults.Add(new TxnOffsetCommitPartitionResult(partition.Partition, r.ResolveError));
-                    continue;
-                }
-                txnMetadata!.PendingOffsets.Add(new PendingTxnOffset
-                {
-                    GroupId = request.GroupId,
-                    Topic = r.Name ?? string.Empty,
-                    Partition = partition.Partition,
-                    Offset = partition.CommittedOffset,
-                    Metadata = partition.Metadata,
-                });
-                stagedCount++;
-                partitionResults.Add(new TxnOffsetCommitPartitionResult(partition.Partition, TxnErrorStatus.None));
+                var partitionResult = status != TxnErrorStatus.None
+                    ? status
+                    : partitionStatus.GetValueOrDefault((i, p.Partition), TxnErrorStatus.None);
+                partitionResults.Add(new TxnOffsetCommitPartitionResult(p.Partition, partitionResult));
             }
             topics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = partitionResults });
         }
 
-        _logger.LogDebug("Staged {Count} offsets for transaction {TransactionalId}, group {GroupId}",
-            stagedCount, request.TransactionalId, request.GroupId);
-
-        _statePersistence.PersistState(txnMetadata!);
-
+        if (status == TxnErrorStatus.None)
+        {
+            _logger.LogDebug("Staged {Count} offsets for transaction {TransactionalId}, group {GroupId}",
+                stagedCount, request.TransactionalId, request.GroupId);
+        }
         return new TxnOffsetCommitResult(topics);
     }
 
     /// <summary>
-    /// Handles EndTxn (commit or abort).
+    /// Handles EndTxn (commit or abort), with Kafka's answers for transactions V1 and V2
+    /// (<see cref="EndTxnTransition"/>). Under V2 the epoch is bumped and returned.
     /// </summary>
     public async Task<EndTxnResult> EndTxnAsync(EndTxnCommand request, CancellationToken cancellationToken)
     {
-        var status = ValidateTransactionRequest(request.TransactionalId, request.ProducerId, request.ProducerEpoch, out var txnMetadata);
-        if (status != TxnErrorStatus.None)
+        if (string.IsNullOrEmpty(request.TransactionalId))
+            return new EndTxnResult(TxnErrorStatus.InvalidRequest);
+        if (!_transactionsByTxnId.TryGetValue(request.TransactionalId, out var txn))
+            return new EndTxnResult(TxnErrorStatus.InvalidProducerIdMapping);
+
+        await txn.Lock.WaitAsync(cancellationToken);
+        try
         {
-            return new EndTxnResult(status);
+            var decision = EndTxnTransition.Decide(txn, request.ProducerId, request.ProducerEpoch, request.Committed, request.TransactionVersion);
+            switch (decision.Outcome)
+            {
+                case EndTxnOutcome.Refuse:
+                    return new EndTxnResult(decision.Error);
+                case EndTxnOutcome.AlreadyDone:
+                    return new EndTxnResult(TxnErrorStatus.None, txn.ProducerId, txn.ProducerEpoch);
+            }
+
+            if (decision.Empty)
+            {
+                _logger.LogDebug("Ending empty transaction {TransactionalId}", txn.TransactionalId);
+                txn.TxnStartTime = DateTimeOffset.UtcNow;
+            }
+
+            txn.ClientTransactionVersion = request.TransactionVersion;
+            if (request.TransactionVersion >= TransactionVersion.Tv2)
+            {
+                PrepareEpochBump(txn);
+            }
+            Prepare(txn, request.Committed);
+        }
+        finally
+        {
+            txn.Lock.Release();
         }
 
-        // Allow EndTxn from Empty state (no-op transaction) or Ongoing state
-        if (txnMetadata!.State != TransactionState.Ongoing && txnMetadata.State != TransactionState.Empty)
+        var (producerId, producerEpoch) = await WriteMarkersAndCompleteAsync(txn, request.Committed, cancellationToken);
+        return new EndTxnResult(TxnErrorStatus.None, producerId, producerEpoch);
+    }
+
+    /// <summary>
+    /// Aborts the transactions that outlived their timeout and finishes the ones left in PrepareCommit /
+    /// PrepareAbort (a restart, or an EndTxn whose marker writing was cancelled). The timeout abort fences
+    /// the producer: the epoch is bumped, so its next produce is refused and a commit still in flight is
+    /// answered PRODUCER_FENCED.
+    /// </summary>
+    internal async Task ExpireTransactionsAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        foreach (var txn in _transactionsByTxnId.Values)
         {
-            return new EndTxnResult(TxnErrorStatus.InvalidTxnState);
+            bool commit;
+            await txn.Lock.WaitAsync(cancellationToken);
+            try
+            {
+                if ((txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort) && !txn.CompletionInProgress)
+                {
+                    commit = txn.State == TransactionState.PrepareCommit;
+                    txn.CompletionInProgress = true;
+                    _logger.LogInformation("Completing transaction {TransactionalId} left in {State}", txn.TransactionalId, txn.State);
+                }
+                else if (txn.IsTimedOut(now))
+                {
+                    commit = false;
+                    _logger.LogWarning(
+                        "Transaction {TransactionalId} timed out after {TimeoutMs}ms, aborting",
+                        txn.TransactionalId,
+                        txn.TransactionTimeoutMs);
+                    PrepareEpochBump(txn);
+                    Prepare(txn, commit: false);
+                }
+                else
+                {
+                    continue;
+                }
+            }
+            finally
+            {
+                txn.Lock.Release();
+            }
+
+            try
+            {
+                await WriteMarkersAndCompleteAsync(txn, commit, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Failed to complete transaction {TransactionalId}", txn.TransactionalId);
+                await txn.Lock.WaitAsync(CancellationToken.None);
+                txn.CompletionInProgress = false; // the next pass retries
+                txn.Lock.Release();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the transaction under its lock, after Kafka's checks for a request
+    /// from the producer: the transactional id must be known and belong to the producer id, and the epoch must
+    /// be the current one.
+    /// </summary>
+    private TxnErrorStatus WithTransaction(string? transactionalId, long producerId, short producerEpoch, Func<TransactionMetadata, TxnErrorStatus> action)
+    {
+        if (string.IsNullOrEmpty(transactionalId))
+            return TxnErrorStatus.InvalidRequest;
+        if (!_transactionsByTxnId.TryGetValue(transactionalId, out var txn))
+            return TxnErrorStatus.InvalidProducerIdMapping;
+
+        txn.Lock.Wait();
+        try
+        {
+            if (producerId != txn.ProducerId)
+                return TxnErrorStatus.InvalidProducerIdMapping;
+            if (producerEpoch != txn.ProducerEpoch)
+                return TxnErrorStatus.ProducerFenced;
+            return action(txn);
+        }
+        finally
+        {
+            txn.Lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Adds a partition or a consumer group to the transaction, starting it when none is ongoing. Called with the
+    /// transaction's lock held.
+    /// </summary>
+    private TxnErrorStatus AddToTransaction(TransactionMetadata txn, TopicPartition? partition, string? groupId)
+    {
+        switch (txn.State)
+        {
+            case TransactionState.PrepareCommit or TransactionState.PrepareAbort:
+                return TxnErrorStatus.ConcurrentTransactions;
+            case TransactionState.Dead:
+                return TxnErrorStatus.InvalidTxnState;
+            case TransactionState.Empty or TransactionState.CompleteCommit or TransactionState.CompleteAbort:
+                ClearTransactionContents(txn);
+                txn.State = TransactionState.Ongoing;
+                txn.TxnStartTime = DateTimeOffset.UtcNow;
+                break;
         }
 
-        // Handle empty transaction (no partitions, no data) - just transition state
-        if (txnMetadata.State == TransactionState.Empty)
-        {
-            _logger.LogDebug("Completing empty transaction {TransactionalId}", txnMetadata.TransactionalId);
-            txnMetadata.State = request.Committed ? TransactionState.CompleteCommit : TransactionState.CompleteAbort;
-            _statePersistence.PersistState(txnMetadata);
+        var changed = false;
+        if (partition is not null)
+            changed |= txn.Partitions.Add(partition.Value);
+        if (groupId is not null)
+            changed |= txn.ConsumerGroups.Add(groupId);
 
-            return new EndTxnResult(TxnErrorStatus.None);
+        txn.LastActivityTime = DateTimeOffset.UtcNow;
+        if (changed)
+            _statePersistence.PersistState(txn);
+        return TxnErrorStatus.None;
+    }
+
+    /// <summary>
+    /// The epoch bump of an ending transaction under transactions V2 and of a timeout abort. When the epoch is
+    /// exhausted, the transaction completes onto a fresh producer id instead (<see cref="TransactionMetadata.NextProducerId"/>).
+    /// Called with the lock held.
+    /// </summary>
+    private void PrepareEpochBump(TransactionMetadata txn)
+    {
+        txn.LastProducerEpoch = txn.ProducerEpoch;
+        if (TransactionMetadata.IsEpochExhausted(txn.ProducerEpoch))
+        {
+            txn.NextProducerId = _producerStateManager.AllocateProducerId().ProducerId;
+        }
+        if (txn.ProducerEpoch < short.MaxValue)
+        {
+            txn.ProducerEpoch++;
+        }
+    }
+
+    /// <summary>
+    /// The epoch bump of InitProducerId: the new incarnation gets the next epoch, or a fresh producer id at epoch 0
+    /// when the epoch is exhausted. Called with the lock held.
+    /// </summary>
+    private void BumpEpoch(TransactionMetadata txn)
+    {
+        txn.LastProducerEpoch = txn.ProducerEpoch;
+        if (TransactionMetadata.IsEpochExhausted(txn.ProducerEpoch))
+        {
+            txn.PreviousProducerId = txn.ProducerId;
+            txn.ProducerId = _producerStateManager.AllocateProducerId().ProducerId;
+            txn.ProducerEpoch = 0;
+        }
+        else
+        {
+            txn.ProducerEpoch++;
+            _producerStateManager.AdvanceEpoch(txn.ProducerId, txn.ProducerEpoch);
+        }
+    }
+
+    /// <summary>Moves the transaction to PrepareCommit / PrepareAbort and persists it. Called with the lock held.</summary>
+    private void Prepare(TransactionMetadata txn, bool commit)
+    {
+        txn.State = commit ? TransactionState.PrepareCommit : TransactionState.PrepareAbort;
+        txn.CompletionInProgress = true;
+        txn.LastActivityTime = DateTimeOffset.UtcNow;
+        _statePersistence.PersistState(txn);
+    }
+
+    /// <summary>
+    /// Writes the markers of a prepared transaction, commits or discards its offsets, and completes it.
+    /// Runs without the lock — the transaction is visibly in PrepareCommit / PrepareAbort meanwhile, so a
+    /// concurrent request is answered CONCURRENT_TRANSACTIONS — and takes it to complete. Returns the producer
+    /// id and epoch the client continues with.
+    /// </summary>
+    private async Task<(long ProducerId, short ProducerEpoch)> WriteMarkersAndCompleteAsync(
+        TransactionMetadata txn, bool commit, CancellationToken cancellationToken)
+    {
+        if (txn.Partitions.Count > 0)
+        {
+            var markerOffset = await _markerWriter.WriteMarkersAsync(txn, commit, cancellationToken);
+
+            // #72 Inc7 — replicate the markers to follower brokers (best-effort). EndTxn latency now depends
+            // on the remote transport, but a replication failure does not fail the commit (markers are
+            // durable locally). No-op for a single broker (no remote leaders) or when no transport is wired.
+            await ReplicateMarkersBestEffortAsync(txn, commit, cancellationToken);
+
+            if (commit)
+                _transactionIndex.CommitTransaction(txn.ProducerId, txn.Partitions, markerOffset);
+            else
+                _transactionIndex.AbortTransaction(txn.ProducerId, txn.Partitions, markerOffset);
         }
 
-        // Transition to prepare state
-        txnMetadata.State = request.Committed ? TransactionState.PrepareCommit : TransactionState.PrepareAbort;
-
-        // Write transaction markers
-        var markerOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, request.Committed, cancellationToken);
-
-        // #72 Inc7 — replicate the markers to follower brokers (best-effort). EndTxn latency now depends
-        // on the remote transport, but a replication failure does not fail the commit (markers are
-        // durable locally). No-op for a single broker (no remote leaders) or when no transport is wired.
-        await ReplicateMarkersBestEffortAsync(txnMetadata, request.Committed, cancellationToken);
-
-        // Update TransactionIndex and commit/discard offsets
-        if (request.Committed)
+        if (commit)
         {
-            _transactionIndex.CommitTransaction(txnMetadata.ProducerId, txnMetadata.Partitions, markerOffset);
-
-            foreach (var pendingOffset in txnMetadata.PendingOffsets)
+            foreach (var pendingOffset in txn.PendingOffsets)
             {
                 _offsetStore.CommitOffset(pendingOffset.GroupId, pendingOffset.Topic, pendingOffset.Partition, pendingOffset.Offset);
                 _logger.LogDebug("Committed transactional offset for group {GroupId}, {Topic}-{Partition} at offset {Offset}",
                     pendingOffset.GroupId, pendingOffset.Topic, pendingOffset.Partition, pendingOffset.Offset);
             }
         }
-        else
+        else if (txn.PendingOffsets.Count > 0)
         {
-            _transactionIndex.AbortTransaction(txnMetadata.ProducerId, txnMetadata.Partitions, markerOffset);
-            if (txnMetadata.PendingOffsets.Count > 0)
-            {
-                _logger.LogDebug("Discarded {Count} pending offsets due to transaction abort", txnMetadata.PendingOffsets.Count);
-            }
+            _logger.LogDebug("Discarded {Count} pending offsets due to transaction abort", txn.PendingOffsets.Count);
         }
 
-        // Complete transaction
-        txnMetadata.State = request.Committed ? TransactionState.CompleteCommit : TransactionState.CompleteAbort;
-        txnMetadata.Partitions.Clear();
-        txnMetadata.ConsumerGroups.Clear();
-        txnMetadata.PendingOffsets.Clear();
+        // The markers are written: completing must not be cancelled, or the transaction stays prepared.
+        await txn.Lock.WaitAsync(CancellationToken.None);
+        try
+        {
+            txn.State = commit ? TransactionState.CompleteCommit : TransactionState.CompleteAbort;
+            ClearTransactionContents(txn);
+            txn.CompletionInProgress = false;
 
-        _statePersistence.PersistState(txnMetadata);
+            ApplyEpochBump(txn);
 
-        return new EndTxnResult(TxnErrorStatus.None);
+            _statePersistence.PersistState(txn);
+            return (txn.ProducerId, txn.ProducerEpoch);
+        }
+        finally
+        {
+            txn.Lock.Release();
+        }
     }
 
     /// <summary>
-    /// Validates a transaction request's transactional ID, producer ID, and epoch.
+    /// Makes a prepared epoch bump effective: the producer continues on the fresh producer id at epoch 0 when the
+    /// epoch was exhausted, otherwise at the transaction's epoch — with fresh sequences when that epoch is new to
+    /// the produce path (transactions V2, a timeout abort). Called with the lock held.
     /// </summary>
-    private TxnErrorStatus ValidateTransactionRequest(string? transactionalId, long producerId, short producerEpoch, out TransactionMetadata? txnMetadata)
+    private void ApplyEpochBump(TransactionMetadata txn)
     {
-        txnMetadata = null;
-
-        if (string.IsNullOrEmpty(transactionalId))
-            return TxnErrorStatus.InvalidTxnState;
-
-        if (!_transactionsByTxnId.TryGetValue(transactionalId, out txnMetadata))
-            return TxnErrorStatus.UnknownProducerId;
-
-        if (producerId != txnMetadata.ProducerId || producerEpoch != txnMetadata.ProducerEpoch)
+        if (txn.NextProducerId != -1)
         {
-            return producerEpoch < txnMetadata.ProducerEpoch
-                ? TxnErrorStatus.InvalidProducerEpoch
-                : TxnErrorStatus.UnknownProducerId;
+            txn.PreviousProducerId = txn.ProducerId;
+            txn.ProducerId = txn.NextProducerId;
+            txn.ProducerEpoch = 0;
+            txn.NextProducerId = -1;
         }
+        _producerStateManager.AdvanceEpoch(txn.ProducerId, txn.ProducerEpoch);
+    }
 
-        return TxnErrorStatus.None;
+    private static void ClearTransactionContents(TransactionMetadata txn)
+    {
+        txn.Partitions.Clear();
+        txn.ConsumerGroups.Clear();
+        txn.PendingOffsets.Clear();
     }
 
     /// <summary>

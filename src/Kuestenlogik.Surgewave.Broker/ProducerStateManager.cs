@@ -348,6 +348,24 @@ public sealed class ProducerStateManager
     }
 
     /// <summary>
+    /// Moves a producer to <paramref name="epoch"/> when that is not its current epoch, with fresh sequences —
+    /// the epoch a transactional producer continues with after EndTxn under transactions V2 or after a fence.
+    /// An unchanged epoch keeps the sequences: under transactions V1 the producer numbers on across transactions.
+    /// </summary>
+    public void AdvanceEpoch(long producerId, short epoch)
+    {
+        if (!_producers.TryGetValue(producerId, out var state))
+        {
+            RegisterProducerId(producerId, epoch);
+            return;
+        }
+        if (state.Epoch != epoch)
+        {
+            UpdateEpoch(producerId, epoch);
+        }
+    }
+
+    /// <summary>
     /// Updates the epoch for a producer (used when fencing during transactional recovery).
     /// Also resets sequence numbers since the new epoch starts fresh.
     /// </summary>

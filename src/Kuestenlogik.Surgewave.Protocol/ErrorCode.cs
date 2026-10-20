@@ -138,6 +138,12 @@ public enum ErrorCode : short
     /// <summary>The instance ID is still used by another member in the consumer group. That member must leave first.</summary>
     UnreleasedInstanceId = 111,
 
+    /// <summary>
+    /// The producer has been fenced: a newer producer with the same transactional id exists, or the
+    /// coordinator aborted the transaction and bumped the epoch. Recoverable by re-initialising.
+    /// </summary>
+    ProducerFenced = 90,
+
     /// <summary>The assignor or its version range is not supported by the consumer group.</summary>
     UnsupportedAssignor = 112,
 
@@ -151,4 +157,7 @@ public enum ErrorCode : short
     /// wrong broker's bootstrap address.
     /// </summary>
     RebootstrapRequired = 129,
+
+    /// <summary>The transaction cannot continue and the client must abort it, e.g. a partition that was not added to it.</summary>
+    TransactionAbortable = 120,
 }

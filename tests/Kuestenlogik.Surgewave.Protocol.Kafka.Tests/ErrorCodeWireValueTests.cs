@@ -38,6 +38,11 @@ public sealed class ErrorCodeWireValueTests
     // code was listed here.
     [InlineData(ErrorCode.InvalidRecord, 87)]
     [InlineData(ErrorCode.SnapshotNotFound, 98)]
+    // The transaction codes transactions V2 puts on the wire (#190).
+    [InlineData(ErrorCode.InvalidProducerIdMapping, 49)]
+    [InlineData(ErrorCode.ConcurrentTransactions, 51)]
+    [InlineData(ErrorCode.ProducerFenced, 90)]
+    [InlineData(ErrorCode.TransactionAbortable, 120)]
     // And the everyday ones, so a careless renumbering anywhere in the block is caught.
     [InlineData(ErrorCode.None, 0)]
     [InlineData(ErrorCode.OffsetOutOfRange, 1)]
