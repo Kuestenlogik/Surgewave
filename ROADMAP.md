@@ -74,6 +74,8 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Samples.Akka#20](https://github.com/Kuestenlogik/Surgewave.Samples.Akka/issues/20) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
 - [Kuestenlogik/Surgewave.Samples#17](https://github.com/Kuestenlogik/Surgewave.Samples/issues/17) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
 - [Kuestenlogik/Surgewave.Bootcamp#6](https://github.com/Kuestenlogik/Surgewave.Bootcamp/issues/6) **deps: SSH.NET and SQLitePCLRaw with known advisories in the lessons** 
+- [#185](https://github.com/Kuestenlogik/Surgewave/issues/185) **Document the public API of the src/ libraries and drop the CS1591/CS1573 suppression** 
+- [Kuestenlogik/Surgewave.Bootcamp#8](https://github.com/Kuestenlogik/Surgewave.Bootcamp/issues/8) **Lesson code: clear the analyzer warnings and fix unit-11/lesson-6 (SurgewaveAdminClient no longer exists)** 
 
 ---
 
