@@ -8,6 +8,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <IncludeContentInPack>true</IncludeContentInPack>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- A template package carries content only: without this the nuspec declares a net10.0
+         dependency group with no matching lib/ folder (NU5128). -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <NoDefaultExcludes>true</NoDefaultExcludes>
   </PropertyGroup>
 
