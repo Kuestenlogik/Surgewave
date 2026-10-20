@@ -178,8 +178,22 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
             ProducerId = r.ProducerId,
             ProducerEpoch = r.ProducerEpoch,
             Topics = topics,
+            // Kafka: TxnOffsetCommit v5+ is sent only by a client running transactions V2.
+            TransactionVersion = r.ApiVersion >= 5 ? TransactionVersion.Tv2 : TransactionVersion.Tv0,
         };
     }
+
+    /// <summary>
+    /// TxnOffsetCommit's verification errors as Kafka puts them on the wire per request version: a fenced
+    /// producer is INVALID_PRODUCER_EPOCH, and a group that was not added is TRANSACTION_ABORTABLE only for
+    /// clients that know it (v4+), INVALID_TXN_STATE before.
+    /// </summary>
+    private static ErrorCode ToTxnOffsetCommitErrorCode(TxnErrorStatus status, short apiVersion) => status switch
+    {
+        TxnErrorStatus.ProducerFenced => ErrorCode.InvalidProducerEpoch,
+        TxnErrorStatus.TransactionAbortable when apiVersion < 4 => ErrorCode.InvalidTxnState,
+        _ => ToErrorCode(status),
+    };
 
     private static TxnOffsetCommitResponse ToTxnOffsetCommitResponse(TxnOffsetCommitResult result, TxnOffsetCommitRequest r)
     {
@@ -189,7 +203,7 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
             var partitions = new List<TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult>(t.Partitions.Count);
             foreach (var p in t.Partitions)
             {
-                partitions.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult { Partition = p.Partition, ErrorCode = ToErrorCode(p.Status) });
+                partitions.Add(new TxnOffsetCommitResponse.TxnOffsetCommitPartitionResult { Partition = p.Partition, ErrorCode = ToTxnOffsetCommitErrorCode(p.Status, r.ApiVersion) });
             }
             topics.Add(new TxnOffsetCommitResponse.TxnOffsetCommitTopicResult { Name = t.Name, TopicId = t.TopicId, Partitions = partitions });
         }

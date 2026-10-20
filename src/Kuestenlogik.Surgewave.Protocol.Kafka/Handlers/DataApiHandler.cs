@@ -86,6 +86,24 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
     /// written. Kept out of <c>ProduceRequest.ReadFrom</c> deliberately — the parse path is
     /// benchmark-gated and this is a protocol decision, not a decoding one.
     /// </summary>
+    /// <summary>
+    /// A transactional batch's verification outcome as Kafka puts it on a produce response, per request
+    /// version (ReplicaManager / AddPartitionsToTxnManager): a fenced producer is INVALID_PRODUCER_EPOCH; a
+    /// partition that was not added is TRANSACTION_ABORTABLE for clients that know it (v11+), INVALID_TXN_STATE
+    /// before; CONCURRENT_TRANSACTIONS stays for transactions V2 clients (v12+) and is NOT_ENOUGH_REPLICAS for
+    /// older ones, which retry that without refreshing metadata.
+    /// </summary>
+    private static ErrorCode ToProduceVerificationError(TxnErrorStatus status, short apiVersion) => status switch
+    {
+        TxnErrorStatus.None => ErrorCode.None,
+        TxnErrorStatus.ProducerFenced => ErrorCode.InvalidProducerEpoch,
+        TxnErrorStatus.TransactionAbortable => apiVersion >= 11 ? ErrorCode.TransactionAbortable : ErrorCode.InvalidTxnState,
+        TxnErrorStatus.ConcurrentTransactions => apiVersion >= 12 ? ErrorCode.ConcurrentTransactions : ErrorCode.NotEnoughReplicas,
+        TxnErrorStatus.InvalidProducerIdMapping => ErrorCode.InvalidProducerIdMapping,
+        TxnErrorStatus.InvalidRequest => ErrorCode.InvalidRequest,
+        _ => ErrorCode.InvalidTxnState,
+    };
+
     private static ProduceResponse InvalidAcksResponse(ProduceRequest request)
     {
         var responses = new List<ProduceResponse.TopicProduceResponse>(request.TopicData.Count);
@@ -419,6 +437,32 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     // Extract idempotence info and validate if present
                     var (producerId, producerEpoch, baseSequence, lastOffsetDelta) =
                         CompressionCodec.GetIdempotenceInfo(producerRecords.Span);
+
+                    // A transactional batch is checked against its transaction before anything is written
+                    // (KIP-890). Produce v12+ (transactions V2) adds the partition to the transaction here,
+                    // since such a client sends no AddPartitionsToTxn; older clients must have added it.
+                    if (CompressionCodec.IsTransactional(producerRecords.Span) &&
+                        !CompressionCodec.IsControlBatch(producerRecords.Span))
+                    {
+                        var verification = string.IsNullOrEmpty(request.TransactionalId)
+                            ? ErrorCode.TransactionalIdAuthorizationFailed
+                            : ToProduceVerificationError(
+                                _transactionCoordinator.VerifyTransactionalBatch(
+                                    request.TransactionalId, producerId, producerEpoch, topicPartition,
+                                    request.ApiVersion >= 12 ? TransactionVersion.Tv2 : TransactionVersion.Tv0),
+                                request.ApiVersion);
+                        if (verification != ErrorCode.None)
+                        {
+                            partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                            {
+                                Index = partitionData.Index,
+                                ErrorCode = verification,
+                                BaseOffset = -1,
+                                LogAppendTimeMs = -1
+                            });
+                            continue;
+                        }
+                    }
 
                     if (producerId != KafkaConstants.Producer.NoProducerId)
                     {

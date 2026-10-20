@@ -69,6 +69,12 @@ public sealed record TxnOffsetCommitCommand
     public required long ProducerId { get; init; }
     public required short ProducerEpoch { get; init; }
     public required IReadOnlyList<TxnOffsetCommitTopic> Topics { get; init; }
+
+    /// <summary>
+    /// The client's transaction protocol; Kafka's TxnOffsetCommit v5+ means <see cref="TransactionVersion.Tv2"/>,
+    /// which adds the group to the transaction itself instead of requiring AddOffsetsToTxn first.
+    /// </summary>
+    public TransactionVersion TransactionVersion { get; init; } = TransactionVersion.Tv0;
 }
 
 public sealed record TxnOffsetCommitPartitionResult(int Partition, TxnErrorStatus Status);

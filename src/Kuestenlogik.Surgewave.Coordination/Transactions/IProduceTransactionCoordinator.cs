@@ -48,6 +48,17 @@ public interface IProduceTransactionCoordinator
         TopicPartition topicPartition, long baseOffset);
 
     /// <summary>
+    /// Checks a transactional batch against its transaction before it is appended (KIP-890). Under
+    /// <see cref="TransactionVersion.Tv2"/> (Kafka's produce v12+) the partition is added to the transaction
+    /// here, since the client no longer sends AddPartitionsToTxn; under older versions it must already be in
+    /// it. Returns <see cref="TxnErrorStatus.ProducerFenced"/> for another epoch,
+    /// <see cref="TxnErrorStatus.ConcurrentTransactions"/> while the transaction's markers are written, and
+    /// <see cref="TxnErrorStatus.TransactionAbortable"/> for a partition that was not added.
+    /// </summary>
+    TxnErrorStatus VerifyTransactionalBatch(
+        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version);
+
+    /// <summary>
     /// Records a transactional batch being written (produce path) so the Last Stable Offset
     /// can be tracked for READ_COMMITTED isolation.
     /// </summary>

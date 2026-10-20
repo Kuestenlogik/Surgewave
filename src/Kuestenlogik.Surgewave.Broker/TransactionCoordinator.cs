@@ -221,29 +221,30 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         => _transactionIndex.AbortTransaction(producerId, partitions, abortOffset);
 
     /// <summary>
-    /// Records a transactional batch being written. Called from produce path.
-    /// Also implicitly adds the partition to the transaction metadata.
+    /// Records a transactional batch being written. Called from produce path, after
+    /// <see cref="VerifyTransactionalBatch"/> has put the partition into its transaction.
     /// </summary>
     public void RecordTransactionalBatch(TopicPartition partition, long producerId, long baseOffset)
-    {
-        _transactionIndex.RecordTransactionalBatch(partition, producerId, baseOffset);
+        => _transactionIndex.RecordTransactionalBatch(partition, producerId, baseOffset);
 
-        // Also track this partition in our transaction metadata
-        foreach (var txnMeta in _transactionsByTxnId.Values)
+    /// <inheritdoc />
+    public TxnErrorStatus VerifyTransactionalBatch(
+        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version)
+        => WithTransaction(transactionalId, producerId, producerEpoch, txn =>
         {
-            if (txnMeta.ProducerId == producerId &&
-                (txnMeta.State == TransactionState.Ongoing || txnMeta.State == TransactionState.Empty))
+            if (version >= TransactionVersion.Tv2)
             {
-                txnMeta.Partitions.Add(partition);
-                txnMeta.LastActivityTime = DateTimeOffset.UtcNow;
-                if (txnMeta.State == TransactionState.Empty)
-                {
-                    txnMeta.State = TransactionState.Ongoing;
-                }
-                break;
+                txn.ClientTransactionVersion = version;
+                return AddToTransaction(txn, partition, groupId: null);
             }
-        }
-    }
+
+            // Kafka's verification (KIP-890 part 1): the partition was added with AddPartitionsToTxn.
+            if (txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
+                return TxnErrorStatus.ConcurrentTransactions;
+            return txn.State == TransactionState.Ongoing && txn.Partitions.Contains(partition)
+                ? TxnErrorStatus.None
+                : TxnErrorStatus.TransactionAbortable;
+        });
 
     /// <summary>
     /// Validates a produce batch for idempotence (sequence number validation). Produce-hot-path;
@@ -475,6 +476,20 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         {
             if (txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
                 return TxnErrorStatus.ConcurrentTransactions;
+
+            if (request.TransactionVersion >= TransactionVersion.Tv2)
+            {
+                // V2 sends no AddOffsetsToTxn: the commit puts the group into the transaction.
+                txn.ClientTransactionVersion = request.TransactionVersion;
+                var added = AddToTransaction(txn, partition: null, request.GroupId);
+                if (added != TxnErrorStatus.None)
+                    return added;
+            }
+            else if (txn.State != TransactionState.Ongoing || !txn.ConsumerGroups.Contains(request.GroupId))
+            {
+                // Kafka's verification: the group was added with AddOffsetsToTxn.
+                return TxnErrorStatus.TransactionAbortable;
+            }
 
             for (var i = 0; i < resolved.Count; i++)
             {
