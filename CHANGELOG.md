@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-- **No package with a known advisory (#183)** — `MessagePack` 3.1.6 → 3.1.12 (twelve advisories, among them GHSA-382j-8mxh-c7x2, fixed in 3.1.7), `SSH.NET` 2025.1.0 → 2026.0.0 (GHSA-mggc-4xg6-vcxf, GHSA-q939-rpr3-3284), `Microsoft.SourceLink.GitHub` 10.0.300 → 10.0.402 (`Microsoft.Build.Tasks.Git` GHSA-23fw-v26w-5fgq). Every `Microsoft.AspNetCore.*`, `Microsoft.Extensions.*`, `Microsoft.Data.Sqlite` and `System.*` 10.0.x pin moves to 10.0.13 (`Microsoft.AspNetCore.Components.WebAssembly.Server` 10.0.11 carried GHSA-qjpx-jqm5-h2c4 and GHSA-g27p-qf6j-c96c); `Microsoft.Data.Sqlite` 10.0.13 brings SQLitePCLRaw 2.1.13, so the GHSA-2m69-gcr7-jv3q suppression from #54 is gone. The `Microsoft.OpenApi` transitive pin follows the raised lower bound of `Microsoft.AspNetCore.OpenApi` 10.0.13 (2.9.0 → 2.12.2).
-
 ### Changed
 - **Everything in English, and a guard that keeps it so (#181)** — the remaining German in docs (the MassTransit rider concept, the Kafka upstream notes, the AWS benchmark cost notes), CHANGELOG, comments and XML docs in `src`/`tests`, site developer comments, build files, workflows, installer files and scripts is translated. Visible strings that changed: the client's retry log message ("Surgewave broker not reachable … attempt …"), a Control natural-language query suggestion ("Latest 5 messages from events"), the assistant's help example, the release body line `release.yml` writes (`… or :latest`), the milestone wording `scripts/release.mjs` writes ("Shipped in <tag>"), and five chart `aria-label`s on the site (their German originals are kept in `site/_i18n/de/` for the planned German version of the site). `docs/upstream/kafka-welle-3-low-priority-verify.md` is now `docs/upstream/kafka-wave-3-low-priority-verify.md`. `scripts/check-english.mjs` runs in the CI build job and fails with `file:line` on German outside `.github/language-allowlist.txt`, where each entry names its reason (German intent keywords and query patterns the broker and the assistant recognise, non-ASCII test inputs).
+
+## [0.5.2] - 2026-10-20
+
+### Security
+- **No package with a known advisory (#183)** — backported to 0.5.1 without the 0.6 work on `main`. `Microsoft.Data.Sqlite` 10.0.8 → 10.0.13 brings SQLitePCLRaw 2.1.13 ([GHSA-2m69-gcr7-jv3q](https://github.com/advisories/GHSA-2m69-gcr7-jv3q), high; it reached the Streams packages, the SQLite storage engine, Protocol.PostgreSql and Compatibility.Confluent.Kafka.Streams), and its suppression from #54 is gone. `MessagePack` 3.1.6 → 3.1.12 (twelve advisories, among them GHSA-hv8m-jj95-wg3x and GHSA-382j-8mxh-c7x2), `SSH.NET` 2025.1.0 → 2026.0.0 (GHSA-mggc-4xg6-vcxf, GHSA-q939-rpr3-3284), `Microsoft.SourceLink.GitHub` 10.0.300 → 10.0.402 (GHSA-23fw-v26w-5fgq). Every `Microsoft.AspNetCore.*`, `Microsoft.Extensions.*` and `System.*` 10.0.x pin moves to 10.0.13 (`Microsoft.AspNetCore.Components.WebAssembly.Server`: GHSA-qjpx-jqm5-h2c4, GHSA-g27p-qf6j-c96c); `Microsoft.OpenApi` 2.9.0 → 2.12.2 and `Microsoft.IdentityModel.*` 8.19.1 → 8.22.0 follow the lower bounds the 10.0.13 packages raise.
+- **NuGet audit fails the restore** — NU1901–NU1903 are no longer suppressed; NuGet audit checks the whole graph at every severity, and warnings as errors turn an advisory into a failed restore.
 
 ## [0.1.13] - 2026-06-08
 
