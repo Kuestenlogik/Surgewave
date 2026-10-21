@@ -279,8 +279,36 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
 
         foreach (var topicData in request.TopicData)
         {
-            var topic = topicData.Name ?? string.Empty;
             var partitionResponses = new List<ProduceResponse.PartitionProduceResponse>(topicData.PartitionData.Count);
+
+            // Produce v13+ names the topic by id only (KIP-516). Taking the absent name for "" wrote every
+            // record of a Java 4.x producer into a topic with an empty name and answered success.
+            var topic = topicData.Name;
+            if (string.IsNullOrEmpty(topic) && topicData.TopicId != Guid.Empty)
+            {
+                topic = _logManager.ResolveTopicId(topicData.TopicId);
+                if (topic is null)
+                {
+                    foreach (var partitionData in topicData.PartitionData)
+                    {
+                        partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                        {
+                            Index = partitionData.Index,
+                            ErrorCode = ErrorCode.UnknownTopicId,
+                            BaseOffset = -1,
+                            LogAppendTimeMs = -1
+                        });
+                    }
+                    responses.Add(new ProduceResponse.TopicProduceResponse
+                    {
+                        Name = string.Empty,
+                        TopicId = topicData.TopicId,
+                        PartitionResponses = partitionResponses
+                    });
+                    continue;
+                }
+            }
+            topic ??= string.Empty;
 
             // Reject writes to read-only mirror topics (geo-replication)
             var topicMetadata = _logManager.GetTopicMetadata(topic);
