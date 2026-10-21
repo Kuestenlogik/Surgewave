@@ -214,6 +214,42 @@ public sealed class ApiVersionsResponseTests
     }
 
     [Fact]
+    public void FinalizedFeatures_AreWrittenMaxLevelFirst_AsKafkasFinalizedFeatureKey()
+    {
+        // Kafka's FinalizedFeatureKey is Name, MaxVersionLevel, MinVersionLevel. Written min-first, a Java client
+        // read transaction.version as level 0 and never ran transactions V2; kafka-features.sh refused the
+        // response ("minVersionLevel: 2, maxVersionLevel: 0").
+        var response = new ApiVersionsResponse
+        {
+            CorrelationId = 1,
+            ApiVersion = 3,
+            ErrorCode = ErrorCode.None,
+            ApiVersions = Array.Empty<ApiVersionsResponse.SupportedApiVersion>(),
+            FinalizedFeaturesEpoch = 1,
+            FinalizedFeatures = [new() { Name = "transaction.version", MinVersionLevel = 1, MaxVersionLevel = 2 }],
+        };
+
+        using var writer = new KafkaProtocolWriter();
+        response.WriteTo(writer);
+        var bytes = writer.ToArray();
+
+        using var expected = new KafkaProtocolWriter();
+        expected.WriteCompactString("transaction.version");
+        expected.WriteInt16(2); // MaxVersionLevel
+        expected.WriteInt16(1); // MinVersionLevel
+        Assert.True(bytes.AsSpan().IndexOf(expected.ToArray()) >= 0);
+    }
+
+    [Fact]
+    public void Default_FinalizesTransactionVersion2()
+    {
+        var feature = Assert.Single(ApiVersionsResponse.CreateDefault(1, 3).FinalizedFeatures!, f => f.Name == "transaction.version");
+
+        Assert.Equal(2, feature.MaxVersionLevel);
+        Assert.Equal(2, feature.MinVersionLevel);
+    }
+
+    [Fact]
     public void ApiVersionsResponse_WithFinalizedFeaturesEpoch_SerializesTaggedField()
     {
         // Arrange

@@ -244,9 +244,12 @@ public sealed class ApiVersionsResponse : KafkaResponse
                 finalWriter.WriteVarInt(FinalizedFeatures.Count + 1);
                 foreach (var feature in FinalizedFeatures)
                 {
+                    // Kafka's FinalizedFeatureKey: Name, MaxVersionLevel, MinVersionLevel — max first, unlike
+                    // SupportedFeatureKey. Written min-first, every client read the levels swapped:
+                    // transaction.version came out as 0, so a Java client never turned transactions V2 on.
                     finalWriter.WriteCompactString(feature.Name);
-                    finalWriter.WriteInt16(feature.MinVersionLevel);
                     finalWriter.WriteInt16(feature.MaxVersionLevel);
+                    finalWriter.WriteInt16(feature.MinVersionLevel);
                     finalWriter.WriteVarInt(0); // No nested tagged fields
                 }
                 var finalData = finalWriter.ToArray();
@@ -399,7 +402,8 @@ public sealed class ApiVersionsResponse : KafkaResponse
             FinalizedFeatures =
             [
                 new FinalizedFeature { Name = "group.version", MinVersionLevel = 1, MaxVersionLevel = 1 },
-                new FinalizedFeature { Name = "transaction.version", MinVersionLevel = 0, MaxVersionLevel = 2 },
+                // Finalized at one level, as Kafka finalizes every feature (min = max = the level).
+                new FinalizedFeature { Name = "transaction.version", MinVersionLevel = 2, MaxVersionLevel = 2 },
                 new FinalizedFeature { Name = "metadata.version", MinVersionLevel = 22, MaxVersionLevel = 22 },
                 new FinalizedFeature { Name = "share.version", MinVersionLevel = 1, MaxVersionLevel = 1 },
             ],
