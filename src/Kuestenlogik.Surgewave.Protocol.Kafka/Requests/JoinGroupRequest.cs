@@ -13,6 +13,9 @@ public sealed class JoinGroupRequest : KafkaRequest
     public required string ProtocolType { get; init; }
     public required GroupProtocol[] Protocols { get; init; }
 
+    /// <summary>v8+: why the member (re)joins, for the broker's log (KIP-800). Null when not given.</summary>
+    public string? Reason { get; init; }
+
     public sealed class GroupProtocol
     {
         public required string Name { get; init; }
@@ -104,6 +107,10 @@ public sealed class JoinGroupRequest : KafkaRequest
             });
         }
 
+        // Reason (v8+), before the tagged fields. Unread, it was taken for the tagged-field count, and a
+        // Java consumer's JoinGroup v9 failed to parse.
+        var reason = apiVersion >= 8 ? reader.ReadCompactString() : null;
+
         // Skip tagged fields for flexible versions
         if (isFlexible)
         {
@@ -128,7 +135,8 @@ public sealed class JoinGroupRequest : KafkaRequest
             MemberId = memberId ?? string.Empty,
             GroupInstanceId = groupInstanceId,
             ProtocolType = protocolType ?? string.Empty,
-            Protocols = protocols
+            Protocols = protocols,
+            Reason = reason,
         };
     }
 }
@@ -140,8 +148,16 @@ public sealed class JoinGroupResponse : KafkaResponse
 {
     public required ErrorCode ErrorCode { get; init; }
     public required int GenerationId { get; init; }
+
+    /// <summary>v7+: the group's protocol type (e.g. "consumer").</summary>
+    public string? ProtocolType { get; init; }
+
     public required string ProtocolName { get; init; }
     public required string Leader { get; init; }
+
+    /// <summary>v9+: the leader skips computing the assignment (static membership, KIP-814).</summary>
+    public bool SkipAssignment { get; init; }
+
     public required string MemberId { get; init; }
     public required JoinGroupMember[] Members { get; init; }
 
@@ -175,6 +191,14 @@ public sealed class JoinGroupResponse : KafkaResponse
         writer.WriteInt16((short)ErrorCode);
         writer.WriteInt32(GenerationId);
 
+        // ProtocolType (v7+) and SkipAssignment (v9+) were missing: a Java consumer reading v9 took the
+        // protocol name for the protocol type, everything after it shifted, and the members array came out
+        // as null ("non-nullable field members was serialized as null").
+        if (ApiVersion >= 7)
+        {
+            writer.WriteCompactString(ProtocolType);
+        }
+
         // Protocol name
         if (ApiVersion >= 6)
         {
@@ -193,6 +217,11 @@ public sealed class JoinGroupResponse : KafkaResponse
         else
         {
             writer.WriteString(Leader);
+        }
+
+        if (ApiVersion >= 9)
+        {
+            writer.WriteBoolean(SkipAssignment);
         }
 
         // Member ID

@@ -189,8 +189,11 @@ public sealed class AddPartitionsToTxnResponse : KafkaResponse
                 {
                     writer.WriteInt32(partition.Partition);
                     writer.WriteInt16((short)partition.ErrorCode);
+                    // Each AddPartitionsToTxnPartitionResult is a struct with its own tagged fields in
+                    // flexible versions. Without this byte a Java client reading v3 ran out of buffer.
+                    writer.WriteVarInt(0);
                 }
-                writer.WriteVarInt(0); // Tagged fields
+                writer.WriteVarInt(0); // Tagged fields of the topic result
             }
             writer.WriteVarInt(0); // Tagged fields
         }

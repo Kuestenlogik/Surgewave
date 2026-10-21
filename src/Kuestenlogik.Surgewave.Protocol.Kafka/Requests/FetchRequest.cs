@@ -158,13 +158,21 @@ public sealed partial class FetchRequest : KafkaRequest
 
                 writer.WriteInt32(partition.MaxBytes);
 
-                // ReplicaDirectoryId (v17+, KIP-858)
-                if (ApiVersion >= 17)
-                    writer.WriteUuid(partition.ReplicaDirectoryId);
-
-                // Partition tagged fields
+                // Partition tagged fields; ReplicaDirectoryId (v17+, KIP-858) is tag 0 and written only when set
                 if (isFlexible)
-                    writer.WriteVarInt(0);
+                {
+                    if (ApiVersion >= 17 && partition.ReplicaDirectoryId != Guid.Empty)
+                    {
+                        writer.WriteVarInt(1);
+                        writer.WriteVarInt(0);  // tag
+                        writer.WriteVarInt(16); // size
+                        writer.WriteUuid(partition.ReplicaDirectoryId);
+                    }
+                    else
+                    {
+                        writer.WriteVarInt(0);
+                    }
+                }
             }
 
             // Topic tagged fields

@@ -162,11 +162,10 @@ public sealed partial class FetchRequest
 
             var maxBytesPerPartition = protocolReader.ReadInt32();
 
-            Guid replicaDirectoryId = Guid.Empty;
-            if (apiVersion >= 17)
-                replicaDirectoryId = protocolReader.ReadUuid();
-
-            SkipTaggedFields(protocolReader);
+            // ReplicaDirectoryId (v17+, tag 0) and HighWatermark (v18+, tag 1) are tagged fields of the
+            // partition, not fixed ones. Read as a fixed UUID, the next partition's bytes were taken for it
+            // and a Java 4.x consumer's fetch failed to parse ("UUID requires 16 bytes").
+            var replicaDirectoryId = ReadPartitionTaggedFields(protocolReader);
 
             partitions.Add(new FetchPartition
             {
@@ -290,6 +289,26 @@ public sealed partial class FetchRequest
         }
 
         return forgottenTopicsData;
+    }
+
+    /// <summary>
+    /// A fetch partition's tagged fields: ReplicaDirectoryId (tag 0, a follower's log directory) is kept, the
+    /// rest — HighWatermark (tag 1, the leader's view of a follower) and unknown tags — skipped.
+    /// </summary>
+    private static Guid ReadPartitionTaggedFields(KafkaProtocolReader protocolReader)
+    {
+        var replicaDirectoryId = Guid.Empty;
+        var taggedFieldCount = protocolReader.ReadVarInt();
+        for (int i = 0; i < taggedFieldCount; i++)
+        {
+            var tag = protocolReader.ReadVarInt();
+            var size = protocolReader.ReadVarInt();
+            if (tag == 0 && size == 16)
+                replicaDirectoryId = protocolReader.ReadUuid();
+            else
+                protocolReader.Skip(size);
+        }
+        return replicaDirectoryId;
     }
 
     private static void SkipTaggedFields(KafkaProtocolReader protocolReader)

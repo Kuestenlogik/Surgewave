@@ -121,6 +121,7 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
             ApiVersion = r.ApiVersion,
             ErrorCode = ErrorCode.None,
             GenerationId = result.GenerationId,
+            ProtocolType = r.ProtocolType,
             ProtocolName = result.ProtocolName,
             Leader = result.LeaderId,
             MemberId = result.MemberId,
