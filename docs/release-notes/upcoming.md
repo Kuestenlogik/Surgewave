@@ -52,7 +52,47 @@ Combined mode stays the default and nothing changes for a single broker,
 an embedded host, or an existing cluster: leave both settings alone and
 every node keeps voting exactly as before.
 
+### Transactions V2, end to end with a Java client (#190)
+
+Surgewave announced Kafka's `transaction.version` 2 but did not implement
+it; a Java client could not even read the answer to `commitTransaction()`.
+Now every EndTxn bumps the producer epoch and returns it, a retry is
+recognised by the epoch below, the producer id rotates when the epoch runs
+out, and produce v12 / TxnOffsetCommit v5 add the partition or group to the
+transaction themselves. EndTxn answers as Kafka does under V1 and V2:
+a retried EndTxn of a completed transaction succeeds, an EndTxn while the
+markers are written is `CONCURRENT_TRANSACTIONS`, another epoch is
+`PRODUCER_FENCED` — also for a commit that raced the coordinator's timeout
+abort (KAFKA-20785). The timeout abort fences the producer and is persisted,
+and a transaction left prepared by a restart is completed. Checked with the
+Java 4.1 client: 2000 records in transactions, all 2000 read back
+`read_committed`.
+
 ## Fixes
+
+### Java 4.x clients: produce, fetch, groups and admin requests on the wire
+
+Running a current Java client against the broker found:
+- **Produce v13 wrote every record into a topic with an empty name** and
+  answered success: v13 names the topic by id, and the id was not resolved.
+- Finalized features were written min-before-max, so clients read
+  `transaction.version` as 0 and `kafka-features.sh` refused the answer.
+- Twenty advertised APIs were missing from the flexible-version table, so
+  their request header was misread (DescribeTransactions,
+  DescribeTopicPartitions, DescribeCluster among them).
+- AddPartitionsToTxn v3, Fetch v17/v18 and JoinGroup v8/v9 lacked fields
+  or tagged fields the Java client sends or expects.
+
+### Creating a topic while its first produce arrives no longer fails with an I/O error
+
+With auto-create, the topic creation and the first produce opened the same
+segment file; on Windows the second open failed and the produce got an
+unknown error.
+
+### A broker with `Host` set to an interface address starts
+
+The Connect worker connected to `localhost`, which such a broker does not
+listen on, and the broker exited.
 
 ### An idempotent producer's records are no longer lost when its first requests race a new partition (#191)
 
