@@ -36,6 +36,21 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     [Range(1, 65535)]
     public int Port { get; set; } = KafkaConstants.Ports.Kafka;
 
+    /// <summary>
+    /// The address a component inside the broker process connects to the broker's own listener on:
+    /// <see cref="Host"/> where it names one address, loopback where it is a wildcard. With
+    /// <see cref="Host"/> set to an interface address the listener binds there only, so a fixed
+    /// <c>localhost</c> is refused.
+    /// </summary>
+    public string LocalListenerAddress()
+    {
+        var host = System.Net.IPAddress.TryParse(Host, out var address)
+            && (address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any))
+                ? "localhost"
+                : Host;
+        return host.Contains(':', StringComparison.Ordinal) ? $"[{host}]:{Port}" : $"{host}:{Port}";
+    }
+
     [Range(1, 65535)]
     public int GrpcPort { get; set; } = KafkaConstants.Ports.Grpc;
 

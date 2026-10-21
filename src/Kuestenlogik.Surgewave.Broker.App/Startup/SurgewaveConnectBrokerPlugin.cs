@@ -94,7 +94,7 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
         // stays Protocol.Kafka-free (#59). A loopback to the co-located broker never needs
         // the Kafka wire; native is also the faster path.
         var localClient = await SurgewaveClient
-            .Create($"localhost:{config.Port}")
+            .Create(config.LocalListenerAddress())
             .UseSurgewaveProtocol()
             .BuildAsync();
         await localClient.ConnectAsync();
