@@ -40,4 +40,13 @@ public enum TxnErrorStatus
 
     /// <summary>The request is malformed, e.g. a transactional request without a transactional id.</summary>
     InvalidRequest,
+
+    /// <summary>
+    /// The producer may not do what it asked for — Kafka's answer to a request for two-phase commit on a broker
+    /// that does not offer it.
+    /// </summary>
+    TransactionalIdAuthorizationFailed,
+
+    /// <summary>The request asks for a feature this broker does not implement (KIP-939's KeepPreparedTxn).</summary>
+    UnsupportedVersion,
 }

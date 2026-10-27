@@ -9,6 +9,9 @@ public sealed class AlterPartitionReassignmentsRequest : KafkaRequest
     /// <summary>The time in ms to wait for the request to complete.</summary>
     public int TimeoutMs { get; init; }
 
+    /// <summary>v1+: whether a reassignment may change a partition's replication factor (KIP-1101). Default true.</summary>
+    public bool AllowReplicationFactorChange { get; init; } = true;
+
     /// <summary>The topics to reassign.</summary>
     public required List<ReassignableTopic> Topics { get; init; }
 
@@ -55,7 +58,7 @@ public sealed class AlterPartitionReassignmentsRequest : KafkaRequest
 
                 if (partition.Replicas == null)
                 {
-                    writer.WriteVarInt(-1); // Null compact array
+                    writer.WriteVarInt(0); // Null compact array
                 }
                 else
                 {
@@ -78,6 +81,7 @@ public sealed class AlterPartitionReassignmentsRequest : KafkaRequest
     public static AlterPartitionReassignmentsRequest ReadFrom(KafkaProtocolReader reader, short apiVersion, int correlationId, string clientId)
     {
         var timeoutMs = reader.ReadInt32();
+        var allowReplicationFactorChange = apiVersion < 1 || reader.ReadBoolean();
 
         var topicCount = reader.ReadVarInt() - 1;
         var topics = new List<ReassignableTopic>(topicCount);
@@ -131,6 +135,7 @@ public sealed class AlterPartitionReassignmentsRequest : KafkaRequest
             CorrelationId = correlationId,
             ClientId = clientId,
             TimeoutMs = timeoutMs,
+            AllowReplicationFactorChange = allowReplicationFactorChange,
             Topics = topics
         };
     }
@@ -174,12 +179,22 @@ public sealed class AlterPartitionReassignmentsResponse : KafkaResponse
         public string? ErrorMessage { get; init; }
     }
 
+    /// <summary>v1+: echoes whether the request allowed replication-factor changes.</summary>
+    public bool AllowReplicationFactorChange { get; init; } = true;
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         writer.WriteInt32(CorrelationId);
         writer.WriteVarInt(0); // Response header tagged fields
 
         writer.WriteInt32(ThrottleTimeMs);
+
+        // v1+ (KIP-1101): whether the reassignment was allowed to change replication factors; missing, a v1
+        // response was read one byte off from here on.
+        if (ApiVersion >= 1)
+        {
+            writer.WriteBoolean(AllowReplicationFactorChange);
+        }
         writer.WriteInt16((short)ErrorCode);
         writer.WriteCompactString(ErrorMessage);
 
@@ -291,7 +306,7 @@ public sealed class ListPartitionReassignmentsRequest : KafkaRequest
 
         if (Topics == null)
         {
-            writer.WriteVarInt(-1); // Null compact array
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {

@@ -158,6 +158,7 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
             {
                 CorrelationId = request.CorrelationId,
                 ApiVersion = request.ApiVersion,
+                AllowReplicationFactorChange = request.AllowReplicationFactorChange,
                 ThrottleTimeMs = 0,
                 ErrorCode = ErrorCode.NotController,
                 ErrorMessage = "Not the controller — retry against the broker advertised by Metadata",
@@ -226,6 +227,7 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
         {
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
+            AllowReplicationFactorChange = request.AllowReplicationFactorChange,
             ThrottleTimeMs = 0,
             ErrorCode = ErrorCode.None,
             ErrorMessage = null,

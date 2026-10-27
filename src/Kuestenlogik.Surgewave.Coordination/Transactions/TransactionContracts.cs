@@ -12,6 +12,12 @@ public sealed record InitProducerIdCommand
     public required int TransactionTimeoutMs { get; init; }
     public required long ProducerId { get; init; }
     public required short ProducerEpoch { get; init; }
+
+    /// <summary>The producer asks for two-phase commit (KIP-939), which this coordinator does not offer.</summary>
+    public bool Enable2Pc { get; init; }
+
+    /// <summary>The producer asks to keep a prepared transaction across the init (KIP-939).</summary>
+    public bool KeepPreparedTxn { get; init; }
 }
 
 public sealed record InitProducerIdResult(TxnErrorStatus Status, long ProducerId, short ProducerEpoch);

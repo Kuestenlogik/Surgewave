@@ -182,11 +182,11 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
         // Topology (nullable struct)
         if (Topology == null)
         {
-            writer.WriteVarInt(-1); // Null struct marker
+            writer.WriteInt8(-1); // Null struct marker
         }
         else
         {
-            writer.WriteVarInt(0); // Presence marker
+            writer.WriteInt8(1); // Presence marker
             writer.WriteInt32(Topology.Epoch);
             writer.WriteVarInt(Topology.Subtopologies.Count + 1);
             foreach (var sub in Topology.Subtopologies)
@@ -243,11 +243,11 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
         // UserEndpoint (nullable struct)
         if (UserEndpoint == null)
         {
-            writer.WriteVarInt(-1); // Null struct marker
+            writer.WriteInt8(-1); // Null struct marker
         }
         else
         {
-            writer.WriteVarInt(0); // Presence marker
+            writer.WriteInt8(1); // Presence marker
             writer.WriteCompactString(UserEndpoint.Host);
             writer.WriteInt16((short)UserEndpoint.Port);
             writer.WriteVarInt(0); // Endpoint tagged fields
@@ -281,7 +281,7 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
     {
         if (list == null)
         {
-            writer.WriteVarInt(-1);
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -300,7 +300,7 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
     {
         if (list == null)
         {
-            writer.WriteVarInt(-1);
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -318,7 +318,7 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
     {
         if (list == null)
         {
-            writer.WriteVarInt(-1);
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -343,74 +343,11 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
         var rackId = reader.ReadCompactString();
         var rebalanceTimeoutMs = reader.ReadInt32();
 
-        // Topology (nullable struct) — peek at first field presence
-        // For a nullable struct, the Kafka protocol uses a special marker
+        // Topology (nullable struct): an int8 marker, negative for null, then the fields.
         TopologyInfo? topology = null;
-        // We read the topology epoch — if the struct is present
-        // In the flexible protocol, a nullable struct is encoded similarly to a nullable array
-        // We need to check for null by reading the "presence" byte
-        // Actually, for a nullable struct, we just try reading fields — if it was null,
-        // the writer would have written -1 as a varint. But struct encoding is different from arrays.
-        // Per Kafka protocol spec: nullable struct uses varint -1 for absent, otherwise fields follow directly.
-        // Let's check: the struct presence is signaled like a nullable field.
-        // Looking at the pattern from ConsumerGroupHeartbeat, for nullable structs the approach
-        // used is ReadVarInt to detect presence.
-        var topoMarker = reader.ReadVarInt();
+        var topoMarker = reader.ReadInt8();
         if (topoMarker >= 0)
         {
-            // topoMarker is actually the Epoch int32 first byte — we need a different approach.
-            // Nullable structs in Kafka's flexible protocol: -1 means null, otherwise the struct fields follow.
-            // But we already consumed the marker. The marker IS the epoch if present.
-            // Actually, looking more carefully: the nullable struct approach uses 0xFF byte for null.
-            // Let's handle this pragmatically: we already read a varint. If it was -1, null. Otherwise
-            // it's actually the topology epoch read as varint.
-            // Re-examining: In the Kafka protocol for nullable structs (not arrays), a boolean-like presence
-            // indicator is used: -1 = absent. Since we wrote with WriteVarInt(-1) for null, we need to
-            // treat the first varint as a presence marker and then read the Epoch separately.
-            // But wait: on the write side we wrote Topology.Epoch as WriteInt32 AFTER the null check.
-            // So the varint(-1) indicates null, and if not null, the next bytes are the Epoch as Int32.
-            // Since we used WriteVarInt(-1) for null, we need to UNDO this read and re-read as Int32.
-            // This is tricky. Let's look at what we actually wrote:
-            // null: WriteVarInt(-1)  -> reads as ReadVarInt() == -1
-            // non-null: WriteInt32(Epoch) -> reads as ReadVarInt() which consumes some bytes of the Int32
-            // This is WRONG in the write path. We need to fix the write path or accept the mismatch.
-            // Actually, looking at the ConsumerGroupHeartbeat pattern more carefully:
-            // For Assignment (nullable struct), the pattern is:
-            //   write: WriteVarInt(-1) for null, or WriteVarInt(count+1) for the array inside
-            //   This works because Assignment has exactly one array field (TopicPartitions).
-            // For Topology, which is a proper struct with non-array first field (Epoch: int32),
-            // the Kafka protocol uses a DIFFERENT pattern: present/absent byte.
-            // Given our write path writes WriteVarInt(-1) for null and then raw fields for non-null,
-            // we should keep ReadVarInt for the null check.
-            // HOWEVER, we wrote the epoch as Int32 after checking null, not as the varint marker.
-            // So the -1 varint (0x01 byte for unsigned zigzag) would collide with the Int32 epoch.
-            // Let's fix this: the correct approach for nullable struct is to use a 1-byte presence indicator.
-            // For now, in our implementation, we write a varint presence marker:
-            //   -1 = null, 0 = present (then fields follow)
-            // But our write code doesn't write 0 for present — it goes directly to fields.
-            // We need to fix the writer to emit a presence marker. Let's handle this by
-            // expecting that our WriteTo was correct (it wrote -1 for null, then fields directly).
-            // Since we need to match our own wire format, the topology presence check is:
-            // We wrote: [varint(-1)] or [int32(epoch), rest...]. The ReadVarInt() will consume
-            // a variable number of bytes from the int32. This is a bug in WriteTo.
-            // For correctness, let's fix the approach: use a boolean-style presence varint.
-
-            // Since we control both reader and writer, and the writer wrote Int32(Epoch) directly
-            // after the null path, this means the first read after the null branch is Int32(Epoch).
-            // But we already consumed bytes with ReadVarInt(). This won't work correctly for
-            // arbitrary epoch values.
-            //
-            // PRAGMATIC FIX: Let's re-interpret. We'll treat this as if the writer writes a
-            // varint presence flag (0 or -1), then the struct fields. We need to adjust WriteTo too.
-            // For now, since this is the ReadFrom and must match WriteTo, let's assume the topoMarker
-            // we read IS actually the varint presence marker. We'll adjust WriteTo to write
-            // varint(0) before the struct fields when non-null.
-            //
-            // Since we ALSO need to fix WriteTo later, let's assume the current wire format is:
-            //   null: varint(-1)
-            //   non-null: varint(0) + fields (int32 epoch, ...)
-            // The topoMarker == 0 means present.
-
             var epoch = reader.ReadInt32();
             var subCount = reader.ReadVarInt() - 1;
             var subtopologies = new List<SubtopologyInfo>(subCount);
@@ -485,7 +422,7 @@ public sealed class StreamsGroupHeartbeatRequest : KafkaRequest
 
         // UserEndpoint (nullable struct)
         EndpointInfo? userEndpoint = null;
-        var epMarker = reader.ReadVarInt();
+        var epMarker = reader.ReadInt8();
         if (epMarker >= 0)
         {
             var host = reader.ReadCompactString() ?? "";
@@ -723,7 +660,7 @@ public sealed class StreamsGroupHeartbeatResponse : KafkaResponse
         // Status (nullable array)
         if (Status == null)
         {
-            writer.WriteVarInt(-1);
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -745,7 +682,7 @@ public sealed class StreamsGroupHeartbeatResponse : KafkaResponse
         // PartitionsByUserEndpoint (nullable array)
         if (PartitionsByUserEndpoint == null)
         {
-            writer.WriteVarInt(-1);
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -770,7 +707,7 @@ public sealed class StreamsGroupHeartbeatResponse : KafkaResponse
     {
         if (list == null)
         {
-            writer.WriteVarInt(-1);
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -1177,16 +1114,16 @@ public sealed class StreamsGroupDescribeResponse : KafkaResponse
             // Topology (nullable struct)
             if (group.Topology == null)
             {
-                writer.WriteVarInt(-1);
+                writer.WriteInt8(-1); // Null struct marker
             }
             else
             {
-                writer.WriteVarInt(0); // Presence marker
+                writer.WriteInt8(1); // Presence marker
                 writer.WriteInt32(group.Topology.Epoch);
 
                 if (group.Topology.Subtopologies == null)
                 {
-                    writer.WriteVarInt(-1);
+                    writer.WriteVarInt(0); // Null compact array
                 }
                 else
                 {
@@ -1226,11 +1163,11 @@ public sealed class StreamsGroupDescribeResponse : KafkaResponse
                 // UserEndpoint (nullable struct)
                 if (member.UserEndpoint == null)
                 {
-                    writer.WriteVarInt(-1);
+                    writer.WriteInt8(-1); // Null struct marker
                 }
                 else
                 {
-                    writer.WriteVarInt(0); // Presence marker
+                    writer.WriteInt8(1); // Presence marker
                     writer.WriteCompactString(member.UserEndpoint.Host);
                     writer.WriteInt16((short)member.UserEndpoint.Port);
                     writer.WriteVarInt(0); // Endpoint tagged fields
@@ -1338,7 +1275,7 @@ public sealed class StreamsGroupDescribeResponse : KafkaResponse
 
             // Topology (nullable struct)
             TopologyInfo? topology = null;
-            var topoMarker = reader.ReadVarInt();
+            var topoMarker = reader.ReadInt8();
             if (topoMarker >= 0)
             {
                 var topoEpoch = reader.ReadInt32();
@@ -1401,7 +1338,7 @@ public sealed class StreamsGroupDescribeResponse : KafkaResponse
 
                 // UserEndpoint (nullable struct)
                 EndpointInfo? userEndpoint = null;
-                var epMarker = reader.ReadVarInt();
+                var epMarker = reader.ReadInt8();
                 if (epMarker >= 0)
                 {
                     var host = reader.ReadCompactString() ?? "";

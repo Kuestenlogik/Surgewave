@@ -173,6 +173,9 @@ public sealed class DescribeLogDirsResponse : KafkaResponse
 
         /// <summary>The usable size in bytes of the volume the log directory is in (v4+).</summary>
         public long UsableBytes { get; init; } = -1;
+
+        /// <summary>v5+: whether the log directory is cordoned (no new replicas placed on it).</summary>
+        public bool IsCordoned { get; init; }
     }
 
     public sealed class TopicResult
@@ -288,6 +291,12 @@ public sealed class DescribeLogDirsResponse : KafkaResponse
             {
                 writer.WriteInt64(result.TotalBytes);
                 writer.WriteInt64(result.UsableBytes);
+            }
+
+            // v5+: IsCordoned (KIP-1066). Missing, a v5 response ended a byte early.
+            if (ApiVersion >= 5)
+            {
+                writer.WriteBoolean(result.IsCordoned);
             }
 
             if (isFlexible)

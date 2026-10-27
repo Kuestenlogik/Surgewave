@@ -271,6 +271,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// </summary>
     public async Task<InitProducerIdResult> InitProducerIdAsync(InitProducerIdCommand request, CancellationToken cancellationToken)
     {
+        // KIP-939 two-phase commit is not offered: answered as Kafka answers it with
+        // transaction.two.phase.commit.enable=false, and keeping a prepared transaction as Kafka does not yet.
+        if (request.Enable2Pc)
+            return new InitProducerIdResult(TxnErrorStatus.TransactionalIdAuthorizationFailed, -1, -1);
+        if (request.KeepPreparedTxn)
+            return new InitProducerIdResult(TxnErrorStatus.UnsupportedVersion, -1, -1);
+
         if (string.IsNullOrEmpty(request.TransactionalId))
         {
             // Non-transactional idempotent producer

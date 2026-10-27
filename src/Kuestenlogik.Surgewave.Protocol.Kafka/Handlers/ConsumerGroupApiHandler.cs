@@ -421,14 +421,18 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
 
     private static ListGroupsResponse ToListGroupsResponse(IReadOnlyList<GroupListing> listings, ListGroupsRequest r)
     {
+        // This coordinator holds the classic groups; a v5 type filter without "classic" lists none of them.
+        var classicAsked = r.TypesFilter.Count == 0
+            || r.TypesFilter.Contains("classic", StringComparer.OrdinalIgnoreCase);
         var groups = new List<ListGroupsResponse.ListedGroup>(listings.Count);
-        foreach (var g in listings)
+        foreach (var g in classicAsked ? listings : [])
         {
             groups.Add(new ListGroupsResponse.ListedGroup
             {
                 GroupId = g.GroupId,
                 ProtocolType = g.ProtocolType,
                 GroupState = g.GroupState,
+                GroupType = "classic",
             });
         }
 

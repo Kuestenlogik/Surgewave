@@ -78,14 +78,40 @@ public sealed partial class FetchRequest
             rackId = isFlexible ? protocolReader.ReadCompactString() : protocolReader.ReadString();
         }
 
-        // Skip top-level tagged fields for flexible versions
+        // Top-level tagged fields: ClusterId (tag 0, v12+) and ReplicaState (tag 1, v15+). From v15 a follower
+        // names itself only in ReplicaState; skipped, every follower fetch read as a consumer's (ReplicaId -1).
+        string? clusterId = null;
+        ReplicaStateInfo? replicaState = null;
         if (isFlexible)
         {
-            SkipTaggedFields(protocolReader);
+            var taggedFieldCount = protocolReader.ReadVarInt();
+            for (int i = 0; i < taggedFieldCount; i++)
+            {
+                var tag = protocolReader.ReadVarInt();
+                var size = protocolReader.ReadVarInt();
+                if (tag == 0)
+                {
+                    clusterId = protocolReader.ReadCompactString();
+                }
+                else if (tag == 1 && apiVersion >= 15)
+                {
+                    var stateReplicaId = protocolReader.ReadInt32();
+                    var stateReplicaEpoch = protocolReader.ReadInt64();
+                    SkipTaggedFields(protocolReader);
+                    replicaState = new ReplicaStateInfo { ReplicaId = stateReplicaId, ReplicaEpoch = stateReplicaEpoch };
+                    replicaId = stateReplicaId;
+                }
+                else
+                {
+                    protocolReader.Skip(size);
+                }
+            }
         }
 
         return new FetchRequest
         {
+            ClusterId = clusterId,
+            ReplicaState = replicaState,
             ApiKey = ApiKey.Fetch,
             ApiVersion = apiVersion,
             CorrelationId = correlationId,

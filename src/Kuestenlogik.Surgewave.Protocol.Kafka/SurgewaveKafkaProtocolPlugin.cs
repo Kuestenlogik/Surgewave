@@ -163,6 +163,7 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
 
         services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupV2ApiHandler(
             sp.GetRequiredService<IConsumerGroupV2Coordinator>(),
+            sp.GetRequiredService<LogManager>().ResolveTopicId,
             sp.GetRequiredService<ILogger<ConsumerGroupV2ApiHandler>>()));
 
         services.AddSingleton<IKafkaRequestHandler>(sp => new StreamsGroupApiHandler(

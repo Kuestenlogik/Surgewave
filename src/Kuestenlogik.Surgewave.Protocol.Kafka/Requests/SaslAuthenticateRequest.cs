@@ -97,13 +97,13 @@ public sealed class SaslAuthenticateResponse : KafkaResponse
         if (isFlexible)
         {
             writer.WriteCompactString(ErrorMessage);
-            writer.WriteVarInt(AuthBytes.Length + 1);
-            writer.WriteBytes(AuthBytes);
+            // WriteCompactBytes/WriteBytes write the length themselves. A second length in front of them made
+            // every SaslAuthenticate response unreadable to a client: 4 bytes too many at v0/v1, garbage at v2.
+            writer.WriteCompactBytes(AuthBytes);
         }
         else
         {
             writer.WriteString(ErrorMessage);
-            writer.WriteInt32(AuthBytes.Length);
             writer.WriteBytes(AuthBytes);
         }
 

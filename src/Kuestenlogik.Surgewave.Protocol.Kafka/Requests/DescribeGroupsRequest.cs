@@ -91,6 +91,9 @@ public sealed class DescribeGroupsResponse : KafkaResponse
 
     public sealed class DescribedGroup
     {
+        /// <summary>v6+: the message for ErrorCode, null when there is none.</summary>
+        public string? ErrorMessage { get; init; }
+
         public required ErrorCode ErrorCode { get; init; }
         public required string GroupId { get; init; }
         public required string GroupState { get; init; }
@@ -133,6 +136,12 @@ public sealed class DescribeGroupsResponse : KafkaResponse
             foreach (var group in Groups)
             {
                 writer.WriteInt16((short)group.ErrorCode);
+                if (ApiVersion >= 6)
+                {
+                    // v6+ (KIP-1043): the error's message. Missing, a v6 client read the group id from here and
+                    // everything after it shifted.
+                    writer.WriteCompactString(group.ErrorMessage);
+                }
                 writer.WriteCompactString(group.GroupId);
                 writer.WriteCompactString(group.GroupState);
                 writer.WriteCompactString(group.ProtocolType);

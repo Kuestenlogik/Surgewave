@@ -128,7 +128,8 @@ public sealed class ListTransactionsResponse : KafkaResponse
     /// List of brokers that could not be reached.
     /// The list of transactions may be incomplete if any brokers were down.
     /// </summary>
-    public List<int> UnknownStateFilters { get; init; } = [];
+    /// <summary>The requested state filters the broker does not know, by name.</summary>
+    public List<string> UnknownStateFilters { get; init; } = [];
 
     /// <summary>The list of transactions.</summary>
     public required List<TransactionListing> TransactionStates { get; init; }
@@ -161,7 +162,9 @@ public sealed class ListTransactionsResponse : KafkaResponse
         writer.WriteVarInt(UnknownStateFilters.Count + 1);
         foreach (var filter in UnknownStateFilters)
         {
-            writer.WriteInt32(filter);
+            // Strings, the names the client asked for; written as int32, a client read the rest from the
+            // wrong place.
+            writer.WriteCompactString(filter);
         }
 
         // TransactionStates array (compact)
@@ -185,10 +188,10 @@ public sealed class ListTransactionsResponse : KafkaResponse
         var errorCode = (ErrorCode)reader.ReadInt16();
 
         var unknownStateFilterCount = reader.ReadVarInt() - 1;
-        var unknownStateFilters = new List<int>(unknownStateFilterCount);
+        var unknownStateFilters = new List<string>(unknownStateFilterCount);
         for (int i = 0; i < unknownStateFilterCount; i++)
         {
-            unknownStateFilters.Add(reader.ReadInt32());
+            unknownStateFilters.Add(reader.ReadCompactString() ?? string.Empty);
         }
 
         var txnCount = reader.ReadVarInt() - 1;

@@ -72,6 +72,8 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
         TxnErrorStatus.InvalidProducerIdMapping => ErrorCode.InvalidProducerIdMapping,
         TxnErrorStatus.TransactionAbortable => ErrorCode.TransactionAbortable,
         TxnErrorStatus.InvalidRequest => ErrorCode.InvalidRequest,
+        TxnErrorStatus.TransactionalIdAuthorizationFailed => ErrorCode.TransactionalIdAuthorizationFailed,
+        TxnErrorStatus.UnsupportedVersion => ErrorCode.UnsupportedVersion,
         _ => ErrorCode.Unknown,
     };
 
@@ -84,6 +86,8 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
             TransactionTimeoutMs = r.TransactionTimeoutMs,
             ProducerId = r.ProducerId,
             ProducerEpoch = r.ProducerEpoch,
+            Enable2Pc = r.Enable2Pc,
+            KeepPreparedTxn = r.KeepPreparedTxn,
         };
 
     private static InitProducerIdResponse ToInitProducerIdResponse(InitProducerIdResult result, InitProducerIdRequest r)
@@ -342,7 +346,10 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
             ApiVersion = r.ApiVersion,
             ThrottleTimeMs = 0,
             ErrorCode = ErrorCode.None,
-            UnknownStateFilters = [],
+            // Kafka answers the state filters it does not know, so a client can tell a typo from "no match".
+            UnknownStateFilters = r.StateFilters
+                .Where(state => !Enum.TryParse<Kuestenlogik.Surgewave.Core.KafkaConstants.TransactionState>(state, ignoreCase: true, out _))
+                .ToList(),
             TransactionStates = listings.Select(l => new ListTransactionsResponse.TransactionListing
             {
                 TransactionalId = l.TransactionalId,

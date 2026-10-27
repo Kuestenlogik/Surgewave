@@ -61,13 +61,17 @@ public sealed partial class TelemetryApiHandler : IKafkaRequestHandler
     /// </summary>
     private ListConfigResourcesResponse HandleListConfigResources(ListConfigResourcesRequest request)
     {
+        // The resources listed here are client-metrics subscriptions, Kafka's ConfigResource.Type CLIENT_METRICS.
+        // A v1 request may ask for other types only; then there is nothing of the asked type to list.
+        const sbyte clientMetrics = 16;
         var resources = new List<ListConfigResourcesResponse.ConfigResource>();
-        if (_config.Enabled)
+        var typeAsked = request.ResourceTypes.Count == 0 || request.ResourceTypes.Contains(clientMetrics);
+        if (_config.Enabled && typeAsked)
         {
             foreach (var metric in _config.RequestedMetrics)
             {
                 if (string.IsNullOrEmpty(metric)) continue;
-                resources.Add(new ListConfigResourcesResponse.ConfigResource { Name = metric });
+                resources.Add(new ListConfigResourcesResponse.ConfigResource { Name = metric, ResourceType = clientMetrics });
             }
         }
 

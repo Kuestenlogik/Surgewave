@@ -315,7 +315,9 @@ public sealed class ApiVersionsResponse : KafkaResponse
 
                 // Transaction APIs
                 new SupportedApiVersion { ApiKey = (short)ApiKey.InitProducerId, MinVersion = 0, MaxVersion = 6 },         // Kafka: 0-6 (was 0-4)
-                new SupportedApiVersion { ApiKey = (short)ApiKey.AddPartitionsToTxn, MinVersion = 0, MaxVersion = 5 },     // Kafka: 0-5 (was 0-3)
+                // v4+ is the inter-broker batched form (KIP-890 verification), which this broker neither sends nor parses;
+                // Kafka's clients send v3 at most (AddPartitionsToTxnRequest.Builder.forClient).
+                new SupportedApiVersion { ApiKey = (short)ApiKey.AddPartitionsToTxn, MinVersion = 0, MaxVersion = 3 },     // Kafka: 0-5, clients 0-3
                 new SupportedApiVersion { ApiKey = (short)ApiKey.AddOffsetsToTxn, MinVersion = 0, MaxVersion = 4 },        // Kafka: 0-4
                 new SupportedApiVersion { ApiKey = (short)ApiKey.EndTxn, MinVersion = 0, MaxVersion = 5 },                 // Kafka: 0-5 (was 0-3)
                 new SupportedApiVersion { ApiKey = (short)ApiKey.TxnOffsetCommit, MinVersion = 0, MaxVersion = 6 },        // Kafka: 0-6 (KIP-1319: topic IDs)

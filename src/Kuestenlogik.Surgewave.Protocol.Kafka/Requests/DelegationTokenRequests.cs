@@ -92,6 +92,17 @@ public sealed class CreateDelegationTokenRequest : KafkaRequest
     public static CreateDelegationTokenRequest ReadFrom(KafkaProtocolReader reader, short apiVersion, int correlationId, string clientId)
     {
         bool isFlexible = apiVersion >= 2;
+
+        // v3+: the owner's principal comes first, before the renewers (KIP-373). It was read after
+        // MaxLifetimeMs, so a v3 request's renewers were read from the owner's principal type.
+        string? ownerPrincipalType = null;
+        string? ownerPrincipalName = null;
+        if (apiVersion >= 3)
+        {
+            ownerPrincipalType = reader.ReadCompactString();
+            ownerPrincipalName = reader.ReadCompactString();
+        }
+
         var renewers = new List<CreatableRenewers>();
 
         if (isFlexible)
@@ -121,15 +132,6 @@ public sealed class CreateDelegationTokenRequest : KafkaRequest
         }
 
         var maxLifetimeMs = reader.ReadInt64();
-
-        string? ownerPrincipalType = null;
-        string? ownerPrincipalName = null;
-
-        if (apiVersion >= 3)
-        {
-            ownerPrincipalType = reader.ReadCompactString();
-            ownerPrincipalName = reader.ReadCompactString();
-        }
 
         if (isFlexible)
         {

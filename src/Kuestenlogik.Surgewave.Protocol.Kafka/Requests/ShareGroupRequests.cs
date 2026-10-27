@@ -41,7 +41,7 @@ public sealed class ShareGroupHeartbeatRequest : KafkaRequest
 
         if (SubscribedTopicNames == null)
         {
-            writer.WriteVarInt(-1); // Null compact array
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -145,10 +145,13 @@ public sealed class ShareGroupHeartbeatResponse : KafkaResponse
 
         if (Assignment == null)
         {
-            writer.WriteVarInt(-1); // Null struct marker
+            // A nullable struct is an int8 marker, -1 for null and 1 before the fields. It was a five-byte varint
+            // for null and no marker at all when present, so a client took the partition count for the marker.
+            writer.WriteInt8(-1);
         }
         else
         {
+            writer.WriteInt8(1);
             writer.WriteVarInt(Assignment.TopicPartitions.Count + 1);
             foreach (var tp in Assignment.TopicPartitions)
             {
@@ -178,9 +181,9 @@ public sealed class ShareGroupHeartbeatResponse : KafkaResponse
         var heartbeatIntervalMs = reader.ReadInt32();
 
         AssignmentInfo? assignment = null;
-        var tpCount = reader.ReadVarInt() - 1;
-        if (tpCount >= 0)
+        if (reader.ReadInt8() >= 0)
         {
+            var tpCount = reader.ReadVarInt() - 1;
             var topicPartitions = new List<TopicPartitions>(tpCount);
             for (int i = 0; i < tpCount; i++)
             {
@@ -1519,7 +1522,7 @@ public sealed class DescribeShareGroupOffsetsRequest : KafkaRequest
 
             if (group.Topics == null)
             {
-                writer.WriteVarInt(-1); // Null compact array
+                writer.WriteVarInt(0); // Null compact array
             }
             else
             {

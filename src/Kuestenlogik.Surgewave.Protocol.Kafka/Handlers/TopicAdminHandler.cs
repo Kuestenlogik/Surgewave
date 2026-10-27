@@ -150,6 +150,7 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
                 {
                     Name = topic.Name,
                     ErrorCode = ErrorCode.None,
+                    TopicId = _logManager.GetTopicId(topic.Name),
                     NumPartitions = numPartitions,
                     ReplicationFactor = replicationFactor,
                     Configs = topic.Configs

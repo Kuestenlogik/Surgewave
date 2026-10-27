@@ -17,6 +17,7 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
 {
     private readonly IConsumerGroupV2Coordinator _coordinator;
+    private readonly Func<Guid, string?> _topicName;
     private readonly ILogger<ConsumerGroupV2ApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -25,11 +26,14 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
         ApiKey.ConsumerGroupDescribe
     ];
 
+    /// <param name="topicName">Resolves a topic id to its name; ConsumerGroupDescribe reports both.</param>
     public ConsumerGroupV2ApiHandler(
         IConsumerGroupV2Coordinator coordinator,
+        Func<Guid, string?> topicName,
         ILogger<ConsumerGroupV2ApiHandler> logger)
     {
         _coordinator = coordinator;
+        _topicName = topicName;
         _logger = logger;
     }
 
@@ -112,7 +116,7 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
 
     // ── Describe: neutral -> wire ───────────────────────────────────────────
 
-    private static ConsumerGroupDescribeResponse ToDescribeResponse(IReadOnlyList<ConsumerGroupDescription> descriptions, ConsumerGroupDescribeRequest r)
+    private ConsumerGroupDescribeResponse ToDescribeResponse(IReadOnlyList<ConsumerGroupDescription> descriptions, ConsumerGroupDescribeRequest r)
     {
         var groups = new List<ConsumerGroupDescribeResponse.DescribedGroup>(descriptions.Count);
         foreach (var d in descriptions)
@@ -145,6 +149,7 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
                     SubscribedTopicRegex = null,
                     MemberAssignment = ToDescribeAssignment(m.MemberAssignment),
                     TargetAssignment = ToDescribeAssignment(m.TargetAssignment),
+                    MemberType = 1, // a consumer member: it joined over ConsumerGroupHeartbeat (KIP-848)
                 });
             }
 
@@ -175,12 +180,17 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
         _ => "Reconciling",
     };
 
-    private static ConsumerGroupDescribeResponse.Assignment ToDescribeAssignment(IReadOnlyList<ConsumerTopicPartitions> assignment)
+    private ConsumerGroupDescribeResponse.Assignment ToDescribeAssignment(IReadOnlyList<ConsumerTopicPartitions> assignment)
     {
         var topicPartitions = new List<ConsumerGroupDescribeResponse.TopicPartitions>(assignment.Count);
         foreach (var t in assignment)
         {
-            topicPartitions.Add(new ConsumerGroupDescribeResponse.TopicPartitions { TopicId = t.TopicId, Partitions = [.. t.Partitions] });
+            topicPartitions.Add(new ConsumerGroupDescribeResponse.TopicPartitions
+            {
+                TopicId = t.TopicId,
+                TopicName = _topicName(t.TopicId) ?? string.Empty,
+                Partitions = [.. t.Partitions],
+            });
         }
         return new ConsumerGroupDescribeResponse.Assignment { TopicPartitions = topicPartitions };
     }

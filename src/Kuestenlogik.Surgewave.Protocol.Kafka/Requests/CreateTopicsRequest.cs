@@ -247,6 +247,10 @@ public sealed class CreateTopicsResponse : KafkaResponse
         public required string Name { get; init; }
         public required ErrorCode ErrorCode { get; init; }
         public string? ErrorMessage { get; init; } // v1+
+
+        /// <summary>v7+: the id of the created topic.</summary>
+        public Guid TopicId { get; init; }
+
         public int? NumPartitions { get; init; } // v5+
         public short? ReplicationFactor { get; init; } // v5+
         public Dictionary<string, string>? Configs { get; init; } // v5+
@@ -278,7 +282,9 @@ public sealed class CreateTopicsResponse : KafkaResponse
                 // TopicId (v7+, 16 bytes UUID)
                 if (ApiVersion >= 7)
                 {
-                    writer.WriteRawBytes(Guid.Empty.ToByteArray());
+                    // The created topic's id, big-endian as every Kafka uuid; it was always zeros, written
+                    // little-endian.
+                    writer.WriteUuid(topic.TopicId);
                 }
                 writer.WriteInt16((short)topic.ErrorCode);
                 writer.WriteCompactString(topic.ErrorMessage);
@@ -295,13 +301,15 @@ public sealed class CreateTopicsResponse : KafkaResponse
                     writer.WriteVarInt(topic.Configs.Count + 1);
                     foreach (var (name, value) in topic.Configs)
                     {
+                        // CreatableTopicConfigs: Name, Value, ReadOnly, ConfigSource, IsSensitive — no synonyms.
+                        // Written in another order with an extra synonyms array, a v5+ client read every
+                        // topic after the first config from the wrong place.
                         writer.WriteCompactString(name);
                         writer.WriteCompactString(value);
-                        writer.WriteInt8(0); // ConfigSource: DEFAULT_CONFIG
-                        writer.WriteInt8(0); // IsSensitive: false
-                        writer.WriteInt8(0); // ReadOnly: false
-                        writer.WriteVarInt(1); // Synonyms: empty array
-                        writer.WriteVarInt(0); // tagged fields
+                        writer.WriteBoolean(false); // ReadOnly
+                        writer.WriteInt8(1);        // ConfigSource: DYNAMIC_TOPIC_CONFIG — set on this topic
+                        writer.WriteBoolean(false); // IsSensitive
+                        writer.WriteVarInt(0);      // tagged fields
                     }
                 }
                 else

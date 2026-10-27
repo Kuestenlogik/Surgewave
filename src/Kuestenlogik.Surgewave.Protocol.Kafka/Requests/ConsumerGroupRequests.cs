@@ -80,7 +80,7 @@ public sealed class ConsumerGroupHeartbeatRequest : KafkaRequest
 
         if (SubscribedTopicNames == null)
         {
-            writer.WriteVarInt(-1); // Null compact array
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -91,16 +91,16 @@ public sealed class ConsumerGroupHeartbeatRequest : KafkaRequest
             }
         }
 
-        writer.WriteCompactString(ServerAssignor);
-
         if (ApiVersion >= 1)
         {
             writer.WriteCompactString(SubscribedTopicRegex);
         }
 
+        writer.WriteCompactString(ServerAssignor);
+
         if (TopicPartitions == null)
         {
-            writer.WriteVarInt(-1); // Null compact array
+            writer.WriteVarInt(0); // Null compact array
         }
         else
         {
@@ -140,16 +140,15 @@ public sealed class ConsumerGroupHeartbeatRequest : KafkaRequest
             }
         }
 
-        var serverAssignor = reader.ReadCompactString();
-
-        // v1+ adds SubscribedTopicRegex between ServerAssignor and TopicPartitions
-        // (KIP-848 Phase II). Older clients send v0; reading the field at v0 would
-        // misalign the rest of the body, so gate on apiVersion.
+        // v1+ adds SubscribedTopicRegex between SubscribedTopicNames and ServerAssignor (KIP-848). It was
+        // read after ServerAssignor, so a v1 client's regex became the assignor and its assignor the regex.
         string? subscribedTopicRegex = null;
         if (apiVersion >= 1)
         {
             subscribedTopicRegex = reader.ReadCompactString();
         }
+
+        var serverAssignor = reader.ReadCompactString();
 
         List<Assignor>? topicPartitions = null;
         var assignorCount = reader.ReadVarInt() - 1;
@@ -466,6 +465,9 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
 
         /// <summary>The target assignment.</summary>
         public required Assignment TargetAssignment { get; init; }
+
+        /// <summary>v1+: -1 unknown, 0 a classic member, 1 a consumer member (KIP-1099).</summary>
+        public sbyte MemberType { get; init; } = -1;
     }
 
     public sealed class Assignment
@@ -478,6 +480,9 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
     {
         /// <summary>The topic ID.</summary>
         public required Guid TopicId { get; init; }
+
+        /// <summary>The topic name; ConsumerGroupDescribe names the topic as well as identifying it.</summary>
+        public string TopicName { get; init; } = string.Empty;
 
         /// <summary>The partition indexes.</summary>
         public required List<int> Partitions { get; init; }
@@ -525,6 +530,13 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
                 // Target assignment
                 WriteAssignment(writer, member.TargetAssignment);
 
+                // v1+: missing, a v1 client read the member's tagged fields as its type and the next member
+                // from one byte too early.
+                if (ApiVersion >= 1)
+                {
+                    writer.WriteInt8(member.MemberType);
+                }
+
                 writer.WriteVarInt(0); // Member tagged fields
             }
 
@@ -542,6 +554,9 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
         foreach (var tp in assignment.TopicPartitions)
         {
             writer.WriteUuid(tp.TopicId);
+            // TopicName sits between TopicId and Partitions. Missing, a client took the name's length for the
+            // partition count and misread every member's assignment.
+            writer.WriteCompactString(tp.TopicName);
             writer.WriteVarInt(tp.Partitions.Count + 1);
             foreach (var partition in tp.Partitions)
             {
@@ -594,6 +609,7 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
 
                 var memberAssignment = ReadAssignment(reader);
                 var targetAssignment = ReadAssignment(reader);
+                var memberType = apiVersion >= 1 ? reader.ReadInt8() : (sbyte)-1;
 
                 reader.SkipTaggedFields();
 
@@ -608,7 +624,8 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
                     SubscribedTopicNames = subscribedTopicNames,
                     SubscribedTopicRegex = subscribedTopicRegex,
                     MemberAssignment = memberAssignment,
-                    TargetAssignment = targetAssignment
+                    TargetAssignment = targetAssignment,
+                    MemberType = memberType,
                 });
             }
 
@@ -649,6 +666,7 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
         for (int i = 0; i < tpCount; i++)
         {
             var topicId = reader.ReadUuid();
+            var topicName = reader.ReadCompactString() ?? string.Empty;
             var partCount = reader.ReadVarInt() - 1;
             var partitions = new List<int>(partCount);
             for (int j = 0; j < partCount; j++)
@@ -660,6 +678,7 @@ public sealed class ConsumerGroupDescribeResponse : KafkaResponse
             topicPartitions.Add(new TopicPartitions
             {
                 TopicId = topicId,
+                TopicName = topicName,
                 Partitions = partitions
             });
         }

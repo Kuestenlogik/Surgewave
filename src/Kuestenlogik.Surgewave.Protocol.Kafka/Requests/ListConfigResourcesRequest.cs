@@ -7,6 +7,9 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 /// </summary>
 public sealed class ListConfigResourcesRequest : KafkaRequest
 {
+    /// <summary>v1+: the config resource types to list; empty means all of them.</summary>
+    public IReadOnlyList<sbyte> ResourceTypes { get; init; } = [];
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         // v0 is flexible
@@ -21,14 +24,22 @@ public sealed class ListConfigResourcesRequest : KafkaRequest
 
     public static ListConfigResourcesRequest ReadFrom(KafkaProtocolReader reader, short apiVersion, int correlationId, string clientId)
     {
+        // ResourceTypes (v1+) was not read; the tagged-field count was read from its length.
+        var resourceTypes = new List<sbyte>();
+        if (apiVersion >= 1)
+        {
+            var count = reader.ReadVarInt() - 1;
+            for (var i = 0; i < count; i++)
+                resourceTypes.Add(reader.ReadInt8());
+        }
         reader.SkipTaggedFields();
-
         return new ListConfigResourcesRequest
         {
             ApiKey = ApiKey.ListConfigResources,
             ApiVersion = apiVersion,
             CorrelationId = correlationId,
-            ClientId = clientId
+            ClientId = clientId,
+            ResourceTypes = resourceTypes,
         };
     }
 }
@@ -51,6 +62,9 @@ public sealed class ListConfigResourcesResponse : KafkaResponse
     {
         /// <summary>The resource name.</summary>
         public required string Name { get; init; }
+
+        /// <summary>v1+: the config resource type, as Kafka's ConfigResource.Type (16 = client metrics).</summary>
+        public sbyte ResourceType { get; init; }
     }
 
     public override void WriteTo(KafkaProtocolWriter writer)
@@ -65,6 +79,11 @@ public sealed class ListConfigResourcesResponse : KafkaResponse
         foreach (var resource in ConfigResources)
         {
             writer.WriteCompactString(resource.Name);
+            if (ApiVersion >= 1)
+            {
+                // v1+: the resource's config type (KIP-1142); missing, a v1 response came up a byte short.
+                writer.WriteInt8(resource.ResourceType);
+            }
             writer.WriteVarInt(0); // Resource tagged fields
         }
 

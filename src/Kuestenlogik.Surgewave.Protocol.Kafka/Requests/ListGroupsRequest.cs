@@ -8,6 +8,9 @@ public sealed class ListGroupsRequest : KafkaRequest
 {
     public List<string>? StatesFilter { get; init; } // v4+
 
+    /// <summary>v5+: the group types to list (classic, consumer, share, streams); empty means all.</summary>
+    public List<string> TypesFilter { get; init; } = [];
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         writer.WriteInt16((short)ApiKey);
@@ -19,6 +22,7 @@ public sealed class ListGroupsRequest : KafkaRequest
 
     public static ListGroupsRequest ReadFrom(BinaryReader reader, short apiVersion, int correlationId, string clientId)
     {
+        var typesFilter = new List<string>();
         bool isFlexible = apiVersion >= 3;
         List<string>? statesFilter = null;
 
@@ -47,7 +51,21 @@ public sealed class ListGroupsRequest : KafkaRequest
                 }
             }
 
-            protocolReader.ReadVarInt(); // tagged fields
+            // v5+ has TypesFilter (KIP-848); unread, the filter's length was taken for the tagged-field count.
+            if (apiVersion >= 5)
+            {
+                var typeCount = protocolReader.ReadVarInt() - 1;
+                for (int i = 0; i < typeCount; i++)
+                {
+                    var type = protocolReader.ReadCompactString();
+                    if (type != null)
+                    {
+                        typesFilter.Add(type);
+                    }
+                }
+            }
+
+            protocolReader.SkipTaggedFields();
         }
         // v0-v2 have no body
 
@@ -57,7 +75,8 @@ public sealed class ListGroupsRequest : KafkaRequest
             ApiVersion = apiVersion,
             CorrelationId = correlationId,
             ClientId = clientId,
-            StatesFilter = statesFilter
+            StatesFilter = statesFilter,
+            TypesFilter = typesFilter,
         };
     }
 }
@@ -76,6 +95,9 @@ public sealed class ListGroupsResponse : KafkaResponse
         public required string GroupId { get; init; }
         public required string ProtocolType { get; init; }
         public string? GroupState { get; init; } // v4+
+
+        /// <summary>v5+: the group's type — classic, consumer, share or streams (KIP-848).</summary>
+        public string GroupType { get; init; } = "classic";
     }
 
     public override void WriteTo(KafkaProtocolWriter writer)
@@ -107,6 +129,11 @@ public sealed class ListGroupsResponse : KafkaResponse
                 if (ApiVersion >= 4)
                 {
                     writer.WriteCompactString(group.GroupState);
+                }
+                if (ApiVersion >= 5)
+                {
+                    // Missing, a v5 client read the group's tagged fields as its type.
+                    writer.WriteCompactString(group.GroupType);
                 }
                 writer.WriteVarInt(0); // group tagged fields
             }

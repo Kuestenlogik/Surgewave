@@ -10,6 +10,12 @@ public sealed class InitProducerIdRequest : KafkaRequest
     public long ProducerId { get; init; } = -1;
     public short ProducerEpoch { get; init; } = -1;
 
+    /// <summary>v6+ (KIP-939): the producer asks for two-phase commit.</summary>
+    public bool Enable2Pc { get; init; }
+
+    /// <summary>v6+ (KIP-939): keep a prepared transaction across the init instead of aborting it.</summary>
+    public bool KeepPreparedTxn { get; init; }
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         writer.WriteInt16((short)ApiKey);
@@ -43,6 +49,7 @@ public sealed class InitProducerIdRequest : KafkaRequest
 
     public static InitProducerIdRequest ReadFrom(BinaryReader reader, short apiVersion, int correlationId, string clientId)
     {
+        bool enable2Pc = false, keepPreparedTxn = false;
         string? transactionalId;
         int transactionTimeoutMs;
         long producerId = -1;
@@ -64,6 +71,14 @@ public sealed class InitProducerIdRequest : KafkaRequest
             {
                 producerId = protocolReader.ReadInt64();
                 producerEpoch = protocolReader.ReadInt16();
+            }
+
+            // v6+ (KIP-939): Enable2Pc and KeepPreparedTxn. Unread, the first was taken for the tagged-field
+            // count and a producer asking for two-phase commit was answered as if it had not.
+            if (apiVersion >= 6)
+            {
+                enable2Pc = protocolReader.ReadBoolean();
+                keepPreparedTxn = protocolReader.ReadBoolean();
             }
 
             // Read tagged fields
@@ -91,7 +106,9 @@ public sealed class InitProducerIdRequest : KafkaRequest
             TransactionalId = transactionalId,
             TransactionTimeoutMs = transactionTimeoutMs,
             ProducerId = producerId,
-            ProducerEpoch = producerEpoch
+            ProducerEpoch = producerEpoch,
+            Enable2Pc = enable2Pc,
+            KeepPreparedTxn = keepPreparedTxn,
         };
     }
 }
@@ -105,6 +122,12 @@ public sealed class InitProducerIdResponse : KafkaResponse
     public required ErrorCode ErrorCode { get; init; }
     public required long ProducerId { get; init; }
     public required short ProducerEpoch { get; init; }
+
+    /// <summary>v6+ (KIP-939): the producer id of an ongoing prepared transaction, -1 when there is none.</summary>
+    public long OngoingTxnProducerId { get; init; } = -1;
+
+    /// <summary>v6+ (KIP-939): the epoch of that ongoing prepared transaction, -1 when there is none.</summary>
+    public short OngoingTxnProducerEpoch { get; init; } = -1;
 
     public override void WriteTo(KafkaProtocolWriter writer)
     {
@@ -122,6 +145,14 @@ public sealed class InitProducerIdResponse : KafkaResponse
         writer.WriteInt16((short)ErrorCode);
         writer.WriteInt64(ProducerId);
         writer.WriteInt16(ProducerEpoch);
+
+        if (ApiVersion >= 6)
+        {
+            // KIP-939 (v6+): the producer id and epoch of a prepared two-phase-commit transaction kept across the
+            // init, -1 when there is none. Missing, a v6 response ended ten bytes early.
+            writer.WriteInt64(OngoingTxnProducerId);
+            writer.WriteInt16(OngoingTxnProducerEpoch);
+        }
 
         if (isFlexible)
         {
