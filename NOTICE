@@ -7,6 +7,10 @@ This product includes or depends on software developed by third parties. The
 following NuGet packages are bundled or linked at runtime; their full license
 texts ship with each package and remain in effect for the respective binaries:
 
+  - Apache Kafka message schemas (Apache License 2.0), copied unchanged as test data into
+    tests/Kuestenlogik.Surgewave.Protocol.Kafka.Tests/KafkaSchemas/
+    https://github.com/apache/kafka
+
   - Apache.Arrow (Apache License 2.0)
     https://github.com/apache/arrow
 
