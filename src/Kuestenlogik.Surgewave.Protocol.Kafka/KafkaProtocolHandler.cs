@@ -278,7 +278,7 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
             ApiKey.FindCoordinator => FindCoordinatorRequest.ReadFrom(reader, apiVersion, correlationId, clientId),
             ApiKey.JoinGroup => ReadJoinGroupRequest(reader, apiVersion, correlationId, clientId),
             ApiKey.SyncGroup => ReadSyncGroupRequest(reader, apiVersion, correlationId, clientId),
-            ApiKey.Heartbeat => HeartbeatRequest.ReadFrom(reader, apiVersion, correlationId, clientId),
+            ApiKey.Heartbeat => ReadHeartbeatRequest(reader, apiVersion, correlationId, clientId),
             ApiKey.LeaveGroup => ReadLeaveGroupRequest(reader, apiVersion, correlationId, clientId),
             ApiKey.DescribeGroups => DescribeGroupsRequest.ReadFrom(reader, apiVersion, correlationId, clientId),
             ApiKey.ListGroups => ListGroupsRequest.ReadFrom(reader, apiVersion, correlationId, clientId),
@@ -427,6 +427,13 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
 
         var protocolReader = new KafkaProtocolReader(remainingBytes);
         return SyncGroupRequest.ReadFrom(protocolReader, apiVersion, correlationId, clientId);
+    }
+
+    private static HeartbeatRequest ReadHeartbeatRequest(BinaryReader reader, short apiVersion, int correlationId, string clientId)
+    {
+        var stream = (MemoryStream)reader.BaseStream;
+        var remainingBytes = reader.ReadBytes((int)(stream.Length - stream.Position));
+        return HeartbeatRequest.ReadFrom(new KafkaProtocolReader(remainingBytes), apiVersion, correlationId, clientId);
     }
 
     private static LeaveGroupRequest ReadLeaveGroupRequest(BinaryReader reader, short apiVersion, int correlationId, string clientId)

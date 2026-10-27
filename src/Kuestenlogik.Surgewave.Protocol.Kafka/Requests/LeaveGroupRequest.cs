@@ -13,6 +13,9 @@ public sealed class LeaveGroupRequest : KafkaRequest
     {
         public required string MemberId { get; init; }
         public string? GroupInstanceId { get; init; }
+
+        /// <summary>v5+: why the member leaves, for the broker's log (KIP-800).</summary>
+        public string? Reason { get; init; }
     }
 
     public override void WriteTo(KafkaProtocolWriter writer)
@@ -55,6 +58,9 @@ public sealed class LeaveGroupRequest : KafkaRequest
                 {
                     var mId = reader.ReadCompactString();
                     var groupInstanceId = reader.ReadCompactString();
+                    // Reason (v5+) before the member's tagged fields. Unread, it was taken for the
+                    // tagged-field count, and a Java consumer's LeaveGroup v5 failed to parse.
+                    var reason = apiVersion >= 5 ? reader.ReadCompactString() : null;
 
                     // Skip tagged fields
                     var tagCount = reader.ReadVarInt();
@@ -68,7 +74,8 @@ public sealed class LeaveGroupRequest : KafkaRequest
                     return new MemberIdentity
                     {
                         MemberId = mId ?? string.Empty,
-                        GroupInstanceId = groupInstanceId
+                        GroupInstanceId = groupInstanceId,
+                        Reason = reason
                     };
                 });
             }

@@ -27,12 +27,19 @@ public sealed class HeartbeatRequest : KafkaRequest
         }
     }
 
-    public static HeartbeatRequest ReadFrom(BinaryReader reader, short apiVersion, int correlationId, string clientId)
+    public static HeartbeatRequest ReadFrom(KafkaProtocolReader reader, short apiVersion, int correlationId, string clientId)
     {
-        var groupId = BinaryHelpers.ReadString(reader);
-        var generationId = BinaryHelpers.ReadInt32BigEndian(reader);
-        var memberId = BinaryHelpers.ReadString(reader);
-        string? groupInstanceId = apiVersion >= 3 ? BinaryHelpers.ReadString(reader) : null;
+        // v4+ is flexible: compact strings and tagged fields. Read as v0-3, a Java consumer's heartbeat
+        // ran out of bytes ("Expected 4 bytes but read 0") and its group never stayed alive.
+        bool isFlexible = ProtocolVersions.IsFlexible(ApiKey.Heartbeat, apiVersion);
+        var groupId = (isFlexible ? reader.ReadCompactString() : reader.ReadString()) ?? string.Empty;
+        var generationId = reader.ReadInt32();
+        var memberId = (isFlexible ? reader.ReadCompactString() : reader.ReadString()) ?? string.Empty;
+        string? groupInstanceId = apiVersion >= 3
+            ? (isFlexible ? reader.ReadCompactString() : reader.ReadString())
+            : null;
+        if (isFlexible)
+            reader.SkipTaggedFields();
 
         return new HeartbeatRequest
         {

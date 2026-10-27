@@ -9,6 +9,13 @@ public sealed class SyncGroupRequest : KafkaRequest
     public required int GenerationId { get; init; }
     public required string MemberId { get; init; }
     public string? GroupInstanceId { get; init; }
+
+    /// <summary>v5+: the group's protocol type (e.g. "consumer"), as the member saw it in JoinGroup.</summary>
+    public string? ProtocolType { get; init; }
+
+    /// <summary>v5+: the group's chosen protocol (e.g. "range"), as the member saw it in JoinGroup.</summary>
+    public string? ProtocolName { get; init; }
+
     public required GroupAssignment[] Assignments { get; init; }
 
     public sealed class GroupAssignment
@@ -52,6 +59,15 @@ public sealed class SyncGroupRequest : KafkaRequest
         string? groupInstanceId = apiVersion >= 3
             ? (isFlexible ? reader.ReadCompactString() : reader.ReadString())
             : null;
+
+        // ProtocolType and ProtocolName (v5+, KIP-559) come before the assignments. Unread, the
+        // assignments array was read from the protocol type, and a Java consumer's SyncGroup v5 failed.
+        string? protocolType = null, protocolName = null;
+        if (apiVersion >= 5)
+        {
+            protocolType = reader.ReadCompactString();
+            protocolName = reader.ReadCompactString();
+        }
 
         GroupAssignment[] assignments;
         if (isFlexible)
@@ -115,6 +131,8 @@ public sealed class SyncGroupRequest : KafkaRequest
             GenerationId = generationId,
             MemberId = memberId ?? string.Empty,
             GroupInstanceId = groupInstanceId,
+            ProtocolType = protocolType,
+            ProtocolName = protocolName,
             Assignments = assignments
         };
     }
@@ -126,6 +144,13 @@ public sealed class SyncGroupRequest : KafkaRequest
 public sealed class SyncGroupResponse : KafkaResponse
 {
     public required ErrorCode ErrorCode { get; init; }
+
+    /// <summary>v5+: the group's protocol type; the client checks it against the one it joined with.</summary>
+    public string? ProtocolType { get; init; }
+
+    /// <summary>v5+: the group's chosen protocol; the client checks it against the one it joined with.</summary>
+    public string? ProtocolName { get; init; }
+
     public required byte[] Assignment { get; init; }
 
     public override void WriteTo(KafkaProtocolWriter writer)
@@ -149,6 +174,12 @@ public sealed class SyncGroupResponse : KafkaResponse
         }
 
         writer.WriteInt16((short)ErrorCode);
+
+        if (ApiVersion >= 5)
+        {
+            writer.WriteCompactString(ProtocolType);
+            writer.WriteCompactString(ProtocolName);
+        }
 
         // Assignment - use compact bytes for v4+
         if (isFlexible)

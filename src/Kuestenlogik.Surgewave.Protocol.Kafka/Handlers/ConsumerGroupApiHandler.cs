@@ -154,6 +154,9 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
             CorrelationId = r.CorrelationId,
             ApiVersion = r.ApiVersion,
             ErrorCode = ToErrorCode(result.Status),
+            // The protocol the member joined with; the group runs one protocol type and name.
+            ProtocolType = r.ProtocolType,
+            ProtocolName = r.ProtocolName,
             Assignment = result.Assignment,
         };
 
