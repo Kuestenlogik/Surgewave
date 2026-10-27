@@ -140,6 +140,11 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Quic\Kuestenlogik.Surgewave.Transport.Quic.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport.Tcp\Kuestenlogik.Surgewave.Transport.Tcp.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Wasm.Hosting\Kuestenlogik.Surgewave.Wasm.Hosting.csproj" />
+    <!-- Build order only: the Kafka protocol plugin is built before the broker so CopyKafkaPluginForDevRun
+         (Directory.Build.targets) can stage it for a dev run. No assembly reference, nothing copied, nothing in
+         the broker's deps.json — the broker stays Kafka-free (#59). -->
+    <ProjectReference Include="..\Kuestenlogik.Surgewave.Protocol.Kafka\Kuestenlogik.Surgewave.Protocol.Kafka.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
 </Project>

@@ -69,6 +69,11 @@ dotnet run --project src/Kuestenlogik.Surgewave.Broker.App
 dotnet run --project src/Kuestenlogik.Surgewave.Control --urls "http://localhost:5050"
 ```
 
+The Kafka wire protocol is a plugin, not part of the broker. Building the broker builds the plugin first and
+stages it into the broker's output as `plugins/kuestenlogik.surgewave.protocol.kafka/`, the layout a published
+broker installs it in, so a `dotnet run` speaks Kafka. The startup log says so:
+`Activated protocol plugin: Kafka Protocol`.
+
 **Endpoints:**
 
 | Service | URL / Address |

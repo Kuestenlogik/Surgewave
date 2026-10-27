@@ -38,13 +38,15 @@ public sealed class BrokerBootSmokeTests
     // the failure detector — which until #121 it did not.
     private const string HeartbeatManagerStartedLine = "Heartbeat manager started";
 
+    // BrokerPluginActivator's line once the Kafka protocol plugin from plugins/ is active.
+    private const string KafkaPluginActivatedLine = "Activated protocol plugin: Kafka Protocol";
+
     [Fact(Timeout = 180_000)]
     public async Task Broker_BootsToReady_WithConnectEnabled()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var brokerDll = ResolveBrokerDll();
         var brokerDir = Path.GetDirectoryName(brokerDll)!;
-        EnsureKafkaPluginStaged(brokerDir);
 
         // Four distinct ephemeral ports: BrokerConfig requires Port, GrpcPort and ReplicationPort
         // to all differ, and fixed defaults (9092/9093/10092/9094) would collide across runs.
@@ -134,6 +136,11 @@ public sealed class BrokerBootSmokeTests
             lock (log)
             {
                 Assert.Contains(HeartbeatManagerStartedLine, log.ToString(), StringComparison.Ordinal);
+
+                // The build staged the Kafka plugin next to the broker (CopyKafkaPluginForDevRun), and the
+                // broker found and activated it from there — what a `dotnet run` relies on. The test used
+                // to stage the plugin itself, which hid that the build put it where the broker never looks.
+                Assert.Contains(KafkaPluginActivatedLine, log.ToString(), StringComparison.Ordinal);
             }
         }
         finally
@@ -151,7 +158,7 @@ public sealed class BrokerBootSmokeTests
         finally { listener.Stop(); }
     }
 
-    private static string ResolveBrokerDll()
+    internal static string ResolveBrokerDll()
     {
         var artifacts = FindArtifactsRoot();
         var config = new DirectoryInfo(AppContext.BaseDirectory).Name; // Debug / Release
@@ -178,35 +185,6 @@ public sealed class BrokerBootSmokeTests
         }
         throw new DirectoryNotFoundException(
             $"Could not locate the 'artifacts' output root walking up from {AppContext.BaseDirectory}.");
-    }
-
-    // Mirror the b6 CopyKafkaPluginForDevRun target: if a parallel/incremental build left the
-    // broker's plugins/ without the Kafka plugin, stage it here so the boot also exercises real
-    // plugin discovery. Best-effort — the Connect-plugin crash this test guards reproduces even
-    // native-only, but staging makes the coverage complete.
-    private static void EnsureKafkaPluginStaged(string brokerDir)
-    {
-        var pluginsDir = Path.Combine(brokerDir, "plugins");
-        if (File.Exists(Path.Combine(pluginsDir, "Kuestenlogik.Surgewave.Protocol.Kafka.dll")))
-            return;
-        var binDir = Directory.GetParent(brokerDir)?.Parent?.FullName; // .../artifacts/bin
-        if (binDir is null) return;
-        var config = new DirectoryInfo(brokerDir).Name;
-        var pkOut = Path.Combine(binDir, "Kuestenlogik.Surgewave.Protocol.Kafka", config);
-        if (!Directory.Exists(pkOut)) return;
-        Directory.CreateDirectory(pluginsDir);
-        foreach (var f in Directory.GetFiles(pkOut))
-        {
-            var name = Path.GetFileName(f);
-            var keep = name.Equals("Kuestenlogik.Surgewave.Protocol.Kafka.dll", StringComparison.OrdinalIgnoreCase)
-                || name.Equals("plugin.json", StringComparison.OrdinalIgnoreCase)
-                || name.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase)
-                // the plugin's private, non-shared external deps (shared Kuestenlogik.* already ship in the broker bin)
-                || (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                    && !name.StartsWith("Kuestenlogik.Surgewave.", StringComparison.OrdinalIgnoreCase));
-            if (keep)
-                try { File.Copy(f, Path.Combine(pluginsDir, name), overwrite: true); } catch { /* best-effort */ }
-        }
     }
 
     private static async Task StopAsync(Process proc, CancellationToken cancellationToken)

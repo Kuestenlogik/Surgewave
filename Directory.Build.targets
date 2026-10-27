@@ -176,39 +176,40 @@
 
   <!--
     #59 b6 — dev-mode Kafka plugin discovery.
-    After the b5 atomic flip the broker no longer references Protocol.Kafka, so its DLL no longer
-    free-rides into surgewave-broker's bin via a transitive P2P copy. A dev-mode `dotnet run` of the
-    broker would therefore silently run NATIVE-ONLY (correct for release — publish.ps1 packs the .swpkg —
-    for tests — IntegrationTests reference Protocol.Kafka directly — but a regression for dev-run).
-    This copies the built Kafka plugin (assembly + manifest + deps + its private external deps) into
-    the broker's plugins/ folder via a GLOB over the artifacts output — deliberately NOT a named
-    Protocol.Kafka ProjectReference, which would re-couple the broker and re-trip the #59 Kafka-free
-    grep/deps gate. Ordering caveat: it only copies if Protocol.Kafka has already been built (a full
-    solution build or publish); a bare broker-only build leaves plugins/ empty, which is the correct
-    native-first default. Runtime discovery (BrokerPluginActivator finds SurgewaveKafkaProtocolPlugin)
-    is verified by KafkaGatingTests / a dev `dotnet run`, not at build time.
+    The broker does not reference Protocol.Kafka (#59): the Kafka wire protocol is a plugin, and a
+    published broker gets it as a .swpkg (scripts/publish.ps1). Run from source (`dotnet run`, F5), the
+    broker would therefore run native-only and close every Kafka client. This stages the built plugin into
+    the broker's plugins/ folder in the layout the installer produces — plugins/<plugin id>/ with the
+    assembly, its manifest and deps, and its private external dependencies — so a dev run speaks Kafka.
+
+    Only the broker host (Broker.App) gets it: its Installation scope is <exe dir>/plugins. The plugin's
+    own copies of the host's Kuestenlogik.Surgewave.* assemblies stay out, or the plugin would load a second
+    copy of the types it shares with the host. Broker.App's build-order ProjectReference to Protocol.Kafka
+    (ReferenceOutputAssembly=false) makes sure the plugin is built first; the broker stays Kafka-free,
+    which Broker.BootTests' KafkaFreeBrokerTests holds.
   -->
   <Target Name="CopyKafkaPluginForDevRun"
           AfterTargets="Build"
-          Condition="'$(MSBuildProjectName)' == 'Kuestenlogik.Surgewave.Broker'">
+          Condition="'$(MSBuildProjectName)' == 'Kuestenlogik.Surgewave.Broker.App'">
     <PropertyGroup>
+      <_KafkaPluginId>kuestenlogik.surgewave.protocol.kafka</_KafkaPluginId>
       <_KafkaPluginOut>$(ArtifactsPath)bin\Kuestenlogik.Surgewave.Protocol.Kafka\$(Configuration)\</_KafkaPluginOut>
+      <_KafkaPluginDir>$(OutputPath)plugins\$(_KafkaPluginId)\</_KafkaPluginDir>
     </PropertyGroup>
     <ItemGroup Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll')">
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll" />
-      <_KafkaPluginFiles Include="$(_KafkaPluginOut)plugin.json" Condition="Exists('$(_KafkaPluginOut)plugin.json')" />
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json" Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json')" />
-      <!-- The plugin's private external deps (e.g. Microsoft.IdentityModel.* for OAUTHBEARER) that
-           the broker's own output does not already carry. Kuestenlogik.Surgewave.* shared assemblies
-           are already in the broker bin, so exclude them. -->
-      <_KafkaPluginFiles Include="$(_KafkaPluginOut)*.dll"
-                         Condition="!$([System.String]::Copy('%(Filename)').StartsWith('Kuestenlogik.Surgewave.'))" />
+      <_KafkaPluginFiles Include="$(_KafkaPluginOut)plugin.json" Condition="Exists('$(_KafkaPluginOut)plugin.json')" />
+      <!-- The plugin's private external dependencies, without the host's shared assemblies. -->
+      <_KafkaPluginFiles Include="$(_KafkaPluginOut)*.dll" Exclude="$(_KafkaPluginOut)Kuestenlogik.Surgewave.*.dll" />
     </ItemGroup>
+    <Warning Text="CopyKafkaPluginForDevRun: no Kafka plugin build output at $(_KafkaPluginOut) — the broker runs native-only."
+             Condition="'@(_KafkaPluginFiles)' == ''" />
     <Copy SourceFiles="@(_KafkaPluginFiles)"
-          DestinationFolder="$(OutputPath)plugins"
+          DestinationFolder="$(_KafkaPluginDir)"
           SkipUnchangedFiles="true"
           Condition="'@(_KafkaPluginFiles)' != ''" />
-    <Message Text="#59 b6: staged Kafka plugin into $(OutputPath)plugins for dev-run"
+    <Message Text="#59 b6: staged the Kafka plugin into $(_KafkaPluginDir) for dev-run"
              Importance="normal"
              Condition="'@(_KafkaPluginFiles)' != ''" />
   </Target>
