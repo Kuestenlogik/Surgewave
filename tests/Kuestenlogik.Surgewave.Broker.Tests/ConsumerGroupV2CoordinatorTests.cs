@@ -200,6 +200,23 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void ListGroups_ListsEachGroupAsAConsumerGroupWithItsState()
+    {
+        SendHeartbeat("list-a", "c1", [TopicA]);
+        SendHeartbeat("list-b", "c1", [TopicB]);
+
+        var all = _coordinator.ListGroups(statesFilter: null);
+
+        Assert.Equal(["list-a", "list-b"], all.Select(g => g.GroupId).Order());
+        Assert.All(all, g =>
+        {
+            Assert.Equal("consumer", g.GroupType);
+            Assert.Equal("consumer", g.ProtocolType);
+        });
+        Assert.Empty(_coordinator.ListGroups(["Dead"]));
+    }
+
+    [Fact]
     public void Describe_ReflectsReconcilingAndStableStates()
     {
         var first = SendHeartbeat("g7", "c1", [TopicA]);

@@ -268,8 +268,9 @@ public sealed class ConsumerGroupCoordinator(
         }
     }
 
-    private List<OffsetFetchTopicResult> FetchOffsetsForGroup(string groupId, IReadOnlyList<OffsetFetchTopicRequest> topicRequests, bool useTopicId)
+    private List<OffsetFetchTopicResult> FetchOffsetsForGroup(string groupId, IReadOnlyList<OffsetFetchTopicRequest>? topicRequests, bool useTopicId)
     {
+        topicRequests ??= AllCommittedTopics(groupId);
         var topics = new List<OffsetFetchTopicResult>();
 
         Log.OffsetFetchRequest(logger, groupId, topicRequests.Count);
@@ -695,7 +696,7 @@ public sealed class ConsumerGroupCoordinator(
                     }
                 }
 
-                groups.Add(new GroupListing(groupId, group.ProtocolType, state));
+                groups.Add(new GroupListing(groupId, group.ProtocolType, state, "classic"));
             }
 
             return groups;
@@ -854,6 +855,45 @@ public sealed class ConsumerGroupCoordinator(
     /// Get all committed offsets for a group from memory.
     /// Returns empty dictionary if group doesn't exist.
     /// </summary>
+    /// <summary>
+    /// Every topic partition the group has committed an offset for, in memory or in the store — what an
+    /// OffsetFetch with null topics answers.
+    /// </summary>
+    private List<OffsetFetchTopicRequest> AllCommittedTopics(string groupId)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        if (_consumerGroups.TryGetValue(groupId, out var group))
+            keys.UnionWith(group.CommittedOffsets.Keys);
+        if (offsetStore != null)
+            keys.UnionWith(offsetStore.GetAllOffsets(groupId).Keys);
+
+        // Keys are "topic:partition"; a Kafka topic name cannot contain ':'.
+        var partitionsByTopic = new SortedDictionary<string, List<int>>(StringComparer.Ordinal);
+        foreach (var key in keys)
+        {
+            var colon = key.LastIndexOf(':');
+            if (colon <= 0 || !int.TryParse(key.AsSpan(colon + 1), out var partition))
+                continue;
+            var topic = key[..colon];
+            if (!partitionsByTopic.TryGetValue(topic, out var partitions))
+                partitionsByTopic[topic] = partitions = [];
+            partitions.Add(partition);
+        }
+
+        var requests = new List<OffsetFetchTopicRequest>(partitionsByTopic.Count);
+        foreach (var (topic, partitions) in partitionsByTopic)
+        {
+            partitions.Sort();
+            requests.Add(new OffsetFetchTopicRequest
+            {
+                Topic = topic,
+                TopicId = logManager?.GetTopicId(topic) ?? Guid.Empty,
+                PartitionIndexes = partitions,
+            });
+        }
+        return requests;
+    }
+
     public Dictionary<string, long> GetGroupCommittedOffsets(string groupId)
     {
         lock (_groupLock)

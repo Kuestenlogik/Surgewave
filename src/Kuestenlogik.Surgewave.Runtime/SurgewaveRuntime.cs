@@ -341,7 +341,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 // (KIP-1071) APIs now route through the dispatcher (their broker fast-paths
                 // were removed when the coordinators went protocol-neutral, #59), so their
                 // adapters must be registered here too.
-                new ConsumerGroupApiHandler(consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
+                new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupV2Coordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
                 new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, _logManager.ResolveTopicId, _loggerFactory.CreateLogger<ConsumerGroupV2ApiHandler>()),
                 new StreamsGroupApiHandler(streamsGroupCoordinator, _loggerFactory.CreateLogger<StreamsGroupApiHandler>()),
                 // Transaction + share-group (KIP-932) APIs also route through the dispatcher now

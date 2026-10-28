@@ -123,9 +123,13 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
         {
             if (d.Status == ConsumerGroupDescribeStatus.GroupNotFound)
             {
+                // GROUP_ID_NOT_FOUND, as Kafka answers for an unknown or a classic group. A Java admin client
+                // falls back to DescribeGroups on exactly this code; INVALID_GROUP_ID failed `describe` of
+                // every classic group.
                 groups.Add(new ConsumerGroupDescribeResponse.DescribedGroup
                 {
-                    ErrorCode = ErrorCode.InvalidGroupId,
+                    ErrorCode = ErrorCode.GroupIdNotFound,
+                    ErrorMessage = $"Group {d.GroupId} not found.",
                     GroupId = d.GroupId,
                     GroupState = "",
                     AssignorName = "range",

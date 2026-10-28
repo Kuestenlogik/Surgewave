@@ -32,8 +32,8 @@ public sealed record GroupDescription
 
 // ── ListGroups ──────────────────────────────────────────────────────────────
 
-/// <summary>A group as reported by ListGroups.</summary>
-public sealed record GroupListing(string GroupId, string ProtocolType, string GroupState);
+/// <summary>A group as reported by ListGroups; <paramref name="GroupType"/> is classic or consumer (KIP-848).</summary>
+public sealed record GroupListing(string GroupId, string ProtocolType, string GroupState, string GroupType);
 
 // ── DeleteGroups ────────────────────────────────────────────────────────────
 

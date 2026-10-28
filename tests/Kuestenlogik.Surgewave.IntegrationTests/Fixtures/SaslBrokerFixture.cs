@@ -132,8 +132,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
         // The classic consumer-group APIs route through the dispatcher now (the broker
         // fast-path was removed when the coordinator went protocol-neutral, #59), so its
         // adapter must be registered here for the consume path to work.
-        var consumerGroupApiHandler = new ConsumerGroupApiHandler(
-            consumerGroupCoordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>());
+        var consumerGroupApiHandler = new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupV2Coordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>());
         var transactionApiHandler = new TransactionApiHandler(
             transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>());
         var shareGroupApiHandler = new ShareGroupApiHandler(

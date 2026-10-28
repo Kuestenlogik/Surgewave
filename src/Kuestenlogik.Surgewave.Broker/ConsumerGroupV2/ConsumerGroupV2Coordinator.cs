@@ -263,6 +263,27 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
         }
     }
 
+    public IReadOnlyList<GroupListing> ListGroups(IReadOnlyList<string>? statesFilter)
+    {
+        lock (_groupLock)
+        {
+            var groups = new List<GroupListing>(_groups.Count);
+            foreach (var (groupId, group) in _groups)
+            {
+                var state = GetGroupPhase(group) switch
+                {
+                    ConsumerGroupPhase.Empty => "Empty",
+                    ConsumerGroupPhase.Stable => "Stable",
+                    _ => "Reconciling",
+                };
+                if (statesFilter is { Count: > 0 } && !statesFilter.Contains(state, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                groups.Add(new GroupListing(groupId, "consumer", state, "consumer"));
+            }
+            return groups;
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Internal helpers
     // ─────────────────────────────────────────────────────────────

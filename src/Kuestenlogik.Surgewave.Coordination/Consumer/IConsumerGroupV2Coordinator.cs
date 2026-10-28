@@ -23,6 +23,12 @@ public interface IConsumerGroupV2Coordinator
     IReadOnlyList<ConsumerGroupDescription> Describe(IReadOnlyList<string> groupIds);
 
     /// <summary>
+    /// Lists the KIP-848 groups, as ListGroups reports them next to the classic ones; an empty or null
+    /// <paramref name="statesFilter"/> lists all.
+    /// </summary>
+    IReadOnlyList<GroupListing> ListGroups(IReadOnlyList<string>? statesFilter);
+
+    /// <summary>
     /// Fences an offset commit/fetch for a KIP-848 member. Returns
     /// <see cref="ConsumerGroupFenceStatus.NotAV2Group"/> (distinct!) when the group is not a
     /// KIP-848 group, so the caller falls through to the classic coordinator.

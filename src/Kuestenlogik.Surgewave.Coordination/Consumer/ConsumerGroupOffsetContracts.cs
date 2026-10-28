@@ -58,7 +58,9 @@ public sealed record OffsetFetchTopicRequest
 public sealed record OffsetFetchGroupRequest
 {
     public required string GroupId { get; init; }
-    public required IReadOnlyList<OffsetFetchTopicRequest> Topics { get; init; }
+
+    /// <summary>The topics to fetch; null fetches every offset the group has committed, as Kafka's null topics do.</summary>
+    public required IReadOnlyList<OffsetFetchTopicRequest>? Topics { get; init; }
 }
 
 /// <summary>

@@ -19,6 +19,7 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
 {
     private readonly IConsumerGroupCoordinator _coordinator;
+    private readonly IConsumerGroupV2Coordinator _consumerGroups;
     private readonly ILogger<ConsumerGroupApiHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -35,11 +36,14 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
         ApiKey.OffsetDelete,
     ];
 
+    /// <param name="consumerGroups">The KIP-848 coordinator, whose groups ListGroups reports next to the classic ones.</param>
     public ConsumerGroupApiHandler(
         IConsumerGroupCoordinator coordinator,
+        IConsumerGroupV2Coordinator consumerGroups,
         ILogger<ConsumerGroupApiHandler> logger)
     {
         _coordinator = coordinator;
+        _consumerGroups = consumerGroups;
         _logger = logger;
     }
 
@@ -54,7 +58,8 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
             OffsetCommitRequest r => ToOffsetCommitResponse(_coordinator.CommitOffsets(ToOffsetCommitCommand(r)), r),
             OffsetFetchRequest r => ToOffsetFetchResponse(_coordinator.FetchOffsets(ToOffsetFetchCommand(r)), r),
             DescribeGroupsRequest r => ToDescribeGroupsResponse(_coordinator.DescribeGroups(r.GroupIds), r),
-            ListGroupsRequest r => ToListGroupsResponse(_coordinator.ListGroups(r.StatesFilter), r),
+            ListGroupsRequest r => ToListGroupsResponse(
+                [.. _coordinator.ListGroups(r.StatesFilter), .. _consumerGroups.ListGroups(r.StatesFilter)], r),
             DeleteGroupsRequest r => ToDeleteGroupsResponse(_coordinator.DeleteGroups(r.GroupIds), r),
             OffsetDeleteRequest r => ToOffsetDeleteResponse(_coordinator.DeleteOffsets(ToOffsetDeleteCommand(r)), r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConsumerGroupApiHandler")
@@ -296,9 +301,11 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
         return new OffsetFetchCommand { UseTopicId = r.ApiVersion >= 10, Groups = groups };
     }
 
-    private static IReadOnlyList<OffsetFetchTopicRequest> ToNeutralFetchTopics(List<TopicPartitionRequest>? topicRequests)
+    private static IReadOnlyList<OffsetFetchTopicRequest>? ToNeutralFetchTopics(List<TopicPartitionRequest>? topicRequests)
     {
-        if (topicRequests == null) return [];
+        // Null topics ask for every committed offset of the group (an admin client's describe); it was an empty
+        // list, so `kafka-consumer-groups --describe` showed no offsets for any group.
+        if (topicRequests == null) return null;
         var topics = new List<OffsetFetchTopicRequest>(topicRequests.Count);
         foreach (var t in topicRequests)
         {
@@ -421,18 +428,19 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
 
     private static ListGroupsResponse ToListGroupsResponse(IReadOnlyList<GroupListing> listings, ListGroupsRequest r)
     {
-        // This coordinator holds the classic groups; a v5 type filter without "classic" lists none of them.
-        var classicAsked = r.TypesFilter.Count == 0
-            || r.TypesFilter.Contains("classic", StringComparer.OrdinalIgnoreCase);
+        // Classic and KIP-848 groups; a v5 type filter narrows them to the types it names.
         var groups = new List<ListGroupsResponse.ListedGroup>(listings.Count);
-        foreach (var g in classicAsked ? listings : [])
+        foreach (var g in listings)
         {
+            if (r.TypesFilter.Count > 0 && !r.TypesFilter.Contains(g.GroupType, StringComparer.OrdinalIgnoreCase))
+                continue;
+
             groups.Add(new ListGroupsResponse.ListedGroup
             {
                 GroupId = g.GroupId,
                 ProtocolType = g.ProtocolType,
                 GroupState = g.GroupState,
-                GroupType = "classic",
+                GroupType = g.GroupType,
             });
         }
 
