@@ -17,6 +17,13 @@ public sealed partial class RaftPersistence
     private readonly string _snapshotDirectory;
     private readonly object _lock = new();
 
+    // Term and vote are saved from several paths (own election, granting a vote, following a new leader),
+    // concurrently. Unserialised, two saves wrote the same .tmp file at once ("being used by another
+    // process", #184), and an older save could land after a newer one and take the term back.
+    private readonly Lock _stateLock = new();
+    private int _savedTerm = -1;
+    private int? _savedVotedFor;
+
     public RaftPersistence(ILogger<RaftPersistence> logger, ClusteringConfig config)
     {
         _logger = logger;
@@ -54,6 +61,14 @@ public sealed partial class RaftPersistence
         {
             var json = await File.ReadAllTextAsync(_stateFile, ct);
             var state = JsonSerializer.Deserialize(json, ClusteringJsonContext.Default.RaftPersistentState);
+            if (state is not null)
+            {
+                lock (_stateLock)
+                {
+                    _savedTerm = state.CurrentTerm;
+                    _savedVotedFor = state.VotedFor;
+                }
+            }
             LogStateLoaded(state?.CurrentTerm ?? 0, state?.VotedFor);
             return state ?? new RaftPersistentState(0, null);
         }
@@ -67,19 +82,35 @@ public sealed partial class RaftPersistence
     /// <summary>
     /// Save persistent state (currentTerm, votedFor).
     /// </summary>
-    public async Task SaveStateAsync(int currentTerm, int? votedFor, CancellationToken ct)
+    /// <remarks>
+    /// One save at a time, and never backwards: a state older than the one on disk — a lower term, or the same
+    /// term without the vote already cast in it — is skipped. The file is a few bytes, so it is written
+    /// synchronously under the lock rather than holding an async lock across the write.
+    /// </remarks>
+    public Task SaveStateAsync(int currentTerm, int? votedFor, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         EnsureDirectoryExists();
 
-        var state = new RaftPersistentState(currentTerm, votedFor);
-        var json = JsonSerializer.Serialize(state, ClusteringJsonContext.Default.RaftPersistentState);
+        lock (_stateLock)
+        {
+            if (currentTerm < _savedTerm || (currentTerm == _savedTerm && votedFor is null && _savedVotedFor is not null))
+                return Task.CompletedTask;
 
-        // Write to temp file then rename for atomicity
-        var tempFile = _stateFile + ".tmp";
-        await File.WriteAllTextAsync(tempFile, json, ct);
-        File.Move(tempFile, _stateFile, overwrite: true);
+            var state = new RaftPersistentState(currentTerm, votedFor);
+            var json = JsonSerializer.Serialize(state, ClusteringJsonContext.Default.RaftPersistentState);
+
+            // Write to temp file then rename for atomicity
+            var tempFile = _stateFile + ".tmp";
+            File.WriteAllText(tempFile, json);
+            File.Move(tempFile, _stateFile, overwrite: true);
+
+            _savedTerm = currentTerm;
+            _savedVotedFor = votedFor;
+        }
 
         LogStateSaved(currentTerm, votedFor);
+        return Task.CompletedTask;
     }
 
     /// <summary>
