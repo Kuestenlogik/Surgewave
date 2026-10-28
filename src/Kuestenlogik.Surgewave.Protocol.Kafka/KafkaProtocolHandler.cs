@@ -162,10 +162,13 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
     ///
     /// Header v1: ApiKey, ApiVersion, CorrelationId, ClientId (STRING)
     /// Header v2: ApiKey, ApiVersion, CorrelationId, ClientId (STRING), TaggedFields
+    /// Header v3: as v2, with ClientInstanceId (uuid) as tagged field 0 (KIP-1313)
     /// </summary>
     private static int ReadRequestHeader(
-        ReadOnlySpan<byte> data, out ApiKey apiKey, out short apiVersion, out int correlationId, out string clientId)
+        ReadOnlySpan<byte> data, out ApiKey apiKey, out short apiVersion, out int correlationId, out string clientId,
+        out Guid? clientInstanceId)
     {
+        clientInstanceId = null;
         // Validate we have enough data for the minimum header (8 bytes: apiKey + apiVersion + correlationId)
         if (data.Length < 8)
             throw new InvalidDataException($"Request too short for header: {data.Length} bytes");
@@ -206,13 +209,16 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
             position += read;
             for (int i = 0; i < headerTags; i++)
             {
-                (_, read) = KafkaProtocolPrimitives.ReadVarInt(data[position..]); // tag id
-                position += read;
+                var (tag, tagRead) = KafkaProtocolPrimitives.ReadVarInt(data[position..]);
+                position += tagRead;
                 var (tagSize, sizeRead) = KafkaProtocolPrimitives.ReadVarInt(data[position..]);
                 position += sizeRead;
                 if (tagSize < 0 || position + tagSize > data.Length)
                     throw new InvalidDataException(
                         $"Invalid tagged field size {tagSize}, only {data.Length - position} bytes remaining");
+                // Tag 0 is header v3's ClientInstanceId; any other tag is skipped, as Kafka skips unknown ones.
+                if (tag == 0 && tagSize == 16)
+                    clientInstanceId = new Guid(data.Slice(position, 16), bigEndian: true);
                 position += tagSize;
             }
         }
@@ -233,8 +239,17 @@ public sealed class KafkaProtocolHandler : IProtocolHandler
     internal static KafkaRequest ParseRequest(byte[] buffer, int size)
     {
         var headerLength = ReadRequestHeader(
-            buffer.AsSpan(0, size), out var apiKey, out var apiVersion, out var correlationId, out var clientId);
+            buffer.AsSpan(0, size), out var apiKey, out var apiVersion, out var correlationId, out var clientId,
+            out var clientInstanceId);
 
+        var request = ParseRequestBody(buffer, size, headerLength, apiKey, apiVersion, correlationId, clientId);
+        request.HeaderClientInstanceId = clientInstanceId;
+        return request;
+    }
+
+    private static KafkaRequest ParseRequestBody(
+        byte[] buffer, int size, int headerLength, ApiKey apiKey, short apiVersion, int correlationId, string clientId)
+    {
         switch (apiKey)
         {
             case ApiKey.Produce:

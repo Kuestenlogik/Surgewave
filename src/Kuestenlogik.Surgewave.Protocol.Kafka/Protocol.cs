@@ -123,6 +123,12 @@ public abstract class KafkaRequest : IProtocolRequest
     public required int CorrelationId { get; init; }
     public required string ClientId { get; init; }
 
+    /// <summary>
+    /// The client instance id from request header v3 (KIP-1313, tagged field 0), or null when the header does not
+    /// carry it — the same id a client reports its telemetry under.
+    /// </summary>
+    public Guid? HeaderClientInstanceId { get; set; }
+
     public abstract void WriteTo(KafkaProtocolWriter writer);
 
     /// <summary>

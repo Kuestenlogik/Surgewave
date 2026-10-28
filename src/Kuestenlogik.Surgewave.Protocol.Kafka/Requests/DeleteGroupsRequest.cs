@@ -96,6 +96,9 @@ public sealed class DeleteGroupsResponse : KafkaResponse
 
         /// <summary>The error code, or 0 if the deletion succeeded.</summary>
         public ErrorCode ErrorCode { get; init; }
+
+        /// <summary>v3+: why the deletion failed, or null.</summary>
+        public string? ErrorMessage { get; init; }
     }
 
     public override void WriteTo(KafkaProtocolWriter writer)
@@ -119,6 +122,10 @@ public sealed class DeleteGroupsResponse : KafkaResponse
             {
                 writer.WriteCompactString(result.GroupId);
                 writer.WriteInt16((short)result.ErrorCode);
+                if (ApiVersion >= 3)
+                {
+                    writer.WriteCompactString(result.ErrorMessage);
+                }
                 writer.WriteVarInt(0); // Result tagged fields
             }
 
@@ -154,12 +161,14 @@ public sealed class DeleteGroupsResponse : KafkaResponse
             {
                 var groupId = reader.ReadCompactString() ?? "";
                 var errorCode = (ErrorCode)reader.ReadInt16();
+                var errorMessage = apiVersion >= 3 ? reader.ReadCompactString() : null;
                 reader.SkipTaggedFields();
 
                 results.Add(new DeletableGroupResult
                 {
                     GroupId = groupId,
-                    ErrorCode = errorCode
+                    ErrorCode = errorCode,
+                    ErrorMessage = errorMessage,
                 });
             }
             reader.SkipTaggedFields();

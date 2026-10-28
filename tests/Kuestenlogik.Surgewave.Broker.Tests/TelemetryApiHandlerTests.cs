@@ -125,7 +125,7 @@ public sealed class TelemetryApiHandlerTests
     }
 
     [Fact]
-    public async Task PushTelemetry_PayloadOverMaxBytes_ReturnsMessageTooLarge()
+    public async Task PushTelemetry_PayloadOverMaxBytes_ReturnsTelemetryTooLarge()
     {
         var (handler, ingestor) = Build(enabled: true, maxBytes: 4);
 
@@ -134,7 +134,7 @@ public sealed class TelemetryApiHandlerTests
             BuildContext(),
             CancellationToken.None);
 
-        Assert.Equal(ErrorCode.MessageTooLarge, resp.ErrorCode);
+        Assert.Equal(ErrorCode.TelemetryTooLarge, resp.ErrorCode);
         Assert.Equal(0, ingestor.Calls); // ingestor must NOT see oversized payloads
     }
 

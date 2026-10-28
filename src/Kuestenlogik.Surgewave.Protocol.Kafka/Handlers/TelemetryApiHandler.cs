@@ -154,7 +154,9 @@ public sealed partial class TelemetryApiHandler : IKafkaRequestHandler
                 CorrelationId = request.CorrelationId,
                 ApiVersion = request.ApiVersion,
                 ThrottleTimeMs = 0,
-                ErrorCode = ErrorCode.MessageTooLarge,
+                // TELEMETRY_TOO_LARGE, Kafka's code for exactly this (KAFKA-21076): a client tells it apart from a
+                // produce-path MESSAGE_TOO_LARGE and backs off its telemetry instead.
+                ErrorCode = ErrorCode.TelemetryTooLarge,
             };
         }
 

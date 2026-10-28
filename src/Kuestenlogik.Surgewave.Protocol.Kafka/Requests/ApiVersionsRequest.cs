@@ -299,7 +299,7 @@ public sealed class ApiVersionsResponse : KafkaResponse
                 new SupportedApiVersion { ApiKey = (short)ApiKey.SyncGroup, MinVersion = 0, MaxVersion = 5 },              // Kafka: 0-5
                 new SupportedApiVersion { ApiKey = (short)ApiKey.DescribeGroups, MinVersion = 0, MaxVersion = 6 },         // Kafka: 0-6
                 new SupportedApiVersion { ApiKey = (short)ApiKey.ListGroups, MinVersion = 0, MaxVersion = 5 },             // Kafka: 0-5
-                new SupportedApiVersion { ApiKey = (short)ApiKey.DeleteGroups, MinVersion = 0, MaxVersion = 2 },           // Kafka: 0-2
+                new SupportedApiVersion { ApiKey = (short)ApiKey.DeleteGroups, MinVersion = 0, MaxVersion = 3 },           // Kafka: 0-3
 
                 // Auth APIs
                 new SupportedApiVersion { ApiKey = (short)ApiKey.SaslHandshake, MinVersion = 0, MaxVersion = 1 },          // Kafka: 0-1

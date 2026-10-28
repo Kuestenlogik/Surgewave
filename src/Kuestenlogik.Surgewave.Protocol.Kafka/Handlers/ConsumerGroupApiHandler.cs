@@ -464,6 +464,15 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
             {
                 GroupId = g.GroupId,
                 ErrorCode = ToErrorCode(g.Status),
+                // v3: the cause next to the code, so an admin client can say why (Kafka 7997c9ebe0).
+                ErrorMessage = g.Status switch
+                {
+                    ConsumerGroupErrorStatus.None => null,
+                    ConsumerGroupErrorStatus.NonEmptyGroup => $"Group {g.GroupId} is not empty.",
+                    ConsumerGroupErrorStatus.GroupIdNotFound => $"Group {g.GroupId} does not exist.",
+                    ConsumerGroupErrorStatus.InvalidGroupId => $"Group id {g.GroupId} is invalid.",
+                    _ => $"Group {g.GroupId} could not be deleted: {g.Status}.",
+                },
             });
         }
 
