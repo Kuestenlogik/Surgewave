@@ -40,12 +40,17 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Topic, int Partition), Lazy<SurgewaveBatchingProducer>> _batchers = new();
     private bool _disposed;
 
+    // The connection, made once: by CreateAsync up front, or by the first send for a producer built with a
+    // constructor. A failed attempt is dropped so the next send tries again.
+    private readonly Lock _connectLock = new();
+    private Task? _connect;
+
     /// <inheritdoc />
     public ProtocolType Protocol => ProtocolType.SurgewaveNative;
 
     /// <summary>
-    /// Creates a new producer with configuration (connects synchronously).
-    /// Prefer <c>CreateAsync(Action&lt;SurgewaveProducerOptions&lt;TKey, TValue&gt;&gt;, CancellationToken)</c> for async contexts.
+    /// Creates a new producer with configuration. It connects on the first send, so the constructor never waits
+    /// on the network; <c>CreateAsync</c> connects up front and reports an unreachable broker there.
     /// </summary>
     public SurgewaveProducer(Action<SurgewaveProducerOptions<TKey, TValue>> configure)
     {
@@ -55,13 +60,11 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 
         var (host, port) = ParseBootstrapServers(_options.BootstrapServers!);
         _client = new SurgewaveNativeClient(host, port, _options.Transport);
-        _client.ConnectAsync().GetAwaiter().GetResult();
-
     }
 
     /// <summary>
-    /// Creates a new producer with options object (connects synchronously).
-    /// Prefer <c>CreateAsync(SurgewaveProducerOptions&lt;TKey, TValue&gt;, CancellationToken)</c> for async contexts.
+    /// Creates a new producer with an options object. It connects on the first send, so the constructor never
+    /// waits on the network; <c>CreateAsync</c> connects up front and reports an unreachable broker there.
     /// </summary>
     public SurgewaveProducer(SurgewaveProducerOptions<TKey, TValue> options)
     {
@@ -70,14 +73,29 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 
         var (host, port) = ParseBootstrapServers(_options.BootstrapServers!);
         _client = new SurgewaveNativeClient(host, port, _options.Transport);
-        _client.ConnectAsync().GetAwaiter().GetResult();
-
     }
 
     private SurgewaveProducer(SurgewaveProducerOptions<TKey, TValue> options, SurgewaveNativeClient client)
     {
         _options = options;
         _client = client;
+        _connect = Task.CompletedTask; // CreateAsync connected it
+    }
+
+    /// <summary>
+    /// Connects on first use. Concurrent first sends share one attempt; each waits only as long as its own token
+    /// allows, without cancelling the attempt for the others.
+    /// </summary>
+    private Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    {
+        Task connect;
+        lock (_connectLock)
+        {
+            if (_connect is null || _connect.IsFaulted || _connect.IsCanceled)
+                _connect = _client.ConnectAsync(CancellationToken.None);
+            connect = _connect;
+        }
+        return connect.IsCompletedSuccessfully ? Task.CompletedTask : connect.WaitAsync(cancellationToken);
     }
 
     /// <summary>
@@ -169,6 +187,7 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 
         try
         {
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             var keyBytes = await SerializeKeyAsync(key, topic, cancellationToken).ConfigureAwait(false);
             var valueBytes = await SerializeValueAsync(value, topic, cancellationToken).ConfigureAwait(false)
                 ?? throw new ArgumentNullException(nameof(value), "Value cannot serialize to null");
@@ -226,6 +245,7 @@ public sealed class SurgewaveProducer<TKey, TValue> : IProducer<TKey, TValue>
 
         try
         {
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             var keyBytes = await SerializeKeyAsync(key, topic, cancellationToken).ConfigureAwait(false);
             var valueBytes = await SerializeValueAsync(value, topic, cancellationToken).ConfigureAwait(false)
                 ?? throw new ArgumentNullException(nameof(value), "Value cannot serialize to null");
