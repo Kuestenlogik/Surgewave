@@ -1004,7 +1004,11 @@ public class RaftIntegrationTests : IAsyncLifetime
 
         // Assert - Entry was proposed successfully
         Assert.True(index > 0, "Entry should be proposed with positive index");
-        Assert.Equal(index, leader.RaftNode.LastLogIndex);
+        // At least up to our entry, not exactly: the leader appends its own entries concurrently (broker
+        // registrations, heartbeats), and one landing between the propose and this read made the exact
+        // comparison fail about one run in five.
+        Assert.True(leader.RaftNode.LastLogIndex >= index,
+            $"the leader's log should hold the proposed entry {index}, but ends at {leader.RaftNode.LastLogIndex}");
 
         // Wait for replication (with eventual timeout)
         await Task.Delay(1000, cancellationToken);
