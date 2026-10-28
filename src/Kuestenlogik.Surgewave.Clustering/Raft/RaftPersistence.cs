@@ -20,7 +20,7 @@ public sealed partial class RaftPersistence
     public RaftPersistence(ILogger<RaftPersistence> logger, ClusteringConfig config)
     {
         _logger = logger;
-        _dataDirectory = config.RaftDataDirectory;
+        _dataDirectory = config.ResolvedRaftDataDirectory;
         _stateFile = Path.Combine(_dataDirectory, "raft-state.json");
         _logFile = Path.Combine(_dataDirectory, "raft-log.bin");
         _snapshotDirectory = Path.Combine(_dataDirectory, "snapshots");

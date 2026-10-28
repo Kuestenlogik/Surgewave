@@ -264,7 +264,17 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int MaxHeartbeatFailures { get; set; } = 3;
 
     // Raft consensus settings (Phase 2: Controller Election)
-    public string RaftDataDirectory { get; set; } = "./data/raft";
+    /// <summary>
+    /// The directory of the Raft metadata log. Unset, it is <c>&lt;DataDirectory&gt;/raft</c>: a broker started
+    /// on a fresh data directory starts a fresh metadata log, and two brokers from the same working directory do
+    /// not share one. It used to default to ./data/raft regardless of DataDirectory (#196).
+    /// </summary>
+    public string? RaftDataDirectory { get; set; }
+
+    /// <summary>The Raft metadata log directory in effect: <see cref="RaftDataDirectory"/>, or DataDirectory/raft.</summary>
+    public string ResolvedRaftDataDirectory =>
+        string.IsNullOrEmpty(RaftDataDirectory) ? Path.Combine(DataDirectory, "raft") : RaftDataDirectory;
+
     public int RaftElectionTimeoutMinMs { get; set; } = KafkaConstants.Raft.ElectionTimeoutMinMs;
     public int RaftElectionTimeoutMaxMs { get; set; } = KafkaConstants.Raft.ElectionTimeoutMaxMs;
     public int RaftHeartbeatIntervalMs { get; set; } = KafkaConstants.Raft.HeartbeatIntervalMs;

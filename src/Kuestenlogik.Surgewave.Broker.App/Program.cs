@@ -982,7 +982,7 @@ RaftPersistence raftPersistence;
     clusterController.SetRaftNode(raftNode);
 
     logger.LogInformation("Raft consensus initialized (BrokerId={BrokerId}, DataDir={DataDir})",
-        config.BrokerId, config.RaftDataDirectory);
+        config.BrokerId, config.ResolvedRaftDataDirectory);
 }
 
 // Initialize rolling upgrade infrastructure

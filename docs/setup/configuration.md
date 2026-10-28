@@ -151,7 +151,7 @@ Ephemeral topics store messages in a fixed-size ring buffer. When full, oldest m
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `RaftDataDirectory` | string | "./raft" | Raft log directory |
+| `RaftDataDirectory` | string | `<DataDirectory>/raft` | Raft log directory; unset, it follows `DataDirectory` |
 | `RaftElectionTimeoutMinMs` | int | 150 | Min election timeout |
 | `RaftElectionTimeoutMaxMs` | int | 300 | Max election timeout |
 | `RaftHeartbeatIntervalMs` | int | 50 | Heartbeat interval |

@@ -159,9 +159,16 @@ public sealed class ClusteringConfig : IValidatableConfig
     /// </remarks>
     public string ControllerQuorumVoters { get; set; } = "";
 
-    [Required]
-    [MinLength(1)]
-    public string RaftDataDirectory { get; set; } = "./data/raft";
+    /// <summary>
+    /// The directory of the Raft metadata log. Unset, it is <c>&lt;DataDirectory&gt;/raft</c>: a broker started
+    /// on a fresh data directory starts a fresh metadata log, and two brokers from the same working directory do
+    /// not share one. It used to default to ./data/raft regardless of DataDirectory (#196).
+    /// </summary>
+    public string? RaftDataDirectory { get; set; }
+
+    /// <summary>The Raft metadata log directory in effect: <see cref="RaftDataDirectory"/>, or DataDirectory/raft.</summary>
+    public string ResolvedRaftDataDirectory =>
+        string.IsNullOrEmpty(RaftDataDirectory) ? Path.Combine(DataDirectory, "raft") : RaftDataDirectory;
 
     [Range(1, int.MaxValue)]
     public int RaftElectionTimeoutMinMs { get; set; } = 150;
@@ -294,7 +301,7 @@ public sealed class ClusteringConfig : IValidatableConfig
         int heartbeatIntervalMs,
         int heartbeatTimeoutMs,
         int maxHeartbeatFailures,
-        string raftDataDirectory,
+        string? raftDataDirectory,
         int raftElectionTimeoutMinMs,
         int raftElectionTimeoutMaxMs,
         int raftHeartbeatIntervalMs,

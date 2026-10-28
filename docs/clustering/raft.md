@@ -15,7 +15,6 @@ KRaft (Kafka Raft) provides:
 ```json
 {
   "Surgewave": {
-    "RaftDataDirectory": "./raft",
     "RaftElectionTimeoutMinMs": 150,
     "RaftElectionTimeoutMaxMs": 300,
     "RaftHeartbeatIntervalMs": 50
@@ -79,7 +78,7 @@ Brokers register with controller:
 | `RaftElectionTimeoutMinMs` | 150 | Min election timeout |
 | `RaftElectionTimeoutMaxMs` | 300 | Max election timeout |
 | `RaftHeartbeatIntervalMs` | 50 | Heartbeat interval |
-| `RaftDataDirectory` | ./raft | Raft log storage |
+| `RaftDataDirectory` | `<DataDirectory>/raft` | Raft log storage |
 | `ProcessRoles` | broker,controller | What this node does |
 | `ControllerQuorumVoters` | *(empty)* | Nodes that vote, as `id@host:port` |
 
