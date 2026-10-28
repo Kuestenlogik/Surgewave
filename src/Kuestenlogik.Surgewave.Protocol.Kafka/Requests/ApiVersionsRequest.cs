@@ -381,8 +381,12 @@ public sealed class ApiVersionsResponse : KafkaResponse
                 new SupportedApiVersion { ApiKey = (short)ApiKey.DeleteShareGroupOffsets, MinVersion = 0, MaxVersion = 0 },   // Kafka: 0
 
                 // Streams Group Protocol (KIP-1071)
-                new SupportedApiVersion { ApiKey = (short)ApiKey.StreamsGroupHeartbeat, MinVersion = 0, MaxVersion = 0 },  // Kafka: 0
-                new SupportedApiVersion { ApiKey = (short)ApiKey.StreamsGroupDescribe, MinVersion = 0, MaxVersion = 0 },   // Kafka: 0
+                // StreamsGroup stays at v0 (#133). Before offering v1 (KIP-1331, stable since Kafka be4d31c869):
+                // the heartbeat response's AcceptableRecoveryLag becomes an int64 in another slot, and the describe
+                // request gains IncludeTopologyDescription — both marked at the code. RequestSchemaConformanceTests
+                // and ResponseSchemaConformanceTests check every advertised version, so a bump without them fails.
+                new SupportedApiVersion { ApiKey = (short)ApiKey.StreamsGroupHeartbeat, MinVersion = 0, MaxVersion = 0 },  // Kafka: 0-1
+                new SupportedApiVersion { ApiKey = (short)ApiKey.StreamsGroupDescribe, MinVersion = 0, MaxVersion = 0 },   // Kafka: 0-1
             ],
             // KIP-848 capability advertisement: librdkafka 2.4+ refuses to start the
             // ConsumerGroupHeartbeat loop unless `group.version >= 1` is offered both

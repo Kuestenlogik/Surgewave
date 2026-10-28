@@ -654,6 +654,8 @@ public sealed class StreamsGroupHeartbeatResponse : KafkaResponse
         writer.WriteCompactString(MemberId);
         writer.WriteInt32(MemberEpoch);
         writer.WriteInt32(HeartbeatIntervalMs);
+        // v0 only: AcceptableRecoveryLagLegacy (int32). v1 (KIP-1331) moves it to an int64 AcceptableRecoveryLag
+        // elsewhere — see the checklist at the StreamsGroup entries in ApiVersionsResponse.
         writer.WriteInt32(AcceptableRecoveryLag);
         writer.WriteInt32(TaskOffsetIntervalMs);
 
@@ -897,6 +899,8 @@ public sealed class StreamsGroupDescribeRequest : KafkaRequest
         }
 
         var includeAuthorizedOperations = reader.ReadBoolean();
+        // v1 (KIP-1331) appends IncludeTopologyDescription (bool) here — see the checklist at the StreamsGroup
+        // entries in ApiVersionsResponse.
 
         reader.SkipTaggedFields();
 
