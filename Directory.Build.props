@@ -21,6 +21,12 @@
 
   <!-- Centralized build output paths -->
   <PropertyGroup>
+    <!-- The SDK defaults Configuration only after this file. Without this line, a build without -c put its
+         output in artifacts/bin/<project>/ instead of .../Debug/, while everything that reads the output
+         (the dev-run Kafka plugin staging, Surgewave.Build, the CLI) looks in .../<Configuration>/ and
+         picked up a stale build. -->
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+
     <!-- Define the artifacts root directory -->
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts\</ArtifactsPath>
 
