@@ -361,7 +361,9 @@ public sealed partial class BrokerLifecycleManager : IAsyncDisposable, IBrokerLi
             CorrelationId = Interlocked.Increment(ref _correlationId),
             ClientId = $"surgewave-broker-{_config.BrokerId}",
             BrokerId = _config.BrokerId,
-            ClusterId = _config.ClusterId ?? "surgewave-cluster",
+            // The configured id or none, never a literal default: the controller validates against its
+            // ClusterIdManager, which generates an id when none is configured, and admits an empty one (#176).
+            ClusterId = _config.ClusterId ?? string.Empty,
             IncarnationId = _incarnationId,
             Listeners = listeners,
             Features = features,

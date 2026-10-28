@@ -217,7 +217,7 @@ public sealed class NativeAdminHandler : INativeRequestHandler
             ["quota.consumer.default"] = (_config.Quotas.ConsumerBytesPerSecond.ToString(), false, false, false),
 
             // Cluster settings
-            ["cluster.id"] = (_config.ClusterId ?? "surgewave-cluster", true, false, false),
+            ["cluster.id"] = (_config.ResolvedClusterId, true, false, false),
             ["broker.rack"] = (_config.Rack ?? "", false, false, false),
 
             // Native protocol

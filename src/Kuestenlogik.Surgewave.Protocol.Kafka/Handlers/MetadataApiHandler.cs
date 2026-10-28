@@ -18,6 +18,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     private readonly LogManager _logManager;
     private readonly ILogger<MetadataApiHandler> _logger;
     private ClusterState? _clusterState;
+    private Func<int, bool> _isKnownFenced = _ => false;
     private IClusterTopicCreator? _clusterTopicCreator;
 
     /// <summary>
@@ -26,6 +27,16 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     public void SetClusterState(ClusterState clusterState)
     {
         _clusterState = clusterState;
+    }
+
+    /// <summary>
+    /// Sets how DescribeCluster learns whether a broker is fenced — ClusterMembershipService.IsKnownFenced.
+    /// Not IsBrokerFenced: it answers "fenced" for every broker it has not registered, and only the controller
+    /// registers brokers, so any other broker would report the whole cluster fenced.
+    /// </summary>
+    public void SetBrokerFencing(Func<int, bool> isKnownFenced)
+    {
+        _isKnownFenced = isKnownFenced;
     }
 
     /// <summary>
@@ -79,7 +90,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
         // cluster is replaced — old DNS still points at it).
         if (request.ApiVersion >= 5)
         {
-            var brokerClusterId = _config.ClusterId ?? "surgewave-cluster";
+            var brokerClusterId = _config.ResolvedClusterId;
             if (!string.IsNullOrEmpty(request.ClusterId) &&
                 !string.Equals(request.ClusterId, brokerClusterId, StringComparison.Ordinal))
             {
@@ -323,7 +334,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
             Brokers = brokers,
-            ClusterId = _config.ClusterId ?? "surgewave-cluster",
+            ClusterId = _config.ResolvedClusterId,
             ControllerId = controllerId,
             Topics = topicMetadata
         };
@@ -467,25 +478,42 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
 
     private DescribeClusterResponse HandleDescribeCluster(DescribeClusterRequest request)
     {
-        // Build the list of brokers
-        // For a single-node broker, we only have ourselves
-        var brokers = new List<DescribeClusterResponse.DescribeClusterBroker>
+        // The cluster as this broker knows it, as Metadata reports it; a broker outside a cluster is the whole
+        // cluster. It used to report only itself, so an admin client saw one broker in a cluster of many.
+        List<DescribeClusterResponse.DescribeClusterBroker> brokers;
+        int controllerId;
+        if (_clusterState is { Brokers.Count: > 0 } cluster)
         {
-            new()
-            {
-                BrokerId = _config.BrokerId,
-                Host = _config.Host,
-                Port = _config.Port,
-                Rack = _config.Rack,
-                IsFenced = false
-            }
-        };
+            brokers = [.. cluster.Brokers.Values
+                .OrderBy(b => b.BrokerId)
+                .Select(b => new DescribeClusterResponse.DescribeClusterBroker
+                {
+                    BrokerId = b.BrokerId,
+                    Host = b.Host,
+                    Port = b.Port,
+                    Rack = b.Rack,
+                    IsFenced = _isKnownFenced(b.BrokerId),
+                })];
+            controllerId = cluster.ControllerId;
+        }
+        else
+        {
+            brokers =
+            [
+                new DescribeClusterResponse.DescribeClusterBroker
+                {
+                    BrokerId = _config.BrokerId,
+                    Host = _config.Host,
+                    Port = _config.Port,
+                    Rack = _config.Rack,
+                    IsFenced = false,
+                },
+            ];
+            controllerId = _config.BrokerId;
+        }
 
-        // Generate a cluster ID if not configured
-        var clusterId = _config.ClusterId ?? $"surgewave-{_config.BrokerId}";
-
-        // For a single-node broker, we are the controller
-        var controllerId = _config.BrokerId;
+        // The same id ApiVersions and Metadata report: with KIP-1242 a client that sees two ids rebootstraps.
+        var clusterId = _config.ResolvedClusterId;
 
         // ClusterAuthorizedOperations: int.MinValue means not requested
         // If requested, return a bitfield of allowed operations

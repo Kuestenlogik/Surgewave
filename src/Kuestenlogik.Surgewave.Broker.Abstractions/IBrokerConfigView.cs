@@ -43,6 +43,13 @@ public interface IBrokerConfigView
     string? Rack { get; }
     string? ClusterId { get; }
 
+    /// <summary>
+    /// The cluster id every client-facing answer reports — ApiVersions, Metadata, DescribeCluster, the
+    /// cluster.id config. The cluster's own id once resolved (configured, persisted or generated), otherwise
+    /// the configured id, otherwise the default.
+    /// </summary>
+    string ResolvedClusterId { get; }
+
     // Controller / leader settings
     bool AllowAutoLeaderRebalance { get; }
     int LeaderImbalanceCheckIntervalSeconds { get; }

@@ -223,7 +223,7 @@ public sealed class DynamicBrokerConfig : IDynamicBrokerConfig
             "leader.imbalance.check.interval.seconds" => _staticConfig.LeaderImbalanceCheckIntervalSeconds.ToString(),
             "quota.producer.default" => _staticConfig.Quotas.ProducerBytesPerSecond.ToString(),
             "quota.consumer.default" => _staticConfig.Quotas.ConsumerBytesPerSecond.ToString(),
-            "cluster.id" => _staticConfig.ClusterId ?? "surgewave-cluster",
+            "cluster.id" => _staticConfig.ResolvedClusterId,
             "broker.rack" => _staticConfig.Rack ?? "",
             _ => null
         };

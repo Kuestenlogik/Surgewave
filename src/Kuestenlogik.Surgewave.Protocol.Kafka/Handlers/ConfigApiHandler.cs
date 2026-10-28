@@ -305,7 +305,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
             ["quota.consumer.default"] = (_config.ConsumerQuotaBytesPerSecond.ToString(), ConfigSource.StaticBrokerConfig, false),
 
             // Cluster settings
-            ["cluster.id"] = (_config.ClusterId ?? "surgewave-cluster", ConfigSource.StaticBrokerConfig, true),
+            ["cluster.id"] = (_config.ResolvedClusterId, ConfigSource.StaticBrokerConfig, true),
             ["broker.rack"] = (_config.Rack ?? "", ConfigSource.StaticBrokerConfig, false),
 
             // Compression

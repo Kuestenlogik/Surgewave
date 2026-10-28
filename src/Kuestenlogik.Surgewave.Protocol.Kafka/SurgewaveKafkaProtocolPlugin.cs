@@ -111,6 +111,7 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
                 sp.GetRequiredService<LogManager>(),
                 sp.GetRequiredService<ILogger<MetadataApiHandler>>());
             metadataApiHandler.SetClusterState(sp.GetRequiredService<ClusterState>());
+            metadataApiHandler.SetBrokerFencing(sp.GetRequiredService<ClusterMembershipService>().IsKnownFenced);
             metadataApiHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
             return metadataApiHandler;
         });
