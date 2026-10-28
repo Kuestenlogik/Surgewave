@@ -237,16 +237,13 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     /// <summary>The cluster id a broker reports when none is configured and the cluster has not resolved one.</summary>
     public const string DefaultClusterId = "surgewave-cluster";
 
-    private string? _resolvedClusterId;
-
     /// <inheritdoc />
-    public string ResolvedClusterId => _resolvedClusterId ?? ClusterId ?? DefaultClusterId;
-
-    /// <summary>
-    /// Adopts the cluster's own id (the ClusterIdManager's) as the one clients see. Without it a broker in a
-    /// cluster without a configured id reported "surgewave-cluster" while the cluster ran on a generated id.
-    /// </summary>
-    public void UseResolvedClusterId(string clusterId) => _resolvedClusterId = clusterId;
+    /// <remarks>
+    /// The configured id or the default — not the ClusterIdManager's generated one. Without a configured id
+    /// each broker generates its own, so reporting it gave every broker of one cluster a different id, and a
+    /// KIP-1242 client rebootstraps on each. A generated id shared through the metadata log is #203.
+    /// </remarks>
+    public string ResolvedClusterId => ClusterId ?? DefaultClusterId;
 
     // Controller settings
     public bool AllowAutoLeaderRebalance { get; set; } = true;

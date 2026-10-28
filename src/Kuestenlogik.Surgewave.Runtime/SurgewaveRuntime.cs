@@ -539,7 +539,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // epochs + fencing). Wired unconditionally so a plugin-free broker owns it too.
         var clusterIdManager = new ClusterIdManager(
             clusteringConfig, _loggerFactory.CreateLogger<ClusterIdManager>());
-        config.UseResolvedClusterId(clusterIdManager.GetClusterId());
         // epochsAreMetadataIndices stays false: a JOINING broker registers over the native
         // lifecycle RPC, which calls ClusterMembershipService.Register directly and mints a
         // composed epoch — the metadata log carries only the controller's own registration.

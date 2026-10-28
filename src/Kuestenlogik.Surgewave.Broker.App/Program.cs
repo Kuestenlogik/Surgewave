@@ -848,10 +848,6 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetry
 
 var app = builder.Build();
 
-// Clients see the cluster's own id (configured, persisted or generated), resolved before any listener starts.
-app.Services.GetRequiredService<BrokerConfig>().UseResolvedClusterId(
-    app.Services.GetRequiredService<ClusterIdManager>().GetClusterId());
-
 // Get dependencies
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var config = app.Services.GetRequiredService<BrokerConfig>();

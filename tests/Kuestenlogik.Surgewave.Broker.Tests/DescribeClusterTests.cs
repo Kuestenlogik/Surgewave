@@ -66,14 +66,11 @@ public sealed class DescribeClusterTests : IDisposable
     }
 
     [Theory]
-    [InlineData(null, null, BrokerConfig.DefaultClusterId)]
-    [InlineData("configured-id", null, "configured-id")]
-    [InlineData(null, "generated-id", "generated-id")]
-    public async Task DescribeClusterMetadataAndApiVersionsReportTheSameClusterId(string? configured, string? resolved, string expected)
+    [InlineData(null, BrokerConfig.DefaultClusterId)]
+    [InlineData("configured-id", "configured-id")]
+    public async Task DescribeClusterMetadataAndApiVersionsReportTheSameClusterId(string? configured, string expected)
     {
         _config.ClusterId = configured;
-        if (resolved is not null)
-            _config.UseResolvedClusterId(resolved);
 
         var described = await DescribeClusterAsync();
         var metadata = Assert.IsType<MetadataResponse>(await _handler.HandleAsync(new MetadataRequest
