@@ -128,6 +128,13 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     [Range(1, int.MaxValue)]
     public int DefaultNumPartitions { get; set; } = 1;
 
+    /// <summary>
+    /// The most partitions one CreateTopics request may create, all its topics together; a request over it
+    /// fails with POLICY_VIOLATION. Kafka's controller.max.records.per.batch default, which bounds the same.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int MaxPartitionsPerCreateTopicsRequest { get; set; } = 10_000;
+
     // Producer defaults (sent to clients via metadata)
     /// <summary>
     /// Default producer batch size in bytes (Kafka-compatible).

@@ -73,6 +73,27 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
     {
         var results = new List<CreateTopicsResponse.TopicResult>();
 
+        // Before anything is created or validated: a request over the limit fails as a whole, as Kafka's does.
+        if (ExceedsPartitionLimit(request))
+        {
+            foreach (var topic in request.Topics)
+            {
+                results.Add(new CreateTopicsResponse.TopicResult
+                {
+                    Name = topic.Name,
+                    ErrorCode = ErrorCode.PolicyViolation,
+                    ErrorMessage = "Too many partitions in request.",
+                });
+            }
+            return new CreateTopicsResponse
+            {
+                CorrelationId = request.CorrelationId,
+                ApiVersion = request.ApiVersion,
+                ThrottleTimeMs = 0,
+                Topics = results,
+            };
+        }
+
         foreach (var topic in request.Topics)
         {
             try
@@ -169,6 +190,29 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
         }
 
         return new CreateTopicsResponse { CorrelationId = request.CorrelationId, ApiVersion = request.ApiVersion, Topics = results };
+    }
+
+    /// <summary>
+    /// Whether the request's topics together create more partitions than one request may: an explicit assignment
+    /// counts its partitions, a topic without one its NumPartitions or, at -1, the default. Summed in 64 bits —
+    /// two topics of int.MaxValue partitions overflowed an int to a small number (Kafka e74637ae04).
+    /// </summary>
+    private bool ExceedsPartitionLimit(CreateTopicsRequest request)
+    {
+        long total = 0;
+        foreach (var topic in request.Topics)
+        {
+            if (topic.Assignments is { Count: > 0 } assignments)
+                total += assignments.Count;
+            else if (topic.NumPartitions == -1)
+                total += _config.DefaultNumPartitions;
+            else if (topic.NumPartitions > 0)
+                total += topic.NumPartitions;
+
+            if (total > _config.MaxPartitionsPerCreateTopicsRequest)
+                return true;
+        }
+        return false;
     }
 
     private async Task<DeleteTopicsResponse> HandleDeleteTopicsAsync(DeleteTopicsRequest request, RequestContext context, CancellationToken cancellationToken)

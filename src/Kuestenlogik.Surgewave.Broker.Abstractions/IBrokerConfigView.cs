@@ -31,6 +31,9 @@ public interface IBrokerConfigView
     bool AutoCreateTopics { get; }
     short DefaultReplicationFactor { get; }
     int DefaultNumPartitions { get; }
+
+    /// <summary>The most partitions one CreateTopics request may create, all its topics together.</summary>
+    int MaxPartitionsPerCreateTopicsRequest { get; }
     int MinInSyncReplicas { get; }
 
     // Replication settings
