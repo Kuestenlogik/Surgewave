@@ -188,11 +188,16 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         var topic = $"controller-failover-{Guid.NewGuid():N}";
         var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
 
+        // RF=3: every broker is a replica, so the controller is one whichever broker won the election.
+        // With RF=2 the partition went to the first two brokers by id, and when broker 3 was controller
+        // it was in no replica set: the precondition below could never hold, about one run in three
+        // (#184). Choosing the replicas explicitly is not an option — CreateTopics ignores replica
+        // assignments (#202).
         using (var admin = new AdminClientBuilder(
             new AdminClientConfig { BootstrapServers = controller.BootstrapServers }).Build())
         {
             await admin.CreateTopicsAsync([
-                new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 2 }
+                new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 3 }
             ]);
         }
 
