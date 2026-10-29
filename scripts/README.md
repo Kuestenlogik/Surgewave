@@ -99,10 +99,33 @@ environment. Use `-SkipCli` to suppress the CLI/PATH logic entirely.
 
 | Script | Purpose |
 |--------|---------|
+| `stack.ps1`                    | The local stack for trying the checkout by hand: one broker, or a cluster (`-Brokers 3`), and the Control UI, each from a copy of the Debug build output in a hidden console. Verbs `start`, `stop`, `restart`, `status`, `log` and `build`; `-Offset` runs stacks side by side. Builds when the build is stale. `./scripts/stack.ps1` alone shows its help. See **Local stack** below. |
 | `run-coverage.ps1`             | Run all tests with coverlet and generate an HTML coverage report. |
 | `run-integration-tests.ps1`    | Start a broker, run Kafka compatibility tests against it, then stop the broker. |
 | `run-all-benchmarks.ps1`       | Run every benchmark category sequentially. |
 | `update-benchmark-baselines.ps1` | Run benchmarks and refresh the regression baselines under `artifacts/benchmarks/`. |
+
+### Local stack
+
+```powershell
+# One broker and the Control UI: bootstrap localhost:9092, UI http://localhost:5050
+./scripts/stack.ps1 start
+
+# A cluster of three beside it, every port moved by 100: bootstrap localhost:9192,localhost:9202,localhost:9212
+./scripts/stack.ps1 start -Offset 100 -Brokers 3
+
+./scripts/stack.ps1 status                    # every running stack; exit code 0 running, 1 not running, 2 in part
+./scripts/stack.ps1 log -Part broker2 -Offset 100 -Follow
+./scripts/stack.ps1 restart -Offset 100       # same brokers, same data, the latest build
+./scripts/stack.ps1 stop -Offset 100
+```
+
+Every port comes from the parts' own `appsettings.json`, moved by the offset, and by 10 more for each broker before
+it. A stack lives in `artifacts/stacks/<offset>/`: `stack.json` (the bootstrap list, every broker's ports, the
+Control URL; other scripts read it), `env/`, `bin/`, `data/` and `logs/`. `artifacts/stack.log` records every call
+and every process started or ended. `start` makes the brokers' data afresh, `restart` keeps it, and a `start` over a
+stack that already runs complete is used as it is. Offsets are multiples of 100; `SURGEWAVE_STACK_OFFSET` sets the
+default.
 
 ## Common manual commands (no script needed)
 
