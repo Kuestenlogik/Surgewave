@@ -214,8 +214,13 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         Directory.CreateDirectory(_dataDirectory);
 
         // Find available ports if using automatic assignment
-        _actualPort = _options.Port == 0 ? FindAvailablePort(_options.EnableDualMode) : _options.Port;
-        _actualReplicationPort = _options.ReplicationPort == 0 ? FindAvailablePort(_options.EnableDualMode) : _options.ReplicationPort;
+        // Both dynamic ports in one reservation: picked one after the other, the OS could hand the same
+        // ephemeral port out twice and the broker failed validation with Port == ReplicationPort.
+        var dynamicPorts = FindAvailablePorts(
+            (_options.Port == 0 ? 1 : 0) + (_options.ReplicationPort == 0 ? 1 : 0), _options.EnableDualMode);
+        var nextDynamic = 0;
+        _actualPort = _options.Port == 0 ? dynamicPorts[nextDynamic++] : _options.Port;
+        _actualReplicationPort = _options.ReplicationPort == 0 ? dynamicPorts[nextDynamic++] : _options.ReplicationPort;
 
         // Build cluster nodes string including this broker
         var clusterNodesStr = BuildClusterNodesString();
@@ -752,27 +757,36 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         throw new InvalidOperationException($"Surgewave broker did not start within {maxRetries * 50}ms");
     }
 
-    private static int FindAvailablePort(bool enableDualMode)
+    /// <summary>
+    /// Free ports, distinct from each other: every listener stays bound until all are picked, so the OS cannot
+    /// return one port twice.
+    /// </summary>
+    private static int[] FindAvailablePorts(int count, bool enableDualMode)
     {
-        IPAddress bindAddress;
-        if (enableDualMode)
+        var bindAddress = enableDualMode ? IPAddress.IPv6Any : IPAddress.Loopback;
+        var listeners = new List<TcpListener>(count);
+        try
         {
-            bindAddress = IPAddress.IPv6Any;
-        }
-        else
-        {
-            bindAddress = IPAddress.Loopback;
-        }
+            for (var i = 0; i < count; i++)
+            {
+                var listener = new TcpListener(bindAddress, 0);
+                if (enableDualMode)
+                {
+                    listener.Server.DualMode = true;
+                }
+                listener.Start();
+                listeners.Add(listener);
+            }
 
-        using var listener = new TcpListener(bindAddress, 0);
-        if (enableDualMode)
-        {
-            listener.Server.DualMode = true;
+            return [.. listeners.Select(l => ((IPEndPoint)l.LocalEndpoint).Port)];
         }
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
+        finally
+        {
+            foreach (var listener in listeners)
+            {
+                listener.Stop();
+            }
+        }
     }
 
     /// <summary>
