@@ -140,28 +140,6 @@ public sealed class BrokerRemovalGuardTests : IAsyncLifetime
         Assert.Null(_state.GetBroker(PeerBrokerId));
     }
 
-    /// <summary>
-    /// A transport with no peers, so the single voter elects itself and commits on its
-    /// own. Copied rather than shared because the one in RaftIntegrationTests is private
-    /// to that class; sharing it would mean making a test helper public across a file
-    /// whose tests are otherwise unrelated to these.
-    /// </summary>
-    private sealed class SingleNodeRaftTransport : IRaftTransport
-    {
-        public IReadOnlyList<int> GetPeerIds() => [];
-
-        public Task<bool> IsPeerReachableAsync(int peerId, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<PreVoteResponse> SendPreVoteAsync(int peerId, PreVoteRequest request, CancellationToken ct)
-            => throw new NotSupportedException("no peers in a single-node test");
-
-        public Task<RequestVoteResponse> SendRequestVoteAsync(int peerId, RequestVoteRequest request, CancellationToken ct)
-            => throw new NotSupportedException("no peers in a single-node test");
-
-        public Task<AppendEntriesResponse> SendAppendEntriesAsync(int peerId, AppendEntriesRequest request, CancellationToken ct)
-            => throw new NotSupportedException("no peers in a single-node test");
-    }
-
     private static BrokerNode Broker(int id) => new()
     {
         BrokerId = id,

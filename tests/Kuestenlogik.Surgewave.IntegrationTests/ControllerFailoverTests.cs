@@ -219,6 +219,18 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
                 timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
             $"the dead broker is still in the ISR ({string.Join(",", promoted.ClusterState!.GetIsrSnapshot(tp))}) — " +
             "the promoted controller never processed the failure it was promoted for");
+
+        // And on the broker that is NOT the controller: every broker ends up without the dead one in the
+        // ISR, not only the controller. (That the controller's removal is itself a log entry, #124, is
+        // pinned by IsrRemovalThroughTheLogTests; here the partition leader's own ISR shrink would get the
+        // other survivor there too, only later.)
+        var otherSurvivor = new[] { _survivor!, _secondSurvivor! }.Single(b => !ReferenceEquals(b, promoted));
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => !otherSurvivor.ClusterState!.GetIsrSnapshot(tp).Contains(controller.BrokerId),
+                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
+            $"broker {otherSurvivor.BrokerId} still has the dead broker in the ISR " +
+            $"({string.Join(",", otherSurvivor.ClusterState!.GetIsrSnapshot(tp))}) — the removal never reached the log");
     }
 
     /// <summary>

@@ -897,10 +897,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         {
             newLeader = preferredLeader.Value;
         }
-        else if (partitionState.Isr.Count > 0)
+        else if (partitionState.Isr.FirstOrDefault(b => _heartbeatManager?.IsBrokerAlive(b) ?? true, -1) is var liveIsrMember
+                 && liveIsrMember >= 0)
         {
-            // Pick first ISR member
-            newLeader = partitionState.Isr[0];
+            // The first ISR member that is alive. A broker just declared dead can still be in this view of
+            // the ISR — its removal is a committed log entry that may not be applied here yet (#124).
+            newLeader = liveIsrMember;
         }
         else if (partitionState.Replicas.Count > 0)
         {
@@ -1027,9 +1029,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             if (state.LeaderBrokerId != brokerId)
             {
                 // Not leading it, but it may be in the ISR — a departing broker must not keep
-                // holding up acks=all for the replicas that stay.
+                // holding up acks=all for the replicas that stay. Through the log, so every broker
+                // drops it, not only this controller (#124).
                 if (state.Isr.Contains(brokerId) && state.Isr.Count > 1)
-                    _clusterState.RemoveFromIsr(tp, brokerId);
+                    await UpdateIsrViaRaftAsync(tp, [.. state.Isr.Where(b => b != brokerId)], ct).ConfigureAwait(false);
 
                 continue;
             }
@@ -1068,24 +1071,31 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         if (!_isController)
             return;
 
-        // As controller, handle the broker failure
-        // 1. Remove from ISR for all partitions
+        // As controller, handle the broker failure: per partition, drop the dead broker from the ISR and,
+        // where it led, elect a successor from what remains. Both through the metadata log (#124): the ISR
+        // removal used to be a write to this controller's own ClusterState only, so every other broker kept
+        // reporting the dead one in-sync, and a controller elected later rebuilt the ISR with it from the log.
         var affectedPartitions = new List<TopicPartition>();
 
         foreach (var (tp, state) in _clusterState.PartitionStates)
         {
-            if (state.Isr.Contains(failedBrokerId))
+            var remainingIsr = state.Isr.Where(b => b != failedBrokerId).ToList();
+            if (remainingIsr.Count != state.Isr.Count)
             {
-                _clusterState.RemoveFromIsr(tp, failedBrokerId);
-                affectedPartitions.Add(tp);
-                LogRemovedFromIsr(tp.Topic, tp.Partition, failedBrokerId);
+                if (await UpdateIsrViaRaftAsync(tp, remainingIsr, CancellationToken.None).ConfigureAwait(false))
+                {
+                    affectedPartitions.Add(tp);
+                    LogRemovedFromIsr(tp.Topic, tp.Partition, failedBrokerId);
+                }
             }
 
-            // 2. If failed broker was leader, elect new leader
             if (state.LeaderBrokerId == failedBrokerId)
             {
                 LogLeaderFailedForPartition(tp.Topic, tp.Partition, failedBrokerId);
-                await ElectLeaderAsync(tp, ct: CancellationToken.None);
+                // The successor named from the ISR just computed, not read back: the committed ISR change
+                // may not be applied here yet, and the read would still offer the dead broker.
+                await ElectLeaderAsync(tp, remainingIsr.Count > 0 ? remainingIsr[0] : null, CancellationToken.None)
+                    .ConfigureAwait(false);
             }
         }
 
