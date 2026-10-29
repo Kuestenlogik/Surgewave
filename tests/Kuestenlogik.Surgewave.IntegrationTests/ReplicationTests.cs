@@ -342,26 +342,10 @@ public class ReplicationTests : IAsyncLifetime
         // The replica assignment is the key fix verified by this test
     }
 
-    // Still quarantined, but no longer for the reason below — both causes #180 named are fixed:
-    // an idle partition now forms an ISR at all, and a departing broker now ASKS the controller to
-    // move its leaderships (controlled shutdown) instead of trying to elect, which only the
-    // controller may do. With both in place this test passes in ~45-77 s where it used to time out.
-    //
-    // What is not established is that it passes RELIABLY: on a loaded machine one run in three
-    // still hits the 120 s limit, and this test's history is of blocking unrelated PRs. Unskip once
-    // a quiet machine or a CI run shows it green repeatedly — the reason to keep it off is now
-    // caution about the runner, not a known defect.
-    //
-    // Original note:
-    // Quarantined until the cluster-reelection-latency roadmap item lands —
-    // see the in-line comment at line ~400 about "new leader assignment
-    // doesn't reliably propagate back into the admin metadata response under
-    // Linux CI load within 60 s". The test passes locally on Windows but
-    // times out on the Linux GitHub Actions runner ~50% of the time, blocking
-    // unrelated PRs. Re-enable when ClusterController's HandleBrokerFailedAsync
-    // propagation is tightened OR the broker-3-shutdown path is rewritten to
-    // wait on partition-leader-changed events instead of admin-metadata polling.
-    [Fact(Timeout = 120000, Skip = "Cause fixed with #180; re-enable once it proves stable on a quiet runner")]
+    // A departing broker hands its partitions to in-sync successors through the controller (controlled
+    // shutdown, #180). Quarantined for months as "too slow under load"; the real cause was the test itself:
+    // it shut broker 3 down before the ISR had formed, so there was no successor to hand over to.
+    [Fact(Timeout = 120000)]
     public async Task Cluster_BrokerShutdown_RemainingBrokersContinue()
     {
         // Linked to the ambient test token: the leader/broker-removal waits below poll until this
@@ -412,6 +396,20 @@ public class ReplicationTests : IAsyncLifetime
         producer.Flush(TimeSpan.FromSeconds(5));
         _output.WriteLine("Produced initial messages");
 
+        // Every replica in the ISR before broker 3 leaves. A leader can only hand a partition to an in-sync
+        // successor; with ISR = {3} the controlled shutdown found none ("no in-sync successor"), the
+        // partition was left leaderless, and the produce below timed out — the correct outcome for that
+        // state, and the test's failure about one run in two (#180). The test waited for leaders only.
+        var controller = _brokers.Single(b => b.IsController);
+        var partitions = Enumerable.Range(0, 3)
+            .Select(p => new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topicName, Partition = p })
+            .ToArray();
+        Assert.True(
+            await TestWaitHelpers.WaitForConditionAsync(
+                () => partitions.All(tp => controller.ClusterState!.GetIsrSnapshot(tp).Count == 3),
+                timeout: TimeSpan.FromSeconds(60), ct: cts.Token, output: _output),
+            "not every partition's ISR held all three replicas, so a shutdown could not hand every partition over");
+
         // Shutdown broker 3
         var broker3 = _brokers[2];
         _output.WriteLine($"Shutting down broker 3 (port {broker3.Port})");
@@ -434,12 +432,6 @@ public class ReplicationTests : IAsyncLifetime
             _output.WriteLine("Warning: Broker 3 still in metadata, proceeding with test anyway");
         }
 
-        // Note: the cluster controller does emit "Transferring leadership for
-        // 1 partitions" via ClusterController.HandleBrokerFailedAsync, but the
-        // new leader assignment doesn't reliably propagate back into the admin
-        // metadata response under Linux CI load within 60 s. Tracked as a
-        // cluster-reelection-latency item on the roadmap; for the moment we
-        // give librdkafka its own metadata-refresh budget below.
 
         // Produce more messages to remaining brokers
         // Use longer timeout and retries to handle metadata refresh after broker shutdown
