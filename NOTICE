@@ -39,6 +39,14 @@ texts ship with each package and remain in effect for the respective binaries:
   - Microsoft.CodeAnalysis.* (MIT License)
     https://github.com/dotnet/roslyn
 
+The logo files include glyph outlines of a font:
+
+  - Inter Bold glyph outlines (SIL Open Font License 1.1), the wordmark "Surgewave" in
+    images/surgewave_lockup_*.svg and scripts/branding/wordmark.json, outlined from the
+    release Inter-4.1.zip (extras/ttf/Inter-Bold.ttf); licence text in
+    scripts/branding/Inter-LICENSE.txt
+    https://github.com/rsms/inter
+
 A full machine-readable bill of materials (CycloneDX SBOM) is generated for
 every Surgewave release and shipped in the corresponding `.swpkg` packages
 under `cyclonedx.bom.json`.

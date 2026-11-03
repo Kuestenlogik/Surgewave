@@ -1,0 +1,22 @@
+{
+  "$comment": "The product's logo set for generate-logos.mjs. Paths are relative to the repository root (root, relative to this file). See README.md beside this file.",
+  "root": "../..",
+  "product": "Surgewave",
+  "prefix": "surgewave",
+  "source": "scripts/branding/surgewave_mark_source.svg",
+  "wordmark": { "text": "Surgewave", "outline": "scripts/branding/wordmark.json" },
+  "images": "images",
+  "roles": {
+    "wave": { "light": "#33bcff", "dark": "#33bcff", "source": ["#33bcff"], "why": "the wave; Surgewave Blue everywhere (BRAND.md), 8.6:1 on #121212" },
+    "crest": { "light": "#66cfff", "dark": "#66cfff", "source": ["#66cfff"], "why": "the upward arc, the lighter blue; 10.6:1 on #121212, stays" },
+    "ink": { "light": "#003e60", "dark": "#ffffff", "source": ["#003e60"], "why": "the body and the wordmark; navy on #121212 would be 1.7:1 (BRAND.md: white on dark)" }
+  },
+  "wordmarkRole": "ink",
+  "background": { "stops": ["#F6F8FA", "#E6EBEF", "#D3DCE3"], "why": "Terracle's neutral light glass; behind apple-touch-icon.png and og-image" },
+  "distribute": [
+    { "dir": "site/assets/images", "files": ["favicon.svg", "favicon.ico", "apple-touch-icon.png", "surgewave_mark_colored.png"] },
+    { "dir": "docs", "files": ["favicon.ico"] },
+    { "dir": "docs/templates/surgewave-theme/public", "files": ["favicon.svg", "surgewave_mark_adaptive.svg"] },
+    { "dir": "src/Kuestenlogik.Surgewave.Control/wwwroot", "files": ["favicon.svg", "favicon.ico", "apple-touch-icon.png"] }
+  ]
+}

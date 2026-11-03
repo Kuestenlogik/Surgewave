@@ -12,7 +12,7 @@
       maximalen Kontrast gegen den schwarzen Kreis.
 
   Diese Datei ist NuGet-spezifisch — das allgemeine adaptive
-  Brand-Mark bleibt in images/mark_adaptive.svg (transparent, theme-aware).
+  Brand-Mark bleibt in images/surgewave_mark_adaptive.svg (transparent, theme-aware).
 -->
 <svg xmlns="http://www.w3.org/2000/svg"
      width="128" height="128"

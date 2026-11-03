@@ -5,7 +5,7 @@
  * sync with the marketing site.
  *
  * Usage:   node scripts/generate-og-image.js
- * Requires Playwright. Already a dev-dep alongside render-favicons.js.
+ * Requires Playwright (a dev-dependency in package.json).
  *
  * Notes on Discord / social previews:
  * - The PNG goes edge-to-edge dark by design — any white chrome you see in
