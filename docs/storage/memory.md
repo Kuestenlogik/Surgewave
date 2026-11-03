@@ -36,11 +36,10 @@ Or with zero-copy optimization:
 ### Testing
 
 ```csharp
-await using var broker = new EmbeddedSurgewave(options =>
-{
-    options.Storage = StorageBackend.Memory;
-});
-await broker.StartAsync();
+await using var broker = await SurgewaveRuntime.CreateBuilder()
+    .WithMemoryStorage()
+    .Build()
+    .StartAsync();
 ```
 
 ### Development

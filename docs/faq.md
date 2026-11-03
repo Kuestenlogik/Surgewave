@@ -38,11 +38,12 @@ Surgewave's embedded broker allows integration testing without external dependen
 [Fact]
 public async Task MyIntegrationTest()
 {
-    await using var surgewave = new EmbeddedSurgewave();
-    await surgewave.StartAsync();
+    await using var surgewave = await SurgewaveRuntime.CreateBuilder()
+        .WithMemoryStorage()
+        .Build()
+        .StartAsync();
 
-    var client = surgewave.CreateClient();
-    // Your test code here
+    // Connect any Kafka client to surgewave.BootstrapServers
 }
 ```
 
@@ -51,10 +52,10 @@ public async Task MyIntegrationTest()
 Yes. Configure memory storage for fastest test execution:
 
 ```csharp
-var surgewave = new EmbeddedSurgewave(options =>
-{
-    options.StorageMode = StorageMode.Memory;
-});
+await using var surgewave = await SurgewaveRuntime.CreateBuilder()
+    .WithMemoryStorage()
+    .Build()
+    .StartAsync();
 ```
 
 ### How fast do tests start?
@@ -63,12 +64,9 @@ Embedded Surgewave starts in milliseconds, not seconds. No JVM startup, no conta
 
 ### Can I run multiple brokers in tests?
 
-Yes, for testing clustering scenarios:
-
-```csharp
-await using var cluster = new EmbeddedSurgewaveCluster(nodeCount: 3);
-await cluster.StartAsync();
-```
+Yes, for testing clustering scenarios: start several `SurgewaveRuntime` instances with distinct broker ids, each
+naming the others with `WithCluster` and the shared `WithControllerQuorum`. See
+[Embedded Broker - Clusters](setup/embedded.md#clusters).
 
 ---
 

@@ -221,7 +221,7 @@ var engine = new ChaosEngine();
 var runtime = await SurgewaveRuntime.CreateBuilder()
     .WithBrokerId(0)
     .WithPort(0)
-    .WithStorageMode(StorageMode.Memory)
+    .WithMemoryStorage()
     .WithChaosEngine(engine, loggerFactory)
     .WithAutoCreateTopics(true)
     .Build()

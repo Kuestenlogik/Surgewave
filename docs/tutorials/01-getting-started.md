@@ -27,7 +27,7 @@ cd SurgewaveQuickstart
 Add the Surgewave Broker (for running embedded) and the Surgewave Client:
 
 ```bash
-dotnet add package Kuestenlogik.Surgewave.Broker
+dotnet add package Kuestenlogik.Surgewave.Runtime
 dotnet add package Kuestenlogik.Surgewave.Client
 ```
 
@@ -36,19 +36,18 @@ dotnet add package Kuestenlogik.Surgewave.Client
 Replace the contents of `Program.cs` with the following:
 
 ```csharp
-using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Client;
 using Kuestenlogik.Surgewave.Client.Native;
+using Kuestenlogik.Surgewave.Runtime;
 
 // --- Start an embedded broker (in-process, no external dependencies) ---
-await using var broker = new EmbeddedSurgewave(options =>
-{
-    options.Port = 9092;
-    options.Storage = StorageBackend.Memory;
-    options.AutoCreateTopics = true;
-});
+await using var broker = await SurgewaveRuntime.CreateBuilder()
+    .WithPort(9092)
+    .WithMemoryStorage()
+    .WithAutoCreateTopics()
+    .Build()
+    .StartAsync();
 
-await broker.StartAsync();
 Console.WriteLine("Broker started on localhost:9092");
 
 // --- Produce a message ---
@@ -106,7 +105,7 @@ Congratulations -- you just ran a full message broker, produced a message, and c
 
 ## What Just Happened?
 
-1. **EmbeddedSurgewave** started an in-process broker with in-memory storage. No Docker, no external services.
+1. **SurgewaveRuntime** started an in-process broker with in-memory storage. No Docker, no external services.
 2. **SurgewaveNativeClient** connected and sent a message using the fluent API.
 3. **SurgewaveConsumer** subscribed to the topic and read the message back.
 

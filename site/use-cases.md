@@ -227,24 +227,23 @@ Embedded broker for fast, reliable tests.
 ```csharp
 public class OrderServiceTests : IAsyncLifetime
 {
-    private EmbeddedSurgewave _surgewave;
-    private ISurgewaveClient _client;
+    private SurgewaveRuntime _surgewave = null!;
+    private ISurgewaveClient _client = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         // In-memory broker starts in milliseconds
-        _surgewave = new EmbeddedSurgewave(options =>
-        {
-            options.Storage = StorageBackend.Memory;
-            options.AutoCreateTopics = true;
-        });
-        await _surgewave.StartAsync();
+        _surgewave = await SurgewaveRuntime.CreateBuilder()
+            .WithMemoryStorage()
+            .WithAutoCreateTopics()
+            .Build()
+            .StartAsync();
 
-        _client = new SurgewaveNativeClient("localhost", _surgewave.Port);
+        _client = new SurgewaveNativeClient(_surgewave.Host, _surgewave.Port);
         await _client.ConnectAsync();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _client.Dispose();
         await _surgewave.DisposeAsync();

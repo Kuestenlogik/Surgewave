@@ -85,22 +85,18 @@ public class TopicManagerTests
 ```csharp
 public class ProducerIntegrationTests : IAsyncLifetime
 {
-    private EmbeddedSurgewave _broker;
+    private SurgewaveRuntime _broker = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
-        _broker = new EmbeddedSurgewave(options =>
-        {
-            options.Port = 19092;
-            options.Storage = StorageBackend.Memory;
-        });
-        await _broker.StartAsync();
+        _broker = await SurgewaveRuntime.CreateBuilder()
+            .WithPort(0)            // a free port; clients use _broker.BootstrapServers
+            .WithMemoryStorage()
+            .Build()
+            .StartAsync();
     }
 
-    public async Task DisposeAsync()
-    {
-        await _broker.DisposeAsync();
-    }
+    public ValueTask DisposeAsync() => _broker.DisposeAsync();
 
     [Fact]
     public async Task Produce_AndConsume_RoundTrip()
@@ -141,15 +137,14 @@ public class KafkaClientCompatibilityTests
 // Use shared broker across tests
 public class SharedBrokerFixture : IAsyncLifetime
 {
-    public EmbeddedSurgewave Broker { get; private set; }
+    public SurgewaveRuntime Broker { get; private set; } = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
-        Broker = new EmbeddedSurgewave();
-        await Broker.StartAsync();
+        Broker = await SurgewaveRuntime.CreateBuilder().WithMemoryStorage().Build().StartAsync();
     }
 
-    public async Task DisposeAsync() => await Broker.DisposeAsync();
+    public ValueTask DisposeAsync() => Broker.DisposeAsync();
 }
 
 // Use in test class

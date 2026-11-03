@@ -76,12 +76,11 @@ surgewave benchmark -n 1000000 -s 100 --batch 1000
 ### Embedded
 
 ```csharp
-// High-performance setup
-await using var broker = new EmbeddedSurgewave(options =>
-{
-    options.Storage = StorageBackend.Memory;
-    options.UseChannelPipeline = true;
-});
+// In-memory broker for benchmarks
+await using var broker = await SurgewaveRuntime.CreateBuilder()
+    .WithMemoryStorage()
+    .Build()
+    .StartAsync();
 ```
 
 ## Environment

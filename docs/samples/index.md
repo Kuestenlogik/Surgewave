@@ -175,20 +175,19 @@ await Task.WhenAll(topics.Select(topic =>
 ```csharp
 public class OrderTests : IAsyncLifetime
 {
-    private EmbeddedSurgewave _broker;
+    private SurgewaveRuntime _broker = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
-        _broker = new EmbeddedSurgewave(o => o.Storage = StorageBackend.Memory);
-        await _broker.StartAsync();
+        _broker = await SurgewaveRuntime.CreateBuilder().WithMemoryStorage().Build().StartAsync();
     }
 
-    public async Task DisposeAsync() => await _broker.DisposeAsync();
+    public ValueTask DisposeAsync() => _broker.DisposeAsync();
 
     [Fact]
     public async Task OrderCreated_PublishesEvent()
     {
-        await using var client = new SurgewaveNativeClient("localhost", 9092);
+        await using var client = new SurgewaveNativeClient(_broker.Host, _broker.Port);
         await client.ConnectAsync();
 
         await client.Messaging.Send("orders")

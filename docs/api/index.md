@@ -32,7 +32,7 @@ Auto-generated .NET API documentation.
 
 - `SurgewaveBroker` - Main broker class
 - `BrokerConfig` - Broker configuration
-- `EmbeddedSurgewave` - Embedded broker for testing
+- `SurgewaveRuntime` - In-process broker for tests and embedding (package `Kuestenlogik.Surgewave.Runtime`)
 
 ### Storage
 

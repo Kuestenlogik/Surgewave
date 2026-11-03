@@ -37,23 +37,27 @@ Integration tests verify end-to-end functionality using an embedded Surgewave br
 
 #### Embedded Broker Tests
 
-These tests use `EmbeddedSurgewave` for self-contained testing:
+These tests use `SurgewaveRuntime` (package `Kuestenlogik.Surgewave.Runtime`) for self-contained testing:
 
 ```bash
-# Run embedded broker tests
-dotnet test --filter "FullyQualifiedName~EmbeddedSurgewave"
+# Run the runtime tests
+dotnet test tests/Kuestenlogik.Surgewave.Runtime.Tests
 ```
 
 ```csharp
-// Example: Using EmbeddedSurgewave in tests
-await using var surgewave = await EmbeddedSurgewave.StartAsync();
+// Example: an in-process broker in a test
+await using var surgewave = await SurgewaveRuntime.CreateBuilder()
+    .WithMemoryStorage()
+    .Build()
+    .StartAsync();
 Console.WriteLine($"Broker running at {surgewave.BootstrapServers}");
 
-// Use fluent builder for custom configuration
-await using var surgewave = await EmbeddedSurgewave.CreateBuilder()
+// Further options on the same builder
+await using var configured = await SurgewaveRuntime.CreateBuilder()
     .WithPort(9092)
     .WithPartitions(3)
-    .WithAutoCreateTopics(true)
+    .WithAutoCreateTopics()
+    .Build()
     .StartAsync();
 ```
 
