@@ -11,7 +11,6 @@
     "record-demo-dark": "cross-env THEME=dark node scripts/record-demo.js",
     "record-demo-light": "cross-env THEME=light node scripts/record-demo.js",
     "check-links": "node scripts/check-internal-links.mjs",
-    "og-image": "node scripts/generate-og-image.js",
     "docs-pdf": "node scripts/build-docs-pdf.js"
   },
   "devDependencies": {

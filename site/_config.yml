@@ -30,14 +30,19 @@ surgewave:
   tagline: "Streaming, reimagined for .NET 10"
   docs_url: "/docs/"
 
-# Default OG-/Twitter-Card-Image picked up by jekyll-seo-tag for every page
-# that doesn't set its own `image:` in front matter. 1200x630 PNG rendered
-# from scripts/og-image-template.html via scripts/generate-og-image.js.
+# Default Open Graph / Twitter card image picked up by jekyll-seo-tag for
+# every page that doesn't set its own `image:` in front matter: the generated
+# images/og-image.png (1200x630), copied here by
+# scripts/branding/generate-logos.mjs (brand.json, distribute).
 defaults:
   - scope:
       path: ""
     values:
-      image: /assets/images/og-image.png
+      image:
+        path: /assets/images/og-image.png
+        width: 1200
+        height: 630
+        alt: "Surgewave logo: the wave mark beside the Surgewave wordmark"
 
 # Twitter handle used by jekyll-seo-tag for twitter:site / twitter:creator.
 # (No active account yet — placeholder consumed only when present.)

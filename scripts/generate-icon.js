@@ -8,8 +8,7 @@
  *
  * Deliberately built on 'sharp' (native libvips, ~5 MB) and not on Playwright —
  * for an SVG → PNG without HTML/CSS layout a headless browser
- * (~350 MB Chromium) is clearly overkill. Playwright stays only for
- * scripts/generate-og-image.js (HTML template with CSS layout).
+ * (~350 MB Chromium) is clearly overkill.
  */
 const sharp = require('sharp');
 const path = require('path');

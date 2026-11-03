@@ -42,5 +42,5 @@ between light and dark, `colored` on light, `white` on dark or on photos, `black
 |---|---|
 | `og-image.svg`, `og-image.png` | Open Graph / Twitter card image (1200×630): the horizontal colored lockup centred on the light background. |
 
-The website keeps its own designed link preview, `site/assets/images/og-image.png`, rendered from
-`scripts/og-image-template.html` by `scripts/generate-og-image.js` (the mark beside the product's pitch).
+The generator copies `og-image.png` to `site/assets/images/og-image.png`, the website's `og:image` and
+`twitter:image` (1200×630, with alt text, set in `site/_config.yml`).

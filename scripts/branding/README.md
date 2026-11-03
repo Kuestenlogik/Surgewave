@@ -20,7 +20,7 @@ the web icons are copied to); `--config <file>` names a configuration elsewhere.
 | `roles` | wave, crest, ink | Per role the light and dark colour and the drawing's fills that mean it. |
 | `wordmarkRole` | `ink` | The role that paints the wordmark. |
 | `background` | Terracle's light glass | The light background of `apple-touch-icon.png` and `og-image`. |
-| `distribute` | `site/assets/images`, `docs`, `docs/templates/surgewave-theme/public`, `src/Kuestenlogik.Surgewave.Control/wwwroot` | Folders that get copies of the web icons. |
+| `distribute` | `site/assets/images`, `docs`, `docs/templates/surgewave-theme/public`, `src/Kuestenlogik.Surgewave.Control/wwwroot` | Folders that get copies of the web icons and the Open Graph image. |
 
 Every logo file in `images/` comes from one drawing by the owner. Everything in `images/` is derived: delete it and run
 the generator again.
@@ -72,7 +72,7 @@ The generator:
 5. writes `og-image.svg` and `og-image.png` (1200×630, the Open Graph image for link previews): the horizontal colored
    lockup centred on the light background, opaque;
 6. deletes every file in `images/` it did not write (`README.md` stays), so the folder holds exactly its outputs;
-7. copies the files `distribute` names: `favicon.svg, favicon.ico, apple-touch-icon.png, surgewave_mark_colored.png` to `site/assets/images/`; `favicon.ico` to `docs/`; `favicon.svg, surgewave_mark_adaptive.svg` to `docs/templates/surgewave-theme/public/`; `favicon.svg, favicon.ico, apple-touch-icon.png` to `src/Kuestenlogik.Surgewave.Control/wwwroot/`;
+7. copies the files `distribute` names: `favicon.svg, favicon.ico, apple-touch-icon.png, surgewave_mark_colored.png, og-image.png` to `site/assets/images/`; `favicon.ico` to `docs/`; `favicon.svg, surgewave_mark_adaptive.svg` to `docs/templates/surgewave-theme/public/`; `favicon.svg, favicon.ico, apple-touch-icon.png` to `src/Kuestenlogik.Surgewave.Control/wwwroot/`;
 8. with `--contact-sheet`, renders every SVG, `favicon.ico`, `apple-touch-icon.png` and `og-image.png` at 16, 32, 64,
    180 and 512 px on light and on dark into one PNG for review.
 

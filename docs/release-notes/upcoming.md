@@ -143,10 +143,12 @@ Terracle, Modelzero and Sealbolt share, from one drawing, `scripts/branding/surg
 configured in `scripts/branding/brand.json`: `surgewave_mark_{colored,black,white,adaptive}`, the lockups
 `surgewave_lockup_{h,v}_*` with the wordmark outlined from Inter Bold, `favicon.svg`, `favicon.ico`,
 `apple-touch-icon.png` and `og-image`. The generator copies the tab and home-screen icons to the website,
-the docs theme and the Control UI, which now shows a tab icon. `images/mark_*` are now
+the docs theme and the Control UI, which now shows a tab icon, and `og-image.png` to the website, whose
+`og:image` and `twitter:image` it now is (1200×630, with alt text). `images/mark_*` are now
 `images/surgewave_mark_*`; the site's copies of the marks and lockups, its fourteen `favicon-<N>.png`, the
-old docs `logo.svg` and the scripts `generate-logo-assets.ps1`, `render-favicons.js` and
-`build-favicon-ico.js` are gone. The Chocolatey icon is `images/surgewave_mark_colored.png`.
+old docs `logo.svg`, the designed link-preview card and the scripts `generate-logo-assets.ps1`,
+`render-favicons.js`, `build-favicon-ico.js`, `generate-og-image.js` with `og-image-template.html` (and
+the `og-image` npm script) are gone. The Chocolatey icon is `images/surgewave_mark_colored.png`.
 
 ## Breaking changes
 
