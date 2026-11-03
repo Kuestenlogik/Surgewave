@@ -14,6 +14,7 @@ internal sealed class TransactionTimeoutManager : IAsyncDisposable
     private readonly Timer _timeoutCheckTimer;
     private readonly CancellationTokenSource _shutdownCts = new();
     private int _running;
+    private int _disposed;
     private const int TimeoutCheckIntervalMs = 5000; // Check every 5 seconds
 
     public TransactionTimeoutManager(Func<DateTimeOffset, CancellationToken, Task> expire, ILogger logger)
@@ -53,6 +54,9 @@ internal sealed class TransactionTimeoutManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Disposed once per contract the container forwards to the coordinator (#209); only the first one acts.
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            return;
         await _shutdownCts.CancelAsync();
         await _timeoutCheckTimer.DisposeAsync();
         _shutdownCts.Dispose();
