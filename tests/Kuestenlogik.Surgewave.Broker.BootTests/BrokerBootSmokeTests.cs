@@ -1,8 +1,3 @@
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
-using System.Runtime.InteropServices;
-using System.Text;
 using Xunit;
 
 namespace Kuestenlogik.Surgewave.Broker.BootTests;
@@ -27,13 +22,6 @@ namespace Kuestenlogik.Surgewave.Broker.BootTests;
 [Collection("BrokerBoot")]
 public sealed class BrokerBootSmokeTests
 {
-    // Emitted synchronously AFTER all IBrokerPlugin activation completes — so a plugin crashing
-    // while constructing a client never reaches it, which is exactly what makes it the crash guard.
-    private const string ReadyLine = "Surgewave broker ready to accept connections";
-
-    // Fires only once app.RunAsync() actually binds Kestrel — also catches a TLS/dev-cert bind failure.
-    private const string AppStartedLine = "Application started. Press Ctrl+C to shut down.";
-
     // HeartbeatManager.StartAsync's own line. Present only if the shipped host constructs and starts
     // the failure detector — which until #121 it did not.
     private const string HeartbeatManagerStartedLine = "Heartbeat manager started";
@@ -45,87 +33,14 @@ public sealed class BrokerBootSmokeTests
     public async Task Broker_BootsToReady_WithConnectEnabled()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var brokerDll = ResolveBrokerDll();
-        var brokerDir = Path.GetDirectoryName(brokerDll)!;
-
-        // Four distinct ephemeral ports: BrokerConfig requires Port, GrpcPort and ReplicationPort
-        // to all differ, and fixed defaults (9092/9093/10092/9094) would collide across runs.
-        int kafkaPort = FreeTcpPort(), grpcPort = FreeTcpPort(), http3Port = FreeTcpPort(), replPort = FreeTcpPort();
         var dataDir = Path.Combine(Path.GetTempPath(), "surgewave-boottest-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dataDir);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = brokerDir,
-        };
-        psi.Environment["NO_COLOR"] = "1";
-        psi.Environment["DOTNET_ENVIRONMENT"] = "Production";
-        string[] args =
-        [
-            brokerDll,
-            "--Surgewave:Host=127.0.0.1",
-            $"--Surgewave:Port={kafkaPort}",
-            $"--Surgewave:GrpcPort={grpcPort}",
-            $"--Surgewave:ReplicationPort={replPort}",
-            "--Surgewave:GrpcUseTls=false",
-            // appsettings.json pins the two admin/gRPC Kestrel endpoints to https, which a
-            // dev-cert-less CI runner cannot bind. GrpcUseTls=false alone does not undo that, so
-            // override both endpoint URLs to plaintext http and drop HTTP/3 (which requires TLS).
-            // Readiness is a stdout line, never an HTTP probe, so http is sufficient.
-            $"--Kestrel:Endpoints:Grpc:Url=http://127.0.0.1:{grpcPort}",
-            $"--Kestrel:Endpoints:GrpcHttp3:Url=http://127.0.0.1:{http3Port}",
-            "--Kestrel:Endpoints:GrpcHttp3:Protocols=Http1AndHttp2",
-            $"--Surgewave:DataDirectory={dataDir}",
-            $"--Surgewave:LogDirectory={Path.Combine(dataDir, "logs")}",
-            "--Surgewave:Connect:Enabled=true", // the regression's trigger — force it on regardless of appsettings
-            "--Surgewave:Kafka:Enabled=true",
-            "--Surgewave:AutoCreateTopics=true",
-            "--Surgewave:DefaultReplicationFactor=1",
-        ];
-        foreach (var a in args) psi.ArgumentList.Add(a);
-
-        var log = new StringBuilder();
-        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var appStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        void OnLine(string? line)
-        {
-            if (line is null) return;
-            lock (log) log.AppendLine(line);
-            if (line.Contains(ReadyLine, StringComparison.Ordinal)) ready.TrySetResult();
-            if (line.Contains(AppStartedLine, StringComparison.Ordinal)) appStarted.TrySetResult();
-        }
-
-        using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        proc.OutputDataReceived += (_, e) => OnLine(e.Data);
-        proc.ErrorDataReceived += (_, e) => OnLine(e.Data);
-        proc.Exited += (_, _) => exited.TrySetResult(proc.ExitCode);
-
         try
         {
-            Assert.True(proc.Start(), "Failed to start the broker process.");
-            proc.BeginOutputReadLine();
-            proc.BeginErrorReadLine();
-
-            // Race readiness against an early crash and a hard timeout. An early exit is the
-            // failure this test exists to catch (a plugin blew up before the broker was ready).
-            var timeout = Task.Delay(TimeSpan.FromSeconds(90), cancellationToken);
-            var first = await Task.WhenAny(ready.Task, exited.Task, timeout);
-            if (first == exited.Task)
-                Assert.Fail($"Broker exited with code {await exited.Task} before reaching readiness.\n{Dump(log)}");
-            if (first == timeout)
-                Assert.Fail($"Broker did not reach '{ReadyLine}' within 90s.\n{Dump(log)}");
-
-            // Readiness reached; require the host to actually bind Kestrel shortly after.
-            await Task.WhenAny(appStarted.Task, exited.Task, Task.Delay(TimeSpan.FromSeconds(20), cancellationToken));
-            Assert.True(appStarted.Task.IsCompletedSuccessfully,
-                $"Broker reached readiness but Kestrel did not bind ('{AppStartedLine}' never appeared).\n{Dump(log)}");
+            await using var broker = await BrokerProcess.StartAsync(dataDir, cancellationToken,
+                "--Surgewave:Connect:Enabled=true", // the regression's trigger — force it on regardless of appsettings
+                "--Surgewave:AutoCreateTopics=true");
 
             // #121 — the same class of gap this test exists for, one layer down: the failure
             // detector was wired in the embedded runtime only, so the shipped process could never
@@ -133,95 +48,17 @@ public sealed class BrokerBootSmokeTests
             // (HandleBrokerFailedAsync is reachable only from HeartbeatManager.OnBrokerFailed).
             // What the behaviour does once wired is covered by ControllerFailoverTests against the
             // embedded runtime; only a real process boot can show it is wired HERE.
-            lock (log)
-            {
-                Assert.Contains(HeartbeatManagerStartedLine, log.ToString(), StringComparison.Ordinal);
+            Assert.Contains(HeartbeatManagerStartedLine, broker.Log, StringComparison.Ordinal);
 
-                // The build staged the Kafka plugin next to the broker (CopyKafkaPluginForDevRun), and the
-                // broker found and activated it from there — what a `dotnet run` relies on. The test used
-                // to stage the plugin itself, which hid that the build put it where the broker never looks.
-                Assert.Contains(KafkaPluginActivatedLine, log.ToString(), StringComparison.Ordinal);
-            }
+            // The build staged the Kafka plugin next to the broker (CopyKafkaPluginForDevRun), and the
+            // broker found and activated it from there — what a `dotnet run` relies on. The test used
+            // to stage the plugin itself, which hid that the build put it where the broker never looks.
+            Assert.Contains(KafkaPluginActivatedLine, broker.Log, StringComparison.Ordinal);
         }
         finally
         {
-            await StopAsync(proc, cancellationToken);
-            TryDelete(dataDir);
+            BrokerProcess.TryDelete(dataDir);
         }
-    }
-
-    private static int FreeTcpPort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try { return ((IPEndPoint)listener.LocalEndpoint).Port; }
-        finally { listener.Stop(); }
-    }
-
-    internal static string ResolveBrokerDll()
-    {
-        var artifacts = FindArtifactsRoot();
-        var config = new DirectoryInfo(AppContext.BaseDirectory).Name; // Debug / Release
-        var sep = Path.DirectorySeparatorChar;
-        var matches = Directory.GetFiles(artifacts, "surgewave-broker.dll", SearchOption.AllDirectories)
-            .Where(p => p.Contains($"{sep}bin{sep}", StringComparison.OrdinalIgnoreCase))          // not the obj/ copy
-            .Where(p => p.Contains("Kuestenlogik.Surgewave.Broker", StringComparison.OrdinalIgnoreCase))
-            .Where(p => !p.Contains("Tests", StringComparison.OrdinalIgnoreCase))
-            .Where(p => File.Exists(Path.Combine(Path.GetDirectoryName(p)!, "surgewave-broker.runtimeconfig.json")))
-            .OrderByDescending(p => p.Contains($"{sep}{config}{sep}", StringComparison.OrdinalIgnoreCase)) // prefer our config
-            .ToList();
-        Assert.True(matches.Count > 0,
-            $"surgewave-broker.dll not found under '{artifacts}'. Was Kuestenlogik.Surgewave.Broker built?");
-        return matches[0];
-    }
-
-    private static string FindArtifactsRoot()
-    {
-        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
-        {
-            if (string.Equals(d.Name, "artifacts", StringComparison.OrdinalIgnoreCase)) return d.FullName;
-            var candidate = Path.Combine(d.FullName, "artifacts");
-            if (Directory.Exists(candidate)) return candidate;
-        }
-        throw new DirectoryNotFoundException(
-            $"Could not locate the 'artifacts' output root walking up from {AppContext.BaseDirectory}.");
-    }
-
-    private static async Task StopAsync(Process proc, CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (proc.HasExited) return;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                // CTRL_C to a child console process is unreliable on Windows; kill the tree.
-                proc.Kill(entireProcessTree: true);
-            }
-            else
-            {
-                // Graceful SIGTERM: the .NET console lifetime runs ApplicationStopping + disposes cleanly.
-                using var kill = Process.Start(new ProcessStartInfo("/bin/kill", $"-s TERM {proc.Id}") { UseShellExecute = false });
-                kill?.WaitForExit(5_000);
-            }
-            // 30s cap on a graceful exit, but abandon it at once when the test itself is being
-            // aborted — the catch below kills the tree, so teardown still terminates the broker.
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
-            try { await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
-        }
-        catch { /* best-effort teardown; never mask the test's own assertion */ }
-    }
-
-    private static string Dump(StringBuilder log)
-    {
-        lock (log) { return "--- broker output ---\n" + log; }
-    }
-
-    private static void TryDelete(string dir)
-    {
-        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
-        catch { /* a leftover temp dir is harmless; Windows file locks can linger briefly */ }
     }
 }
 

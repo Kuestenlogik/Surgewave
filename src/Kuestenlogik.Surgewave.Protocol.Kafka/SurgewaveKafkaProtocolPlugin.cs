@@ -116,12 +116,19 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             return metadataApiHandler;
         });
 
-        services.AddSingleton<IKafkaRequestHandler>(sp => new TopicAdminHandler(
-            sp.GetRequiredService<IBrokerConfigView>(),
-            sp.GetRequiredService<LogManager>(),
-            sp.GetRequiredService<IQuotaManager>(),
-            sp.GetService<IAuditLogger>(),
-            sp.GetRequiredService<ILogger<TopicAdminHandler>>()));
+        services.AddSingleton<IKafkaRequestHandler>(sp =>
+        {
+            var topicAdminHandler = new TopicAdminHandler(
+                sp.GetRequiredService<IBrokerConfigView>(),
+                sp.GetRequiredService<LogManager>(),
+                sp.GetRequiredService<IQuotaManager>(),
+                sp.GetService<IAuditLogger>(),
+                sp.GetRequiredService<ILogger<TopicAdminHandler>>());
+            // CreateTopics goes through the controller into the metadata log, the only store of topics (#163);
+            // without it the topic lived in the local log manager only and was gone after a restart (#212).
+            topicAdminHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
+            return topicAdminHandler;
+        });
 
         services.AddSingleton<IKafkaRequestHandler>(sp => new ConfigApiHandler(
             sp.GetRequiredService<IBrokerConfigView>(),

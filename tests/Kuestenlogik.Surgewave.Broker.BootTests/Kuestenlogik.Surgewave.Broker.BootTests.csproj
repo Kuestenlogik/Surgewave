@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
+    <!-- An outside Kafka client, as a user has one; not the broker closure. -->
+    <PackageReference Include="Confluent.Kafka" />
   </ItemGroup>
 
   <!-- #59: this full-host boot smoke test launches the built surgewave-broker.dll as a

@@ -834,10 +834,18 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetry
         sp.GetRequiredService<ClusterState>(),
         sp.GetRequiredService<ClusteringConfig>(),
         sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>()));
+    // A committed assignment or leader change becomes a local leader or follower through this queue (#165, #176).
+    // The host built the state machine without it, so a broker never acted on the log: after a restart the
+    // replayed topics stood in the cluster state with no partition behind them (#212).
+    builder.Services.AddSingleton(sp => new ReplicationTransitionQueue(
+        sp.GetRequiredService<ReplicaManager>(),
+        sp.GetRequiredService<ClusteringConfig>().BrokerId,
+        sp.GetRequiredService<ILogger<ReplicationTransitionQueue>>()));
     builder.Services.AddSingleton(sp => new MetadataStateMachine(
         sp.GetRequiredService<ILogger<MetadataStateMachine>>(),
         sp.GetRequiredService<ClusterState>(),
-        sp.GetRequiredService<ClusterMembershipService>()));
+        sp.GetRequiredService<ClusterMembershipService>(),
+        sp.GetRequiredService<ReplicationTransitionQueue>()));
     builder.Services.AddSingleton(sp => new RaftNode(
         sp.GetRequiredService<ILogger<RaftNode>>(),
         sp.GetRequiredService<ClusteringConfig>(),

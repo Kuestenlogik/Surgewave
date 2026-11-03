@@ -15,7 +15,7 @@ public sealed class KafkaFreeBrokerTests
     private const string KafkaProtocolAssembly = "Kuestenlogik.Surgewave.Protocol.Kafka";
     private const string KafkaPluginId = "kuestenlogik.surgewave.protocol.kafka";
 
-    private static string BrokerDir => Path.GetDirectoryName(BrokerBootSmokeTests.ResolveBrokerDll())!;
+    private static string BrokerDir => Path.GetDirectoryName(BrokerProcess.ResolveBrokerDll())!;
 
     [Fact]
     public void TheBrokersDependencies_DoNotNameTheKafkaProtocol()
