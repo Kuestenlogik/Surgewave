@@ -140,7 +140,9 @@
 
   <!-- Include icon and README for NuGet packages -->
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
-    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Link="icon.png" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)icon.png')" />
+    <!-- The package icon: the mark on a light background, 128 px, generated into images/ by
+         scripts/branding/tool/generate-logos.mjs. -->
+    <None Include="$(MSBuildThisFileDirectory)images/icon.png" Pack="true" PackagePath="\" Link="icon.png" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Link="README.md" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)README.md')" />
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" Link="LICENSE" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
   </ItemGroup>

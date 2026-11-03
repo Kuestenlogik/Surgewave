@@ -148,7 +148,20 @@ the docs theme and the Control UI, which now shows a tab icon, and `og-image.png
 `images/surgewave_mark_*`; the site's copies of the marks and lockups, its fourteen `favicon-<N>.png`, the
 old docs `logo.svg`, the designed link-preview card and the scripts `generate-logo-assets.ps1`,
 `render-favicons.js`, `build-favicon-ico.js`, `generate-og-image.js` with `og-image-template.html` (and
-the `og-image` npm script) are gone. The Chocolatey icon is `images/surgewave_mark_colored.png`.
+the `og-image` npm script) are gone.
+
+### The shared branding tool; WebP, package icon and manifest icon (Kuestenlogik/Kuestenlogik#10)
+
+The generator is now the shared tool of every Kuestenlogik product, vendored as a pinned copy in
+`scripts/branding/tool/` (`pin.json`: version, commit, each file's hash); `scripts/branding/` keeps only
+`brand.json`, `wordmark.json` and the drawing, and `tests/ci/branding-tool.test.mjs` fails when the copy is
+edited in place. Every PNG in `images/` now has a lossless WebP twin. The NuGet package icon is
+`images/icon.png` (128 px, the mark on the light background, generated like every other logo file); the root
+`icon.png` with its black disc, `scripts/icon.svg`, `scripts/generate-icon.js`, `scripts/measure-icon.js`,
+`scripts/measure-mark.js` and the `sharp` dev dependency are gone. The Chocolatey `iconUrl` and the MSI
+installer's icon use `images/icon.png`; the web manifest's 512 px icon is `icon-512.png` (was
+`surgewave_mark_colored.png`). `generate-logos.mjs --check` fails when `images/`, its copies or the brand
+files differ from the drawing.
 
 ## Breaking changes
 

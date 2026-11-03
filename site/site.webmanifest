@@ -8,6 +8,6 @@
   "theme_color": "#33bcff",
   "icons": [
     { "src": "/assets/images/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "/assets/images/surgewave_mark_colored.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    { "src": "/assets/images/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

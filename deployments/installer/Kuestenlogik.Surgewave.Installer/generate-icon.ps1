@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-    Generates surgewave.ico from the repository icon.png for the MSI installer.
+    Generates surgewave.ico from the package icon images/icon.png (made by scripts/branding/tool/generate-logos.mjs)
+    for the MSI installer.
     Requires System.Drawing (available on Windows with .NET Framework or .NET 6+).
 #>
 $ErrorActionPreference = "Stop"
-$RepoRoot = Resolve-Path "$PSScriptRoot/../.."
-$PngPath = "$RepoRoot/icon.png"
+$RepoRoot = Resolve-Path "$PSScriptRoot/../../.."
+$PngPath = "$RepoRoot/images/icon.png"
 $IcoPath = "$PSScriptRoot/surgewave.ico"
 
 if (Test-Path $IcoPath) {

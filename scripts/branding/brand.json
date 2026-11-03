@@ -14,7 +14,7 @@
   "wordmarkRole": "ink",
   "background": { "stops": ["#F6F8FA", "#E6EBEF", "#D3DCE3"], "why": "Terracle's neutral light glass; behind apple-touch-icon.png and og-image" },
   "distribute": [
-    { "dir": "site/assets/images", "files": ["favicon.svg", "favicon.ico", "apple-touch-icon.png", "surgewave_mark_colored.png", "og-image.png"] },
+    { "dir": "site/assets/images", "files": ["favicon.svg", "favicon.ico", "apple-touch-icon.png", "icon-512.png", "og-image.png"] },
     { "dir": "docs", "files": ["favicon.ico"] },
     { "dir": "docs/templates/surgewave-theme/public", "files": ["favicon.svg", "surgewave_mark_adaptive.svg"] },
     { "dir": "src/Kuestenlogik.Surgewave.Control/wwwroot", "files": ["favicon.svg", "favicon.ico", "apple-touch-icon.png"] }

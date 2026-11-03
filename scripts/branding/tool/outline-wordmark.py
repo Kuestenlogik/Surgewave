@@ -1,15 +1,15 @@
-"""Outline the wordmark "Terracle" in Inter Bold to an SVG path, so the lockups render without the font.
+"""Outline a product's wordmark in Inter Bold to an SVG path, so the lockups render without the font.
 
-The result, scripts/branding/wordmark.json, is committed: generate-logos.mjs reads it and never needs the font.
-Run this only when the wordmark, the font or its version changes.
+The result, wordmark.json beside the product's brand.json (by default the folder above this tool), is committed:
+generate-logos.mjs reads it and never needs the font. Run this only when the wordmark, the font or its version changes.
 
     python -m venv .venv && .venv/Scripts/python -m pip install fonttools uharfbuzz
-    .venv/Scripts/python scripts/branding/outline-wordmark.py <path/to/Inter-Bold.ttf> [--text Terracle]
+    .venv/Scripts/python <tool>/outline-wordmark.py <path/to/Inter-Bold.ttf> --text <Product> [--out <wordmark.json>]
 
 Inter comes from its official release (https://github.com/rsms/inter/releases, extras/ttf/Inter-Bold.ttf) under the
-SIL Open Font License 1.1; the outlined glyphs are a use the licence permits (see README.md).
+SIL Open Font License 1.1; the outlined glyphs are a use the licence permits (see README.md beside this file).
 
-The text is shaped with HarfBuzz, so the font's kerning applies (the "Te" pair is kerned). Coordinates are in font
+The text is shaped with HarfBuzz, so the font's kerning applies (e.g. the "Te" pair is kerned). Coordinates are in font
 units, y pointing down, the baseline at y = 0, the pen starting at x = 0.
 """
 from __future__ import annotations
@@ -28,8 +28,8 @@ from fontTools.ttLib import TTFont
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("font", type=Path)
-    ap.add_argument("--text", default="Terracle")
-    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "wordmark.json")
+    ap.add_argument("--text", required=True)
+    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "wordmark.json")
     args = ap.parse_args()
 
     blob = hb.Blob.from_file_path(str(args.font))

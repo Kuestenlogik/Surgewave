@@ -33,7 +33,7 @@ surgewave:
 # Default Open Graph / Twitter card image picked up by jekyll-seo-tag for
 # every page that doesn't set its own `image:` in front matter: the generated
 # images/og-image.png (1200x630), copied here by
-# scripts/branding/generate-logos.mjs (brand.json, distribute).
+# scripts/branding/tool/generate-logos.mjs (brand.json, distribute).
 defaults:
   - scope:
       path: ""

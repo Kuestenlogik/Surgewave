@@ -6,5 +6,5 @@ publish/
 bin/
 obj/
 
-# Generated icon (regenerate from icon.png)
+# Generated icon (regenerate from images/icon.png)
 Kuestenlogik.Surgewave.Installer/surgewave.ico
