@@ -16,7 +16,7 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka;
 /// The coordinator references no Kafka type; this is the piece that moves into the Kafka
 /// protocol plugin later.
 /// </summary>
-public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
+public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
 {
     private readonly IConsumerGroupCoordinator _coordinator;
     private readonly IConsumerGroupV2Coordinator _consumerGroups;
@@ -49,18 +49,19 @@ public sealed class ConsumerGroupApiHandler : IKafkaRequestHandler
 
     public Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
-        KafkaResponse response = request switch
+        KafkaResponse response = NotCoordinatorFor(request, IsLocal) ?? request switch
         {
             JoinGroupRequest r => ToJoinGroupResponse(_coordinator.JoinGroup(ToJoinGroupCommand(r)), r),
             SyncGroupRequest r => ToSyncGroupResponse(_coordinator.SyncGroup(ToSyncGroupCommand(r)), r),
             HeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(new GroupHeartbeatCommand(r.GroupId, r.MemberId)), r),
             LeaveGroupRequest r => ToLeaveGroupResponse(_coordinator.LeaveGroup(ToLeaveGroupCommand(r)), r),
             OffsetCommitRequest r => ToOffsetCommitResponse(_coordinator.CommitOffsets(ToOffsetCommitCommand(r)), r),
+            OffsetFetchRequest { ApiVersion: >= 8, Groups: not null } r => OffsetFetchGroupsHere(r),
             OffsetFetchRequest r => ToOffsetFetchResponse(_coordinator.FetchOffsets(ToOffsetFetchCommand(r)), r),
-            DescribeGroupsRequest r => ToDescribeGroupsResponse(_coordinator.DescribeGroups(r.GroupIds), r),
+            DescribeGroupsRequest r => DescribeGroupsHere(r),
             ListGroupsRequest r => ToListGroupsResponse(
                 [.. _coordinator.ListGroups(r.StatesFilter), .. _consumerGroups.ListGroups(r.StatesFilter)], r),
-            DeleteGroupsRequest r => ToDeleteGroupsResponse(_coordinator.DeleteGroups(r.GroupIds), r),
+            DeleteGroupsRequest r => DeleteGroupsHere(r),
             OffsetDeleteRequest r => ToOffsetDeleteResponse(_coordinator.DeleteOffsets(ToOffsetDeleteCommand(r)), r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConsumerGroupApiHandler")
         };

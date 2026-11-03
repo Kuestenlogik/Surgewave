@@ -64,6 +64,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     // Handler references for cluster wiring
     private TopicAdminHandler? _topicAdminHandler;
     private MetadataApiHandler? _metadataApiHandler;
+    private ConsumerGroupApiHandler? _consumerGroupApiHandler;
+    private NativeGroupCoordinator? _nativeGroupCoordinator;
+    private ConsumerGroupV2ApiHandler? _consumerGroupV2ApiHandler;
     private DataApiHandler? _dataApiHandler;
     // Kept so the inter-broker handler (registered after the broker is up) can share the same
     // coordinator instance for WriteTxnMarkers (#69). This runtime creates it, so this runtime
@@ -241,6 +244,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             ClusterNodes = clusterNodesStr,
             ProcessRoles = _options.ProcessRoles,
             ControllerQuorumVoters = _options.ControllerQuorumVoters,
+            OffsetsTopicNumPartitions = _options.OffsetsTopicNumPartitions ?? new BrokerConfig().OffsetsTopicNumPartitions,
             HeartbeatIntervalMs = _options.HeartbeatIntervalMs,
             HeartbeatTimeoutMs = _options.HeartbeatTimeoutMs,
             // Raft settings
@@ -292,6 +296,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var recordBatchSerializer = new RecordBatchSerializer(serializerLogger);
         _offsetStore = new OffsetStore(_dataDirectory, offsetStoreLogger);
         var nativeGroupCoordinator = new NativeGroupCoordinator(nativeGroupCoordinatorLogger, _offsetStore);
+        _nativeGroupCoordinator = nativeGroupCoordinator;
+        // On its own the broker coordinates every group, at the address it actually bound; a cluster replaces this
+        // with the __consumer_offsets partition leaders once it forms (#204).
+        nativeGroupCoordinator.SetCoordinatorLocator(
+            new Kuestenlogik.Surgewave.Coordination.Coordinators.LocalCoordinatorLocator(
+                _options.BrokerId, () => config.Host, () => _actualPort));
         var queueViewConfig = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewConfig();
         var queueViewManager = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager(queueViewConfig, _loggerFactory, _logManager);
         _queueViewManager = queueViewManager;
@@ -346,8 +356,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 // (KIP-1071) APIs now route through the dispatcher (their broker fast-paths
                 // were removed when the coordinators went protocol-neutral, #59), so their
                 // adapters must be registered here too.
-                new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupV2Coordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
-                new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, _logManager.ResolveTopicId, _loggerFactory.CreateLogger<ConsumerGroupV2ApiHandler>()),
+                _consumerGroupApiHandler = new ConsumerGroupApiHandler(consumerGroupCoordinator, consumerGroupV2Coordinator, _loggerFactory.CreateLogger<ConsumerGroupApiHandler>()),
+                _consumerGroupV2ApiHandler = new ConsumerGroupV2ApiHandler(consumerGroupV2Coordinator, _logManager.ResolveTopicId, _loggerFactory.CreateLogger<ConsumerGroupV2ApiHandler>()),
                 new StreamsGroupApiHandler(streamsGroupCoordinator, _loggerFactory.CreateLogger<StreamsGroupApiHandler>()),
                 // Transaction + share-group (KIP-932) APIs also route through the dispatcher now
                 // (broker fast-paths removed when the coordinators went protocol-neutral, #59).
@@ -421,7 +431,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             reassignmentThrottleBytesPerSec: config.ReassignmentThrottleBytesPerSec,
             reassignmentMaxConcurrent: config.ReassignmentMaxConcurrent,
             processRoles: config.ProcessRoles,
-            controllerQuorumVoters: config.ControllerQuorumVoters
+            controllerQuorumVoters: config.ControllerQuorumVoters,
+            offsetsTopicNumPartitions: config.OffsetsTopicNumPartitions,
+            offsetsTopicReplicationFactor: config.OffsetsTopicReplicationFactor
         );
 
         // #170 — an invalid configuration stops the runtime here rather than surfacing later as a
@@ -644,6 +656,14 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
         // Wire up metadata handler to use cluster state for accurate replica info
         _metadataApiHandler?.SetClusterState(_clusterState);
+
+        // In a cluster, a group's coordinator is the leader of its __consumer_offsets partition (#204); without a
+        // cluster the handlers keep coordinating every group themselves.
+        var coordinators = new ClusterCoordinatorLocator(_clusterState);
+        _metadataApiHandler?.SetCoordinatorLocator(coordinators);
+        _consumerGroupApiHandler?.SetCoordinatorLocator(coordinators);
+        _consumerGroupV2ApiHandler?.SetCoordinatorLocator(coordinators);
+        _nativeGroupCoordinator?.SetCoordinatorLocator(coordinators);
         _metadataApiHandler?.SetBrokerFencing(membershipService.IsKnownFenced);
         _metadataApiHandler?.SetClusterTopicCreator(_clusterController);
 

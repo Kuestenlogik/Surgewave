@@ -357,15 +357,33 @@ public sealed class NativeGroupCoordinator
         }
     }
 
+    private Kuestenlogik.Surgewave.Coordination.Coordinators.ICoordinatorLocator? _coordinators;
+
+    /// <summary>
+    /// Sets who coordinates which group (#204) — the same answer the Kafka FindCoordinator gives, so a native and a
+    /// Kafka client of one group meet at one coordinator.
+    /// </summary>
+    public void SetCoordinatorLocator(Kuestenlogik.Surgewave.Coordination.Coordinators.ICoordinatorLocator coordinators)
+        => _coordinators = coordinators;
+
     public FindCoordinatorResult FindCoordinator(string key, byte keyType)
     {
-        // In single-broker mode, this broker is always the coordinator
+        // It answered broker 0 at localhost:9092 whatever the broker's id, host and port were. Without a locator
+        // there is no answer to give: COORDINATOR_NOT_AVAILABLE, and the client asks again.
+        var location = _coordinators?.Locate(
+            keyType == 1
+                ? Kuestenlogik.Surgewave.Coordination.Coordinators.CoordinatorKind.Transaction
+                : Kuestenlogik.Surgewave.Coordination.Coordinators.CoordinatorKind.Group,
+            key);
+        if (location is not { Status: Kuestenlogik.Surgewave.Coordination.Coordinators.CoordinatorLookupStatus.Ok } found)
+            return new FindCoordinatorResult { ErrorCode = (ushort)Kuestenlogik.Surgewave.Protocol.Native.SurgewaveErrorCode.CoordinatorNotAvailable, CoordinatorId = -1 };
+
         return new FindCoordinatorResult
         {
             ErrorCode = 0,
-            CoordinatorId = 0,
-            Host = "localhost",
-            Port = KafkaConstants.Ports.Kafka
+            CoordinatorId = found.BrokerId,
+            Host = found.Host,
+            Port = found.Port,
         };
     }
 

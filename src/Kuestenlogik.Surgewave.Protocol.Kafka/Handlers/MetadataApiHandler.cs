@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Core.Models;
@@ -19,6 +20,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     private readonly ILogger<MetadataApiHandler> _logger;
     private ClusterState? _clusterState;
     private Func<int, bool> _isKnownFenced = _ => false;
+    private ICoordinatorLocator? _coordinators;
     private IClusterTopicCreator? _clusterTopicCreator;
 
     /// <summary>
@@ -37,6 +39,15 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     public void SetBrokerFencing(Func<int, bool> isKnownFenced)
     {
         _isKnownFenced = isKnownFenced;
+    }
+
+    /// <summary>
+    /// Sets who coordinates which group or transactional id (#204): FindCoordinator names that broker. Unset, a broker
+    /// on its own, which coordinates everything itself.
+    /// </summary>
+    public void SetCoordinatorLocator(ICoordinatorLocator coordinators)
+    {
+        _coordinators = coordinators;
     }
 
     /// <summary>
@@ -121,40 +132,58 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
 
     private FindCoordinatorResponse HandleFindCoordinator(FindCoordinatorRequest request)
     {
-        // For a single-node broker, we are the coordinator for all groups
-        // v4+ uses batch lookup with Coordinators array
+        // The coordinator the cluster agrees on, the same from every broker (#204). It used to be the broker asked,
+        // so the members of one group could each find a different coordinator.
+        var kind = request.KeyType == 1 ? CoordinatorKind.Transaction : CoordinatorKind.Group;
+
+        // v4+ looks up a batch of keys.
         if (request.ApiVersion >= 4)
         {
             var keys = request.CoordinatorKeys ?? (request.Key != null ? [request.Key] : []);
-            var coordinators = keys.Select(key => new FindCoordinatorResponse.Coordinator
-            {
-                Key = key,
-                NodeId = _config.BrokerId,
-                Host = _config.Host,
-                Port = _config.Port,
-                ErrorCode = ErrorCode.None,
-                ErrorMessage = null
-            }).ToList();
-
             return new FindCoordinatorResponse
             {
                 CorrelationId = request.CorrelationId,
                 ApiVersion = request.ApiVersion,
-                Coordinators = coordinators
+                Coordinators = [.. keys.Select(key =>
+                {
+                    var location = Locate(kind, key);
+                    var (error, message) = LookupError(location, key);
+                    return new FindCoordinatorResponse.Coordinator
+                    {
+                        Key = key,
+                        NodeId = location.BrokerId,
+                        Host = location.Host,
+                        Port = location.Port,
+                        ErrorCode = error,
+                        ErrorMessage = message,
+                    };
+                })],
             };
         }
 
-        // Legacy format (v0-3)
+        var single = Locate(kind, request.Key ?? string.Empty);
+        var (singleError, singleMessage) = LookupError(single, request.Key ?? string.Empty);
         return new FindCoordinatorResponse
         {
             CorrelationId = request.CorrelationId,
             ApiVersion = request.ApiVersion,
-            ErrorCode = ErrorCode.None,
-            NodeId = _config.BrokerId,
-            Host = _config.Host,
-            Port = _config.Port
+            ErrorCode = singleError,
+            ErrorMessage = singleMessage,
+            NodeId = single.BrokerId,
+            Host = single.Host,
+            Port = single.Port,
         };
     }
+
+    private CoordinatorLocation Locate(CoordinatorKind kind, string key) =>
+        _coordinators?.Locate(kind, key)
+        ?? new CoordinatorLocation(CoordinatorLookupStatus.Ok, _config.BrokerId, _config.Host, _config.Port);
+
+    /// <summary>COORDINATOR_NOT_AVAILABLE while nobody coordinates the key yet; the client asks again.</summary>
+    private static (ErrorCode Error, string? Message) LookupError(CoordinatorLocation location, string key) =>
+        location.Status == CoordinatorLookupStatus.Ok
+            ? (ErrorCode.None, null)
+            : (ErrorCode.CoordinatorNotAvailable, $"No broker coordinates {key} yet.");
 
     private async Task<MetadataResponse> HandleMetadataAsync(MetadataRequest request, CancellationToken cancellationToken)
     {

@@ -113,6 +113,50 @@ JwtBearer mapped the inbound claims, so `roles` arrived as the long
 auth enabled, every mutation was refused with 403, also for callers that
 hold `RequiredRole`. The claims are now kept as the token names them.
 
+### One coordinator per consumer group in a cluster (#204)
+
+Every broker answered FindCoordinator with itself and coordinated every
+group, so consumers of one group that bootstrapped at different brokers met
+in separate copies of it, with separate offsets. A group's coordinator is
+now the leader of its `__consumer_offsets` partition, as in Kafka: the
+controller creates the compacted topic once the cluster can carry it
+(`OffsetsTopicNumPartitions`, `OffsetsTopicReplicationFactor`, capped at the
+configured cluster size), FindCoordinator names that leader for the Kafka
+and the native protocol alike, and a broker that is not the coordinator
+answers the group requests with `NOT_COORDINATOR`. A controller that loses
+its leadership while creating a topic no longer reports it as created, and
+the next controller assigns the partitions of `__consumer_offsets` that were
+left without replicas. How the members of one group split the partitions is
+still wrong with the classic protocol: a member that joins later gets none
+(#216).
+
+### Topics created over Kafka survive a restart of the shipped broker (#212)
+
+The broker host never gave the Kafka CreateTopics handler the cluster
+controller, so a topic went into the local log only, past the metadata log,
+and was gone after a restart while its data stayed on disk. The host also
+never turned committed partition assignments into leaders and followers.
+Both are wired as in the embedded runtime.
+
+### The Connect REST routes answer with Connect enabled (#211)
+
+With `Connect:Enabled`, the host and the Connect plugin both mapped the
+Connect gRPC service, so every transcoded Connect route matched twice and
+answered 500. The host maps it only when the plugin does not.
+
+### Broker shutdown no longer throws from the transaction coordinator (#209)
+
+The container disposes the transaction timeout manager once for each
+contract it is registered under; the second dispose threw
+`ObjectDisposedException`. Dispose is now idempotent.
+
+### The AI plugin recommendation points at a package that exists (#137)
+
+`surgewave plugins recommend` and the Control banner advertised
+`Kuestenlogik.Surgewave.Ai.Basics` from nuget.org, which does not exist.
+They now name `Kuestenlogik.Surgewave.AI` from the new default plugin source
+`surgewave-ai`, the GitHub releases of the Surgewave.Ai repository.
+
 ## Also in this release
 
 ### Everything in English, and a guard that keeps it so (#181)

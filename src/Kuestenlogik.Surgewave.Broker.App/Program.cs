@@ -499,7 +499,9 @@ builder.Services.AddSingleton(sp =>
         interBrokerCertificatePassword: c.InterBrokerCertificatePassword,
         interBrokerCaCertificatePath: c.InterBrokerCaCertificatePath,
         processRoles: c.ProcessRoles,
-        controllerQuorumVoters: c.ControllerQuorumVoters);
+        controllerQuorumVoters: c.ControllerQuorumVoters,
+        offsetsTopicNumPartitions: c.OffsetsTopicNumPartitions,
+        offsetsTopicReplicationFactor: c.OffsetsTopicReplicationFactor);
 });
 // Inter-broker transport (TCP by default, QUIC when Surgewave:InterBrokerTransport=quic).
 // Explicitly invoke both registrations so the module initializers run even if no
@@ -707,9 +709,19 @@ builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.StreamsGro
 // depends only on Coordination, not the broker-internal coordinator type.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Streams.IStreamsGroupCoordinator>(
     sp => sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>());
-builder.Services.AddSingleton(sp => new NativeGroupCoordinator(
-    sp.GetRequiredService<ILogger<NativeGroupCoordinator>>(),
-    sp.GetRequiredService<OffsetStore>()));
+// Who coordinates which group: the leader of its __consumer_offsets partition, one answer for the Kafka and
+// the native FindCoordinator alike (#204).
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Coordinators.ICoordinatorLocator>(
+    sp => new ClusterCoordinatorLocator(sp.GetRequiredService<ClusterState>()));
+builder.Services.AddSingleton(sp =>
+{
+    var coordinator = new NativeGroupCoordinator(
+        sp.GetRequiredService<ILogger<NativeGroupCoordinator>>(),
+        sp.GetRequiredService<OffsetStore>());
+    coordinator.SetCoordinatorLocator(
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Coordinators.ICoordinatorLocator>());
+    return coordinator;
+});
 
 // Transaction + quota + delegation stack in DI (#59 phase 2a). Same singletons,
 // now DI-managed so the Kafka handlers can be DI-resolved. Behaviour-preserving.

@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
@@ -20,6 +21,14 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
     private readonly Func<Guid, string?> _topicName;
     private readonly ILogger<ConsumerGroupV2ApiHandler> _logger;
 
+    // Everything is local until a cluster sets the locator: a broker on its own coordinates every group.
+    private ICoordinatorLocator? _coordinators;
+
+    /// <summary>Sets who coordinates which group; another broker's group is answered NOT_COORDINATOR (#204).</summary>
+    public void SetCoordinatorLocator(ICoordinatorLocator coordinators) => _coordinators = coordinators;
+
+    private bool IsLocal(string groupId) => _coordinators?.IsLocal(CoordinatorKind.Group, groupId) ?? true;
+
     public IEnumerable<ApiKey> SupportedApiKeys =>
     [
         ApiKey.ConsumerGroupHeartbeat,
@@ -41,8 +50,17 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
     {
         KafkaResponse response = request switch
         {
+            ConsumerGroupHeartbeatRequest r when !IsLocal(r.GroupId) => new ConsumerGroupHeartbeatResponse
+            {
+                CorrelationId = r.CorrelationId,
+                ApiVersion = r.ApiVersion,
+                ErrorCode = ErrorCode.NotCoordinator,
+                ErrorMessage = $"This broker does not coordinate group {r.GroupId}.",
+                MemberId = r.MemberId,
+                MemberEpoch = r.MemberEpoch,
+            },
             ConsumerGroupHeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(ToHeartbeatCommand(r)), r),
-            ConsumerGroupDescribeRequest r => ToDescribeResponse(_coordinator.Describe(r.GroupIds), r),
+            ConsumerGroupDescribeRequest r => DescribeHere(r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConsumerGroupV2ApiHandler")
         };
 
@@ -115,6 +133,30 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
     };
 
     // ── Describe: neutral -> wire ───────────────────────────────────────────
+
+    /// <summary>ConsumerGroupDescribe: this broker describes its own groups, NOT_COORDINATOR for the rest, in order.</summary>
+    private ConsumerGroupDescribeResponse DescribeHere(ConsumerGroupDescribeRequest r)
+    {
+        var described = ToDescribeResponse(_coordinator.Describe([.. r.GroupIds.Where(IsLocal)]), r).Groups
+            .ToDictionary(g => g.GroupId, StringComparer.Ordinal);
+
+        return new ConsumerGroupDescribeResponse
+        {
+            CorrelationId = r.CorrelationId,
+            ApiVersion = r.ApiVersion,
+            Groups = [.. r.GroupIds.Select(id => described.TryGetValue(id, out var group)
+                ? group
+                : new ConsumerGroupDescribeResponse.DescribedGroup
+                {
+                    ErrorCode = ErrorCode.NotCoordinator,
+                    ErrorMessage = $"This broker does not coordinate group {id}.",
+                    GroupId = id,
+                    GroupState = string.Empty,
+                    AssignorName = string.Empty,
+                    Members = [],
+                })],
+        };
+    }
 
     private ConsumerGroupDescribeResponse ToDescribeResponse(IReadOnlyList<ConsumerGroupDescription> descriptions, ConsumerGroupDescribeRequest r)
     {

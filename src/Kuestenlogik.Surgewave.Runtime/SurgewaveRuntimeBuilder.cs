@@ -37,6 +37,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     private List<string> _clusterNodes = [];
     private string _processRoles = "broker,controller";
     private string _controllerQuorumVoters = "";
+    private int? _offsetsTopicNumPartitions;
     private int _raftElectionTimeoutMinMs = 150;
     private int _raftElectionTimeoutMaxMs = 300;
     private int _raftHeartbeatIntervalMs = 50;
@@ -261,6 +262,16 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
+    /// Sets how many partitions <c>__consumer_offsets</c> gets — the internal topic whose partition leaders
+    /// coordinate groups (#204). A test cluster that does not need Kafka's 50 can keep replication light.
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithOffsetsTopicPartitions(int partitions)
+    {
+        _offsetsTopicNumPartitions = partitions;
+        return this;
+    }
+
+    /// <summary>
     /// Sets what this node does — <c>broker</c>, <c>controller</c>, or both (#168).
     /// </summary>
     /// <remarks>
@@ -478,6 +489,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         ClusterNodes = _clusterNodes,
         ProcessRoles = _processRoles,
         ControllerQuorumVoters = _controllerQuorumVoters,
+        OffsetsTopicNumPartitions = _offsetsTopicNumPartitions,
         RaftElectionTimeoutMinMs = _raftElectionTimeoutMinMs,
         RaftElectionTimeoutMaxMs = _raftElectionTimeoutMaxMs,
         RaftHeartbeatIntervalMs = _raftHeartbeatIntervalMs,

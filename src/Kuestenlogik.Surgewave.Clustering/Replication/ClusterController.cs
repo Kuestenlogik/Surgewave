@@ -225,6 +225,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
                     // Start controller loop
                     _controllerTask = Task.Run(() => ControllerLoopAsync(ct), ct);
+
+                    // The group coordinator topic, once the cluster can carry it (#204).
+                    _ = EnsureInternalTopicsAsync(ct);
                 }
                 else if (!isLeader && wasLeader)
                 {
@@ -650,7 +653,21 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
-        // Now propose partition assignments
+        if (!await AssignPartitionsViaRaftAsync(topic, topicId, Enumerable.Range(0, partitionCount), replicationFactor, ct))
+            return false;
+
+        LogTopicCreated(topic, partitionCount, replicationFactor);
+        return true;
+    }
+
+    /// <summary>
+    /// Proposes the replica assignment of each partition and, once it commits, takes this broker's part in it. False
+    /// when an assignment does not commit — the controller lost its leadership on the way, say — so the caller never
+    /// reports a topic as created while some of its partitions have no replicas anywhere but here.
+    /// </summary>
+    private async Task<bool> AssignPartitionsViaRaftAsync(
+        string topic, Guid topicId, IEnumerable<int> partitions, short replicationFactor, CancellationToken ct)
+    {
         var brokerIds = _clusterState.Brokers.Keys.OrderBy(id => id).ToList();
         if (brokerIds.Count == 0)
         {
@@ -658,16 +675,17 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
-        for (int partition = 0; partition < partitionCount; partition++)
+        foreach (var partition in partitions)
         {
             var replicas = _replicaAssignment.AssignReplicas(brokerIds, partition, replicationFactor);
             var assignCmd = new PartitionAssignedCommand(topic, partition, replicas, _config.MinInSyncReplicas);
             var assignData = JsonSerializer.SerializeToUtf8Bytes(assignCmd, ClusteringJsonContext.Default.PartitionAssignedCommand);
 
-            var assignIndex = await _raftNode.ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
-            if (assignIndex > 0)
+            var assignIndex = await _raftNode!.ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
+            if (assignIndex < 0 || !await _raftNode.WaitForCommitAsync(assignIndex, TimeSpan.FromSeconds(5), ct))
             {
-                await _raftNode.WaitForCommitAsync(assignIndex, TimeSpan.FromSeconds(5), ct);
+                LogRaftCommitTimeout("PartitionAssigned", assignIndex);
+                return false;
             }
 
             // Apply local replica manager state
@@ -689,7 +707,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             }
         }
 
-        LogTopicCreated(topic, partitionCount, replicationFactor);
         return true;
     }
 
@@ -721,6 +738,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         if (committed)
         {
             LogBrokerRegisteredViaRaft(brokerId, host, port);
+
+            // One more broker may be what the group coordinator topic was waiting for (#204).
+            _ = EnsureInternalTopicsAsync(ct);
         }
         return committed;
     }

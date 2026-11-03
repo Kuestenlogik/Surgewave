@@ -417,14 +417,26 @@ public class NativeGroupCoordinatorTests
     #region FindCoordinator Tests
 
     [Fact]
-    public void FindCoordinator_ReturnsSelf()
+    public void FindCoordinator_NamesTheLocatorsCoordinator()
     {
+        // The broker's own id, host and port — it used to answer broker 0 at localhost:9092 regardless (#204).
+        _coordinator.SetCoordinatorLocator(
+            new Kuestenlogik.Surgewave.Coordination.Coordinators.LocalCoordinatorLocator(4, () => "10.1.2.3", () => 19092));
+
         var result = _coordinator.FindCoordinator("test-group", 0);
 
         Assert.Equal(0, result.ErrorCode);
-        Assert.Equal(0, result.CoordinatorId);
-        Assert.Equal("localhost", result.Host);
-        Assert.Equal(9092, result.Port);
+        Assert.Equal(4, result.CoordinatorId);
+        Assert.Equal("10.1.2.3", result.Host);
+        Assert.Equal(19092, result.Port);
+    }
+
+    [Fact]
+    public void FindCoordinator_WithoutALocator_IsNotAvailable()
+    {
+        var result = _coordinator.FindCoordinator("test-group", 0);
+
+        Assert.Equal((ushort)Kuestenlogik.Surgewave.Protocol.Native.SurgewaveErrorCode.CoordinatorNotAvailable, result.ErrorCode);
     }
 
     #endregion

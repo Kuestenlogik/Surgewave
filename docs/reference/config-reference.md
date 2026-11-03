@@ -23,6 +23,8 @@ Section: `Surgewave`
 | `AutoCreateTopics` | bool | `true` | Create topics on first produce |
 | `DefaultNumPartitions` | int | `1` | Default partition count for new topics |
 | `DefaultReplicationFactor` | short | `1` | Default replication factor |
+| `OffsetsTopicNumPartitions` | int | `50` | Partitions of `__consumer_offsets`, whose leaders coordinate groups; fixed once the topic exists |
+| `OffsetsTopicReplicationFactor` | short | `3` | Replication factor of `__consumer_offsets`, capped at the configured cluster size |
 | `LogRetentionHours` | int | `168` | Retention period (hours) |
 | `LogRetentionBytes` | long | `-1` | Retention size per partition (-1 = unlimited) |
 | `LogSegmentBytes` | long | `1073741824` | Max segment size (1 GB) |

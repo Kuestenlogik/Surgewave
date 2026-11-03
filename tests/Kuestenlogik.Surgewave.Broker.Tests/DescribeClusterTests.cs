@@ -96,6 +96,53 @@ public sealed class DescribeClusterTests : IDisposable
         Assert.Equal(ErrorCode.None, apiVersions.ErrorCode); // the id a client learned is the broker's own
     }
 
+    [Fact]
+    public async Task FindCoordinatorNamesTheCoordinatorTheClusterAgreesOnOrSaysNoneIsAvailable()
+    {
+        // #204: the coordinator of a group is the leader of its __consumer_offsets partition, not the broker asked.
+        var cluster = new ClusterState { LocalBrokerId = 1 };
+        foreach (var id in new[] { 1, 2, 3 })
+            cluster.AddBroker(new BrokerNode { BrokerId = id, Host = $"10.0.0.{id}", Port = 9092 });
+        cluster.AddTopic(new Kuestenlogik.Surgewave.Core.Models.TopicMetadata
+        {
+            Name = Kuestenlogik.Surgewave.Coordination.Coordinators.CoordinatorPartitioner.GroupTopic,
+            TopicId = Guid.NewGuid(),
+            PartitionCount = 1,
+            ReplicationFactor = 3,
+            Config = [],
+            CreatedAt = DateTime.UtcNow,
+        });
+        var tp = new Kuestenlogik.Surgewave.Core.Models.TopicPartition
+        {
+            Topic = Kuestenlogik.Surgewave.Coordination.Coordinators.CoordinatorPartitioner.GroupTopic,
+            Partition = 0,
+        };
+        cluster.AssignReplicas(tp, [1, 2, 3], 1);
+        cluster.ElectLeader(tp, 3);
+        _handler.SetCoordinatorLocator(new ClusterCoordinatorLocator(cluster));
+
+        var found = await FindCoordinatorAsync(["orders-app"]);
+        var coordinator = Assert.Single(found.Coordinators!);
+        Assert.Equal(ErrorCode.None, coordinator.ErrorCode);
+        Assert.Equal(3, coordinator.NodeId);
+        Assert.Equal("10.0.0.3", coordinator.Host);
+
+        cluster.UpdatePartitionState(tp, p => p.LeaderBrokerId = -1);
+        var none = Assert.Single((await FindCoordinatorAsync(["orders-app"])).Coordinators!);
+        Assert.Equal(ErrorCode.CoordinatorNotAvailable, none.ErrorCode);
+    }
+
+    private async Task<FindCoordinatorResponse> FindCoordinatorAsync(List<string> keys) =>
+        Assert.IsType<FindCoordinatorResponse>(await _handler.HandleAsync(new FindCoordinatorRequest
+        {
+            ApiKey = ApiKey.FindCoordinator,
+            ApiVersion = 4,
+            CorrelationId = 9,
+            ClientId = "admin",
+            KeyType = 0,
+            CoordinatorKeys = keys,
+        }, Context(), CancellationToken.None));
+
     private async Task<DescribeClusterResponse> DescribeClusterAsync() =>
         Assert.IsType<DescribeClusterResponse>(await _handler.HandleAsync(new DescribeClusterRequest
         {

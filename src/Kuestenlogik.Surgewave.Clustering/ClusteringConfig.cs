@@ -190,6 +190,20 @@ public sealed class ClusteringConfig : IValidatableConfig
     [Range(0, int.MaxValue)]
     public int RaftPeerDiscoveryTimeoutSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// Partitions of <c>__consumer_offsets</c>, the internal topic whose partition leaders coordinate groups (#204).
+    /// Kafka's offsets.topic.num.partitions. Fixed once the topic exists: a group's partition is a hash over it.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int OffsetsTopicNumPartitions { get; set; } = 50;
+
+    /// <summary>
+    /// Replication factor of <c>__consumer_offsets</c>, capped at the number of brokers the cluster is configured
+    /// with — a single broker gets 1. Kafka's offsets.topic.replication.factor.
+    /// </summary>
+    [Range(1, short.MaxValue)]
+    public short OffsetsTopicReplicationFactor { get; set; } = 3;
+
     // Auto-rebalancing settings
     public bool AutoRebalanceEnabled { get; set; } = true;
 
@@ -316,10 +330,14 @@ public sealed class ClusteringConfig : IValidatableConfig
         string interBrokerCertificatePassword = "",
         string interBrokerCaCertificatePath = "",
         string processRoles = Raft.NodeRolesParser.CombinedMode,
-        string controllerQuorumVoters = "")
+        string controllerQuorumVoters = "",
+        int offsetsTopicNumPartitions = 50,
+        short offsetsTopicReplicationFactor = 3)
     {
         return new ClusteringConfig
         {
+            OffsetsTopicNumPartitions = offsetsTopicNumPartitions,
+            OffsetsTopicReplicationFactor = offsetsTopicReplicationFactor,
             BrokerId = brokerId,
             Host = host,
             Port = port,

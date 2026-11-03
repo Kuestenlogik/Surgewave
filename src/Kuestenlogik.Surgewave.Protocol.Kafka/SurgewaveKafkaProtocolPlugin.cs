@@ -9,6 +9,7 @@ using Kuestenlogik.Surgewave.Storage.Disaggregated.Read;
 using Kuestenlogik.Surgewave.Storage.Disaggregated.Routing;
 using Kuestenlogik.Surgewave.Broker.Security.OAuthBearer;
 using Kuestenlogik.Surgewave.Broker.Telemetry;
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Clustering;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.InterBroker;
@@ -111,6 +112,7 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
                 sp.GetRequiredService<LogManager>(),
                 sp.GetRequiredService<ILogger<MetadataApiHandler>>());
             metadataApiHandler.SetClusterState(sp.GetRequiredService<ClusterState>());
+            metadataApiHandler.SetCoordinatorLocator(sp.GetRequiredService<ICoordinatorLocator>());
             metadataApiHandler.SetBrokerFencing(sp.GetRequiredService<ClusterMembershipService>().IsKnownFenced);
             metadataApiHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
             return metadataApiHandler;
@@ -157,10 +159,15 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             sp.GetService<ITransactionMarkerSink>(),
             isrUpdateApplier: sp.GetRequiredService<ClusterController>()));
 
-        services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupApiHandler(
-            sp.GetRequiredService<IConsumerGroupCoordinator>(),
-            sp.GetRequiredService<IConsumerGroupV2Coordinator>(),
-            sp.GetRequiredService<ILogger<ConsumerGroupApiHandler>>()));
+        services.AddSingleton<IKafkaRequestHandler>(sp =>
+        {
+            var handler = new ConsumerGroupApiHandler(
+                sp.GetRequiredService<IConsumerGroupCoordinator>(),
+                sp.GetRequiredService<IConsumerGroupV2Coordinator>(),
+                sp.GetRequiredService<ILogger<ConsumerGroupApiHandler>>());
+            handler.SetCoordinatorLocator(sp.GetRequiredService<ICoordinatorLocator>());
+            return handler;
+        });
 
         services.AddSingleton<IKafkaRequestHandler>(sp => new ShareGroupApiHandler(
             sp.GetRequiredService<IShareGroupCoordinator>(),
@@ -170,10 +177,15 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             sp.GetRequiredService<ITransactionCoordinator>(),
             sp.GetRequiredService<ILogger<TransactionApiHandler>>()));
 
-        services.AddSingleton<IKafkaRequestHandler>(sp => new ConsumerGroupV2ApiHandler(
-            sp.GetRequiredService<IConsumerGroupV2Coordinator>(),
-            sp.GetRequiredService<LogManager>().ResolveTopicId,
-            sp.GetRequiredService<ILogger<ConsumerGroupV2ApiHandler>>()));
+        services.AddSingleton<IKafkaRequestHandler>(sp =>
+        {
+            var handler = new ConsumerGroupV2ApiHandler(
+                sp.GetRequiredService<IConsumerGroupV2Coordinator>(),
+                sp.GetRequiredService<LogManager>().ResolveTopicId,
+                sp.GetRequiredService<ILogger<ConsumerGroupV2ApiHandler>>());
+            handler.SetCoordinatorLocator(sp.GetRequiredService<ICoordinatorLocator>());
+            return handler;
+        });
 
         services.AddSingleton<IKafkaRequestHandler>(sp => new StreamsGroupApiHandler(
             sp.GetRequiredService<IStreamsGroupCoordinator>(),
