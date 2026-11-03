@@ -150,6 +150,14 @@ old docs `logo.svg`, the designed link-preview card and the scripts `generate-lo
 `render-favicons.js`, `build-favicon-ico.js`, `generate-og-image.js` with `og-image-template.html` (and
 the `og-image` npm script) are gone.
 
+### The drawing is edited in the Kuestenlogik repository (Kuestenlogik/Kuestenlogik#10)
+
+Branding tool 1.1.0 vendors `brand/products/surgewave` of the Kuestenlogik repository (the drawing,
+`brand.json`, `wordmark.json`) into `scripts/branding/` with the tool, and `pin.json` pins their hashes too
+(`brand.from`, `brand.files`); `tests/ci/branding-tool.test.mjs` fails when one of them is edited here. A logo
+change is made there and brought here with `node tools/branding/vendor.mjs surgewave <checkout>`, then the
+generator (`BRAND.md`). The outputs are unchanged.
+
 ### The shared branding tool; WebP, package icon and manifest icon (Kuestenlogik/Kuestenlogik#10)
 
 The generator is now the shared tool of every Kuestenlogik product, vendored as a pinned copy in

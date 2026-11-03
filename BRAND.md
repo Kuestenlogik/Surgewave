@@ -7,7 +7,8 @@ the shared branding tool,
 [`scripts/branding/tool/generate-logos.mjs`](scripts/branding/tool/README.md)
 (a pinned copy of `tools/branding` in the Kuestenlogik repository), from one
 drawing, `scripts/branding/surgewave_mark_source.svg`, configured in
-`scripts/branding/brand.json`; the generator also copies the tab and
+`scripts/branding/brand.json` (both pinned copies of `brand/products/surgewave`
+in the Kuestenlogik repository, edited only there); the generator also copies the tab and
 home-screen icons to the website, the docs theme and the Control UI. See
 [`images/README.md`](images/README.md) for which file to use where.
 
@@ -91,12 +92,15 @@ generator with every other logo file; there is no separate icon drawing.
 ## Regenerating the logos
 
 Every logo file, the package icon included, is committed, so consumers never
-need to render it. To regenerate after a change to the drawing or to
-`scripts/branding/brand.json`:
+need to render it. The drawing and `brand.json` are edited in the Kuestenlogik
+repository (`brand/products/surgewave`), never here: the pin test
+(`tests/ci/branding-tool.test.mjs`) fails a copy edited in place. After a change
+there:
 
 ```bash
-cd scripts/branding/tool && npm ci && cd ../../..   # once: Playwright and sharp
-node scripts/branding/tool/generate-logos.mjs        # writes images/ and its copies
+node tools/branding/vendor.mjs surgewave <this checkout>   # in a clean Kuestenlogik checkout
+cd scripts/branding/tool && npm ci && cd ../../..          # once: Playwright and sharp
+node scripts/branding/tool/generate-logos.mjs              # writes images/ and its copies
 node scripts/branding/tool/generate-logos.mjs --check
 ```
 
