@@ -54,6 +54,13 @@ public sealed class BrokerBootSmokeTests
             // broker found and activated it from there — what a `dotnet run` relies on. The test used
             // to stage the plugin itself, which hid that the build put it where the broker never looks.
             Assert.Contains(KafkaPluginActivatedLine, broker.Log, StringComparison.Ordinal);
+
+            // #211 — with Connect enabled the host mapped the Connect gRPC service and the Connect plugin mapped it
+            // again, so every transcoded Connect route matched two endpoints and answered 500 (AmbiguousMatchException).
+            using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{broker.RestPort}") };
+            using var connectors = await http.GetAsync("/v3/clusters/local/connectors", cancellationToken);
+            Assert.True(connectors.IsSuccessStatusCode,
+                $"GET /v3/clusters/local/connectors answered {(int)connectors.StatusCode}\n{broker.Dump()}");
         }
         finally
         {

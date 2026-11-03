@@ -1741,8 +1741,11 @@ if (!config.Connect.Enabled)
         resumeConnector: _ => Task.CompletedTask,
         restartConnectorTask: (_, _) => Task.CompletedTask,
         listConnectorPlugins: (_, _) => []);
+
+    // Only here: with Connect enabled the plugin maps the service itself, and a second mapping made every
+    // transcoded Connect route match two endpoints (#211).
+    app.MapGrpcService<ConnectServiceImpl>();
 }
-app.MapGrpcService<ConnectServiceImpl>();
 
 // Health check endpoints (Kubernetes ready/live probes)
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions

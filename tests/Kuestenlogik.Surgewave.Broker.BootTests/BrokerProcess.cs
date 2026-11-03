@@ -26,14 +26,18 @@ internal sealed class BrokerProcess : IAsyncDisposable
     private readonly TaskCompletionSource _appStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<int> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private BrokerProcess(Process process, int kafkaPort)
+    private BrokerProcess(Process process, int kafkaPort, int restPort)
     {
         _process = process;
         KafkaPort = kafkaPort;
+        RestPort = restPort;
     }
 
     /// <summary>The port the broker's Kafka listener binds.</summary>
     public int KafkaPort { get; }
+
+    /// <summary>The plaintext HTTP/1.1 and HTTP/2 port that serves the transcoded REST API.</summary>
+    public int RestPort { get; }
 
     /// <summary>Bootstrap servers for a Kafka client.</summary>
     public string BootstrapServers => $"127.0.0.1:{KafkaPort}";
@@ -81,7 +85,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
             // Readiness is a stdout line, never an HTTP probe, so http is sufficient.
             $"--Kestrel:Endpoints:Grpc:Url=http://127.0.0.1:{grpcPort}",
             $"--Kestrel:Endpoints:GrpcHttp3:Url=http://127.0.0.1:{http3Port}",
-            "--Kestrel:Endpoints:GrpcHttp3:Protocols=Http1AndHttp2",
+            "--Kestrel:Endpoints:GrpcHttp3:Protocols=Http1AndHttp2", // also the REST port of the tests
             $"--Surgewave:DataDirectory={dataDir}",
             $"--Surgewave:LogDirectory={Path.Combine(dataDir, "logs")}",
             "--Surgewave:Kafka:Enabled=true",
@@ -90,7 +94,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
         ];
         foreach (var a in args) psi.ArgumentList.Add(a);
 
-        var broker = new BrokerProcess(new Process { StartInfo = psi, EnableRaisingEvents = true }, kafkaPort);
+        var broker = new BrokerProcess(new Process { StartInfo = psi, EnableRaisingEvents = true }, kafkaPort, http3Port);
         broker._process.OutputDataReceived += (_, e) => broker.OnLine(e.Data);
         broker._process.ErrorDataReceived += (_, e) => broker.OnLine(e.Data);
         broker._process.Exited += (_, _) => broker._exited.TrySetResult(broker._process.ExitCode);
