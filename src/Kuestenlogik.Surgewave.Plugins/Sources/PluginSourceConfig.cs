@@ -52,12 +52,15 @@ public sealed class PluginSourceConfig
         File.WriteAllText(ConfigPath, json);
     }
 
-    private static PluginSourceConfig CreateDefault() => new()
+    /// <summary>The sources a fresh install knows, before the user adds or removes any.</summary>
+    public static PluginSourceConfig CreateDefault() => new()
     {
         Sources =
         [
             new SourceEntry { Name = "nuget", Type = "nuget", Url = "https://api.nuget.org/v3/index.json" },
-            new SourceEntry { Name = "marketplace", Type = "http", Url = "http://localhost:5060" }
+            new SourceEntry { Name = "marketplace", Type = "http", Url = "http://localhost:5060" },
+            // Küstenlogik's own plugins ship as .swpkg assets on their repository's GitHub releases (#137).
+            new SourceEntry { Name = "surgewave-ai", Type = "github", Url = "Kuestenlogik/Surgewave.Ai" }
         ]
     };
 

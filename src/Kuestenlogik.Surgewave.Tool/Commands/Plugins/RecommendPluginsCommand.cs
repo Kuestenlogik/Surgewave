@@ -9,7 +9,7 @@ using Spectre.Console;
 namespace Kuestenlogik.Surgewave.Cli.Commands.Plugins;
 
 /// <summary>
-/// Show plugins curated by Surgewave Core (e.g. AI Basics) that the operator
+/// Show plugins curated by Surgewave Core (e.g. Surgewave AI) that the operator
 /// has not yet installed, with an opt-in <c>--apply</c> flag that runs
 /// <c>install</c> for each one. The catalog ships embedded in the CLI
 /// binary — no network round-trip required.
