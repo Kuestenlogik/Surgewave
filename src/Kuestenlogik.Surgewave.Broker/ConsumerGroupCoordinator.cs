@@ -15,243 +15,17 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// OffsetCommit requests that target a KIP-848 v2 group fall through to a server-side
 /// epoch validation against that coordinator.
 /// </summary>
-public sealed class ConsumerGroupCoordinator(
+public sealed partial class ConsumerGroupCoordinator(
     ILogger<ConsumerGroupCoordinator> logger,
     OffsetStore? offsetStore = null,
     LogManager? logManager = null,
     AclAuthorizer? aclAuthorizer = null,
     SurgewaveBrokerObservability? observability = null,
-    IConsumerGroupV2Coordinator? v2Coordinator = null) : IConsumerGroupCoordinator
+    IConsumerGroupV2Coordinator? v2Coordinator = null,
+    TimeProvider? timeProvider = null) : IConsumerGroupCoordinator
 {
     private readonly Dictionary<string, ConsumerGroupState> _consumerGroups = [];
     private readonly Lock _groupLock = new();
-
-    public JoinGroupResult JoinGroup(JoinGroupCommand request)
-    {
-        lock (_groupLock)
-        {
-            // Only the first join protocol is consulted (Kafka picks one protocol per group).
-            var firstProtocol = request.Protocols.Count > 0 ? request.Protocols[0] : null;
-
-            Log.JoinGroupRequest(logger, request.GroupId, request.MemberId,
-                request.Protocols.Count, firstProtocol?.Metadata?.Length ?? 0);
-
-            if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
-            {
-                group = new ConsumerGroupState
-                {
-                    GroupId = request.GroupId,
-                    GenerationId = 1,
-                    ProtocolType = request.ProtocolType,
-                    ProtocolName = firstProtocol?.Name ?? "range"
-                };
-                _consumerGroups[request.GroupId] = group;
-                Log.JoinGroupCreated(logger, request.GroupId);
-            }
-
-            // Clean up stale members who haven't sent a heartbeat within session timeout
-            var sessionTimeout = TimeSpan.FromMilliseconds(request.SessionTimeoutMs > 0 ? request.SessionTimeoutMs : 10000);
-            var now = DateTime.UtcNow;
-
-            // Inline loop avoids LINQ closure allocations
-            List<string>? staleMembers = null;
-            foreach (var kvp in group.Members)
-            {
-                if (now - kvp.Value.LastHeartbeat > sessionTimeout)
-                {
-                    staleMembers ??= new List<string>();
-                    staleMembers.Add(kvp.Key);
-                }
-            }
-
-            if (staleMembers != null)
-            foreach (var staleMember in staleMembers)
-            {
-                group.Members.Remove(staleMember);
-                Log.JoinGroupRemovedStaleMember(logger, staleMember, sessionTimeout.TotalMilliseconds);
-            }
-
-            if (staleMembers is { Count: > 0 })
-            {
-                // Bump generation when members are removed
-                group.GenerationId++;
-            }
-
-            // Generate member ID if empty
-            var memberId = string.IsNullOrEmpty(request.MemberId)
-                ? $"{request.ClientId}-{Guid.NewGuid()}"
-                : request.MemberId;
-
-            // Add or update member (preserve assignment if member already exists)
-            if (!group.Members.TryGetValue(memberId, out var member))
-            {
-                member = new GroupMember
-                {
-                    MemberId = memberId,
-                    GroupInstanceId = request.GroupInstanceId,
-                    ClientId = request.ClientId,
-                    Metadata = firstProtocol?.Metadata ?? Array.Empty<byte>(),
-                    Assignment = Array.Empty<byte>()
-                };
-                group.Members[memberId] = member;
-                Log.JoinGroupMemberAdded(logger, memberId, member.Metadata.Length);
-            }
-            else
-            {
-                // Update metadata for existing member, but preserve assignment
-                member.Metadata = firstProtocol?.Metadata ?? Array.Empty<byte>();
-                Log.JoinGroupMemberUpdated(logger, memberId, member.Metadata.Length);
-            }
-
-            // First member becomes the leader
-            var leaderId = group.Members.Keys.First();
-            var isLeader = memberId == leaderId;
-
-            Log.JoinGroupLeaderInfo(logger, memberId, leaderId, isLeader, group.Members.Count);
-
-            // Prepare member list (only for leader) - inline loop avoids LINQ closures
-            JoinGroupMemberInfo[] members;
-            int totalMetadataLength = 0;
-            if (isLeader)
-            {
-                members = new JoinGroupMemberInfo[group.Members.Count];
-                int i = 0;
-                foreach (var m in group.Members.Values)
-                {
-                    members[i++] = new JoinGroupMemberInfo(m.MemberId, m.GroupInstanceId, m.Metadata ?? []);
-                    totalMetadataLength += m.Metadata?.Length ?? 0;
-                }
-            }
-            else
-            {
-                members = [];
-            }
-
-            Log.JoinGroupResponse(logger, memberId, members.Length, totalMetadataLength);
-
-            return new JoinGroupResult
-            {
-                GenerationId = group.GenerationId,
-                ProtocolName = group.ProtocolName,
-                LeaderId = leaderId,
-                MemberId = memberId,
-                Members = members
-            };
-        }
-    }
-
-    public SyncGroupResult SyncGroup(SyncGroupCommand request)
-    {
-        lock (_groupLock)
-        {
-            Log.SyncGroupRequest(logger, request.GroupId, request.MemberId, request.GenerationId);
-            Log.SyncGroupAssignmentsCount(logger, request.Assignments.Count);
-
-            if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
-            {
-                Log.SyncGroupNotFound(logger, request.GroupId);
-                return new SyncGroupResult(ConsumerGroupErrorStatus.UnknownMember, Array.Empty<byte>());
-            }
-
-            // Store assignments if this is the leader
-            if (request.Assignments.Count > 0)
-            {
-                Log.SyncGroupLeaderAssignments(logger, request.Assignments.Count);
-                foreach (var assignment in request.Assignments)
-                {
-                    Log.SyncGroupMemberAssignment(logger, assignment.MemberId, assignment.Assignment.Length);
-                    if (group.Members.TryGetValue(assignment.MemberId, out var member))
-                    {
-                        member.Assignment = assignment.Assignment;
-                    }
-                }
-
-                // Rebalance is "done" the moment the leader distributes
-                // assignments — followers' subsequent SyncGroup calls just
-                // read back the stored bytes, so emitting here gives one
-                // event per rebalance (not one per member). Topic stays
-                // empty because assignments span every topic the group
-                // subscribes to and decoding the assignment bytes to
-                // enumerate them is more work than the tap needs.
-                if (observability?.HasSubscribers == true)
-                {
-                    observability.Publish(new SurgewaveBrokerEvent(
-                        SurgewaveBrokerEventKind.Rebalanced,
-                        Topic: string.Empty, Partition: -1, Offset: null,
-                        Principal: null, RejectReason: null,
-                        Consumers: [request.GroupId],
-                        Key: null, Value: null,
-                        Timestamp: DateTimeOffset.UtcNow));
-                }
-            }
-
-            // Return the assignment for this member
-            var memberAssignment = group.Members.TryGetValue(request.MemberId, out var m)
-                ? m.Assignment
-                : Array.Empty<byte>();
-
-            Log.SyncGroupReturningAssignment(logger, request.MemberId, memberAssignment.Length);
-
-            return new SyncGroupResult(ConsumerGroupErrorStatus.None, memberAssignment);
-        }
-    }
-
-    public GroupHeartbeatResult Heartbeat(GroupHeartbeatCommand request)
-    {
-        lock (_groupLock)
-        {
-            if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
-            {
-                return new GroupHeartbeatResult(ConsumerGroupErrorStatus.UnknownMember);
-            }
-
-            if (!group.Members.TryGetValue(request.MemberId, out var member))
-            {
-                return new GroupHeartbeatResult(ConsumerGroupErrorStatus.UnknownMember);
-            }
-
-            // Update heartbeat timestamp
-            member.LastHeartbeat = DateTime.UtcNow;
-
-            // Heartbeat successful
-            return new GroupHeartbeatResult(ConsumerGroupErrorStatus.None);
-        }
-    }
-
-    public LeaveGroupResult LeaveGroup(LeaveGroupCommand request)
-    {
-        lock (_groupLock)
-        {
-            if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
-            {
-                return new LeaveGroupResult(ConsumerGroupErrorStatus.UnknownMember, null);
-            }
-
-            // Handle V3+ batch leave (members array)
-            if (request.Members.Count > 0)
-            {
-                var memberResponses = new List<LeaveGroupMemberResult>();
-                foreach (var member in request.Members)
-                {
-                    var removed = group.Members.Remove(member.MemberId);
-                    memberResponses.Add(new LeaveGroupMemberResult(
-                        member.MemberId,
-                        member.GroupInstanceId,
-                        removed ? ConsumerGroupErrorStatus.None : ConsumerGroupErrorStatus.UnknownMember));
-                }
-
-                return new LeaveGroupResult(ConsumerGroupErrorStatus.None, memberResponses);
-            }
-
-            // Handle V0-2 single member leave
-            if (!string.IsNullOrEmpty(request.MemberId))
-            {
-                group.Members.Remove(request.MemberId);
-            }
-
-            return new LeaveGroupResult(ConsumerGroupErrorStatus.None, null);
-        }
-    }
 
     public OffsetFetchResult FetchOffsets(OffsetFetchCommand request)
     {
@@ -823,21 +597,7 @@ public sealed class ConsumerGroupCoordinator(
         }
     }
 
-    private static string GetGroupState(ConsumerGroupState group)
-    {
-        if (group.Members.Count == 0)
-        {
-            return "Empty";
-        }
-
-        // Check if any member has an assignment (inline loop avoids LINQ closure)
-        foreach (var m in group.Members.Values)
-        {
-            if (m.Assignment.Length > 0)
-                return "Stable";
-        }
-        return "PreparingRebalance";
-    }
+    private static string GetGroupState(ConsumerGroupState group) => StateName(group.Phase);
 
     /// <summary>
     /// Get information about all consumer groups for lag monitoring.
@@ -941,6 +701,14 @@ internal sealed class ConsumerGroupState
     public required string ProtocolName { get; init; }
     public Dictionary<string, GroupMember> Members { get; } = new();
     public Dictionary<string, long> CommittedOffsets { get; } = new(); // "topic:partition" -> offset
+
+    // The rebalance cycle (#216): where the group is, who leads, and who is waiting for the next step.
+    public ClassicGroupPhase Phase { get; set; } = ClassicGroupPhase.Empty;
+    public string? LeaderId { get; set; }
+    public Dictionary<string, TaskCompletionSource<JoinGroupResult>> PendingJoins { get; } = new();
+    public Dictionary<string, TaskCompletionSource<SyncGroupResult>> PendingSyncs { get; } = new();
+    public ITimer? RebalanceDeadline { get; set; }
+    public int RebalanceRound { get; set; }
 }
 
 internal sealed class GroupMember
@@ -951,4 +719,8 @@ internal sealed class GroupMember
     public required byte[] Metadata { get; set; }
     public byte[] Assignment { get; set; } = Array.Empty<byte>();
     public DateTime LastHeartbeat { get; set; } = DateTime.UtcNow;
+    public int SessionTimeoutMs { get; set; }
+    public int RebalanceTimeoutMs { get; set; }
+    public ITimer? SessionDeadline { get; set; }
+    public int SessionRound { get; set; }
 }

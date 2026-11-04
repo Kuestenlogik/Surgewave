@@ -219,8 +219,14 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Debug, Message = "[JoinGroup] Response for {MemberId}: returning {MemberCount} members, total metadata bytes={TotalMetadataBytes}")]
     public static partial void JoinGroupResponse(ILogger logger, string memberId, int memberCount, int totalMetadataBytes);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "[JoinGroup] Removed stale member {MemberId} (no heartbeat within {TimeoutMs}ms)")]
-    public static partial void JoinGroupRemovedStaleMember(ILogger logger, string memberId, double timeoutMs);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Group {GroupId} rebalances: {Reason}; {Members} member(s) must rejoin")]
+    public static partial void GroupRebalanceStarted(ILogger logger, string groupId, string reason, int members);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Group {GroupId} is at generation {Generation} with {Members} member(s), led by {LeaderId}")]
+    public static partial void GroupRebalanceCompleted(ILogger logger, string groupId, int generation, int members, string leaderId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Group {GroupId} dropped member {MemberId}: {Reason}")]
+    public static partial void GroupMemberDropped(ILogger logger, string groupId, string memberId, string reason);
 
     // TLS handling
     [LoggerMessage(Level = LogLevel.Debug, Message = "[{Endpoint}] TLS handshake starting")]

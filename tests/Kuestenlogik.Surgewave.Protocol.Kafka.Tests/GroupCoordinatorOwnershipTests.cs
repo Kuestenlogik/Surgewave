@@ -57,7 +57,7 @@ public sealed class GroupCoordinatorOwnershipTests
         }, Context, CancellationToken.None));
 
         Assert.Equal(ErrorCode.NotCoordinator, response.ErrorCode);
-        _classic.DidNotReceiveWithAnyArgs().JoinGroup(default!);
+        await _classic.DidNotReceiveWithAnyArgs().JoinGroupAsync(default!, default);
     }
 
     [Fact]

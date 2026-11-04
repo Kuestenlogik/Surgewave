@@ -29,13 +29,13 @@ public class ObservabilityWiringTests
             offsetStore: null, logManager: null, aclAuthorizer: null,
             observability: observability);
 
-        var memberId = JoinAndGetMemberId(coordinator, "g1");
+        var memberId = await JoinAndGetMemberIdAsync(coordinator, "g1");
 
         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var reader = ReadFirstAsync(observability, cts.Token);
 
         // Leader distributes assignments — this is the "rebalance done" tick.
-        var sync = coordinator.SyncGroup(new SyncGroupCommand
+        var sync = await coordinator.SyncGroupAsync(new SyncGroupCommand
         {
             GroupId = "g1",
             GenerationId = 1,
@@ -44,7 +44,7 @@ public class ObservabilityWiringTests
             [
                 new SyncGroupAssignmentInput(memberId, [0x01, 0x02, 0x03]),
             ],
-        });
+        }, TestContext.Current.CancellationToken);
         Assert.Equal(ConsumerGroupErrorStatus.None, sync.Status);
 
         var ev = await reader;
@@ -55,7 +55,7 @@ public class ObservabilityWiringTests
     }
 
     [Fact]
-    public async Task FollowerSyncGroup_DoesNotPublish()
+    public async Task SyncGroupInAStableGeneration_DoesNotPublish()
     {
         var observability = new SurgewaveBrokerObservability(
             NullLogger<SurgewaveBrokerObservability>.Instance);
@@ -64,32 +64,35 @@ public class ObservabilityWiringTests
             offsetStore: null, logManager: null, aclAuthorizer: null,
             observability: observability);
 
-        var memberId = JoinAndGetMemberId(coordinator, "g2");
-
-        // Follower path: Assignments empty — coordinator just returns
-        // whatever's stored, no new rebalance signal should fire.
-        var sync = coordinator.SyncGroup(new SyncGroupCommand
+        var memberId = await JoinAndGetMemberIdAsync(coordinator, "g2");
+        var sync = new SyncGroupCommand
         {
             GroupId = "g2",
             GenerationId = 1,
             MemberId = memberId,
-            Assignments = [],
-        });
-        Assert.Equal(ConsumerGroupErrorStatus.None, sync.Status);
+            Assignments = [new SyncGroupAssignmentInput(memberId, [0x01])],
+        };
+        Assert.Equal(ConsumerGroupErrorStatus.None,
+            (await coordinator.SyncGroupAsync(sync, TestContext.Current.CancellationToken)).Status);
+
+        // The generation is stable: a sync again reads back the stored assignment and is no new rebalance.
+        using var subscribed = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        var reader = ReadFirstAsync(observability, subscribed.Token);
+        var again = await coordinator.SyncGroupAsync(sync with { Assignments = [] }, TestContext.Current.CancellationToken);
+        Assert.Equal(ConsumerGroupErrorStatus.None, again.Status);
+        Assert.Equal([0x01], again.Assignment);
 
         // ThrowsAnyAsync, not ThrowsAsync: the assertion is "nothing was published, so the read
         // waits until it is cancelled". Which cancellation type surfaces —
         // OperationCanceledException or the TaskCanceledException derived from it — is the
         // runtime's choice, and it changed under a servicing update. Pinning the exact type was
         // pinning an implementation detail rather than the behaviour.
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            ReadFirstAsync(observability, cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader);
     }
 
-    private static string JoinAndGetMemberId(ConsumerGroupCoordinator coordinator, string groupId)
+    private static async Task<string> JoinAndGetMemberIdAsync(ConsumerGroupCoordinator coordinator, string groupId)
     {
-        var join = coordinator.JoinGroup(new JoinGroupCommand
+        var join = await coordinator.JoinGroupAsync(new JoinGroupCommand
         {
             GroupId = groupId,
             MemberId = string.Empty,
@@ -97,7 +100,7 @@ public class ObservabilityWiringTests
             ProtocolType = "consumer",
             SessionTimeoutMs = 10_000,
             Protocols = [new GroupJoinProtocol("range", [])],
-        });
+        }, TestContext.Current.CancellationToken);
         Assert.NotEmpty(join.MemberId);
         return join.MemberId;
     }

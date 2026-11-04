@@ -122,6 +122,49 @@ public class ConsumerGroupTests
     }
 
     /// <summary>
+    /// Two consumers of one group split two partitions, and the one that stays takes both when the other leaves
+    /// (#216). The classic protocol never rebalanced: the member that joined first kept every partition, and the
+    /// one that joined later got none.
+    /// </summary>
+    [Fact(Timeout = 120_000)]
+    public async Task TwoConsumersOfOneGroupSplitThePartitions_AndTheOneThatStaysTakesBothWhenTheOtherLeaves()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var topic = $"split-{Guid.NewGuid():N}";
+        var groupId = $"split-group-{Guid.NewGuid():N}";
+
+        using (var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = BrokerFixture.BootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([new Confluent.Kafka.Admin.TopicSpecification { Name = topic, NumPartitions = 2, ReplicationFactor = 1 }]);
+        }
+
+        using var first = new ConsumerBuilder<string, string>(CreateConsumerConfig(groupId, "consumer-1")).Build();
+        using var second = new ConsumerBuilder<string, string>(CreateConsumerConfig(groupId, "consumer-2")).Build();
+        first.Subscribe(topic);
+        second.Subscribe(topic);
+
+        // Both are driven: a member rejoins from inside its own poll.
+        var split = await TestWaitHelpers.WaitForConditionAsync(
+            () =>
+            {
+                first.Consume(TimeSpan.FromMilliseconds(50));
+                second.Consume(TimeSpan.FromMilliseconds(50));
+                return first.Assignment.Count == 1 && second.Assignment.Count == 1
+                    && first.Assignment[0].Partition != second.Assignment[0].Partition;
+            },
+            timeout: TimeSpan.FromSeconds(60), pollInterval: TimeSpan.FromMilliseconds(10), ct: ct, output: _output);
+        Assert.True(split,
+            $"the consumers did not split the partitions: first [{string.Join(",", first.Assignment)}], second [{string.Join(",", second.Assignment)}]");
+
+        // Close sends LeaveGroup; the one that stays rebalances alone.
+        second.Close();
+
+        Assert.True(
+            await TestWaitHelpers.WaitForConsumerAssignmentAsync(first, minPartitionCount: 2, timeout: TimeSpan.FromSeconds(60), ct: ct, output: _output),
+            $"the consumer that stayed did not take both partitions: [{string.Join(",", first.Assignment)}]");
+    }
+
+    /// <summary>
     /// Test that consumer leaving group triggers rebalancing.
     /// </summary>
     [Fact]

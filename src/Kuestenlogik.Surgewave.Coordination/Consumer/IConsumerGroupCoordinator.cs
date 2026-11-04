@@ -10,9 +10,11 @@ namespace Kuestenlogik.Surgewave.Coordination.Consumer;
 /// </summary>
 public interface IConsumerGroupCoordinator
 {
-    JoinGroupResult JoinGroup(JoinGroupCommand request);
+    /// <summary>Completes when the join round does: every member rejoined, or the rebalance timeout passed (#216).</summary>
+    Task<JoinGroupResult> JoinGroupAsync(JoinGroupCommand request, CancellationToken cancellationToken);
 
-    SyncGroupResult SyncGroup(SyncGroupCommand request);
+    /// <summary>A follower's completes when the leader's SyncGroup brings the assignment (#216).</summary>
+    Task<SyncGroupResult> SyncGroupAsync(SyncGroupCommand request, CancellationToken cancellationToken);
 
     GroupHeartbeatResult Heartbeat(GroupHeartbeatCommand request);
 

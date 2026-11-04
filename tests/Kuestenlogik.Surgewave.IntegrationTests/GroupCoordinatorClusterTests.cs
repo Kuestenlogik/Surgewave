@@ -116,7 +116,7 @@ public sealed class GroupCoordinatorClusterTests : IAsyncLifetime
     }
 
     [Fact(Timeout = 180_000)]
-    public async Task TwoConsumersBootstrappedAtDifferentBrokersJoinOneGroup()
+    public async Task TwoConsumersBootstrappedAtDifferentBrokersShareOneGroup()
     {
         var ct = TestContext.Current.CancellationToken;
         var topic = $"orders-{Guid.NewGuid():N}";
@@ -134,9 +134,9 @@ public sealed class GroupCoordinatorClusterTests : IAsyncLifetime
         first.Subscribe(topic);
         second.Subscribe(topic);
 
-        // Asked through the third broker, the group has both members. With a coordinator per broker each consumer met
-        // its own copy of the group, and the broker the admin asked had a copy with nobody in it. How the members
-        // split the partitions is the rebalance protocol's job, not the coordinator's (#216).
+        // Asked through the third broker, the group has both members, and they split the two partitions. With a
+        // coordinator per broker each consumer met its own copy of the group, and the broker the admin asked had a
+        // copy with nobody in it; two copies would also each have handed out both partitions.
         using var observer = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = _brokers[0].BootstrapServers }).Build();
         var members = 0;
         var oneGroup = await TestWaitHelpers.WaitForConditionAsync(
@@ -146,11 +146,14 @@ public sealed class GroupCoordinatorClusterTests : IAsyncLifetime
                 second.Consume(TimeSpan.FromMilliseconds(100));
                 var described = observer.DescribeConsumerGroupsAsync([group]).GetAwaiter().GetResult();
                 members = described.ConsumerGroupDescriptions.Single().Members.Count;
-                return members == 2;
+                return members == 2
+                    && first.Assignment.Count == 1 && second.Assignment.Count == 1
+                    && first.Assignment[0].Partition != second.Assignment[0].Partition;
             },
             timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(50), ct: ct, output: _output);
 
-        Assert.True(oneGroup, $"the group had {members} member(s), not the two consumers");
+        Assert.True(oneGroup,
+            $"the group had {members} member(s); first [{string.Join(",", first.Assignment)}], second [{string.Join(",", second.Assignment)}]");
     }
 
     private static IConsumer<Ignore, string> NewConsumer(string bootstrap, string group) =>

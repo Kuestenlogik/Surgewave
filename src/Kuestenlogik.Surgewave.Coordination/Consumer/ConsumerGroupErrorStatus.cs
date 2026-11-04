@@ -33,4 +33,10 @@ public enum ConsumerGroupErrorStatus
 
     /// <summary>An active member of the group still subscribes to the topic (OffsetDelete, KIP-496).</summary>
     GroupSubscribedToTopic,
+
+    /// <summary>The group is rebalancing; the member has to rejoin (#216).</summary>
+    RebalanceInProgress,
+
+    /// <summary>The request names a generation the group has left behind (#216).</summary>
+    IllegalGeneration,
 }

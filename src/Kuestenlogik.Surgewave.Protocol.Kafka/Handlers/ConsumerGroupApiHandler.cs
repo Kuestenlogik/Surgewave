@@ -47,13 +47,19 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
         _logger = logger;
     }
 
-    public Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
+    public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
-        KafkaResponse response = NotCoordinatorFor(request, IsLocal) ?? request switch
+        // The join barrier and the sync hand-off hold their answer until the group gets there (#216).
+        if (NotCoordinatorFor(request, IsLocal) is { } notHere)
+            return notHere;
+        if (request is JoinGroupRequest join)
+            return ToJoinGroupResponse(await _coordinator.JoinGroupAsync(ToJoinGroupCommand(join), cancellationToken).ConfigureAwait(false), join);
+        if (request is SyncGroupRequest sync)
+            return ToSyncGroupResponse(await _coordinator.SyncGroupAsync(ToSyncGroupCommand(sync), cancellationToken).ConfigureAwait(false), sync);
+
+        KafkaResponse response = request switch
         {
-            JoinGroupRequest r => ToJoinGroupResponse(_coordinator.JoinGroup(ToJoinGroupCommand(r)), r),
-            SyncGroupRequest r => ToSyncGroupResponse(_coordinator.SyncGroup(ToSyncGroupCommand(r)), r),
-            HeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(new GroupHeartbeatCommand(r.GroupId, r.MemberId)), r),
+            HeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(new GroupHeartbeatCommand(r.GroupId, r.MemberId, r.GenerationId)), r),
             LeaveGroupRequest r => ToLeaveGroupResponse(_coordinator.LeaveGroup(ToLeaveGroupCommand(r)), r),
             OffsetCommitRequest r => ToOffsetCommitResponse(_coordinator.CommitOffsets(ToOffsetCommitCommand(r)), r),
             OffsetFetchRequest { ApiVersion: >= 8, Groups: not null } r => OffsetFetchGroupsHere(r),
@@ -66,7 +72,7 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConsumerGroupApiHandler")
         };
 
-        return Task.FromResult(response);
+        return response;
     }
 
     // Maps a neutral outcome onto the Kafka wire error code. Kept exhaustive so a new
@@ -82,6 +88,8 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
         ConsumerGroupErrorStatus.NonEmptyGroup => ErrorCode.NonEmptyGroup,
         ConsumerGroupErrorStatus.GroupIdNotFound => ErrorCode.GroupIdNotFound,
         ConsumerGroupErrorStatus.GroupSubscribedToTopic => ErrorCode.GroupSubscribedToTopic,
+        ConsumerGroupErrorStatus.RebalanceInProgress => ErrorCode.RebalanceInProgress,
+        ConsumerGroupErrorStatus.IllegalGeneration => ErrorCode.IllegalGeneration,
         _ => ErrorCode.None,
     };
 
@@ -103,6 +111,7 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
             GroupInstanceId = r.GroupInstanceId,
             ProtocolType = r.ProtocolType,
             SessionTimeoutMs = r.SessionTimeoutMs,
+            RebalanceTimeoutMs = r.RebalanceTimeoutMs,
             Protocols = protocols,
         };
     }
@@ -125,7 +134,7 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
         {
             CorrelationId = r.CorrelationId,
             ApiVersion = r.ApiVersion,
-            ErrorCode = ErrorCode.None,
+            ErrorCode = ToErrorCode(result.Status),
             GenerationId = result.GenerationId,
             ProtocolType = r.ProtocolType,
             ProtocolName = result.ProtocolName,

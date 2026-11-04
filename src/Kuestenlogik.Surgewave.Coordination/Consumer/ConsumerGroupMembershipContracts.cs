@@ -19,20 +19,36 @@ public sealed record JoinGroupCommand
     public string? GroupInstanceId { get; init; }
     public required string ProtocolType { get; init; }
     public required int SessionTimeoutMs { get; init; }
+
+    /// <summary>How long the group waits for this member to rejoin in a rebalance; 0 takes the session timeout.</summary>
+    public int RebalanceTimeoutMs { get; init; }
+
     public required IReadOnlyList<GroupJoinProtocol> Protocols { get; init; }
 }
 
 /// <summary>A member as echoed to the elected leader in a JoinGroup response.</summary>
 public sealed record JoinGroupMemberInfo(string MemberId, string? GroupInstanceId, byte[] Metadata);
 
-/// <summary>Neutral JoinGroup result. The classic path has no error branch, so no status is carried.</summary>
+/// <summary>Neutral JoinGroup result: the generation the member joined, or why it did not.</summary>
 public sealed record JoinGroupResult
 {
+    public ConsumerGroupErrorStatus Status { get; init; } = ConsumerGroupErrorStatus.None;
     public required int GenerationId { get; init; }
     public required string ProtocolName { get; init; }
     public required string LeaderId { get; init; }
     public required string MemberId { get; init; }
     public required IReadOnlyList<JoinGroupMemberInfo> Members { get; init; }
+
+    /// <summary>A join that did not happen; generation -1 as Kafka answers it.</summary>
+    public static JoinGroupResult Failed(ConsumerGroupErrorStatus status, string memberId) => new()
+    {
+        Status = status,
+        GenerationId = -1,
+        ProtocolName = string.Empty,
+        LeaderId = string.Empty,
+        MemberId = memberId,
+        Members = [],
+    };
 }
 
 // ── SyncGroup ───────────────────────────────────────────────────────────────
@@ -55,7 +71,7 @@ public sealed record SyncGroupResult(ConsumerGroupErrorStatus Status, byte[] Ass
 // ── Heartbeat ───────────────────────────────────────────────────────────────
 
 /// <summary>Neutral classic-protocol Heartbeat request.</summary>
-public sealed record GroupHeartbeatCommand(string GroupId, string MemberId);
+public sealed record GroupHeartbeatCommand(string GroupId, string MemberId, int GenerationId);
 
 /// <summary>Neutral classic-protocol Heartbeat result.</summary>
 public sealed record GroupHeartbeatResult(ConsumerGroupErrorStatus Status);

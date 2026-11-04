@@ -126,9 +126,24 @@ and the native protocol alike, and a broker that is not the coordinator
 answers the group requests with `NOT_COORDINATOR`. A controller that loses
 its leadership while creating a topic no longer reports it as created, and
 the next controller assigns the partitions of `__consumer_offsets` that were
-left without replicas. How the members of one group split the partitions is
-still wrong with the classic protocol: a member that joins later gets none
-(#216).
+left without replicas.
+
+Two Raft fixes came with it. A proposal now replicates at once, each peer on
+its own, so a dead broker no longer holds up every replication round and a
+controller handling a failure is done in seconds rather than minutes. A
+pre-vote whose answers arrive after a leader was elected no longer starts an
+election that deposes that leader.
+
+### Consumers of one group share the partitions (#216)
+
+The classic group protocol never rebalanced: a member that joined later was
+added to the running generation without anyone being told, so the first
+member kept every partition and the later one got none. The coordinator now
+runs Kafka's rebalance cycle. A join, a leave or a missed session timeout
+starts a rebalance; heartbeats answer `REBALANCE_IN_PROGRESS`; JoinGroup is
+held until every member has rejoined or the rebalance timeout has passed;
+a follower's SyncGroup waits for the leader's assignment; and a request of
+an older generation gets `ILLEGAL_GENERATION`.
 
 ### Topics created over Kafka survive a restart of the shipped broker (#212)
 
