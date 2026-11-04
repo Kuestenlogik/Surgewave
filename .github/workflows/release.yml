@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write  # Trusted Publishing: OIDC token exchanged for a one-hour nuget.org key
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -167,7 +168,6 @@ jobs:
     # Empty string when the org secret is not set, so that the `env.X != ''`
     # gates skip correctly instead of failing. Bowire pattern.
     env:
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
@@ -425,16 +425,22 @@ jobs:
       - name: Publish NuGet to GitHub Packages
         run: dotnet nuget push ./artifacts/packages/*.nupkg --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
 
-      # nuget.org: only on stable tags (no `-rc` suffix) and only when the
-      # secret is configured. NUGET_API_KEY needs the 'Push new packages
-      # and package versions' scope with glob `Kuestenlogik.Surgewave.*` or
-      # `surgewave*` (kebab IDs for executables).
+      # nuget.org, through Trusted Publishing (no stored key): the policy on
+      # nuget.org trusts this repository's release.yml. Only GA tags, no `-rc`.
+      # The temporary key lives one hour, so it is fetched right before the push.
+      - name: nuget.org login (OIDC → temporary API key)
+        if: ${{ !contains(github.ref, '-rc') && vars.NUGET_USER != '' }}
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Publish NuGet to nuget.org
-        if: ${{ !contains(github.ref, '-rc') && env.NUGET_API_KEY != '' }}
+        if: ${{ !contains(github.ref, '-rc') && vars.NUGET_USER != '' }}
         run: |
           dotnet nuget push "./artifacts/packages/*.nupkg" \
             --source https://api.nuget.org/v3/index.json \
-            --api-key "$NUGET_API_KEY" \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --skip-duplicate
 
       - name: Upload NuGet packages
