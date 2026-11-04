@@ -637,6 +637,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Create topic via Raft consensus - proposes to Raft log and waits for commit.
     /// </summary>
+    /// <remarks>
+    /// One entry carries the topic and the replicas of every partition (#217): it commits whole, or a controller that
+    /// lost its leadership on the way leaves no trace of the topic, and the client's retry creates it.
+    /// </remarks>
     private async Task<bool> CreateTopicViaRaftAsync(
         string topic,
         int partitionCount,
@@ -644,9 +648,18 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         Dictionary<string, string>? config,
         CancellationToken ct)
     {
-        // Propose TopicCreated command with newly generated TopicId
+        var brokerIds = _clusterState.Brokers.Keys.OrderBy(id => id).ToList();
+        if (brokerIds.Count == 0)
+        {
+            LogNoBrokersAvailable(topic);
+            return false;
+        }
+        var assignments = Enumerable.Range(0, partitionCount)
+            .Select(p => new PartitionAssignment(p, _replicaAssignment.AssignReplicas(brokerIds, p, replicationFactor), _config.MinInSyncReplicas))
+            .ToList();
+
         var topicId = Guid.NewGuid();
-        var command = new TopicCreatedCommand(topic, topicId, partitionCount, replicationFactor, config);
+        var command = new TopicCreatedCommand(topic, topicId, partitionCount, replicationFactor, config, assignments);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.TopicCreatedCommand);
 
         var index = await _raftNode!.ProposeAsync(MetadataCommandType.TopicCreated, data, ct);
@@ -664,9 +677,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
-        if (!await AssignPartitionsViaRaftAsync(topic, topicId, Enumerable.Range(0, partitionCount), replicationFactor, ct))
-            return false;
-
+        await TakePartInAsync(topic, topicId, [.. assignments.Select(a => (a.Partition, a.Replicas))], ct);
         LogTopicCreated(topic, partitionCount, replicationFactor);
         return true;
     }
@@ -716,7 +727,13 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
-        // Apply local replica manager state
+        await TakePartInAsync(topic, topicId, assigned, ct);
+        return true;
+    }
+
+    // This broker's part in committed assignments: leading or following the partitions it is a replica of.
+    private async Task TakePartInAsync(string topic, Guid topicId, List<(int Partition, List<int> Replicas)> assigned, CancellationToken ct)
+    {
         foreach (var (partition, replicas) in assigned)
         {
             if (!replicas.Contains(_config.BrokerId))
@@ -727,8 +744,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             else
                 await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct, topicId);
         }
-
-        return true;
     }
 
     #region Raft-based Metadata Operations

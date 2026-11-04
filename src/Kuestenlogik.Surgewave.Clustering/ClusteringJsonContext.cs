@@ -17,6 +17,7 @@ namespace Kuestenlogik.Surgewave.Clustering;
 [JsonSerializable(typeof(BrokerRegisteredCommand))]
 [JsonSerializable(typeof(BrokerRemovedCommand))]
 [JsonSerializable(typeof(TopicCreatedCommand))]
+[JsonSerializable(typeof(PartitionAssignment))]
 [JsonSerializable(typeof(TopicDeletedCommand))]
 [JsonSerializable(typeof(PartitionAssignedCommand))]
 [JsonSerializable(typeof(IsrChangedCommand))]

@@ -189,6 +189,8 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         };
 
         _clusterState.AddTopic(topic);
+        foreach (var assignment in cmd.Assignments ?? [])
+            Assign(cmd.Name, assignment.Partition, assignment.Replicas, assignment.MinIsr);
         LogTopicCreated(cmd.Name, cmd.PartitionCount, cmd.ReplicationFactor);
     }
 
@@ -206,8 +208,14 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         var cmd = JsonSerializer.Deserialize(data, ClusteringJsonContext.Default.PartitionAssignedCommand);
         if (cmd == null) return;
 
-        var tp = new TopicPartition { Topic = cmd.Topic, Partition = cmd.Partition };
-        _clusterState.AssignReplicas(tp, cmd.Replicas, cmd.MinIsr);
+        Assign(cmd.Topic, cmd.Partition, cmd.Replicas, cmd.MinIsr);
+    }
+
+    // A partition's replicas, from a topic's creation or a later assignment.
+    private void Assign(string topic, int partition, List<int> replicas, int minIsr)
+    {
+        var tp = new TopicPartition { Topic = topic, Partition = partition };
+        _clusterState.AssignReplicas(tp, replicas, minIsr);
 
         // The same half ApplyLeaderChanged was missing (#165), in the place a new topic actually
         // goes through: creating one commits TopicCreated and PartitionAssigned and NEVER a
@@ -221,7 +229,7 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
             _transitions?.EnqueueLeadershipChange(tp, state.LeaderBrokerId, state.LeaderEpoch, state.Replicas);
         }
 
-        LogPartitionAssigned(cmd.Topic, cmd.Partition, string.Join(",", cmd.Replicas));
+        LogPartitionAssigned(topic, partition, string.Join(",", replicas));
     }
 
     private void ApplyIsrChanged(byte[] data)
@@ -323,13 +331,22 @@ public sealed record BrokerRemovedCommand(int BrokerId);
 /// <summary>
 /// Command to create a topic.
 /// </summary>
+/// <remarks>
+/// Carries the replica assignment of every partition, so a topic is in the log whole or not at all (#217). The
+/// assignments used to follow as one PartitionAssigned entry each, and a controller that lost its leadership between
+/// them left a topic with partitions no broker led, which a retried CreateTopics could not repair.
+/// </remarks>
 public sealed record TopicCreatedCommand(
     string Name,
     Guid TopicId,
     int PartitionCount,
     short ReplicationFactor,
-    Dictionary<string, string>? Config
+    Dictionary<string, string>? Config,
+    List<PartitionAssignment>? Assignments = null
 );
+
+/// <summary>The replicas of one partition of a topic being created; the first is its leader.</summary>
+public sealed record PartitionAssignment(int Partition, List<int> Replicas, int MinIsr);
 
 /// <summary>
 /// Command to delete a topic.

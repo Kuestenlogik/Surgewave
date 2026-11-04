@@ -143,6 +143,15 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### A topic is created whole or not at all (#217)
+
+Creating a topic wrote the topic and then the replicas of each partition as
+separate entries of the metadata log. A controller that lost its leadership
+between them left a topic whose partitions no broker led, and a retried
+CreateTopics was answered `TOPIC_ALREADY_EXISTS`. One entry now carries the
+topic with the replicas of every partition: it commits whole, or the topic
+is not there and the retry creates it.
+
 ### A cluster that lost one of three voters elects a leader at once (#225)
 
 An election waited for every voter's answer, the answer of a stopped broker
