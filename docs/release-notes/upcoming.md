@@ -292,6 +292,19 @@ own keeps `__consumer_offsets` too and leads all of its partitions. A consumer t
 assigns its partitions itself can commit offsets for a group nobody joined,
 outside any generation, as Kafka allows.
 
+### A KIP-848 consumer group outlives its coordinator (#219)
+
+A KIP-848 consumer group's members, epochs and assignments lived only in
+the memory of the broker that coordinated it. A coordinator that took the
+group over knew none of it, and a restart lost it. They are now Kafka's
+ConsumerGroup records in the group's partition of `__consumer_offsets`:
+the group epoch, each member's metadata, the target assignment and each
+member's current assignment. A heartbeat is answered once the changes it
+made are on the in-sync replicas. A broker that takes the partition over
+reads the group from them, and every member gets a session from then on.
+A broker that does not coordinate the group answers `NOT_COORDINATOR`, and
+one still reading the partition answers `COORDINATOR_LOAD_IN_PROGRESS`.
+
 ### A group taken over by another coordinator can be described (#224)
 
 A broker that took a group's partition of `__consumer_offsets` over read

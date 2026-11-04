@@ -39,10 +39,10 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_StaleEpoch_ReturnsStaleMemberEpoch()
+    public async Task Heartbeat_StaleEpoch_ReturnsStaleMemberEpoch()
     {
         // Member joins (epoch=0 → broker assigns epoch=1).
-        var join = Heartbeat("g", "c1", memberId: "", memberEpoch: 0);
+        var join = await HeartbeatAsync("g", "c1", memberId: "", memberEpoch: 0);
         Assert.Equal(ConsumerGroupFenceStatus.Ok, join.Status);
         Assert.True(join.MemberEpoch >= 1);
         var assignedId = join.MemberId!;
@@ -50,7 +50,7 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
 
         // Replay a heartbeat from before the join — same memberId but with
         // an older epoch that the client never reset.
-        var stale = Heartbeat("g", "c1", memberId: assignedId, memberEpoch: currentEpoch - 1);
+        var stale = await HeartbeatAsync("g", "c1", memberId: assignedId, memberEpoch: currentEpoch - 1);
 
         Assert.Equal(ConsumerGroupFenceStatus.StaleEpoch, stale.Status);
         // The fenced response must NOT carry an assignment — the client has
@@ -59,65 +59,65 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_FutureEpoch_ReturnsFencedMemberEpoch()
+    public async Task Heartbeat_FutureEpoch_ReturnsFencedMemberEpoch()
     {
-        var join = Heartbeat("g", "c1", memberId: "", memberEpoch: 0);
+        var join = await HeartbeatAsync("g", "c1", memberId: "", memberEpoch: 0);
         Assert.Equal(ConsumerGroupFenceStatus.Ok, join.Status);
         var assignedId = join.MemberId!;
 
         // Future-epoch heartbeat — impossible state, the broker never issued
         // this. KIP-848 fences it as FENCED_MEMBER_EPOCH so the client
         // discards local state and rejoins.
-        var fenced = Heartbeat("g", "c1", memberId: assignedId, memberEpoch: join.MemberEpoch + 5);
+        var fenced = await HeartbeatAsync("g", "c1", memberId: assignedId, memberEpoch: join.MemberEpoch + 5);
 
         Assert.Equal(ConsumerGroupFenceStatus.FencedEpoch, fenced.Status);
     }
 
     [Fact]
-    public void Heartbeat_NonZeroEpoch_UnknownMember_ReturnsUnknownMemberId()
+    public async Task Heartbeat_NonZeroEpoch_UnknownMember_ReturnsUnknownMemberId()
     {
         // No previous join — but a client claims a memberId AND a non-zero
         // epoch. This is structurally impossible (the broker assigns the id
         // on the epoch-0 join) and must be UNKNOWN_MEMBER_ID.
-        var resp = Heartbeat("g", "c1", memberId: "ghost-member", memberEpoch: 7);
+        var resp = await HeartbeatAsync("g", "c1", memberId: "ghost-member", memberEpoch: 7);
 
         Assert.Equal(ConsumerGroupFenceStatus.UnknownMember, resp.Status);
     }
 
     [Fact]
-    public void Heartbeat_ZeroEpoch_UnknownMember_StillJoinsCleanly()
+    public async Task Heartbeat_ZeroEpoch_UnknownMember_StillJoinsCleanly()
     {
         // Epoch=0 with a non-empty memberId is the static-membership rejoin
         // path — the client claims a stable id. Surgewave accepts this so static
         // members can carry their identity across restarts; the fence MUST
         // NOT trip.
-        var resp = Heartbeat("g", "c1", memberId: "static-1", memberEpoch: 0);
+        var resp = await HeartbeatAsync("g", "c1", memberId: "static-1", memberEpoch: 0);
 
         Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
         Assert.Equal("static-1", resp.MemberId);
     }
 
     [Fact]
-    public void Heartbeat_MatchingEpoch_AdvancesNormally()
+    public async Task Heartbeat_MatchingEpoch_AdvancesNormally()
     {
         // Round-trip a normal heartbeat: the client echoes the broker's
         // last MemberEpoch. The fence must accept it (regression guard).
-        var first = Heartbeat("g", "c1", memberId: "", memberEpoch: 0);
+        var first = await HeartbeatAsync("g", "c1", memberId: "", memberEpoch: 0);
         var assignedId = first.MemberId!;
         var firstEpoch = first.MemberEpoch;
 
-        var second = Heartbeat("g", "c1", memberId: assignedId, memberEpoch: firstEpoch);
+        var second = await HeartbeatAsync("g", "c1", memberId: assignedId, memberEpoch: firstEpoch);
 
         Assert.Equal(ConsumerGroupFenceStatus.Ok, second.Status);
         Assert.Equal(assignedId, second.MemberId);
     }
 
-    private ConsumerHeartbeatResult Heartbeat(
+    private Task<ConsumerHeartbeatResult> HeartbeatAsync(
         string group,
         string clientId,
         string memberId,
         int memberEpoch) =>
-        _coordinator.Heartbeat(new ConsumerHeartbeatCommand
+        _coordinator.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
             ClientId = clientId,
             GroupId = group,
@@ -125,5 +125,5 @@ public sealed class ConsumerGroupV2HeartbeatEpochFenceTests : IDisposable
             MemberEpoch = memberEpoch,
             SubscribedTopicNames = [Topic],
             RebalanceTimeoutMs = -1,
-        });
+        }, TestContext.Current.CancellationToken);
 }

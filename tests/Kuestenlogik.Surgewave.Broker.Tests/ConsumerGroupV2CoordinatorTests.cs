@@ -49,17 +49,17 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_RebalanceTimeoutMs_OnlyShrinksAfterInit()
+    public async Task Heartbeat_RebalanceTimeoutMs_OnlyShrinksAfterInit()
     {
         // First heartbeat seeds the rebalance timeout to 60s.
-        var first = SendHeartbeat("kip955-g", "c1", [TopicA], rebalanceTimeoutMs: 60_000);
+        var first = await SendHeartbeatAsync("kip955-g", "c1", [TopicA], rebalanceTimeoutMs: 60_000);
         Assert.Equal(ConsumerGroupFenceStatus.Ok, first.Status);
 
         // Larger timeout from a later heartbeat must NOT raise the group's value back up.
-        SendHeartbeat("kip955-g", "c2", [TopicA], rebalanceTimeoutMs: 90_000);
+        await SendHeartbeatAsync("kip955-g", "c2", [TopicA], rebalanceTimeoutMs: 90_000);
 
         // Smaller timeout shrinks it.
-        SendHeartbeat("kip955-g", "c3", [TopicA], rebalanceTimeoutMs: 30_000);
+        await SendHeartbeatAsync("kip955-g", "c3", [TopicA], rebalanceTimeoutMs: 30_000);
 
         var groups = typeof(ConsumerGroupV2Coordinator)
             .GetField("_groups", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
@@ -73,9 +73,9 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_FirstMember_GetsAllPartitionsOfSubscribedTopic()
+    public async Task Heartbeat_FirstMember_GetsAllPartitionsOfSubscribedTopic()
     {
-        var resp = SendHeartbeat(group: "g1", clientId: "c1", subscribed: [TopicA]);
+        var resp = await SendHeartbeatAsync(group: "g1", clientId: "c1", subscribed: [TopicA]);
 
         Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
         Assert.NotEmpty(resp.Assignment);
@@ -85,18 +85,18 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_SecondMember_TargetSplitButReconciliationWithholdsConflictingPartitions()
+    public async Task Heartbeat_SecondMember_TargetSplitButReconciliationWithholdsConflictingPartitions()
     {
-        var first = SendHeartbeat("g2", "c1", [TopicA]);
+        var first = await SendHeartbeatAsync("g2", "c1", [TopicA]);
 
         // Member 1 reports it owns the full range it was just told to take.
         var ownedByFirst = first.Assignment
             .Select(t => new ConsumerTopicPartitions(t.TopicId, t.Partitions))
             .ToList();
-        SendHeartbeat("g2", "c1", subscribed: null, memberId: first.MemberId, memberEpoch: first.MemberEpoch, owned: ownedByFirst);
+        await SendHeartbeatAsync("g2", "c1", subscribed: null, memberId: first.MemberId, memberEpoch: first.MemberEpoch, owned: ownedByFirst);
 
         // Second member joins.
-        var second = SendHeartbeat("g2", "c2", [TopicA]);
+        var second = await SendHeartbeatAsync("g2", "c2", [TopicA]);
 
         // Range over 6 partitions split between two members → 0..2 vs 3..5. Member 2 has
         // not been advertised any partitions yet because member 1 still owns them. KIP-848
@@ -105,25 +105,25 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_SecondMember_AfterFirstRevokes_GetsItsRangeShare()
+    public async Task Heartbeat_SecondMember_AfterFirstRevokes_GetsItsRangeShare()
     {
-        var first = SendHeartbeat("g3", "c1", [TopicA]);
+        var first = await SendHeartbeatAsync("g3", "c1", [TopicA]);
         var firstId = first.MemberId;
 
         // Member 1 acks its full assignment.
-        SendHeartbeat("g3", "c1", subscribed: null, memberId: firstId, memberEpoch: first.MemberEpoch,
+        await SendHeartbeatAsync("g3", "c1", subscribed: null, memberId: firstId, memberEpoch: first.MemberEpoch,
             owned: AssignmentToOwned(first.Assignment));
 
         // Member 2 joins → triggers rebalance.
-        var second = SendHeartbeat("g3", "c2", [TopicA]);
+        var second = await SendHeartbeatAsync("g3", "c2", [TopicA]);
 
         // Member 1 returns and now reports a reduced ownership (it has revoked partitions 3..5).
-        var refetched = SendHeartbeat("g3", "c1", subscribed: null, memberId: firstId,
+        var refetched = await SendHeartbeatAsync("g3", "c1", subscribed: null, memberId: firstId,
             memberEpoch: first.MemberEpoch,
             owned: [new ConsumerTopicPartitions(_topicAId, [0, 1, 2])]);
 
         // Now member 2 should see its target.
-        var second2 = SendHeartbeat("g3", "c2", subscribed: null, memberId: second.MemberId,
+        var second2 = await SendHeartbeatAsync("g3", "c2", subscribed: null, memberId: second.MemberId,
             memberEpoch: second.MemberEpoch,
             owned: []);
 
@@ -135,27 +135,27 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_LeaveRequest_RemovesMemberAndRebalances()
+    public async Task Heartbeat_LeaveRequest_RemovesMemberAndRebalances()
     {
-        var first = SendHeartbeat("g4", "c1", [TopicA]);
-        SendHeartbeat("g4", "c1", subscribed: null, memberId: first.MemberId, memberEpoch: first.MemberEpoch,
+        var first = await SendHeartbeatAsync("g4", "c1", [TopicA]);
+        await SendHeartbeatAsync("g4", "c1", subscribed: null, memberId: first.MemberId, memberEpoch: first.MemberEpoch,
             owned: AssignmentToOwned(first.Assignment));
 
-        var second = SendHeartbeat("g4", "c2", [TopicA]);
+        var second = await SendHeartbeatAsync("g4", "c2", [TopicA]);
 
         // Member 1 leaves (epoch -1).
-        var leaveResp = _coordinator.Heartbeat(new ConsumerHeartbeatCommand
+        var leaveResp = await _coordinator.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
             ClientId = "c1",
             GroupId = "g4",
             MemberId = first.MemberId,
             MemberEpoch = -1,
             SubscribedTopicNames = null,
-        });
+        }, TestContext.Current.CancellationToken);
         Assert.Equal(-1, leaveResp.MemberEpoch);
 
         // Member 2's next heartbeat should now see the full topic.
-        var second2 = SendHeartbeat("g4", "c2", subscribed: null, memberId: second.MemberId,
+        var second2 = await SendHeartbeatAsync("g4", "c2", subscribed: null, memberId: second.MemberId,
             memberEpoch: second.MemberEpoch, owned: []);
 
         Assert.NotEmpty(second2.Assignment);
@@ -164,14 +164,14 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_ServerAssignorRoundRobin_DistributesAcrossTopics()
+    public async Task Heartbeat_ServerAssignorRoundRobin_DistributesAcrossTopics()
     {
-        var first = SendHeartbeat("g5", "c1", [TopicA, TopicB], serverAssignor: "roundrobin");
+        var first = await SendHeartbeatAsync("g5", "c1", [TopicA, TopicB], serverAssignor: "roundrobin");
         var firstId = first.MemberId;
-        SendHeartbeat("g5", "c1", subscribed: null, memberId: firstId, memberEpoch: first.MemberEpoch,
+        await SendHeartbeatAsync("g5", "c1", subscribed: null, memberId: firstId, memberEpoch: first.MemberEpoch,
             owned: AssignmentToOwned(first.Assignment));
 
-        var second = SendHeartbeat("g5", "c2", [TopicA, TopicB], serverAssignor: "roundrobin");
+        var second = await SendHeartbeatAsync("g5", "c2", [TopicA, TopicB], serverAssignor: "roundrobin");
 
         // Assignor switch may bump an epoch; verify by describing.
         var describe = _coordinator.Describe(["g5"]);
@@ -182,13 +182,13 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Heartbeat_UnknownServerAssignor_IsRefused()
+    public async Task Heartbeat_UnknownServerAssignor_IsRefused()
     {
         // Was Heartbeat_UnknownServerAssignor_KeepsRangeAsDefault, which pinned the substitution as
         // if it were the contract. It is not (#127): a client that asked for a specific assignor and
         // silently got another keeps its own expectations about which partitions move on a
         // rebalance, so the mismatch surfaces as unexplained reassignment instead of an error.
-        var first = SendHeartbeat("g6", "c1", [TopicA], serverAssignor: "does-not-exist");
+        var first = await SendHeartbeatAsync("g6", "c1", [TopicA], serverAssignor: "does-not-exist");
 
         Assert.Equal(ConsumerGroupFenceStatus.UnsupportedAssignor, first.Status);
         Assert.Empty(first.Assignment);
@@ -200,10 +200,10 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void ListGroups_ListsEachGroupAsAConsumerGroupWithItsState()
+    public async Task ListGroups_ListsEachGroupAsAConsumerGroupWithItsState()
     {
-        SendHeartbeat("list-a", "c1", [TopicA]);
-        SendHeartbeat("list-b", "c1", [TopicB]);
+        await SendHeartbeatAsync("list-a", "c1", [TopicA]);
+        await SendHeartbeatAsync("list-b", "c1", [TopicB]);
 
         var all = _coordinator.ListGroups(statesFilter: null);
 
@@ -217,10 +217,10 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Describe_ReflectsReconcilingAndStableStates()
+    public async Task Describe_ReflectsReconcilingAndStableStates()
     {
-        var first = SendHeartbeat("g7", "c1", [TopicA]);
-        SendHeartbeat("g7", "c1", subscribed: null, memberId: first.MemberId, memberEpoch: first.MemberEpoch,
+        var first = await SendHeartbeatAsync("g7", "c1", [TopicA]);
+        await SendHeartbeatAsync("g7", "c1", subscribed: null, memberId: first.MemberId, memberEpoch: first.MemberEpoch,
             owned: AssignmentToOwned(first.Assignment));
 
         // After only first member's full ack, the group is stable.
@@ -228,12 +228,12 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
         Assert.Equal(ConsumerGroupPhase.Stable, stable.Members.Count == 0 ? ConsumerGroupPhase.Empty : stable.Phase);
 
         // Add a second member — group becomes Reconciling because member 1 still owns its partitions.
-        SendHeartbeat("g7", "c2", [TopicA]);
+        await SendHeartbeatAsync("g7", "c2", [TopicA]);
         var reconciling = Describe("g7");
         Assert.Equal(ConsumerGroupPhase.Reconciling, reconciling.Phase);
     }
 
-    private ConsumerHeartbeatResult SendHeartbeat(
+    private async Task<ConsumerHeartbeatResult> SendHeartbeatAsync(
         string group,
         string clientId,
         List<string>? subscribed,
@@ -243,7 +243,7 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
         string? serverAssignor = null,
         int rebalanceTimeoutMs = -1)
     {
-        return _coordinator.Heartbeat(new ConsumerHeartbeatCommand
+        return await _coordinator.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
             ClientId = clientId,
             GroupId = group,
@@ -253,7 +253,7 @@ public sealed class ConsumerGroupV2CoordinatorTests : IDisposable
             ServerAssignor = serverAssignor,
             OwnedTopicPartitions = owned,
             RebalanceTimeoutMs = rebalanceTimeoutMs,
-        });
+        }, TestContext.Current.CancellationToken);
     }
 
     private ConsumerGroupDescription Describe(string groupId)

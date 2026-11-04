@@ -66,23 +66,23 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
     }
 
     [Fact]
-    public void SweepOnce_RemovesStaleMembersFromConsumerGroupV2()
+    public async Task SweepOnce_RemovesStaleMembersFromConsumerGroupV2()
     {
         // Arrange: add a member, then back-date its heartbeat past the timeout.
-        var resp = _v2.Heartbeat(new ConsumerHeartbeatCommand
+        var resp = await _v2.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
             ClientId = "c1",
             GroupId = "sweep-g",
             MemberId = "",
             MemberEpoch = 0,
             SubscribedTopicNames = ["sweep-topic"],
-        });
+        }, TestContext.Current.CancellationToken);
         Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
 
         BackdateLastHeartbeat(_v2, "sweep-g", resp.MemberId!);
 
         // Act
-        _sweep.SweepOnce();
+        await _sweep.SweepOnceAsync(TestContext.Current.CancellationToken);
 
         // Assert: describe should show no members.
         var described = _v2.Describe(["sweep-g"]);
@@ -90,18 +90,18 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
     }
 
     [Fact]
-    public void SweepOnce_DoesNothing_WhenAllMembersFresh()
+    public async Task SweepOnce_DoesNothing_WhenAllMembersFresh()
     {
-        var resp = _v2.Heartbeat(new ConsumerHeartbeatCommand
+        var resp = await _v2.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
             ClientId = "c1",
             GroupId = "sweep-g2",
             MemberId = "",
             MemberEpoch = 0,
             SubscribedTopicNames = ["sweep-topic"],
-        });
+        }, TestContext.Current.CancellationToken);
 
-        _sweep.SweepOnce();
+        await _sweep.SweepOnceAsync(TestContext.Current.CancellationToken);
 
         var described = _v2.Describe(["sweep-g2"]);
         Assert.Single(described[0].Members);
@@ -112,14 +112,14 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
     public async Task PeriodicLoop_FiresSweepRepeatedly()
     {
         // Add a stale member, start the loop, observe the sweep removes it.
-        var resp = _v2.Heartbeat(new ConsumerHeartbeatCommand
+        var resp = await _v2.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
             ClientId = "c1",
             GroupId = "loop-g",
             MemberId = "",
             MemberEpoch = 0,
             SubscribedTopicNames = ["sweep-topic"],
-        });
+        }, TestContext.Current.CancellationToken);
         BackdateLastHeartbeat(_v2, "loop-g", resp.MemberId!);
 
         await _sweep.StartAsync(CancellationToken.None);

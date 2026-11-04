@@ -37,7 +37,7 @@ public sealed class UnsupportedAssignorTests : IDisposable
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _logManager.CreateTopicAsync(Topic, partitionCount: 4).GetAwaiter().GetResult();
         _coordinator = new ConsumerGroupV2Coordinator(
-            NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, persistence: null);
+            NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager);
     }
 
     public void Dispose()
@@ -47,23 +47,23 @@ public sealed class UnsupportedAssignorTests : IDisposable
     }
 
     [Fact]
-    public void AnUnknownAssignor_IsRefused()
+    public async Task AnUnknownAssignor_IsRefused()
     {
-        var result = _coordinator.Heartbeat(Heartbeat("g-unknown", serverAssignor: "stikcy"));
+        var result = await _coordinator.HeartbeatAsync(Heartbeat("g-unknown", serverAssignor: "stikcy"), TestContext.Current.CancellationToken);
 
         Assert.Equal(ConsumerGroupFenceStatus.UnsupportedAssignor, result.Status);
     }
 
     [Fact]
-    public void AnUnknownAssignor_LeavesTheGroupUntouched()
+    public async Task AnUnknownAssignor_LeavesTheGroupUntouched()
     {
         // The refusal happens before any mutation, like the epoch fence. A request the broker will
         // not honour must not advance the group — otherwise a client with a typo repeatedly bumps
         // the group epoch and forces rebalances it never gets to take part in.
-        _coordinator.Heartbeat(Heartbeat("g-untouched", serverAssignor: "sticky"));
+        await _coordinator.HeartbeatAsync(Heartbeat("g-untouched", serverAssignor: "sticky"), TestContext.Current.CancellationToken);
         var before = Assert.Single(_coordinator.Describe(["g-untouched"]));
 
-        _coordinator.Heartbeat(Heartbeat("g-untouched", serverAssignor: "nonsense"));
+        await _coordinator.HeartbeatAsync(Heartbeat("g-untouched", serverAssignor: "nonsense"), TestContext.Current.CancellationToken);
         var after = Assert.Single(_coordinator.Describe(["g-untouched"]));
 
         Assert.Equal(before.GroupEpoch, after.GroupEpoch);
@@ -76,18 +76,18 @@ public sealed class UnsupportedAssignorTests : IDisposable
     [InlineData("sticky")]
     [InlineData("cooperative-sticky")]
     [InlineData("STICKY")]
-    public void AKnownAssignor_IsAccepted(string assignorName)
+    public async Task AKnownAssignor_IsAccepted(string assignorName)
     {
-        var result = _coordinator.Heartbeat(Heartbeat($"g-{assignorName}", assignorName));
+        var result = await _coordinator.HeartbeatAsync(Heartbeat($"g-{assignorName}", assignorName), TestContext.Current.CancellationToken);
 
         Assert.NotEqual(ConsumerGroupFenceStatus.UnsupportedAssignor, result.Status);
     }
 
     [Fact]
-    public void NoAssignorRequested_IsNotARefusal()
+    public async Task NoAssignorRequested_IsNotARefusal()
     {
         // Expressing no preference is legitimate and keeps the broker's default.
-        var result = _coordinator.Heartbeat(Heartbeat("g-none", serverAssignor: null));
+        var result = await _coordinator.HeartbeatAsync(Heartbeat("g-none", serverAssignor: null), TestContext.Current.CancellationToken);
 
         Assert.NotEqual(ConsumerGroupFenceStatus.UnsupportedAssignor, result.Status);
     }

@@ -1,3 +1,5 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
+using Kuestenlogik.Surgewave.Broker.GroupOffsets;
 using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
 using Kuestenlogik.Surgewave.Broker.Native.Assignors;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
@@ -24,26 +26,146 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     private readonly Dictionary<string, ConsumerGroupV2State> _groups;
     private readonly Lock _groupLock = new();
     private readonly TargetAssignmentComputer _assignmentComputer;
-    private readonly IGroupStateStore<ConsumerGroupV2State>? _persistence;
+
+    // The group's records live in its partition of __consumer_offsets (#219). What this coordinator wrote or read of
+    // each group, by record key, with the load epoch of the partition it was read in: a moved epoch means the
+    // partition was taken over or let go since, and the group is read afresh.
+    private readonly OffsetStore _offsets;
+    private readonly Dictionary<string, Held> _held = new(StringComparer.Ordinal);
+
+    // One heartbeat of a group at a time, from its change to the answer, so the group's records reach the log in the
+    // order its state changed.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
 
     private const int DefaultHeartbeatIntervalMs = 5000;
     private static readonly TimeSpan StaleHeartbeatTimeout = TimeSpan.FromSeconds(45);
 
+    /// <param name="offsets">
+    /// The store of <c>__consumer_offsets</c> the group's records are kept in; without one, a store in memory that owns
+    /// every group.
+    /// </param>
     public ConsumerGroupV2Coordinator(
         ILogger<ConsumerGroupV2Coordinator> logger,
         LogManager logManager,
-        IGroupStateStore<ConsumerGroupV2State>? persistence = null)
+        OffsetStore? offsets = null)
     {
         _logger = logger;
         _assignmentComputer = new TargetAssignmentComputer(logManager);
-        _persistence = persistence;
-        _groups = persistence is null
-            ? []
-            : persistence.LoadAll().ToDictionary(kv => kv.Key, kv => kv.Value);
+        _offsets = offsets ?? OffsetStore.InMemory();
+        _groups = new Dictionary<string, ConsumerGroupV2State>(StringComparer.Ordinal);
+    }
 
-        if (_groups.Count > 0)
+    /// <summary>
+    /// The group as this broker holds it now, under <see cref="_groupLock"/>: read from its records when its partition
+    /// was taken over since, dropped when another broker serves it. Null when the group does not exist here.
+    /// </summary>
+    private ConsumerGroupV2State? Current(string groupId)
+    {
+        var snapshot = _offsets.GroupStateOf(groupId);
+        if (snapshot is not { } held)
         {
-            _logger.LogInformation("ConsumerGroupV2Coordinator: recovered {Count} group(s) from persistence", _groups.Count);
+            _groups.Remove(groupId);
+            _held.Remove(groupId);
+            return null;
+        }
+        if (_held.TryGetValue(groupId, out var known) && known.LoadEpoch == held.LoadEpoch)
+            return _groups.GetValueOrDefault(groupId);
+
+        var records = held.Records.Where(r => ConsumerGroupRecords.IsConsumerGroupKey(r.Key)).ToList();
+        _held[groupId] = new Held(held.LoadEpoch, records.ToDictionary(r => Convert.ToBase64String(r.Key), r => r.Value, StringComparer.Ordinal));
+        var group = ConsumerGroupRecords.Read(groupId, records);
+        if (group is null)
+            _groups.Remove(groupId);
+        else
+            _groups[groupId] = group;
+        return group;
+    }
+
+    // Under _groupLock: the records that differ from what the log has of the group — changed ones, and tombstones for
+    // members gone.
+    private List<(byte[] Key, byte[] Value)> ChangesOf(string groupId)
+    {
+        if (!_groups.TryGetValue(groupId, out var group) || !_held.TryGetValue(groupId, out var held))
+            return [];
+        var now = ConsumerGroupRecords.Of(group);
+        var changes = new List<(byte[] Key, byte[] Value)>();
+        var present = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (key, value) in now)
+        {
+            var id = Convert.ToBase64String(key);
+            present.Add(id);
+            if (!held.Written.TryGetValue(id, out var written) || !written.AsSpan().SequenceEqual(value))
+                changes.Add((key, value));
+        }
+        foreach (var id in held.Written.Keys.Where(id => !present.Contains(id)))
+            changes.Add((Convert.FromBase64String(id), []));
+        return changes;
+    }
+
+    // Under _groupLock: the changes are in the log.
+    private void Remember(string groupId, List<(byte[] Key, byte[] Value)> changes)
+    {
+        if (!_held.TryGetValue(groupId, out var held))
+            return;
+        foreach (var (key, value) in changes)
+        {
+            var id = Convert.ToBase64String(key);
+            if (value.Length == 0)
+                held.Written.Remove(id);
+            else
+                held.Written[id] = value;
+        }
+    }
+
+    // Changes the group under its gate and writes what changed; the answer is given once the records are durable.
+    private async Task<T> ChangeAsync<T>(string groupId, Func<T> change, Func<ConsumerGroupFenceStatus, T> refused, CancellationToken cancellationToken)
+    {
+        var gate = _gates.GetOrAdd(groupId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            T result;
+            List<(byte[] Key, byte[] Value)> changes;
+            lock (_groupLock)
+            {
+                result = change();
+                changes = ChangesOf(groupId);
+            }
+            if (changes.Count == 0)
+                return result;
+
+            var written = await _offsets.WriteGroupStateAsync(groupId, changes, cancellationToken).ConfigureAwait(false);
+            if (written != StateWriteStatus.Ok)
+                return refused(StatusOf(written));
+            lock (_groupLock)
+                Remember(groupId, changes);
+            return result;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static ConsumerGroupFenceStatus StatusOf(StateWriteStatus written) => written switch
+    {
+        StateWriteStatus.NotCoordinator => ConsumerGroupFenceStatus.NotCoordinator,
+        StateWriteStatus.LoadInProgress => ConsumerGroupFenceStatus.CoordinatorLoadInProgress,
+        _ => ConsumerGroupFenceStatus.CoordinatorNotAvailable,
+    };
+
+    private sealed record Held(int LoadEpoch, Dictionary<string, byte[]> Written);
+
+    /// <summary>
+    /// Puts a group in place as this broker holds it now, for a test that stages a group's state without the heartbeats
+    /// that would lead to it. Nothing is written: the log has none of it.
+    /// </summary>
+    internal void Seed(ConsumerGroupV2State group)
+    {
+        lock (_groupLock)
+        {
+            _groups[group.GroupId] = group;
+            _held[group.GroupId] = new Held(_offsets.LoadEpochOf(group.GroupId), new Dictionary<string, byte[]>(StringComparer.Ordinal));
         }
     }
 
@@ -51,9 +173,24 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     // ConsumerGroupHeartbeat (API Key 68)
     // ─────────────────────────────────────────────────────────────
 
-    public ConsumerHeartbeatResult Heartbeat(ConsumerHeartbeatCommand command)
+    /// <remarks>
+    /// Served by the broker that leads the group's partition of <c>__consumer_offsets</c>, and answered once the group's
+    /// changed records are durable there (#219): a coordinator that takes the partition over reads the group from them.
+    /// </remarks>
+    public Task<ConsumerHeartbeatResult> HeartbeatAsync(ConsumerHeartbeatCommand command, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        switch (_offsets.OwnershipOf(command.GroupId))
+        {
+            case CoordinatorOwnership.NotOwned:
+                return Task.FromResult(FenceResult(command, ConsumerGroupFenceStatus.NotCoordinator));
+            case CoordinatorOwnership.Loading:
+                return Task.FromResult(FenceResult(command, ConsumerGroupFenceStatus.CoordinatorLoadInProgress));
+        }
+        return ChangeAsync(command.GroupId, () => HeartbeatLocked(command), status => FenceResult(command, status), cancellationToken);
+    }
+
+    private ConsumerHeartbeatResult HeartbeatLocked(ConsumerHeartbeatCommand command)
+    {
         {
             _logger.LogDebug("ConsumerGroupV2Heartbeat: GroupId={GroupId}, MemberId={MemberId}, MemberEpoch={MemberEpoch}",
                 command.GroupId, command.MemberId, command.MemberEpoch);
@@ -64,7 +201,8 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
                 return HandleLeave(command);
             }
 
-            if (!_groups.TryGetValue(command.GroupId, out var group))
+            var group = Current(command.GroupId);
+            if (group is null)
             {
                 group = new ConsumerGroupV2State { GroupId = command.GroupId };
                 _groups[command.GroupId] = group;
@@ -158,10 +296,6 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
             member.Assignment = safeAssignment;
             member.MemberEpoch = group.GroupEpoch;
 
-            // Persist after every heartbeat that changed authoritative state. The
-            // store debounces writes internally so this is cheap.
-            _persistence?.Save(group.GroupId, group);
-
             return new ConsumerHeartbeatResult
             {
                 Status = ConsumerGroupFenceStatus.Ok,
@@ -175,7 +309,7 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
 
     private ConsumerHeartbeatResult HandleLeave(ConsumerHeartbeatCommand command)
     {
-        if (_groups.TryGetValue(command.GroupId, out var group))
+        if (Current(command.GroupId) is { } group)
         {
             if (group.Members.Remove(command.MemberId))
             {
@@ -183,15 +317,6 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
                 _assignmentComputer.Compute(group);
                 _logger.LogInformation("ConsumerGroupV2 {GroupId}: member {MemberId} left (epoch={Epoch})",
                     command.GroupId, command.MemberId, group.GroupEpoch);
-
-                if (group.Members.Count == 0)
-                {
-                    _persistence?.Delete(group.GroupId);
-                }
-                else
-                {
-                    _persistence?.Save(group.GroupId, group);
-                }
             }
         }
 
@@ -216,7 +341,7 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
 
             foreach (var groupId in groupIds)
             {
-                if (!_groups.TryGetValue(groupId, out var group))
+                if (Current(groupId) is not { } group)
                 {
                     result.Add(new ConsumerGroupDescription
                     {
@@ -268,8 +393,10 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
         lock (_groupLock)
         {
             var groups = new List<GroupListing>(_groups.Count);
-            foreach (var (groupId, group) in _groups)
+            foreach (var groupId in _offsets.GroupStateIds().Concat(_groups.Keys).Distinct(StringComparer.Ordinal).ToList())
             {
+                if (Current(groupId) is not { } group)
+                    continue;
                 var state = GetGroupPhase(group) switch
                 {
                     ConsumerGroupPhase.Empty => "Empty",
@@ -437,7 +564,7 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     {
         lock (_groupLock)
         {
-            if (!_groups.TryGetValue(groupId, out var group))
+            if (Current(groupId) is not { } group)
             {
                 return ConsumerGroupFenceStatus.NotAV2Group;
             }
@@ -476,7 +603,7 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     {
         lock (_groupLock)
         {
-            if (!_groups.TryGetValue(groupId, out var group)) return false;
+            if (Current(groupId) is not { } group) return false;
             if (string.IsNullOrEmpty(memberId) || !group.Members.TryGetValue(memberId, out var member)) return false;
 
             // Walk the member's TARGET assignment — that's the broker's view
@@ -508,27 +635,25 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
     /// to call from a hosted timer; intended to be invoked roughly once per
     /// <see cref="StaleHeartbeatTimeout"/>.
     /// </summary>
-    public void SweepStaleMembers()
+    /// <remarks>An eviction is written to the group's records like any other change (#219).</remarks>
+    public async Task SweepStaleMembersAsync(CancellationToken cancellationToken)
     {
+        List<string> groupIds;
         lock (_groupLock)
+            groupIds = [.. _groups.Keys];
+
+        foreach (var groupId in groupIds)
         {
-            foreach (var group in _groups.Values)
+            await ChangeAsync(groupId, () =>
             {
+                if (Current(groupId) is not { } group)
+                    return false;
                 bool needsRecompute = false;
                 CleanStaleMembers(group, ref needsRecompute);
                 if (needsRecompute)
-                {
                     _assignmentComputer.Compute(group);
-                    if (group.Members.Count == 0)
-                    {
-                        _persistence?.Delete(group.GroupId);
-                    }
-                    else
-                    {
-                        _persistence?.Save(group.GroupId, group);
-                    }
-                }
-            }
+                return needsRecompute;
+            }, _ => false, cancellationToken).ConfigureAwait(false);
         }
     }
 

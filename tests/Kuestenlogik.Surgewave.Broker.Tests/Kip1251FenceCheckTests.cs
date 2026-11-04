@@ -51,18 +51,12 @@ public sealed class Kip1251FenceCheckTests : IDisposable
     }
 
     /// <summary>
-    /// Reaches into the coordinator's private <c>_groups</c> dict to set up
-    /// a group with a controlled (member, partition) ownership map without
-    /// going through the heartbeat path. Lets each test stage the exact
+    /// Puts a group with a controlled (member, partition) ownership map in
+    /// place without going through the heartbeat path. Lets each test stage the exact
     /// epoch-mismatch scenario it wants to fence-check.
     /// </summary>
     private void SeedGroup(string groupId, int groupEpoch, params (string MemberId, int MemberEpoch, int[] Partitions, int[]? PartitionEpochs)[] members)
     {
-        var groupsField = typeof(ConsumerGroupV2Coordinator).GetField("_groups", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var lockField = typeof(ConsumerGroupV2Coordinator).GetField("_groupLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var lockObj = lockField.GetValue(_coordinator)!;
-        var dict = (Dictionary<string, ConsumerGroupV2State>)groupsField.GetValue(_coordinator)!;
-
         var group = new ConsumerGroupV2State
         {
             GroupId = groupId,
@@ -87,7 +81,7 @@ public sealed class Kip1251FenceCheckTests : IDisposable
                 ],
             };
         }
-        lock (lockObj) dict[groupId] = group;
+        _coordinator.Seed(group);
     }
 
     [Fact]

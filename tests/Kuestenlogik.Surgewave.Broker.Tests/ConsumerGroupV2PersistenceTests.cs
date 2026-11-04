@@ -1,5 +1,5 @@
 using Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
-using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
@@ -10,27 +10,27 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
-/// KIP-848 9c: verifies that <see cref="ConsumerGroupV2Coordinator"/> reloads
-/// its groups from a <see cref="JsonFileGroupStateStore{T}"/> after a simulated
-/// broker restart. The store flushes synchronously on dispose, so a test that
-/// disposes the first store before constructing the second is deterministic.
+/// A KIP-848 consumer group's state lives in its partition of <c>__consumer_offsets</c> (#219): the coordinator writes
+/// the group's records there before it answers a heartbeat, and a coordinator that takes the partition over — another
+/// broker, or this one after a restart — reads the group from them. It used to live in this broker's memory only, so a
+/// coordinator that took a group over knew neither its members nor its epochs.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class ConsumerGroupV2PersistenceTests : IDisposable
 {
-    private readonly string _dataDir;
-    private readonly LogManager _logManager;
-    private readonly Guid _topicAId;
-
+    private const int Partitions = 4;
     private const string TopicA = "v2-persist-topic";
+
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "surgewave-cg2-persist-" + Guid.NewGuid().ToString("N"));
+    private readonly LogManager _logManager;
+    private readonly RecordBatchSerializer _serializer = new(NullLogger<RecordBatchSerializer>.Instance);
+    private readonly CancellationToken _ct = TestContext.Current.CancellationToken;
 
     public ConsumerGroupV2PersistenceTests()
     {
-        _dataDir = Path.Combine(Path.GetTempPath(), "surgewave-cg2-persist-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dataDir);
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
-        var topic = _logManager.CreateTopicAsync(TopicA, partitionCount: 4).GetAwaiter().GetResult();
-        _topicAId = topic.TopicId;
+        _logManager.CreateTopicAsync(TopicA, partitionCount: 4).GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -40,90 +40,76 @@ public sealed class ConsumerGroupV2PersistenceTests : IDisposable
     }
 
     [Fact]
-    public void GroupState_SurvivesCoordinatorRestart()
+    public async Task ACoordinatorThatTakesThePartitionOverKnowsTheGroup()
     {
-        // ── Phase 1: first coordinator instance creates a group and persists it.
-        string memberId;
-        int groupEpochBefore;
-        using (var store = new JsonFileGroupStateStore<ConsumerGroupV2State>(_dataDir, "consumer-groups-v2", NullLogger.Instance))
-        {
-            var coordinator = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, store);
+        var first = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, await StoreAsync());
+        var joined = await JoinAsync(first, "persist-g", "c1");
+        var second = await JoinAsync(first, "persist-g", "c2");
 
-            var resp = coordinator.Heartbeat(new ConsumerHeartbeatCommand
-            {
-                ClientId = "c1",
-                GroupId = "persist-g",
-                MemberId = "",
-                MemberEpoch = 0,
-                SubscribedTopicNames = [TopicA],
-                RebalanceTimeoutMs = 60_000,
-            });
+        // Another store over the same log: a broker that takes the partition over, or this one after a restart.
+        var next = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, await StoreAsync());
 
-            memberId = resp.MemberId!;
-            groupEpochBefore = resp.MemberEpoch;
-            // Disposing the store flushes the dirty bag synchronously.
-        }
-
-        // ── Phase 2: a fresh coordinator constructed with a NEW store instance pointing
-        // at the same directory should rehydrate the group transparently.
-        using var store2 = new JsonFileGroupStateStore<ConsumerGroupV2State>(_dataDir, "consumer-groups-v2", NullLogger.Instance);
-        var coordinator2 = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, store2);
-
-        var describe = coordinator2.Describe(["persist-g"]);
-
-        var group = Assert.Single(describe);
+        var group = Assert.Single(next.Describe(["persist-g"]));
         Assert.Equal(ConsumerGroupDescribeStatus.Ok, group.Status);
-        var member = Assert.Single(group.Members);
-        Assert.Equal(memberId, member.MemberId);
-        Assert.Contains(TopicA, member.SubscribedTopicNames);
-        Assert.True(group.GroupEpoch >= groupEpochBefore);
+        Assert.Equal([joined.MemberId, second.MemberId], group.Members.Select(m => m.MemberId).Order(StringComparer.Ordinal));
+        Assert.All(group.Members, m => Assert.Contains(TopicA, m.SubscribedTopicNames));
+        Assert.Equal(second.MemberEpoch, group.GroupEpoch);
+
+        // A member heartbeats on with the epoch it knew: the takeover kept it, so no fence.
+        var again = await next.HeartbeatAsync(new ConsumerHeartbeatCommand
+        {
+            ClientId = "c1",
+            GroupId = "persist-g",
+            MemberId = joined.MemberId!,
+            MemberEpoch = joined.MemberEpoch,
+        }, _ct);
+        Assert.NotEqual(ConsumerGroupFenceStatus.UnknownMember, again.Status);
     }
 
     [Fact]
-    public void GroupState_RemovedFromDisk_WhenLastMemberLeaves()
+    public async Task AMemberThatLeftIsGoneForTheNextCoordinatorToo()
     {
-        using var store = new JsonFileGroupStateStore<ConsumerGroupV2State>(_dataDir, "consumer-groups-v2", NullLogger.Instance);
+        var first = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, await StoreAsync());
+        var staying = await JoinAsync(first, "leave-g", "c1");
+        var leaving = await JoinAsync(first, "leave-g", "c2");
+        await first.HeartbeatAsync(new ConsumerHeartbeatCommand
+        {
+            ClientId = "c2", GroupId = "leave-g", MemberId = leaving.MemberId!, MemberEpoch = -1,
+        }, _ct);
+
+        var next = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, await StoreAsync());
+
+        Assert.Equal(staying.MemberId, Assert.Single(Assert.Single(next.Describe(["leave-g"])).Members).MemberId);
+    }
+
+    [Fact]
+    public async Task ABrokerThatDoesNotLeadTheGroupsPartitionIsNotItsCoordinator()
+    {
+        // A store of a broker in a cluster that leads no partition of __consumer_offsets.
+        var store = new OffsetStore(_logManager, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
         var coordinator = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, store);
 
-        var first = coordinator.Heartbeat(new ConsumerHeartbeatCommand
-        {
-            ClientId = "c1",
-            GroupId = "ephemeral-g",
-            MemberId = "",
-            MemberEpoch = 0,
-            SubscribedTopicNames = [TopicA],
-        });
+        var response = await JoinAsync(coordinator, "elsewhere-g", "c1");
 
-        // Member leaves.
-        coordinator.Heartbeat(new ConsumerHeartbeatCommand
-        {
-            ClientId = "c1",
-            GroupId = "ephemeral-g",
-            MemberId = first.MemberId!,
-            MemberEpoch = -1,
-            SubscribedTopicNames = null,
-        });
-
-        var stateFiles = Directory.EnumerateFiles(Path.Combine(_dataDir, ".metadata", "consumer-groups-v2"), "*.json").ToList();
-        Assert.DoesNotContain(stateFiles, p => Path.GetFileNameWithoutExtension(p).Contains("ephemeral", StringComparison.Ordinal));
+        Assert.Equal(ConsumerGroupFenceStatus.NotCoordinator, response.Status);
     }
 
-    [Fact]
-    public void Coordinator_WithoutPersistence_StillWorks()
-    {
-        // The persistence parameter is optional; existing call sites must keep working.
-        var coordinator = new ConsumerGroupV2Coordinator(
-            NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager, persistence: null);
-
-        var resp = coordinator.Heartbeat(new ConsumerHeartbeatCommand
+    private Task<ConsumerHeartbeatResult> JoinAsync(ConsumerGroupV2Coordinator coordinator, string group, string clientId) =>
+        coordinator.HeartbeatAsync(new ConsumerHeartbeatCommand
         {
-            ClientId = "c1",
-            GroupId = "no-persist-g",
+            ClientId = clientId,
+            GroupId = group,
             MemberId = "",
             MemberEpoch = 0,
             SubscribedTopicNames = [TopicA],
-        });
+            RebalanceTimeoutMs = 60_000,
+        }, _ct);
 
-        Assert.Equal(ConsumerGroupFenceStatus.Ok, resp.Status);
+    // A store that leads every partition of __consumer_offsets in this log, read from it afresh.
+    private async Task<OffsetStore> StoreAsync()
+    {
+        var store = new OffsetStore(_logManager, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
+        await store.StartLocalAsync(_ct);
+        return store;
     }
 }

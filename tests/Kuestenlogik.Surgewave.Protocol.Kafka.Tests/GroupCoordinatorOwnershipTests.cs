@@ -137,6 +137,6 @@ public sealed class GroupCoordinatorOwnershipTests
         }, Context, CancellationToken.None));
 
         Assert.Equal(ErrorCode.NotCoordinator, response.ErrorCode);
-        _consumerGroups.DidNotReceiveWithAnyArgs().Heartbeat(default!);
+        await _consumerGroups.DidNotReceiveWithAnyArgs().HeartbeatAsync(default!, default);
     }
 }

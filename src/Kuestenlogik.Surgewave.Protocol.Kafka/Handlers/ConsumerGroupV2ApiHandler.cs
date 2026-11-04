@@ -46,7 +46,7 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
         _logger = logger;
     }
 
-    public Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
+    public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
         KafkaResponse response = request switch
         {
@@ -59,12 +59,12 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
                 MemberId = r.MemberId,
                 MemberEpoch = r.MemberEpoch,
             },
-            ConsumerGroupHeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(ToHeartbeatCommand(r)), r),
+            ConsumerGroupHeartbeatRequest r => ToHeartbeatResponse(await _coordinator.HeartbeatAsync(ToHeartbeatCommand(r), cancellationToken), r),
             ConsumerGroupDescribeRequest r => DescribeHere(r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConsumerGroupV2ApiHandler")
         };
 
-        return Task.FromResult(response);
+        return response;
     }
 
     // ── Heartbeat: wire -> neutral -> wire ──────────────────────────────────
@@ -128,6 +128,9 @@ public sealed class ConsumerGroupV2ApiHandler : IKafkaRequestHandler
         ConsumerGroupFenceStatus.StaleEpoch => ErrorCode.StaleMemberEpoch,
         ConsumerGroupFenceStatus.FencedEpoch => ErrorCode.FencedMemberEpoch,
         ConsumerGroupFenceStatus.UnsupportedAssignor => ErrorCode.UnsupportedAssignor,
+        ConsumerGroupFenceStatus.NotCoordinator => ErrorCode.NotCoordinator,
+        ConsumerGroupFenceStatus.CoordinatorLoadInProgress => ErrorCode.CoordinatorLoadInProgress,
+        ConsumerGroupFenceStatus.CoordinatorNotAvailable => ErrorCode.CoordinatorNotAvailable,
         // NotAV2Group is offset-path only; never reaches the heartbeat response.
         _ => ErrorCode.None,
     };

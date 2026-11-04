@@ -34,6 +34,12 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
     private readonly Dictionary<long, List<PendingOffset>>[] _pending;
     private readonly List<(long ProducerId, bool Commit)>[] _markersWhileLoading;
 
+    // Per partition: the state records of the groups of other types (#219) — KIP-848 consumer groups and share groups,
+    // keyed by group and then by record key — and how often the partition was taken over or let go, so a coordinator
+    // knows when what it holds of a group is no longer this broker's.
+    private readonly Dictionary<string, Dictionary<string, (byte[] Key, byte[] Value)>>[] _groupState;
+    private readonly int[] _loadEpoch;
+
     /// <summary>
     /// A store over the broker's <c>__consumer_offsets</c>. It serves nothing until it is told what this broker
     /// leads: <see cref="FollowLeadershipOf"/> in a cluster, <see cref="StartLocalAsync"/> for a broker on its own.
@@ -50,6 +56,7 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         _time = timeProvider ?? TimeProvider.System;
         _groups = NewGroups(partitionCount);
         (_pending, _markersWhileLoading) = NewPending(partitionCount);
+        (_groupState, _loadEpoch) = NewGroupState(partitionCount);
         _log = new CoordinatorStateLog(CoordinatorPartitioner.GroupTopic, partitionCount, this, logManager, serializer, logger, commitTimeout, _time);
     }
 
@@ -58,6 +65,7 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         _time = TimeProvider.System;
         _groups = NewGroups(1);
         (_pending, _markersWhileLoading) = NewPending(1);
+        (_groupState, _loadEpoch) = NewGroupState(1);
         _log = CoordinatorStateLog.InMemory(CoordinatorPartitioner.GroupTopic, this, logger);
     }
 
@@ -122,6 +130,60 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// The state records this broker holds of a group of another type (#219) — a KIP-848 consumer group or a share
+    /// group — with the load epoch of its partition; null when this broker does not serve the group now. A coordinator
+    /// rebuilds the group from them whenever the load epoch moved: the partition was taken over or let go since.
+    /// </summary>
+    public GroupStateSnapshot? GroupStateOf(string groupId)
+    {
+        var partition = _log.PartitionFor(groupId);
+        lock (_log.SyncRoot)
+        {
+            if (_log.OwnershipOf(partition) != CoordinatorOwnership.Owned)
+                return null;
+            IReadOnlyList<(byte[] Key, byte[] Value)> records = _groupState[partition].TryGetValue(groupId, out var held)
+                ? [.. held.Values]
+                : [];
+            return new GroupStateSnapshot(_loadEpoch[partition], records);
+        }
+    }
+
+    /// <summary>The load epoch of the group's partition: it moves whenever the partition is taken over or let go.</summary>
+    public int LoadEpochOf(string groupId)
+    {
+        var partition = _log.PartitionFor(groupId);
+        lock (_log.SyncRoot)
+            return _loadEpoch[partition];
+    }
+
+    /// <summary>The groups of other types this broker serves that have state records (#219).</summary>
+    public IReadOnlyList<string> GroupStateIds()
+    {
+        lock (_log.SyncRoot)
+        {
+            return [.. Enumerable.Range(0, _groupState.Length)
+                .Where(p => _log.OwnershipOf(p) == CoordinatorOwnership.Owned)
+                .SelectMany(p => _groupState[p].Keys)];
+        }
+    }
+
+    /// <summary>
+    /// Writes state records of a group of another type (#219) into its partition, answered once durable; an empty value
+    /// removes its key.
+    /// </summary>
+    public Task<StateWriteStatus> WriteGroupStateAsync(string groupId, IReadOnlyList<(byte[] Key, byte[] Value)> records, CancellationToken cancellationToken)
+    {
+        if (records.Count == 0)
+            return Task.FromResult(StateWriteStatus.Ok);
+        var partition = _log.PartitionFor(groupId);
+        return _log.WriteAsync(partition, records, _ =>
+        {
+            foreach (var record in records)
+                HoldGroupState(partition, groupId, record.Key, record.Value);
+        }, cancellationToken);
     }
 
     /// <summary>Whether a transaction has offsets of the group that are not committed yet.</summary>
@@ -299,6 +361,11 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
                 Complete(partition, record.ProducerId, record.Marker!.Value);
                 continue;
             }
+            if (record.ProducerId < 0 && GroupStateRecords.IsGroupStateKey(record.Key.Span))
+            {
+                HoldGroupState(partition, GroupStateRecords.GroupOf(record.Key.Span), record.Key.ToArray(), record.Value.ToArray());
+                continue;
+            }
             if (record.ProducerId >= 0)
             {
                 // An offset commit in a transaction: pending until the transaction's marker follows.
@@ -333,6 +400,7 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         foreach (var (producerId, commit) in _markersWhileLoading[partition])
             Complete(partition, producerId, commit);
         _markersWhileLoading[partition].Clear();
+        _loadEpoch[partition]++;
     }
 
     void ICoordinatorStateOwner.Unloaded(int partition)
@@ -340,7 +408,29 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         _groups[partition].Clear();
         _pending[partition].Clear();
         _markersWhileLoading[partition].Clear();
+        _groupState[partition].Clear();
+        _loadEpoch[partition]++;
     }
+
+    // Under the log's lock: a group-state record's latest value, or its key gone when the value is empty.
+    private void HoldGroupState(int partition, string groupId, byte[] key, byte[] value)
+    {
+        var groups = _groupState[partition];
+        var keyId = Convert.ToBase64String(key);
+        if (value.Length == 0)
+        {
+            if (groups.TryGetValue(groupId, out var held) && held.Remove(keyId) && held.Count == 0)
+                groups.Remove(groupId);
+            return;
+        }
+        if (!groups.TryGetValue(groupId, out var records))
+            groups[groupId] = records = new Dictionary<string, (byte[] Key, byte[] Value)>(StringComparer.Ordinal);
+        records[keyId] = (key, value);
+    }
+
+    private static (Dictionary<string, Dictionary<string, (byte[] Key, byte[] Value)>>[], int[]) NewGroupState(int partitionCount) =>
+        ([.. Enumerable.Range(0, partitionCount).Select(_ => new Dictionary<string, Dictionary<string, (byte[] Key, byte[] Value)>>(StringComparer.Ordinal))],
+         new int[partitionCount]);
 
     // Under the log's lock.
     private void Complete(int partition, long producerId, bool commit)
@@ -422,3 +512,6 @@ public readonly record struct CommittedOffset(string Topic, int Partition, long 
 
 /// <summary>Value-type key for topic-partition lookups (avoids string allocation).</summary>
 internal readonly record struct TopicPartitionKey(string Topic, int Partition);
+
+/// <summary>What a broker holds of a group of another type: its state records and the load epoch of its partition.</summary>
+public readonly record struct GroupStateSnapshot(int LoadEpoch, IReadOnlyList<(byte[] Key, byte[] Value)> Records);

@@ -14,7 +14,7 @@ public interface IConsumerGroupV2Coordinator
     /// <see cref="ConsumerHeartbeatCommand.MemberEpoch"/>) and returns the member's assignment
     /// or a fence <see cref="ConsumerHeartbeatResult.Status"/>.
     /// </summary>
-    ConsumerHeartbeatResult Heartbeat(ConsumerHeartbeatCommand command);
+    Task<ConsumerHeartbeatResult> HeartbeatAsync(ConsumerHeartbeatCommand command, CancellationToken cancellationToken);
 
     /// <summary>
     /// Describes the requested groups; unknown ids come back with
@@ -42,5 +42,5 @@ public interface IConsumerGroupV2Coordinator
     bool IsPartitionAssignmentValid(string groupId, string? memberId, int memberEpoch, Guid topicId, int partition);
 
     /// <summary>Evicts members whose heartbeat has expired. Background maintenance; no wire concern.</summary>
-    void SweepStaleMembers();
+    Task SweepStaleMembersAsync(CancellationToken cancellationToken);
 }

@@ -62,15 +62,16 @@ public sealed class GroupCoordinatorSweepService : IHostedService, IAsyncDisposa
     /// Runs one sweep iteration. Public so tests can drive the sweep deterministically
     /// without waiting on the timer.
     /// </summary>
-    public void SweepOnce()
+    public async Task SweepOnceAsync(CancellationToken cancellationToken)
     {
         try
         {
-            _consumerGroupV2.SweepStaleMembers();
+            // A KIP-848 eviction is written to __consumer_offsets, answered once durable (#219).
+            await _consumerGroupV2.SweepStaleMembersAsync(cancellationToken).ConfigureAwait(false);
             _shareGroup.SweepStaleMembers();
             _streamsGroup.SweepStaleMembers();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "GroupCoordinatorSweepService: sweep iteration failed");
         }
@@ -83,7 +84,7 @@ public sealed class GroupCoordinatorSweepService : IHostedService, IAsyncDisposa
         {
             while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
             {
-                SweepOnce();
+                await SweepOnceAsync(token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

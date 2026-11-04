@@ -703,9 +703,11 @@ builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ShareGroup
 // depends only on Coordination, not the broker-internal coordinator type.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareGroupCoordinator>(
     sp => sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>());
+// KIP-848 group state lives in __consumer_offsets with the group's offsets (#219).
 builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(
     sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>>(),
-    sp.GetRequiredService<LogManager>()));
+    sp.GetRequiredService<LogManager>(),
+    sp.GetRequiredService<OffsetStore>()));
 // Neutral contract (#59) resolves to the same singleton so the Kafka adapter depends only on Coordination.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupV2Coordinator>(
     sp => sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>());
