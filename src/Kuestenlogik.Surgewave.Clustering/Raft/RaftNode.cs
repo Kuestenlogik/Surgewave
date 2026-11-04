@@ -678,6 +678,13 @@ public sealed partial class RaftNode : IAsyncDisposable
         }
     }
 
+    // Under _lock. A pre-vote speaks for the term it proposed and the silence it started in: once the term moved on,
+    // this node leads, or a leader was heard from since, its result says nothing about now.
+    private bool IsStalePreVote(int proposedTerm, DateTimeOffset started) =>
+        _currentTerm + 1 != proposedTerm
+        || _state == RaftState.Leader
+        || (_leaderId.HasValue && _leaderId != NodeId && _lastHeartbeat > started);
+
     private async Task StartElectionAsync(CancellationToken ct)
     {
         // ========================================
@@ -707,6 +714,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             LastLogTerm
         );
 
+        var preVoteStarted = DateTimeOffset.UtcNow;
         var preVotes = 1; // Pre-vote for self
         var preVoteTasks = peers.Select(async peerId =>
         {
@@ -725,6 +733,15 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         lock (_lock)
         {
+            // The answers can take seconds — a peer that is not up yet costs its connect retries — and the world
+            // may have moved on meanwhile: a leader elected, this node its follower. Acting on the stale result
+            // started a second election right after the first and deposed a leader that was working (#204).
+            if (IsStalePreVote(proposedTerm, preVoteStarted))
+            {
+                LogPreVoteStale(proposedTerm, _currentTerm);
+                return;
+            }
+
             // Process pre-vote responses
             foreach (var (peerId, response) in preVoteResults)
             {
@@ -768,6 +785,13 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         lock (_lock)
         {
+            // The lock was let go after counting; a leader may have spoken up in between.
+            if (IsStalePreVote(proposedTerm, preVoteStarted))
+            {
+                LogPreVoteStale(proposedTerm, _currentTerm);
+                return;
+            }
+
             _state = RaftState.Candidate;
             _currentTerm++;
             _votedFor = NodeId;
@@ -1430,6 +1454,9 @@ public sealed partial class RaftNode : IAsyncDisposable
     // Pre-Vote logging
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting pre-vote for proposed term {ProposedTerm}")]
     private partial void LogStartingPreVote(int proposedTerm);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Pre-vote for term {ProposedTerm} is stale (now term {CurrentTerm}, or a leader was heard from); no election")]
+    private partial void LogPreVoteStale(int proposedTerm, int currentTerm);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Received pre-vote from {PeerId}, total={PreVotes}/{Majority}")]
     private partial void LogReceivedPreVote(int peerId, int preVotes, int majority);
