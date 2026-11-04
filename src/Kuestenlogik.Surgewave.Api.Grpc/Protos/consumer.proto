@@ -120,6 +120,10 @@ message CommitRequest {
   string cluster_id = 1;
   string consumer_group = 2;
   repeated OffsetCommit offsets = 3;
+  // The member committing and the generation it was assigned its partitions in, checked by the group's coordinator
+  // as Kafka's OffsetCommit is (#221). Without a generation the commit is a simple consumer's, outside any.
+  string member_id = 4;
+  optional int32 generation_id = 5;
 }
 
 message OffsetCommit {
@@ -131,6 +135,8 @@ message OffsetCommit {
 
 message CommitResponse {
   repeated OffsetCommitResult results = 1;
+  // The group's coordinator when this broker is not it (results NOT_COORDINATOR): the client asks it instead (#221).
+  BrokerInfo coordinator = 2;
 }
 
 message OffsetCommitResult {
@@ -147,6 +153,8 @@ message FetchOffsetsRequest {
 
 message FetchOffsetsResponse {
   repeated OffsetFetchResult results = 1;
+  // The group's coordinator when this broker is not it (results NOT_COORDINATOR): the client asks it instead (#221).
+  BrokerInfo coordinator = 2;
 }
 
 message OffsetFetchResult {

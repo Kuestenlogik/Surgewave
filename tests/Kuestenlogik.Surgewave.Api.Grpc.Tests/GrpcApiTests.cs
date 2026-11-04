@@ -40,15 +40,16 @@ public sealed class GrpcApiTests : IDisposable
         _consumerService = new ConsumerServiceImpl(
             _logManager,
             ParseRecordBatch,
-            (groupId, topic, partition, offset, _) =>
+            (groupId, _, _, offsets, _) =>
             {
-                _committedOffsets.Add((groupId, topic, partition, offset));
-                return Task.FromResult(true);
+                foreach (var o in offsets)
+                    _committedOffsets.Add((groupId, o.Topic, o.Partition, o.Offset));
+                return Task.FromResult<IReadOnlyList<OffsetCommitOutcome>>(
+                    [.. offsets.Select(o => new OffsetCommitOutcome(o.Topic, o.Partition, ErrorCode.None))]);
             },
-            (groupId, topic, partition) => _committedOffsets
-                .Where(o => o.groupId == groupId && o.topic == topic && o.partition == partition)
-                .Select(o => (long?)o.offset)
-                .LastOrDefault() ?? -1);
+            (groupId, partitions) => [.. partitions.Select(p => new OffsetFetchOutcome(p.Topic, p.Partition,
+                _committedOffsets.Where(o => o.groupId == groupId && o.topic == p.Topic && o.partition == p.Partition)
+                    .Select(o => (long?)o.offset).LastOrDefault() ?? -1, ErrorCode.None))]);
         _topicService = new TopicServiceImpl(_logManager);
         _adminService = new AdminServiceImpl(0, "localhost", 9092, 9093,
             getPartitionInfo: (topic, partition) =>

@@ -143,6 +143,20 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### The gRPC and REST offset commit and fetch go through the group's coordinator (#221)
+
+`ConsumerService.Commit` and `FetchOffsets` (and their REST routes) wrote
+and read the offset store directly, past the group's coordinator: no
+member or generation check, and on a broker that does not coordinate the
+group only a retriable error, with nothing saying where the coordinator
+is. They now go through the coordinator as Kafka's OffsetCommit and
+OffsetFetch do. A broker that does not coordinate the group answers
+`NOT_COORDINATOR` and names the coordinator in the response's new
+`coordinator` field. A commit can carry `member_id` and `generation_id`,
+which the coordinator checks; without a generation it is a simple
+consumer's commit. A coordinator still loading the group answers the new
+`COORDINATOR_LOAD_IN_PROGRESS`.
+
 ### The shipped broker refuses a produce for a partition another broker leads (#227)
 
 The embedded runtime answered a produce for a partition another broker

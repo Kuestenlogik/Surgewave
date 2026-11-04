@@ -1065,12 +1065,16 @@ var offsetStore = app.Services.GetRequiredService<OffsetStore>();
 
 // Register gRPC service implementations with required dependencies
 ProducerServiceImplHolder.Instance = new ProducerServiceImpl(logManager, recordBatchSerializer.SerializeMessages);
+// Offsets through the group's coordinator, as the Kafka path's OffsetCommit and OffsetFetch (#221).
+var grpcGroupOffsets = new Kuestenlogik.Surgewave.Api.Grpc.Server.GroupOffsets(
+    app.Services.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Consumer.IConsumerGroupCoordinator>(),
+    app.Services.GetRequiredService<Kuestenlogik.Surgewave.Coordination.Coordinators.ICoordinatorLocator>());
 ConsumerServiceImplHolder.Instance = new ConsumerServiceImpl(
     logManager,
     recordBatchSerializer.ParseRecordBatch,
-    async (groupId, topic, partition, offset, ct) =>
-        await offsetStore.CommitOffsetAsync(groupId, topic, partition, offset, ct) == StateWriteStatus.Ok,
-    (groupId, topic, partition) => (long?)offsetStore.GetCommittedOffset(groupId, topic, partition));
+    grpcGroupOffsets.CommitAsync,
+    grpcGroupOffsets.Fetch,
+    grpcGroupOffsets.CoordinatorOf);
 TopicServiceImplHolder.Instance = new TopicServiceImpl(logManager);
 AdminServiceImplHolder.Instance = new AdminServiceImpl(
     config.BrokerId,

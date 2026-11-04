@@ -92,6 +92,8 @@ enum ErrorCode {
   ILLEGAL_GENERATION = 35;
   UNKNOWN_MEMBER_ID = 36;
   GROUP_NOT_EMPTY = 37;
+  // The group's coordinator is still reading its offsets; retry (#221).
+  COORDINATOR_LOAD_IN_PROGRESS = 38;
 }
 
 enum ConfigResourceType {

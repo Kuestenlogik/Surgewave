@@ -13,14 +13,23 @@ namespace Kuestenlogik.Surgewave.Api.Grpc.Server;
 public delegate List<Message> ParseRecordBatchDelegate(byte[] recordBatch);
 
 /// <summary>
-/// Delegate for committing consumer group offsets.
+/// Commits a group's offsets through the group's coordinator (#221): the answer per partition, in the API's error codes —
+/// NOT_COORDINATOR when another broker coordinates the group, the member and generation checks of Kafka's OffsetCommit.
 /// </summary>
-public delegate Task<bool> CommitOffsetDelegate(string groupId, string topic, int partition, long offset, CancellationToken cancellationToken);
+public delegate Task<IReadOnlyList<OffsetCommitOutcome>> CommitOffsetsDelegate(
+    string groupId, string? memberId, int generationId, IReadOnlyList<OffsetCommit> offsets, CancellationToken cancellationToken);
 
-/// <summary>
-/// Delegate for fetching committed offsets.
-/// </summary>
-public delegate long? GetCommittedOffsetDelegate(string groupId, string topic, int partition);
+/// <summary>One partition's answer to an offset commit.</summary>
+public sealed record OffsetCommitOutcome(string Topic, int Partition, ErrorCode Error);
+
+/// <summary>Reads a group's committed offsets through the group's coordinator (#221); -1 where none is committed.</summary>
+public delegate IReadOnlyList<OffsetFetchOutcome> FetchOffsetsDelegate(string groupId, IReadOnlyList<Kuestenlogik.Surgewave.Api.Grpc.TopicPartition> partitions);
+
+/// <summary>One partition's committed offset, or why there is none to give.</summary>
+public sealed record OffsetFetchOutcome(string Topic, int Partition, long Offset, ErrorCode Error);
+
+/// <summary>The broker that coordinates the group, null when none does right now.</summary>
+public delegate BrokerInfo? GroupCoordinatorDelegate(string groupId);
 
 /// <summary>
 /// gRPC ConsumerService implementation
@@ -29,19 +38,22 @@ public class ConsumerServiceImpl : ConsumerService.ConsumerServiceBase
 {
     private readonly LogManager _logManager;
     private readonly ParseRecordBatchDelegate _parseRecordBatch;
-    private readonly CommitOffsetDelegate? _commitOffset;
-    private readonly GetCommittedOffsetDelegate? _getCommittedOffset;
+    private readonly CommitOffsetsDelegate? _commitOffsets;
+    private readonly FetchOffsetsDelegate? _fetchOffsets;
+    private readonly GroupCoordinatorDelegate? _groupCoordinator;
 
     public ConsumerServiceImpl(
         LogManager logManager,
         ParseRecordBatchDelegate parseRecordBatch,
-        CommitOffsetDelegate? commitOffset = null,
-        GetCommittedOffsetDelegate? getCommittedOffset = null)
+        CommitOffsetsDelegate? commitOffsets = null,
+        FetchOffsetsDelegate? fetchOffsets = null,
+        GroupCoordinatorDelegate? groupCoordinator = null)
     {
         _logManager = logManager;
         _parseRecordBatch = parseRecordBatch;
-        _commitOffset = commitOffset;
-        _getCommittedOffset = getCommittedOffset;
+        _commitOffsets = commitOffsets;
+        _fetchOffsets = fetchOffsets;
+        _groupCoordinator = groupCoordinator;
     }
 
     public override async Task Consume(
@@ -206,7 +218,7 @@ public class ConsumerServiceImpl : ConsumerService.ConsumerServiceBase
     {
         var response = new CommitResponse();
 
-        if (_commitOffset == null)
+        if (_commitOffsets == null)
         {
             foreach (var offset in request.Offsets)
             {
@@ -220,52 +232,65 @@ public class ConsumerServiceImpl : ConsumerService.ConsumerServiceBase
             return response;
         }
 
-        foreach (var offset in request.Offsets)
+        var outcomes = await _commitOffsets(
+            request.ConsumerGroup, string.IsNullOrEmpty(request.MemberId) ? null : request.MemberId,
+            request.HasGenerationId ? request.GenerationId : -1, [.. request.Offsets], context.CancellationToken);
+        foreach (var outcome in outcomes)
         {
-            try
+            response.Results.Add(new OffsetCommitResult
             {
-                var committed = await _commitOffset(request.ConsumerGroup, offset.Topic, offset.Partition, offset.Offset, context.CancellationToken);
-                response.Results.Add(new OffsetCommitResult
-                {
-                    Topic = offset.Topic,
-                    Partition = offset.Partition,
-                    Status = committed
-                        ? ResponseStatusFactory.Success
-                        : ResponseStatusFactory.CoordinatorNotAvailable("The offset could not be committed now")
-                });
-            }
-            catch (Exception ex)
-            {
-                response.Results.Add(new OffsetCommitResult
-                {
-                    Topic = offset.Topic,
-                    Partition = offset.Partition,
-                    Status = ResponseStatusFactory.FromException(ex)
-                });
-            }
+                Topic = outcome.Topic,
+                Partition = outcome.Partition,
+                Status = StatusOf(outcome.Error),
+            });
         }
-
+        if (outcomes.Any(o => o.Error == ErrorCode.NotCoordinator) && _groupCoordinator?.Invoke(request.ConsumerGroup) is { } coordinator)
+            response.Coordinator = coordinator;
         return response;
     }
 
     public override Task<FetchOffsetsResponse> FetchOffsets(FetchOffsetsRequest request, ServerCallContext context)
     {
         var response = new FetchOffsetsResponse();
-
-        foreach (var partition in request.Partitions)
+        if (_fetchOffsets == null)
         {
-            var offset = _getCommittedOffset?.Invoke(request.ConsumerGroup, partition.Topic, partition.Partition) ?? -1;
-            response.Results.Add(new OffsetFetchResult
+            foreach (var partition in request.Partitions)
             {
-                Topic = partition.Topic,
-                Partition = partition.Partition,
-                Offset = offset,
-                Status = ResponseStatusFactory.Success
-            });
+                response.Results.Add(new OffsetFetchResult
+                {
+                    Topic = partition.Topic,
+                    Partition = partition.Partition,
+                    Offset = -1,
+                    Status = ResponseStatusFactory.CoordinatorNotAvailable("Offset storage not configured")
+                });
+            }
+            return Task.FromResult(response);
         }
 
+        var outcomes = _fetchOffsets(request.ConsumerGroup, [.. request.Partitions]);
+        foreach (var outcome in outcomes)
+        {
+            response.Results.Add(new OffsetFetchResult
+            {
+                Topic = outcome.Topic,
+                Partition = outcome.Partition,
+                Offset = outcome.Offset,
+                Status = StatusOf(outcome.Error),
+            });
+        }
+        if (outcomes.Any(o => o.Error == ErrorCode.NotCoordinator) && _groupCoordinator?.Invoke(request.ConsumerGroup) is { } coordinator)
+            response.Coordinator = coordinator;
         return Task.FromResult(response);
     }
+
+    private static ResponseStatus StatusOf(ErrorCode error) => error switch
+    {
+        ErrorCode.None => ResponseStatusFactory.Success,
+        ErrorCode.NotCoordinator => ResponseStatusFactory.Error(error, "Another broker coordinates the group; ask the coordinator in this response"),
+        ErrorCode.CoordinatorLoadInProgress => ResponseStatusFactory.Error(error, "The group's coordinator is still reading its offsets; retry"),
+        ErrorCode.CoordinatorNotAvailable => ResponseStatusFactory.CoordinatorNotAvailable("No broker coordinates the group right now; retry"),
+        _ => ResponseStatusFactory.Error(error, $"The group's coordinator refused: {error}"),
+    };
 
     public override Task<ListOffsetsResponse> ListOffsets(ListOffsetsRequest request, ServerCallContext context)
     {
