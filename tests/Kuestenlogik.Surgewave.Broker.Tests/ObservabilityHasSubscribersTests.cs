@@ -63,23 +63,25 @@ public class ObservabilityHasSubscribersTests
         using var ctsA = new CancellationTokenSource();
         using var ctsB = new CancellationTokenSource();
 
+        // A first, and observing, before B starts: with both started at once, HasSubscribers could be B's alone, and
+        // cancelling A before its task ran cancelled the task itself — `await a` then threw.
         var a = Task.Run(async () =>
         {
             try { await foreach (var _ in observability.ObserveAsync(ctsA.Token)) { } }
             catch (OperationCanceledException) { }
-        }, ctsA.Token);
+        });
+        await WaitForAsync(() => observability.HasSubscribers, TimeSpan.FromSeconds(2));
+        Assert.True(observability.HasSubscribers);
+
         var b = Task.Run(async () =>
         {
             try { await foreach (var _ in observability.ObserveAsync(ctsB.Token)) { } }
             catch (OperationCanceledException) { }
-        }, ctsB.Token);
-
-        await WaitForAsync(() => observability.HasSubscribers, TimeSpan.FromSeconds(2));
-        Assert.True(observability.HasSubscribers);
+        });
 
         await ctsA.CancelAsync();
         await a;
-        // B is still observing.
+        // A is gone, so only B can be observing now.
         await WaitForAsync(() => observability.HasSubscribers, TimeSpan.FromSeconds(2));
         Assert.True(observability.HasSubscribers);
 
