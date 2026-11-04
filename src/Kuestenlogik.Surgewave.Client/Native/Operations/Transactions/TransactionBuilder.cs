@@ -14,6 +14,11 @@ public sealed class TransactionBuilder
     private long _producerId;
     private short _producerEpoch;
 
+    // Whether the coordinator has heard of the current transaction: a partition or a group was added. A transaction
+    // it never heard of has nothing to end — the broker refuses EndTxn for it with INVALID_TXN_STATE, as Kafka does —
+    // so it completes here, as the Java producer completes it without a request (#218).
+    private bool _started;
+
     internal TransactionBuilder(SurgewaveNativeClient client, string transactionalId)
     {
         _client = client;
@@ -51,23 +56,29 @@ public sealed class TransactionBuilder
         Dictionary<string, List<int>> topics,
         CancellationToken cancellationToken = default)
     {
+        _started = true;
         return _client.Transactions.AddPartitionsToTxnAsync(_transactionalId, _producerId, _producerEpoch, topics, cancellationToken);
     }
 
     /// <summary>
-    /// Commit the transaction.
+    /// Commit the transaction. One that added nothing completes without a request.
     /// </summary>
-    public Task<SurgewaveErrorCode> CommitAsync(CancellationToken cancellationToken = default)
-    {
-        return _client.Transactions.EndTxnAsync(_transactionalId, _producerId, _producerEpoch, commit: true, cancellationToken);
-    }
+    public Task<SurgewaveErrorCode> CommitAsync(CancellationToken cancellationToken = default) => EndAsync(commit: true, cancellationToken);
 
     /// <summary>
-    /// Abort the transaction.
+    /// Abort the transaction. One that added nothing completes without a request.
     /// </summary>
-    public Task<SurgewaveErrorCode> AbortAsync(CancellationToken cancellationToken = default)
+    public Task<SurgewaveErrorCode> AbortAsync(CancellationToken cancellationToken = default) => EndAsync(commit: false, cancellationToken);
+
+    private async Task<SurgewaveErrorCode> EndAsync(bool commit, CancellationToken cancellationToken)
     {
-        return _client.Transactions.EndTxnAsync(_transactionalId, _producerId, _producerEpoch, commit: false, cancellationToken);
+        if (!_started)
+            return SurgewaveErrorCode.None;
+
+        var result = await _client.Transactions.EndTxnAsync(_transactionalId, _producerId, _producerEpoch, commit, cancellationToken);
+        if (result == SurgewaveErrorCode.None)
+            _started = false; // the next transaction starts with its first partition or group
+        return result;
     }
 
     /// <summary>
@@ -84,6 +95,7 @@ public sealed class TransactionBuilder
         CancellationToken cancellationToken = default)
     {
         // First, add the consumer group to the transaction
+        _started = true;
         var addResult = await _client.Transactions.AddOffsetsToTxnAsync(
             _transactionalId, _producerId, _producerEpoch, groupId, cancellationToken);
 
