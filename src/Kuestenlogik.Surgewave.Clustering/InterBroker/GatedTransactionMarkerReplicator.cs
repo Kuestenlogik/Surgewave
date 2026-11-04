@@ -49,12 +49,14 @@ public sealed partial class GatedTransactionMarkerReplicator : ITransactionMarke
         if (_kafkaWireFallback is not null)
             return _kafkaWireFallback.ReplicateMarkersAsync(transactionalId, producerId, producerEpoch, partitions, commit, coordinatorEpoch, cancellationToken);
 
-        // Cluster pinned to the Kafka wire but this broker cannot speak it (native-only, no plugin).
-        // Report failure so the coordinator does not treat the markers as durably replicated.
-        LogNoTransport(transactionalId);
-        return Task.FromResult(new MarkerReplicationResult { IsSuccess = false });
+        // Cluster pinned to the Kafka wire but this broker cannot speak it (native-only, no plugin). Every broker
+        // serves the native inter-broker frames whatever the finalized level, so the markers go native (#197): a
+        // transaction completes only once its partitions' leaders have them, and refusing to send would leave every
+        // transaction of this broker prepared.
+        LogNativeWithoutWire(transactionalId);
+        return _nativeReplicator.ReplicateMarkersAsync(transactionalId, producerId, producerEpoch, partitions, commit, coordinatorEpoch, cancellationToken);
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Cannot replicate txn markers for {TransactionalId}: cluster is finalized to the Kafka wire but no Kafka-wire replicator is available (native-only broker)")]
-    private partial void LogNoTransport(string transactionalId);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Markers of {TransactionalId} go native: the cluster is finalized to the Kafka wire, which this broker does not speak")]
+    private partial void LogNativeWithoutWire(string transactionalId);
 }

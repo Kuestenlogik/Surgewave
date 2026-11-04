@@ -50,8 +50,7 @@ public sealed class TransactionCoordinatorClusterTests(ITestOutputHelper output)
             () => CoordinatorCluster.LeaderOf(controller, topic, 0) > 0, timeout: TimeSpan.FromSeconds(30), ct: ct, output: output));
         var leader = _cluster.Brokers.Single(b => b.BrokerId == CoordinatorCluster.LeaderOf(controller, topic, 0));
 
-        // A transactional id the topic's leader coordinates: a produce is verified on the broker that coordinates the
-        // id. Verifying through the coordinator from another broker is the next slice of #197.
+        // A transactional id the topic's leader coordinates, so stopping that one broker takes both away.
         var transactionalId = Enumerable.Range(0, 1000).Select(i => $"orders-tx-{i}")
             .First(id => _cluster.CoordinatorOf(CoordinatorKind.Transaction, id) == leader);
         var survivor = _cluster.Brokers.First(b => b != leader);
@@ -82,6 +81,69 @@ public sealed class TransactionCoordinatorClusterTests(ITestOutputHelper output)
         output.WriteLine($"first producer: {failed.Error.Code} ({failed.Error.Reason}), fatal={failed.Error.IsFatal}");
         Assert.True(failed.Error.Code is ErrorCode.Local_Fenced or ErrorCode.ProducerFenced or ErrorCode.InvalidProducerEpoch,
             $"the previous producer was not fenced: {failed.Error.Code} ({failed.Error.Reason})");
+    }
+
+    /// <summary>
+    /// A transaction writes to partitions led by brokers other than its coordinator (#197): each leader verifies the
+    /// batch with the coordinator, and each gets its marker. A leader used to ask only its own broker's coordinator,
+    /// which answered NOT_COORDINATOR, and the batch was never appended.
+    /// </summary>
+    [Fact(Timeout = 240_000)]
+    public async Task ATransactionAcrossPartitionsLedByOtherBrokersCommitsAndAborts()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var topic = $"orders-{Guid.NewGuid():N}";
+        const int partitions = 3;
+
+        var controller = _cluster.Brokers.Single(b => b.IsController);
+        using (var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = controller.BootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([new TopicSpecification { Name = topic, NumPartitions = partitions, ReplicationFactor = 3 }]);
+        }
+        Assert.True(await TestWaitHelpers.WaitForConditionAsync(
+            () => _cluster.Brokers.All(b => Enumerable.Range(0, partitions).All(p => CoordinatorCluster.LeaderOf(b, topic, p) > 0)),
+            timeout: TimeSpan.FromSeconds(30), ct: ct, output: output));
+
+        var leaders = Enumerable.Range(0, partitions).Select(p => CoordinatorCluster.LeaderOf(controller, topic, p)!.Value).ToList();
+        var coordinator = _cluster.CoordinatorOf(CoordinatorKind.Transaction, "orders-tx");
+        output.WriteLine($"orders-tx is coordinated by broker {coordinator.BrokerId}; {topic} is led by {string.Join(",", leaders)}");
+        Assert.Contains(leaders, l => l != coordinator.BrokerId);
+
+        using var producer = NewProducer(controller, "orders-tx");
+        producer.InitTransactions(TimeSpan.FromSeconds(60));
+
+        producer.BeginTransaction();
+        for (var p = 0; p < partitions; p++)
+            await producer.ProduceAsync(new TopicPartition(topic, p), new Message<Null, string> { Value = $"aborted-{p}" }, ct);
+        producer.AbortTransaction(TimeSpan.FromSeconds(60));
+
+        producer.BeginTransaction();
+        for (var p = 0; p < partitions; p++)
+            await producer.ProduceAsync(new TopicPartition(topic, p), new Message<Null, string> { Value = $"committed-{p}" }, ct);
+        producer.CommitTransaction(TimeSpan.FromSeconds(60));
+
+        // A read-committed consumer gets past the aborted batches only once their markers are on the partitions'
+        // leaders, and sees the committed ones only once theirs are.
+        using var consumer = new ConsumerBuilder<Null, string>(new ConsumerConfig
+        {
+            BootstrapServers = controller.BootstrapServers,
+            GroupId = $"readers-{Guid.NewGuid():N}",
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            IsolationLevel = IsolationLevel.ReadCommitted,
+            EnableAutoCommit = false,
+        }).Build();
+        consumer.Assign(Enumerable.Range(0, partitions).Select(p => new TopicPartitionOffset(topic, p, Offset.Beginning)));
+
+        var seen = new List<string>();
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (seen.Count < partitions && DateTime.UtcNow < deadline)
+        {
+            var record = consumer.Consume(TimeSpan.FromSeconds(5));
+            if (record?.Message is { } message)
+                seen.Add(message.Value);
+        }
+
+        Assert.Equal(Enumerable.Range(0, partitions).Select(p => $"committed-{p}").Order(), seen.Order());
     }
 
     private static IProducer<Null, string> NewProducer(SurgewaveRuntime broker, string transactionalId) =>

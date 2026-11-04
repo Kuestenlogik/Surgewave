@@ -155,15 +155,18 @@ public class NativeTransactionMarkerTests
         Assert.Equal(1, fallback.Calls);
     }
 
+    // #197 — every broker serves native frames, and a transaction completes only once its leaders have the markers:
+    // a broker without the Kafka wire sends them native rather than none at all.
     [Fact]
-    public async Task Gate_KafkaWirePinned_NoFallback_ReportsFailure()
+    public async Task Gate_KafkaWirePinned_NoFallback_RoutesToNative()
     {
         var state = new ClusterState(); // empty → finalized KafkaWire
-        var gate = new GatedTransactionMarkerReplicator(state, new RecordingReplicator(), kafkaWireFallback: null, NullLogger<GatedTransactionMarkerReplicator>.Instance);
+        var native = new RecordingReplicator();
+        var gate = new GatedTransactionMarkerReplicator(state, native, kafkaWireFallback: null, NullLogger<GatedTransactionMarkerReplicator>.Instance);
 
-        var result = await gate.ReplicateMarkersAsync("t", 1, 1, [new TopicPartition { Topic = "x", Partition = 0 }], true, 1, CancellationToken.None);
+        await gate.ReplicateMarkersAsync("t", 1, 1, [new TopicPartition { Topic = "x", Partition = 0 }], true, 1, CancellationToken.None);
 
-        Assert.False(result.IsSuccess);
+        Assert.Equal(1, native.Calls);
     }
 
     // ── End-to-end over TCP loopback ─────────────────────────────────────────

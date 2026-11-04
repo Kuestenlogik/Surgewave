@@ -61,9 +61,10 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
             return result;
         }
 
-        // Group partitions by follower broker, recording each partition's outcome (#72 Inc6): a
-        // partition unknown to cluster state is a VISIBLE skip rather than a silent drop.
-        var brokerPartitions = GroupPartitionsByFollowerBroker(partitions, result);
+        // Group partitions by their leader, recording each partition's outcome (#72 Inc6): a partition
+        // unknown to cluster state is a VISIBLE skip rather than a silent drop.
+        var brokerPartitions = GroupPartitionsByLeader(partitions, result);
+        var sentTo = brokerPartitions.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
         // Log-only min.insync.replicas assessment, shared verbatim with the native replicator.
         AssessMinIsr(transactionalId, partitions);
@@ -115,6 +116,7 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
             // Check if we have enough replicas acknowledged
             if (MeetsReplicationRequirements(result, partitions))
             {
+                MarkOutcomes(result, sentTo);
                 result.IsSuccess = true;
                 LogReplicationSucceeded(
                     transactionalId,
@@ -143,6 +145,7 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
             }
         }
 
+        MarkOutcomes(result, sentTo);
         result.IsSuccess = false;
         LogReplicationFailed(
             transactionalId,
@@ -153,10 +156,10 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
     }
 
     /// <summary>
-    /// Groups partitions by the follower brokers that host replicas.
-    /// Excludes the local broker (leader).
+    /// Groups partitions by their leader (#197): the leader appends the marker and its followers fetch it, as on the
+    /// native wire. A partition this broker leads is the coordinator's to write, one without a leader waits for one.
     /// </summary>
-    private Dictionary<int, List<PartitionTopicPair>> GroupPartitionsByFollowerBroker(
+    private Dictionary<int, List<PartitionTopicPair>> GroupPartitionsByLeader(
         IEnumerable<TopicPartition> partitions, MarkerReplicationResult result)
     {
         var brokerPartitions = new Dictionary<int, List<PartitionTopicPair>>();
@@ -169,25 +172,37 @@ internal sealed partial class TransactionMarkerReplicator : ITransactionMarkerRe
                 result.PartitionOutcomes[tp] = MarkerPartitionOutcome.SkippedUnknownPartition;
                 continue;
             }
-
-            result.PartitionOutcomes[tp] = MarkerPartitionOutcome.Replicated; // dispatched to its followers
-
-            // Get all replicas except the local broker
-            foreach (var replicaId in state.Replicas)
+            if (state.LeaderBrokerId < 0)
             {
-                if (replicaId == _localBrokerId) continue;
-
-                if (!brokerPartitions.TryGetValue(replicaId, out var list))
-                {
-                    list = [];
-                    brokerPartitions[replicaId] = list;
-                }
-
-                list.Add(new PartitionTopicPair(tp.Topic, tp.Partition));
+                result.PartitionOutcomes[tp] = MarkerPartitionOutcome.SkippedNoLeader;
+                continue;
             }
+            if (state.LeaderBrokerId == _localBrokerId)
+            {
+                result.PartitionOutcomes[tp] = MarkerPartitionOutcome.LocalLeader;
+                continue;
+            }
+
+            if (!brokerPartitions.TryGetValue(state.LeaderBrokerId, out var list))
+            {
+                list = [];
+                brokerPartitions[state.LeaderBrokerId] = list;
+            }
+            list.Add(new PartitionTopicPair(tp.Topic, tp.Partition));
         }
 
         return brokerPartitions;
+    }
+
+    // A partition sent to a leader that took the markers is replicated; one whose leader did not, failed.
+    private static void MarkOutcomes(MarkerReplicationResult result, Dictionary<int, List<PartitionTopicPair>> sentTo)
+    {
+        foreach (var (brokerId, sent) in sentTo)
+        {
+            var outcome = result.FailedBrokers.ContainsKey(brokerId) ? MarkerPartitionOutcome.Failed : MarkerPartitionOutcome.Replicated;
+            foreach (var p in sent)
+                result.PartitionOutcomes[new TopicPartition { Topic = p.Topic, Partition = p.Partition }] = outcome;
+        }
     }
 
     // #72 Inc6 — log-only: report the involved partitions under min.insync.replicas via the one shared

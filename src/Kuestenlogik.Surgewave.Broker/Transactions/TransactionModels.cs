@@ -57,6 +57,12 @@ internal sealed class TransactionMetadata
     /// </summary>
     public bool CompletionInProgress { get; set; }
 
+    /// <summary>
+    /// The partitions of this prepared transaction whose marker is written, so a pass that completes it writes only
+    /// the others. Not persisted: a coordinator that takes the transaction over writes every marker again.
+    /// </summary>
+    public HashSet<TopicPartition> MarkersWritten { get; } = new();
+
     public bool IsTimedOut(DateTimeOffset now) => State == TransactionState.Ongoing &&
         TransactionTimeoutMs > 0 &&
         now - TxnStartTime > TimeSpan.FromMilliseconds(TransactionTimeoutMs);

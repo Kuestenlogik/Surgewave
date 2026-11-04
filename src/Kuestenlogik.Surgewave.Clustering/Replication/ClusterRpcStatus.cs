@@ -32,4 +32,7 @@ public enum ClusterRpcStatus : short
     // Kafka ErrorCode members so native and Kafka-wire membership peers interpret them identically.
     BrokerNotAvailable = 8,
     ClusterAuthorizationFailed = 31,
+
+    // #197: a transaction marker was appended but not replicated in time. Pinned to Kafka ErrorCode.NotEnoughReplicas.
+    NotEnoughReplicas = 19,
 }

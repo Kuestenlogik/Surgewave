@@ -18,7 +18,8 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// are protocol-neutral (b2): the former returns <c>ProduceSequenceStatus</c>, the latter takes
 /// only neutral types; the Kafka Produce handler maps to the wire error code at the boundary.
 /// </summary>
-public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator, IProduceTransactionCoordinator, ITransactionMarkerSink
+public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoordinator, IProduceTransactionCoordinator, ITransactionMarkerSink,
+    ITransactionPartitionVerifier
 {
     private readonly ProducerStateManager _producerStateManager;
     private readonly TransactionIndex _transactionIndex;
@@ -26,20 +27,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     private readonly ILogger<TransactionCoordinator> _logger;
     private readonly LogManager _logManager;
     private readonly ConcurrentDictionary<string, TransactionMetadata> _transactionsByTxnId = new();
-    private readonly TransactionMarkerWriter _markerWriter;
+    private readonly TransactionMarkerChannel _markers;
     private readonly TransactionStateLog _stateLog;
     private readonly TransactionTimeoutManager _timeoutManager;
 
-    // #72 Inc7 — best-effort inter-broker marker replication (merged from the now-deleted
-    // ClusteredTransactionCoordinator). Set once during startup wiring, before the coordinator serves
-    // requests; null → markers are written locally only (single broker / no cluster transport),
-    // preserving the prior behavior.
-    private ITransactionMarkerReplicator? _markerReplicator;
     private int _coordinatorEpoch;
 
-    // #72 Inc8 — bounded, partition-scoped retry of the best-effort marker replication.
-    private const int MarkerReplicationMaxAttempts = 3;
-    private static readonly TimeSpan MarkerReplicationRetryBackoff = TimeSpan.FromMilliseconds(50);
+    // The coordinator of a transactional id on another broker, asked by this broker as the leader of a partition the
+    // transaction writes to (#197). Null on a broker on its own, which coordinates every id.
+    private ITransactionPartitionVerifier? _remoteVerifier;
 
     public TransactionCoordinator(
         ProducerStateManager producerStateManager,
@@ -55,8 +51,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         _logger = logger;
         _logManager = logManager;
 
-        // Create helper components
-        _markerWriter = new TransactionMarkerWriter(logManager, logger);
+        _markers = new TransactionMarkerChannel(logManager, transactionIndex, logger);
 
         // The transactions of the partitions of __transaction_state this broker leads (#197): taken over when a
         // partition has been read, let go when another broker leads it.
@@ -83,108 +78,19 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     }
 
     /// <summary>
-    /// #72 Inc7 — wire the best-effort inter-broker marker replicator (the gated native / Kafka-wire
-    /// transport). Called once during startup before the coordinator serves requests; a null replicator
-    /// keeps markers local-only.
+    /// Joins the coordinator to the cluster (#197), once during startup before it serves requests: markers go to the
+    /// leaders of the transaction's partitions through <paramref name="markerReplicator"/>, a marker this broker writes
+    /// counts once <paramref name="commitGate"/> says it is replicated, and a partition this broker leads is verified
+    /// with the transactional id's coordinator through <paramref name="remoteVerifier"/> when that is another broker.
     /// </summary>
-    public void SetMarkerReplicator(ITransactionMarkerReplicator? markerReplicator)
-        => _markerReplicator = markerReplicator;
-
-    /// <summary>
-    /// #72 Inc7/Inc8 — replicate the just-written commit/abort markers to follower brokers, best-effort
-    /// (merged from the deleted ClusteredTransactionCoordinator), with a bounded retry of ONLY the
-    /// not-yet-acked partitions (#72 Inc8). EndTxn latency now depends on the remote transport, but the
-    /// replication NEVER fails the transaction — the markers are already durable in the local log, so a
-    /// failed result, a transport throw, a cancelled replication, or exhausting the retries are all
-    /// swallowed and logged. No-op when no replicator is wired or there are no partitions.
-    /// <para>
-    /// The retry is partition-scoped because the receive side does NOT dedup markers: re-sending a
-    /// partition whose marker was already applied would double-write it, so only partitions the transport
-    /// did not confirm (per the Inc6 per-partition outcomes) are retried. The happy path (all acked on the
-    /// first attempt) adds no latency; the retry only engages on an actual replication shortfall and is
-    /// bounded so EndTxn latency stays capped.
-    /// </para>
-    /// </summary>
-    private async Task ReplicateMarkersBestEffortAsync(TransactionMetadata txnMetadata, bool commit, CancellationToken ct)
+    public void JoinCluster(
+        ITransactionMarkerReplicator? markerReplicator,
+        Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? commitGate,
+        ITransactionPartitionVerifier? remoteVerifier)
     {
-        if (_markerReplicator is null || txnMetadata.Partitions.Count == 0)
-            return;
-
-        IReadOnlyList<TopicPartition> pending = [.. txnMetadata.Partitions];
-        for (var attempt = 1; ; attempt++)
-        {
-            MarkerReplicationResult result;
-            try
-            {
-                result = await _markerReplicator.ReplicateMarkersAsync(
-                    txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch,
-                    pending, commit, _coordinatorEpoch, ct);
-            }
-            catch (Exception ex)
-            {
-                // Best-effort: the local markers are already durable, so a transport throw or a cancelled
-                // replication must NEVER fail a commit. Swallow and log.
-                _logger.LogWarning(ex,
-                    "Transaction {TransactionalId}: marker replication threw on attempt {Attempt} — proceeding best-effort, markers are durable locally",
-                    txnMetadata.TransactionalId, attempt);
-                return;
-            }
-
-            var stillPending = NotAcked(result, pending);
-            if (stillPending.Count == 0)
-            {
-                // A coarse transport (e.g. the Kafka wire) may report incomplete without a per-partition
-                // failure target; surface it, but there is nothing dedup-safe to retry.
-                if (!result.IsSuccess)
-                    _logger.LogWarning(
-                        "Transaction {TransactionalId}: marker replication reported incomplete with no per-partition retry target — proceeding best-effort, markers are durable locally",
-                        txnMetadata.TransactionalId);
-                return;
-            }
-
-            if (attempt >= MarkerReplicationMaxAttempts)
-            {
-                _logger.LogWarning(
-                    "Transaction {TransactionalId}: {Count} partition(s) still unreplicated after {Attempts} attempt(s) — proceeding best-effort, markers are durable locally",
-                    txnMetadata.TransactionalId, stillPending.Count, attempt);
-                return;
-            }
-
-            pending = stillPending;
-            try
-            {
-                await Task.Delay(MarkerReplicationRetryBackoff, ct);
-            }
-            catch (Exception)
-            {
-                return; // cancelled during backoff — best-effort
-            }
-        }
-    }
-
-    /// <summary>
-    /// #72 Inc8 — the partitions a retry may re-send: ONLY those the transport EXPLICITLY reported as not
-    /// applied (<see cref="MarkerPartitionOutcome.Failed"/> / <see cref="MarkerPartitionOutcome.SkippedNoLeader"/>
-    /// / <see cref="MarkerPartitionOutcome.SkippedUnknownPartition"/>). A partition marked
-    /// <see cref="MarkerPartitionOutcome.Replicated"/> or <see cref="MarkerPartitionOutcome.LocalLeader"/> —
-    /// or ABSENT from the outcomes (e.g. a trivial <c>Success()</c> with no per-partition detail) — is
-    /// treated as acked and never re-sent, so the receive side (which does not dedup) never double-writes a
-    /// marker the transport did not report as failed.
-    /// </summary>
-    private static List<TopicPartition> NotAcked(MarkerReplicationResult result, IReadOnlyList<TopicPartition> attempted)
-    {
-        var notAcked = new List<TopicPartition>();
-        foreach (var tp in attempted)
-        {
-            if (result.PartitionOutcomes.TryGetValue(tp, out var outcome)
-                && outcome is MarkerPartitionOutcome.Failed
-                    or MarkerPartitionOutcome.SkippedNoLeader
-                    or MarkerPartitionOutcome.SkippedUnknownPartition)
-            {
-                notAcked.Add(tp);
-            }
-        }
-        return notAcked;
+        _markers.Replicator = markerReplicator;
+        _markers.CommitGate = commitGate;
+        _remoteVerifier = remoteVerifier;
     }
 
     /// <summary>
@@ -230,7 +136,30 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         => _transactionIndex.RecordTransactionalBatch(partition, producerId, baseOffset);
 
     /// <inheritdoc />
-    public Task<TxnErrorStatus> VerifyTransactionalBatchAsync(
+    /// <remarks>
+    /// The transactional id's coordinator answers. This broker leads the partition, and in a cluster another broker
+    /// mostly coordinates the id: then it is asked (#197), as Kafka's leaders send AddPartitionsToTxn v4+.
+    /// </remarks>
+    public async Task<TxnErrorStatus> VerifyTransactionalBatchAsync(
+        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version,
+        CancellationToken cancellationToken)
+    {
+        var status = await VerifyHereAsync(transactionalId, producerId, producerEpoch, partition, version, cancellationToken);
+        if (status != TxnErrorStatus.NotCoordinator || _remoteVerifier is null)
+            return status;
+        return await _remoteVerifier.VerifyPartitionAsync(transactionalId, producerId, producerEpoch, partition, version, cancellationToken);
+    }
+
+    /// <summary>
+    /// The answer of this broker's coordinator alone, for a partition leader that asked it over the inter-broker
+    /// channel: it never asks on, so a request between two brokers that each think the other coordinates the id ends.
+    /// </summary>
+    Task<TxnErrorStatus> ITransactionPartitionVerifier.VerifyPartitionAsync(
+        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version,
+        CancellationToken cancellationToken)
+        => VerifyHereAsync(transactionalId, producerId, producerEpoch, partition, version, cancellationToken);
+
+    private Task<TxnErrorStatus> VerifyHereAsync(
         string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version,
         CancellationToken cancellationToken)
         => WithTransactionAsync(transactionalId, producerId, producerEpoch, txn =>
@@ -368,11 +297,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
                         txnMetadata.TransactionalId,
                         txnMetadata.Partitions.Count);
 
-                    var abortOffset = await _markerWriter.WriteMarkersAsync(txnMetadata, commit: false, cancellationToken);
-                    _transactionIndex.AbortTransaction(txnMetadata.ProducerId, txnMetadata.Partitions, abortOffset);
-
-                    // #72 Inc7 — replicate the fencing abort markers best-effort before the partitions are cleared.
-                    await ReplicateMarkersBestEffortAsync(txnMetadata, commit: false, cancellationToken);
+                    // The abort is durable before any marker is written, so a coordinator that takes over completes it.
+                    var prepared = await PrepareAsync(txnMetadata, commit: false, cancellationToken);
+                    if (prepared != TxnErrorStatus.None)
+                        return new InitProducerIdResult(prepared, NoProducerId, NoProducerEpoch);
+                    var written = await WriteMarkersAsync(txnMetadata, commit: false, cancellationToken);
+                    txnMetadata.CompletionInProgress = false;
+                    if (!written)
+                    {
+                        // A partition's leader did not take its marker: the expiry pass completes the abort, and the
+                        // producer retries meanwhile, as Kafka answers it.
+                        return new InitProducerIdResult(TxnErrorStatus.ConcurrentTransactions, NoProducerId, NoProducerEpoch);
+                    }
                 }
 
                 ClearTransactionContents(txnMetadata);
@@ -609,6 +545,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             txn.Lock.Release();
         }
 
+        // The outcome is decided and durable: the answer does not wait for a partition leader that cannot take its
+        // marker now — the expiry pass completes the transaction, and the producer is answered
+        // CONCURRENT_TRANSACTIONS meanwhile.
         var (producerId, producerEpoch) = await WriteMarkersAndCompleteAsync(txn, request.Committed, cancellationToken);
         return new EndTxnResult(TxnErrorStatus.None, producerId, producerEpoch);
     }
@@ -841,27 +780,51 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     }
 
     /// <summary>
+    /// Writes the markers of a prepared transaction to the partitions that lack one yet, each on its leader. True once
+    /// every partition has its marker. Called by the one completing the transaction.
+    /// </summary>
+    private async Task<bool> WriteMarkersAsync(TransactionMetadata txn, bool commit, CancellationToken cancellationToken)
+    {
+        var outstanding = txn.Partitions.Where(p => !txn.MarkersWritten.Contains(p)).ToList();
+        if (outstanding.Count == 0)
+            return true;
+
+        var written = await _markers.WriteAsync(txn, outstanding, commit, _coordinatorEpoch, cancellationToken);
+        txn.MarkersWritten.UnionWith(written);
+        if (txn.MarkersWritten.Count >= txn.Partitions.Count)
+            return true;
+
+        _logger.LogWarning(
+            "Transaction {TransactionalId}: {Count} partition(s) have no {Marker} marker yet; the next pass writes them",
+            txn.TransactionalId, outstanding.Count - written.Count, commit ? "COMMIT" : "ABORT");
+        return false;
+    }
+
+    /// <summary>
     /// Writes the markers of a prepared transaction, commits or discards its offsets, and completes it.
     /// Runs without the lock — the transaction is visibly in PrepareCommit / PrepareAbort meanwhile, so a
     /// concurrent request is answered CONCURRENT_TRANSACTIONS — and takes it to complete. Returns the producer
     /// id and epoch the client continues with.
     /// </summary>
+    /// <remarks>
+    /// A transaction completes once every partition has its marker (#197): one whose leader did not take it stays
+    /// prepared, and the expiry pass tries again.
+    /// </remarks>
     private async Task<(long ProducerId, short ProducerEpoch)> WriteMarkersAndCompleteAsync(
         TransactionMetadata txn, bool commit, CancellationToken cancellationToken)
     {
-        if (txn.Partitions.Count > 0)
+        if (!await WriteMarkersAsync(txn, commit, cancellationToken))
         {
-            var markerOffset = await _markerWriter.WriteMarkersAsync(txn, commit, cancellationToken);
-
-            // #72 Inc7 — replicate the markers to follower brokers (best-effort). EndTxn latency now depends
-            // on the remote transport, but a replication failure does not fail the commit (markers are
-            // durable locally). No-op for a single broker (no remote leaders) or when no transport is wired.
-            await ReplicateMarkersBestEffortAsync(txn, commit, cancellationToken);
-
-            if (commit)
-                _transactionIndex.CommitTransaction(txn.ProducerId, txn.Partitions, markerOffset);
-            else
-                _transactionIndex.AbortTransaction(txn.ProducerId, txn.Partitions, markerOffset);
+            await txn.Lock.WaitAsync(CancellationToken.None);
+            try
+            {
+                txn.CompletionInProgress = false;
+                return txn.NextProducerId != -1 ? (txn.NextProducerId, (short)0) : (txn.ProducerId, txn.ProducerEpoch);
+            }
+            finally
+            {
+                txn.Lock.Release();
+            }
         }
 
         if (commit)
@@ -925,6 +888,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     private static void ClearTransactionContents(TransactionMetadata txn)
     {
         txn.Partitions.Clear();
+        txn.MarkersWritten.Clear();
         txn.ConsumerGroups.Clear();
         txn.PendingOffsets.Clear();
     }

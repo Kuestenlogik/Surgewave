@@ -623,17 +623,24 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 markerSink: _transactionCoordinator, // #60 Inc7: apply native WriteTxnMarkers to the txn index
                 registrationCoordinator: registrationCoordinator,
                 shutdownCoordinator: _clusterController,
-                topicCreator: _clusterController)));
+                topicCreator: _clusterController,
+                transactionVerifier: _transactionCoordinator,
+                commitGate: new ReplicaCommitGate(_clusterState, _replicaManager))));
 
-        // #72 Inc7 — wire best-effort marker replication into the LIVE coordinator over the same native
-        // transport (gated by the finalized inter-broker level; no Kafka-wire fallback in the embedded
-        // runtime). EndTxn now replicates commit/abort markers to the follower leaders, best-effort.
+        // The coordinator joins the cluster over the same native transport (#197): markers go to the partitions'
+        // leaders (gated by the finalized inter-broker level; no Kafka-wire fallback in the embedded runtime), and a
+        // partition this broker leads is verified with the transactional id's coordinator.
         var nativeMarkerReplicator = new NativeTransactionMarkerReplicator(
             _connectionPool, _clusterState, clusteringConfig.BrokerId,
             _loggerFactory.CreateLogger<NativeTransactionMarkerReplicator>());
-        _transactionCoordinator!.SetMarkerReplicator(new GatedTransactionMarkerReplicator(
-            _clusterState, nativeMarkerReplicator, kafkaWireFallback: null,
-            _loggerFactory.CreateLogger<GatedTransactionMarkerReplicator>()));
+        _transactionCoordinator!.JoinCluster(
+            new GatedTransactionMarkerReplicator(
+                _clusterState, nativeMarkerReplicator, kafkaWireFallback: null,
+                _loggerFactory.CreateLogger<GatedTransactionMarkerReplicator>()),
+            new ReplicaCommitGate(_clusterState, _replicaManager),
+            new NativeTransactionVerifier(
+                _connectionPool, _clusterState, clusteringConfig.BrokerId,
+                _loggerFactory.CreateLogger<NativeTransactionVerifier>()));
 
         // #60 Inc6b — the native broker-lifecycle loop: registers this broker with the controller over
         // the ReplicationPort and heartbeats, so a plugin-free broker JOINS. It no-ops on the

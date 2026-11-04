@@ -68,8 +68,9 @@ public class TransactionMarkerReplicatorTests : IDisposable
         // Act
         var result = await replicator.ReplicateMarkersAsync(txnMetadata.TransactionalId, txnMetadata.ProducerId, txnMetadata.ProducerEpoch, [.. txnMetadata.Partitions], commit: true, coordinatorEpoch: 1, CancellationToken.None);
 
-        // Assert
+        // Assert: this broker leads it, so the marker is the coordinator's to write (#197)
         Assert.True(result.IsSuccess);
+        Assert.Equal(MarkerPartitionOutcome.LocalLeader, result.PartitionOutcomes[tp]);
     }
 
     [Fact]
@@ -198,8 +199,9 @@ public class TransactionMarkerReplicatorTests : IDisposable
     {
         // Arrange
         var replicator = CreateReplicator();
+        // Led by broker 2: the marker goes to it, and the cancelled send throws.
         var tp = new TopicPartition { Topic = "test-topic", Partition = 0 };
-        _clusterState.AssignReplicas(tp, [1, 2, 3]);
+        _clusterState.AssignReplicas(tp, [2, 1, 3]);
         var txnMetadata = CreateTransactionMetadata("test-txn", partitions: [tp]);
 
         using var cts = new CancellationTokenSource();

@@ -57,4 +57,11 @@ public interface INativeInterBrokerService
     /// broker is not the controller, so the caller asks the real one.
     /// </summary>
     ValueTask<ClusterRpcStatus> ApplyCreateTopicAsync(CreateTopicPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Answer a partition leader's question about a partition of a transaction this broker coordinates (#197).
+    /// <c>NotCoordinator</c> when it coordinates the transactional id no longer, so the leader asks the real one.
+    /// </summary>
+    ValueTask<Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus> VerifyTxnPartitionAsync(
+        VerifyTxnPartitionPayload payload, CancellationToken ct = default);
 }

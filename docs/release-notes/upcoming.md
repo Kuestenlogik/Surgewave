@@ -181,8 +181,26 @@ so does Surgewave now:
   `NOT_COORDINATOR` (KAFKA-21181), and one still reading the partition
   answers `COORDINATOR_LOAD_IN_PROGRESS`.
 
-A partition led by another broker than the transaction's coordinator is not
-yet verified through the coordinator; that is the next part of #197.
+### A transaction spans partitions led by any broker (#197)
+
+A transaction could only write to partitions its coordinator led. A
+partition's leader asked its own broker about the transaction, was told
+`NOT_COORDINATOR`, and the batch was never appended. Now, as in Kafka:
+
+- **Verification through the coordinator:** the leader asks the
+  transactional id's coordinator over the inter-broker channel. Kafka does
+  this with AddPartitionsToTxn v4+. Under transactions V1 the leader checks
+  that the partition was added; under V2 the coordinator adds it.
+- **Markers on the leaders:** each commit or abort marker is written by the
+  partition's leader and counts once its in-sync replicas have it. The
+  coordinator used to write every marker into its own log, which for a
+  partition led elsewhere was only a follower's copy, and send the markers
+  on best-effort.
+- **Complete once every marker is written:** a transaction whose leader
+  does not take its marker stays prepared. The coordinator writes the
+  missing markers on its next pass, and the producer is answered
+  `CONCURRENT_TRANSACTIONS` meanwhile. EndTxn is still answered once the
+  outcome is durable.
 
 ### A topic created through any broker is a topic of the cluster (#207, #208)
 
@@ -195,6 +213,13 @@ retriable error: `NOT_CONTROLLER` for CreateTopics, `LEADER_NOT_AVAILABLE`
 for Metadata. Metadata also takes a topic's partitions from the cluster's
 view. A broker hosting one partition of two used to report a topic of one
 partition, and a group leader that asked it assigned only that one.
+
+### A commit after an abort is visible to read-committed consumers
+
+An aborted transaction hid every later batch of its producer from
+read-committed consumers, not only its own batches, because its aborted
+range had no end. A producer that committed after an abort stayed
+invisible. The range now ends at the abort marker.
 
 ### Committing or aborting an empty native transaction succeeds (#218)
 

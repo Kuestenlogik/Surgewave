@@ -203,6 +203,9 @@ public enum SurgewaveOpCode : ushort
     // #207 — a broker that is not the controller hands a topic creation to the controller.
     InterBrokerCreateTopic = 0x1509,
 
+    // #197 — a partition leader asks a transactional id's coordinator about a partition of the transaction.
+    InterBrokerVerifyTxnPartition = 0x150A,
+
     // #60 — inter-broker Raft/KRaft consensus (0x16xx). The real consensus already rides a
     // hand-rolled framing on the ReplicationPort (Family B); these opcodes are for unifying it
     // onto the SRWV frame later (Inc8, optional).

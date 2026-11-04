@@ -765,9 +765,16 @@ builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog>().FollowLeadershipOf(
         sp.GetRequiredService<ReplicaManager>(),
         sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>());
-    // #72 Inc7 — wire the gated (native / Kafka-wire) marker replicator so EndTxn replicates markers
-    // to follower brokers best-effort. The gate is the host's unkeyed ITransactionMarkerReplicator.
-    coordinator.SetMarkerReplicator(sp.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerReplicator>());
+    // Markers go to the partitions' leaders through the gated (native / Kafka-wire) replicator — the host's unkeyed
+    // ITransactionMarkerReplicator — and a partition this broker leads is verified with the id's coordinator (#197).
+    coordinator.JoinCluster(
+        sp.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerReplicator>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(),
+        new NativeTransactionVerifier(
+            sp.GetRequiredService<ConnectionPool>(),
+            sp.GetRequiredService<ClusterState>(),
+            sp.GetRequiredService<ClusteringConfig>().BrokerId,
+            sp.GetRequiredService<ILogger<NativeTransactionVerifier>>()));
     return coordinator;
 });
 // Neutral contract (#59) resolves to the same singleton so the Kafka adapter (TransactionApiHandler)
@@ -993,7 +1000,9 @@ replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
         markerSink: app.Services.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerSink>(),
         registrationCoordinator: registrationCoordinator,
         shutdownCoordinator: clusterController,
-        topicCreator: clusterController)));
+        topicCreator: clusterController,
+        transactionVerifier: app.Services.GetRequiredService<TransactionCoordinator>(),
+        commitGate: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>())));
 
 // #60 Inc6b — the native broker-lifecycle loop: a plugin-free broker registers with the controller
 // over the ReplicationPort and heartbeats, so it JOINS the cluster. No-ops on the controller/seed

@@ -26,6 +26,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly BrokerRegistrationCoordinator? _registrationCoordinator;
     private readonly IControlledShutdownCoordinator? _shutdownCoordinator;
     private readonly IClusterTopicCreator? _topicCreator;
+    private readonly ITransactionPartitionVerifier? _transactionVerifier;
+    private readonly Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? _commitGate;
 
     public ClusterStateInterBrokerService(
         ILogger<ClusterStateInterBrokerService> logger,
@@ -38,7 +40,9 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         ITransactionMarkerSink? markerSink = null,
         BrokerRegistrationCoordinator? registrationCoordinator = null,
         IControlledShutdownCoordinator? shutdownCoordinator = null,
-        IClusterTopicCreator? topicCreator = null)
+        IClusterTopicCreator? topicCreator = null,
+        ITransactionPartitionVerifier? transactionVerifier = null,
+        Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? commitGate = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -51,6 +55,18 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _registrationCoordinator = registrationCoordinator;
         _shutdownCoordinator = shutdownCoordinator;
         _topicCreator = topicCreator;
+        _transactionVerifier = transactionVerifier;
+        _commitGate = commitGate;
+    }
+
+    public async ValueTask<TxnErrorStatus> VerifyTxnPartitionAsync(VerifyTxnPartitionPayload payload, CancellationToken ct = default)
+    {
+        // The verifier here is this broker's own coordinator, which answers for the ids it coordinates and never
+        // asks on — a coordinator that lost the id since the leader looked says NotCoordinator, and the leader retries.
+        if (_transactionVerifier is null)
+            return TxnErrorStatus.NotCoordinator;
+        return await _transactionVerifier.VerifyPartitionAsync(
+            payload.TransactionalId, payload.ProducerId, payload.ProducerEpoch, payload.Partition, payload.Version, ct).ConfigureAwait(false);
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyCreateTopicAsync(CreateTopicPayload payload, CancellationToken ct = default)
@@ -156,6 +172,15 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
                 var markerBatch = ControlBatchBuilder.BuildTransactionMarker(payload.ProducerId, payload.ProducerEpoch, controlType);
                 var offset = await _logManager.AppendBatchAsync(tp, markerBatch, ct).ConfigureAwait(false);
 
+                // The coordinator completes the transaction once every marker is written, so a marker counts once
+                // the in-sync replicas have it — a leader lost right after the append would otherwise take it along.
+                if (_commitGate is not null
+                    && !await _commitGate.WaitForDurableCommitAsync(tp, offset + 1, MarkerCommitTimeout, ct).ConfigureAwait(false))
+                {
+                    LogTxnMarkerNotDurable(tp.Topic, tp.Partition);
+                    return ClusterRpcStatus.NotEnoughReplicas;
+                }
+
                 if (payload.Commit)
                     _markerSink?.CommitTransaction(payload.ProducerId, [tp], offset);
                 else
@@ -173,6 +198,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         return ClusterRpcStatus.None;
     }
 
+    private static readonly TimeSpan MarkerCommitTimeout = TimeSpan.FromSeconds(5);
+
     private bool IsController => _isrUpdateApplier?.IsController ?? (_clusterState.ControllerId == _localBrokerId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Served controlled shutdown for broker {BrokerId}: {StillLed} partition(s) still with it")]
@@ -186,6 +213,9 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Wrote native {MarkerType} marker for {Topic}-{Partition}, ProducerId={ProducerId}, Offset={Offset}")]
     private partial void LogTxnMarkerWritten(string topic, int partition, long producerId, string markerType, long offset);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Transaction marker for {Topic}-{Partition} was not replicated in time")]
+    private partial void LogTxnMarkerNotDurable(string topic, int partition);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error writing native transaction marker for {Topic}-{Partition}")]
     private partial void LogTxnMarkerError(string topic, int partition, Exception ex);

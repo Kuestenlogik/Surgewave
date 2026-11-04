@@ -77,20 +77,19 @@ public sealed class TransactionIndex
     {
         foreach (var partition in partitions)
         {
-            long firstOffset = 0;
-
-            if (_inFlightTransactions.TryGetValue(partition, out var partitionTxns))
+            // The aborted range runs from the transaction's first batch on this partition to its abort marker; a
+            // producer that wrote nothing here in the transaction has nothing to hide.
+            if (_inFlightTransactions.TryGetValue(partition, out var partitionTxns)
+                && partitionTxns.TryRemove(producerId, out var firstOffset))
             {
-                partitionTxns.TryRemove(producerId, out firstOffset);
+                var abortedTxns = _abortedTransactions.GetOrAdd(partition, _ => new ConcurrentBag<AbortedTransaction>());
+                abortedTxns.Add(new AbortedTransaction
+                {
+                    ProducerId = producerId,
+                    FirstOffset = firstOffset,
+                    LastOffset = abortOffset,
+                });
             }
-
-            // Record the aborted transaction range
-            var abortedTxns = _abortedTransactions.GetOrAdd(partition, _ => new ConcurrentBag<AbortedTransaction>());
-            abortedTxns.Add(new AbortedTransaction
-            {
-                ProducerId = producerId,
-                FirstOffset = firstOffset
-            });
 
             // Recalculate LSO for this partition
             RecalculateLso(partition, abortOffset);
@@ -143,10 +142,12 @@ public sealed class TransactionIndex
             return false;
         }
 
-        // Check if this producer has an aborted transaction that includes this offset
+        // Check if this producer has an aborted transaction that includes this offset. The range ends at the abort
+        // marker: the producer's batches after it belong to a later transaction.
         return abortedTxns.Any(at =>
             at.ProducerId == producerId &&
-            batchBaseOffset >= at.FirstOffset);
+            batchBaseOffset >= at.FirstOffset &&
+            batchBaseOffset < at.LastOffset);
     }
 
     /// <summary>
@@ -241,4 +242,7 @@ public record struct AbortedTransaction
 {
     public long ProducerId { get; init; }
     public long FirstOffset { get; init; }
+
+    /// <summary>The offset of the abort marker that ended the transaction.</summary>
+    public long LastOffset { get; init; }
 }

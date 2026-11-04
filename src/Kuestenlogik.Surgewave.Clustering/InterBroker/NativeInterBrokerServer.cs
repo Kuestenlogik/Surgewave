@@ -75,6 +75,9 @@ public sealed partial class NativeInterBrokerServer
                 return await HandleAsync<CreateTopicPayload>(
                     opcode, payload, static (s, p, ct) => s.ApplyCreateTopicAsync(p, ct), ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerVerifyTxnPartition:
+                return await HandleVerifyTxnPartitionAsync(payload, ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);
@@ -175,6 +178,29 @@ public sealed partial class NativeInterBrokerServer
 
         var status = await _service.ApplyWriteTxnMarkersAsync(request, ct).ConfigureAwait(false);
         return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerWriteTxnMarkers, new WriteTxnMarkersResponsePayload(status));
+    }
+
+    // #197 — the answer is a transaction status, not a cluster RPC status: its own response payload.
+    private async ValueTask<byte[]> HandleVerifyTxnPartitionAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        if (_service is null)
+            return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerVerifyTxnPartition,
+                new VerifyTxnPartitionResponsePayload(Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus.NotCoordinator));
+
+        VerifyTxnPartitionPayload request;
+        try
+        {
+            var reader = new SurgewavePayloadReader(payload.Span);
+            request = VerifyTxnPartitionPayload.Read(ref reader);
+        }
+        catch (Exception ex)
+        {
+            LogDecodeError(SurgewaveOpCode.InterBrokerVerifyTxnPartition, ex);
+            return ErrorFrame(ClusterRpcStatus.Unknown);
+        }
+
+        var status = await _service.VerifyTxnPartitionAsync(request, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerVerifyTxnPartition, new VerifyTxnPartitionResponsePayload(status));
     }
 
     /// <summary>
