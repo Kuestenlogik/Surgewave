@@ -143,6 +143,16 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### A cluster that lost one of three voters elects a leader at once (#225)
+
+An election waited for every voter's answer, the answer of a stopped broker
+included, which came only once its connect attempts gave up, after
+seconds. The two voters still up campaigned in step, each voting for
+itself, round after round: after a broker stopped, the cluster could stay
+without a controller for minutes. An election is now decided as the answers
+arrive: on a majority, once a majority can no longer be reached, or on a
+newer term.
+
 ### Producer ids are unique in the cluster and over restarts (#223)
 
 Every broker handed out producer ids from a counter that started at 1 on each

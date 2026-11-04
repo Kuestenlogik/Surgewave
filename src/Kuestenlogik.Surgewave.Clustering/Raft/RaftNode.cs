@@ -725,20 +725,9 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         var preVoteStarted = DateTimeOffset.UtcNow;
         var preVotes = 1; // Pre-vote for self
-        var preVoteTasks = peers.Select(async peerId =>
-        {
-            try
-            {
-                var response = await _transport.SendPreVoteAsync(peerId, preVoteRequest, ct);
-                return (peerId, response);
-            }
-            catch
-            {
-                return (peerId, (PreVoteResponse?)null);
-            }
-        });
-
-        var preVoteResults = await Task.WhenAll(preVoteTasks);
+        var preVoteResults = await CollectUntilDecidedAsync(
+            peers, peerId => _transport.SendPreVoteAsync(peerId, preVoteRequest, ct),
+            r => r.VoteGranted, r => r.Term > proposedTerm - 1, majority);
 
         lock (_lock)
         {
@@ -825,20 +814,9 @@ public sealed partial class RaftNode : IAsyncDisposable
             LastLogTerm
         );
 
-        var tasks = peers.Select(async peerId =>
-        {
-            try
-            {
-                var response = await _transport.SendRequestVoteAsync(peerId, request, ct);
-                return (peerId, response);
-            }
-            catch
-            {
-                return (peerId, (RequestVoteResponse?)null);
-            }
-        });
-
-        var results = await Task.WhenAll(tasks);
+        var results = await CollectUntilDecidedAsync(
+            peers, peerId => _transport.SendRequestVoteAsync(peerId, request, ct),
+            r => r.VoteGranted, r => r.Term > request.Term, majority);
 
         lock (_lock)
         {
@@ -869,6 +847,48 @@ public sealed partial class RaftNode : IAsyncDisposable
                 BecomeLeader();
             }
         }
+    }
+
+    /// <summary>
+    /// Asks every peer and returns the answers that decided the round (#225): once this node and the grants are a
+    /// majority, once the peers still to answer could no longer make one, or once an answer names a newer term. A peer
+    /// that cannot be reached answers only when its connect attempts gave up — seconds — and waiting for it, as the
+    /// round did, kept the voters that were up campaigning in step, each for itself, round after round.
+    /// </summary>
+    /// <remarks>The peers still asked when the round is decided go on; their answers are not counted.</remarks>
+    private static async Task<List<(int PeerId, TResponse? Response)>> CollectUntilDecidedAsync<TResponse>(
+        IReadOnlyList<int> peers, Func<int, Task<TResponse>> send, Func<TResponse, bool> granted,
+        Func<TResponse, bool> newerTerm, int majority)
+        where TResponse : class
+    {
+        var pending = peers.Select(async peerId =>
+        {
+            try
+            {
+                return (peerId, (TResponse?)await send(peerId).ConfigureAwait(false));
+            }
+            catch
+            {
+                return (peerId, (TResponse?)null);
+            }
+        }).ToList();
+
+        var answers = new List<(int PeerId, TResponse? Response)>(pending.Count);
+        var grants = 1; // this node's own
+        while (pending.Count > 0 && grants < majority && grants + pending.Count >= majority)
+        {
+            var done = await Task.WhenAny(pending).ConfigureAwait(false);
+            pending.Remove(done);
+            var answer = await done.ConfigureAwait(false);
+            answers.Add(answer);
+            if (answer.Item2 is not { } response)
+                continue;
+            if (newerTerm(response))
+                break;
+            if (granted(response))
+                grants++;
+        }
+        return answers;
     }
 
     /// <summary>
