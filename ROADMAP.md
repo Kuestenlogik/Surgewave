@@ -8,7 +8,7 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ## Next up
 
-### M6 — first stable
+### v1.0 — First stable
 
 - [#5](https://github.com/Kuestenlogik/Surgewave/issues/5) **G3 — Public benchmarks on identical hardware** `area:broker` `track:performance`
 
@@ -16,10 +16,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### M1 — Hygiene: CI, dependencies, licences
 
-- [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
-- [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
-- [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
-- [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Keep the licence assignment per project and check it in CI** `area:multi`
 - [Kuestenlogik/Surgewave.Connectors#12](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/12) **OllamaSharp held at 5.4.25 - 5.4.30 source generator requires newer Roslyn** 
 - [Kuestenlogik/Surgewave.Connectors#11](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/11) **Migrate Parquet connector to Parquet.Net 6 (DataColumn API removed)** 
 - [Kuestenlogik/Surgewave.Connectors#10](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/10) **swpkg release assets carry the Directory.Build.props version floor instead of the tag version** 
@@ -27,36 +23,46 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Edge#5](https://github.com/Kuestenlogik/Surgewave.Edge/issues/5) **This repository packages a .swpkg that contains no plugin** 
 - [Kuestenlogik/Surgewave.Tactical#5](https://github.com/Kuestenlogik/Surgewave.Tactical/issues/5) **deps: 10.0.x Microsoft and System pins to 10.0.13** 
 
-### M2 — Multi-tenancy & data mesh
-
-- [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
-- [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
-- [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
-
-### M3 — Streams & client parity
-
-- [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
-- [#43](https://github.com/Kuestenlogik/Surgewave/issues/43) **Native client: multi-broker bootstrap & failover** 
-- [#44](https://github.com/Kuestenlogik/Surgewave/issues/44) **StreamsProducer: transactional changelog writes** 
-- [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
-
 ### M4 — Protocol plugins & transport
 
 - [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
-- [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
-- [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
-- [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
-- [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
 - [Kuestenlogik/Surgewave.Ai#8](https://github.com/Kuestenlogik/Surgewave.Ai/issues/8) **G26 — AI pipeline cost tracking** 
 
-### M5 — Correctness & durability
+### v0.6 — Correctness & durability
 
 - [#119](https://github.com/Kuestenlogik/Surgewave/issues/119) **bug(clustering): topic configuration never reaches brokers that only host replicas** 
 - [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
 - [#179](https://github.com/Kuestenlogik/Surgewave/issues/179) **bug(tests): the replication stall is undone by the metadata log, so the failover class passes by luck** `area:clustering`
 - [#180](https://github.com/Kuestenlogik/Surgewave/issues/180) **perf(clustering): re-election and ISR propagation are too slow to assert on within 60s** `area:clustering`
 
-### M6 — first stable
+### v0.7 — Hygiene: CI, dependencies, licences
+
+- [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
+- [#174](https://github.com/Kuestenlogik/Surgewave/issues/174) **deps: 12 outdated packages in the main repo** `area:multi`
+- [#175](https://github.com/Kuestenlogik/Surgewave/issues/175) **ci: seven sibling repos have no CI at all** `area:multi`
+- [#178](https://github.com/Kuestenlogik/Surgewave/issues/178) **Keep the licence assignment per project and check it in CI** `area:multi`
+
+### v0.8 — Streams & client parity
+
+- [#42](https://github.com/Kuestenlogik/Surgewave/issues/42) **Streams: cross-instance rebalancing for StreamsConsumer** 
+- [#43](https://github.com/Kuestenlogik/Surgewave/issues/43) **Native client: multi-broker bootstrap & failover** 
+- [#44](https://github.com/Kuestenlogik/Surgewave/issues/44) **StreamsProducer: transactional changelog writes** 
+- [#45](https://github.com/Kuestenlogik/Surgewave/issues/45) **Confluent compat: real partition assignment callbacks in Consumer** 
+
+### v0.9 — Protocol plugins & transport
+
+- [#24](https://github.com/Kuestenlogik/Surgewave/issues/24) **QUIC transport benchmark on real LAN/WAN** `area:broker` `track:transport`
+- [#25](https://github.com/Kuestenlogik/Surgewave/issues/25) **QUIC retransmit statistics** `area:observability` `track:transport`
+- [#62](https://github.com/Kuestenlogik/Surgewave/issues/62) **Surgewave.Client schema introspection for Bowire discovery (adopt Client.SchemaRegistry, drop Confluent)** 
+- [#70](https://github.com/Kuestenlogik/Surgewave/issues/70) **Config decoupling: native IConfiguration canonical, Kafka-style properties as an optional compat mapping layer** 
+
+### v0.10 — Multi-tenancy & data mesh
+
+- [#35](https://github.com/Kuestenlogik/Surgewave/issues/35) **Tenants/Namespaces backend (/api/tenants) — MultiTenancy page is Preview** 
+- [#36](https://github.com/Kuestenlogik/Surgewave/issues/36) **Data-Mesh backend (/api/data-mesh) — DataMesh catalog is Preview** 
+- [#67](https://github.com/Kuestenlogik/Surgewave/issues/67) **Multi-instance Control: shared/replicated RBAC + alerting store** 
+
+### v1.0 — First stable
 
 - [#4](https://github.com/Kuestenlogik/Surgewave/issues/4) **G1 — Native non-.NET clients (Python, Go, Rust)** `area:multi`
 - [#6](https://github.com/Kuestenlogik/Surgewave/issues/6) **G4 — Real Jepsen run** `area:clustering` `track:cluster-correctness`
