@@ -169,7 +169,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         {
             try
             {
-                var markerBatch = ControlBatchBuilder.BuildTransactionMarker(payload.ProducerId, payload.ProducerEpoch, controlType);
+                var markerBatch = ControlBatchBuilder.BuildTransactionMarker(payload.ProducerId, payload.ProducerEpoch, controlType, coordinatorEpoch: payload.CoordinatorEpoch);
                 var offset = await _logManager.AppendBatchAsync(tp, markerBatch, ct).ConfigureAwait(false);
 
                 // The coordinator completes the transaction once every marker is written, so a marker counts once

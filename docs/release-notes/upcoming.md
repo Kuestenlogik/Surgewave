@@ -395,6 +395,16 @@ files differ from the drawing.
 
 ## Breaking changes
 
+### Transaction markers are Kafka's control records (#226)
+
+A commit or abort marker's control record is now Kafka's: the key holds
+the version and the marker type, the value the version and the
+coordinator epoch. The type used to be in the value, so Kafka tooling that
+dumps a log, and a client handed a marker, read no type from it. Markers
+written before the upgrade keep the old layout; a transactional offset
+commit in `__consumer_offsets` whose marker is in the old layout stays
+pending.
+
 ### Transaction state is not carried over from an upgrade (#197)
 
 Transaction state was kept in a file under the data directory. It is now

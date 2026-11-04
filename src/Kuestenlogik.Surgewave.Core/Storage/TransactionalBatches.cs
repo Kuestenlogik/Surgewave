@@ -31,14 +31,15 @@ public static class TransactionalBatches
             : KafkaConstants.Producer.NoProducerId;
 
     /// <summary>
-    /// Whether the control record of a transaction marker, as <see cref="ControlBatchBuilder"/> writes it, commits;
-    /// null for a control record that is no commit or abort marker.
+    /// Whether the control record of a transaction marker commits, read from its key as Kafka's
+    /// <c>ControlRecordType.parse</c> reads it (version, type); null for a control record that is no commit or abort
+    /// marker.
     /// </summary>
-    public static bool? IsCommitMarker(ReadOnlySpan<byte> controlRecordValue)
+    public static bool? IsCommitMarker(ReadOnlySpan<byte> controlRecordKey)
     {
-        if (controlRecordValue.Length < 4)
+        if (controlRecordKey.Length < 4)
             return null;
-        return BinaryPrimitives.ReadInt16BigEndian(controlRecordValue[2..]) switch
+        return BinaryPrimitives.ReadInt16BigEndian(controlRecordKey[2..]) switch
         {
             KafkaConstants.ControlRecordType.Commit => true,
             KafkaConstants.ControlRecordType.Abort => false,

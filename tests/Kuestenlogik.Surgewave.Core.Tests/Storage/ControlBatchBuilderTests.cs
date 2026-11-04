@@ -45,6 +45,23 @@ public class ControlBatchBuilderTests
         Assert.Equal(KafkaConstants.Magic.V2, batch[16]);
     }
 
+    /// <summary>
+    /// Kafka's control record (#226): key {version 0, type}, value {version 0, coordinator epoch} — what Kafka's
+    /// <c>ControlRecordType.parse</c> and <c>EndTransactionMarker.deserialize</c> read. The type was in the value.
+    /// </summary>
+    [Theory]
+    [InlineData(KafkaConstants.ControlRecordType.Commit)]
+    [InlineData(KafkaConstants.ControlRecordType.Abort)]
+    public void BuildTransactionMarker_TheControlRecordIsKafkas(short type)
+    {
+        var batch = ControlBatchBuilder.BuildTransactionMarker(555, 3, type, FixedTs, coordinatorEpoch: 0x01020304);
+
+        var record = Assert.Single(new RecordBatchSerializer(Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordBatchSerializer>.Instance).ParseRecordBatch(batch));
+        Assert.Equal(new byte[] { 0, 0, 0, (byte)type }, record.Key.ToArray());
+        Assert.Equal(new byte[] { 0, 0, 1, 2, 3, 4 }, record.Value.ToArray());
+        Assert.Equal(type == KafkaConstants.ControlRecordType.Commit, TransactionalBatches.IsCommitMarker(record.Key.Span));
+    }
+
     [Fact]
     public void BuildTransactionMarker_EncodesProducerId()
     {

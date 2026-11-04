@@ -237,7 +237,8 @@ public sealed partial class InterBrokerApiHandler : IKafkaRequestHandler
                             var markerBatch = Kuestenlogik.Surgewave.Core.Storage.ControlBatchBuilder.BuildTransactionMarker(
                                 marker.ProducerId,
                                 marker.ProducerEpoch,
-                                controlRecordType);
+                                controlRecordType,
+                                coordinatorEpoch: marker.CoordinatorEpoch);
 
                             var offset = await _logManager.AppendBatchAsync(tp, markerBatch, ct);
 

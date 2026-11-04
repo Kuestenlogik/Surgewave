@@ -18,7 +18,13 @@ public static class ControlBatchBuilder
     /// <see cref="KafkaConstants.ControlRecordType.Abort"/>. <paramref name="baseTimestampMs"/>
     /// defaults to the current time; pass a fixed value for deterministic output.
     /// </summary>
-    public static byte[] BuildTransactionMarker(long producerId, short producerEpoch, short controlType, long? baseTimestampMs = null)
+    /// <remarks>
+    /// The control record is Kafka's (#226): key = {version int16 = 0, type int16}, value = {version int16 = 0,
+    /// coordinator epoch int32}. The type used to be in the value and the key only a version, so Kafka tooling and a
+    /// client handed the batch read no type from it.
+    /// </remarks>
+    public static byte[] BuildTransactionMarker(
+        long producerId, short producerEpoch, short controlType, long? baseTimestampMs = null, int coordinatorEpoch = 0)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
@@ -26,16 +32,14 @@ public static class ControlBatchBuilder
         var baseOffset = 0L;
         var baseTimestamp = baseTimestampMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        // Control record: key = version (int16 = 0), value = {version: int16, type: int16}
-        Span<byte> controlKey = stackalloc byte[2];
-        controlKey[0] = 0;
-        controlKey[1] = 0; // Version 0
+        // Control record: key = {version: int16 = 0, type: int16}, value = {version: int16 = 0, coordinatorEpoch: int32}
+        Span<byte> controlKey = stackalloc byte[4];
+        BinaryPrimitives.WriteInt16BigEndian(controlKey, 0);
+        BinaryPrimitives.WriteInt16BigEndian(controlKey[2..], controlType);
 
-        Span<byte> controlValue = stackalloc byte[4];
-        controlValue[0] = 0;
-        controlValue[1] = 0; // Version
-        controlValue[2] = (byte)(controlType >> 8);
-        controlValue[3] = (byte)(controlType & 0xFF);
+        Span<byte> controlValue = stackalloc byte[6];
+        BinaryPrimitives.WriteInt16BigEndian(controlValue, 0);
+        BinaryPrimitives.WriteInt32BigEndian(controlValue[2..], coordinatorEpoch);
 
         // Build the record
         using var recordStream = new MemoryStream();

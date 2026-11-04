@@ -289,7 +289,7 @@ public sealed class CoordinatorStateLog
                             continue; // a batch that starts before where this read began was read already
                         records.Add(isMarker
                             ? new StateRecord(ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty, message.Offset, producerId,
-                                TransactionalBatches.IsCommitMarker(message.Value.Span))
+                                TransactionalBatches.IsCommitMarker(message.Key.Span))
                             : new StateRecord(message.Key, message.Value, message.Offset, producerId));
                         position = Math.Max(position, message.Offset + 1);
                     }

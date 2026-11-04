@@ -87,19 +87,21 @@ internal sealed class TransactionMarkerChannel
 
         foreach (var partition in local)
         {
-            if (await WriteLocalAsync(txn, partition, commit, cancellationToken).ConfigureAwait(false))
+            if (await WriteLocalAsync(txn, partition, commit, coordinatorEpoch, cancellationToken).ConfigureAwait(false))
                 written.Add(partition);
         }
         return written;
     }
 
-    private async Task<bool> WriteLocalAsync(TransactionMetadata txn, TopicPartition partition, bool commit, CancellationToken cancellationToken)
+    private async Task<bool> WriteLocalAsync(
+        TransactionMetadata txn, TopicPartition partition, bool commit, int coordinatorEpoch, CancellationToken cancellationToken)
     {
         var controlRecordType = commit ? KafkaConstants.ControlRecordType.Commit : KafkaConstants.ControlRecordType.Abort;
         long offset;
         try
         {
-            var marker = ControlBatchBuilder.BuildTransactionMarker(txn.ProducerId, txn.ProducerEpoch, controlRecordType);
+            var marker = ControlBatchBuilder.BuildTransactionMarker(
+                txn.ProducerId, txn.ProducerEpoch, controlRecordType, coordinatorEpoch: coordinatorEpoch);
             offset = await _logManager.AppendBatchAsync(partition, marker, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
