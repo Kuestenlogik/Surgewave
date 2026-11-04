@@ -415,6 +415,15 @@ public sealed partial class RaftNode : IAsyncDisposable
 
             stateChanged = false;
 
+            // Another leader of this very term: election safety is broken, which Raft rules out. Said loudly, then
+            // this node follows — staying leader while naming the other one as leader was the state of #213.
+            if (_state == RaftState.Leader && request.Term == _currentTerm && request.LeaderId != NodeId)
+            {
+                LogElectionSafetyViolation(_currentTerm, request.LeaderId);
+                BecomeFollower(request.Term);
+                stateChanged = true;
+            }
+
             // If we see a newer term or we're candidate, become follower
             if (request.Term > _currentTerm || _state == RaftState.Candidate)
             {
@@ -920,8 +929,15 @@ public sealed partial class RaftNode : IAsyncDisposable
     private void BecomeFollower(int term)
     {
         _state = RaftState.Follower;
-        _currentTerm = term;
-        _votedFor = null;
+
+        // The vote is per term: only a newer term frees it (#213). A candidate that hears from the leader of its own
+        // term, or a leader that steps down, used to forget the vote it had cast in that term and could cast another
+        // — for a node starting its campaign for the same term from the one before — and two nodes led one term.
+        if (term > _currentTerm)
+        {
+            _currentTerm = term;
+            _votedFor = null;
+        }
         _leaderId = null;
 
         // Cancel heartbeat task if running
@@ -1454,6 +1470,9 @@ public sealed partial class RaftNode : IAsyncDisposable
     // Pre-Vote logging
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting pre-vote for proposed term {ProposedTerm}")]
     private partial void LogStartingPreVote(int proposedTerm);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Election safety violated: this node leads term {Term} and node {OtherLeader} claims to lead it too; following it")]
+    private partial void LogElectionSafetyViolation(int term, int otherLeader);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Pre-vote for term {ProposedTerm} is stale (now term {CurrentTerm}, or a leader was heard from); no election")]
     private partial void LogPreVoteStale(int proposedTerm, int currentTerm);

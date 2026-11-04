@@ -134,6 +134,15 @@ controller handling a failure is done in seconds rather than minutes. A
 pre-vote whose answers arrive after a leader was elected no longer starts an
 election that deposes that leader.
 
+### At most one controller per Raft term (#213)
+
+A Raft node that became follower within its term, either a candidate hearing
+from that term's leader or a leader stepping down, forgot the vote it had cast
+in the term and could cast a second one. Two brokers could then lead one term,
+and one of them reported itself as leader while naming the other. A vote now
+holds for its whole term. A leader that hears from another leader of its own
+term logs the violation as an error and follows that leader.
+
 ### Consumers of one group share the partitions (#216)
 
 The classic group protocol never rebalanced: a member that joined later was
