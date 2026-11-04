@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
 using Kuestenlogik.Surgewave.Coordination.ShareGroups;
@@ -143,7 +144,11 @@ public sealed class SharePartitionTests : IDisposable
         var shareState = ShareStateStore.InMemory();
         var leader = Coordinator(shareState);
         var groupCoordinator = Coordinator(shareState);
-        Assert.Null(await groupCoordinator.SetShareGroupConfigAsync("g1", "share.delivery.count.limit", "5", _ct));
+        // An empty group, so its offsets can be altered.
+        var joined = await groupCoordinator.HeartbeatAsync(new ShareGroupHeartbeatCommand
+            { GroupId = "g1", MemberId = "", MemberEpoch = 0, ClientId = "c0", SubscribedTopicNames = [Topic] }, _ct);
+        await groupCoordinator.HeartbeatAsync(new ShareGroupHeartbeatCommand
+            { GroupId = "g1", MemberId = joined.MemberId, MemberEpoch = -1, ClientId = "c0", SubscribedTopicNames = [Topic] }, _ct);
         Assert.Equal((0L, 2L, (short)1), Single(await FetchAsync(leader, "g1", "m1")));
 
         var altered = await groupCoordinator.AlterOffsetsAsync(new AlterShareOffsetsCommand
@@ -159,6 +164,27 @@ public sealed class SharePartitionTests : IDisposable
         var described = await groupCoordinator.DescribeOffsetsAsync(new DescribeShareOffsetsCommand(
             [new DescribeShareOffsetsGroup { GroupId = "g1", Topics = [new DescribeShareOffsetsTopic { TopicName = Topic, Partitions = [0] }] }]), _ct);
         Assert.Equal(2, described.Groups.Single().Topics.Single().Partitions.Single().StartOffset);
+    }
+
+    [Fact]
+    public async Task ALeaderThatDoesNotCoordinateTheGroupRunsItWithItsConfigs()
+    {
+        await ProduceAsync(1);
+        var groupConfigs = new InMemoryGroupConfigStore();
+        // The group's coordinator, on a broker in a cluster that leads no partition of __consumer_offsets: a config is
+        // the metadata log's, not the group's, and needs no coordinator.
+        var elsewhere = new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager,
+            new OffsetStore(_logManager, _serializer, 4, NullLogger<OffsetStore>.Instance), groupConfigs: groupConfigs);
+        Assert.Null(await elsewhere.SetShareGroupConfigAsync("g1", "share.delivery.count.limit", "2", _ct));
+        var leader = Coordinator(groupConfigs: groupConfigs);
+
+        Assert.Equal((0L, 0L, (short)1), Single(await FetchAsync(leader, "g1", "m1")));
+        Assert.Equal(ShareGroupErrorStatus.None, await AckAsync(leader, "g1", "m1", 0, release: true));
+        Assert.Equal((0L, 0L, (short)2), Single(await FetchAsync(leader, "g1", "m1")));
+        Assert.Equal(ShareGroupErrorStatus.None, await AckAsync(leader, "g1", "m1", 0, release: true));
+
+        // Delivered twice, the group's limit, not Kafka's default of five: archived.
+        Assert.Empty((await FetchAsync(leader, "g1", "m1")).AcquiredRecords);
     }
 
     [Fact]
@@ -198,8 +224,9 @@ public sealed class SharePartitionTests : IDisposable
         Assert.Equal(7, state!.StartOffset);
     }
 
-    private ShareGroupCoordinator Coordinator(IShareStatePersister? shareState = null) =>
-        new(NullLogger<ShareGroupCoordinator>.Instance, _logManager, recordLockDuration: LockDuration, timeProvider: _time, shareState: shareState);
+    private ShareGroupCoordinator Coordinator(IShareStatePersister? shareState = null, IGroupConfigStore? groupConfigs = null) =>
+        new(NullLogger<ShareGroupCoordinator>.Instance, _logManager, recordLockDuration: LockDuration, timeProvider: _time,
+            shareState: shareState, groupConfigs: groupConfigs);
 
     // A share coordinator that leads every partition of __share_group_state in this log, read from it afresh.
     private async Task<ShareStateStore> ShareStateAsync()

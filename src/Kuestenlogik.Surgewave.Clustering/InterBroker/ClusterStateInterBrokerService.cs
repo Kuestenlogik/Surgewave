@@ -28,6 +28,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly IClusterTopicCreator? _topicCreator;
     private readonly ITransactionPartitionVerifier? _transactionVerifier;
     private readonly Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? _shareState;
+    private readonly IClusterGroupConfigWriter? _groupConfigs;
     private readonly Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? _commitGate;
 
     public ClusterStateInterBrokerService(
@@ -44,7 +45,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         IClusterTopicCreator? topicCreator = null,
         ITransactionPartitionVerifier? transactionVerifier = null,
         Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? commitGate = null,
-        Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? shareState = null)
+        Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? shareState = null,
+        IClusterGroupConfigWriter? groupConfigs = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -60,6 +62,17 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _transactionVerifier = transactionVerifier;
         _commitGate = commitGate;
         _shareState = shareState;
+        _groupConfigs = groupConfigs;
+    }
+
+    public async ValueTask<ClusterRpcStatus> ApplyGroupConfigAsync(GroupConfigPayload payload, CancellationToken ct = default)
+    {
+        // Only the controller writes to the metadata log; one that lost the role since the caller looked says so.
+        if (_groupConfigs is null || !_groupConfigs.IsController)
+            return ClusterRpcStatus.NotController;
+        return await _groupConfigs.SetGroupConfigAsync(payload.GroupId, payload.Name, payload.Value, ct).ConfigureAwait(false)
+            ? ClusterRpcStatus.None
+            : ClusterRpcStatus.Unknown;
     }
 
     public async ValueTask<ShareStateResponsePayload> ShareStateAsync(ShareStatePayload payload, CancellationToken ct = default)

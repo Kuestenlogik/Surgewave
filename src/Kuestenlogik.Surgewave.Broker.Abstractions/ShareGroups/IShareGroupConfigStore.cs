@@ -9,8 +9,9 @@ namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
 public interface IShareGroupConfigStore
 {
     /// <summary>
-    /// Set a share-group config value, answered once it is durable with the group's state (#219). Returns an error
-    /// message when the group, config name, or value is rejected; <c>null</c> on success.
+    /// Set a share-group config value, or reset it to Kafka's default with a <c>null</c> value, answered once it is in
+    /// the metadata log (#228). Returns an error message when the group, config name, or value is rejected; <c>null</c>
+    /// on success.
     /// </summary>
     Task<string?> SetShareGroupConfigAsync(string groupId, string name, string? value, CancellationToken cancellationToken);
 }

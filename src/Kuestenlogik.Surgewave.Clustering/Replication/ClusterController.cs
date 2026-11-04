@@ -35,11 +35,26 @@ public interface IClusterTopicCreator
 }
 
 /// <summary>
+/// Changes a group's configs in the metadata log (#228): directly on the controller, through it from any other broker.
+/// </summary>
+public interface IClusterGroupConfigWriter
+{
+    /// <summary>Whether this broker is the controller now.</summary>
+    bool IsController { get; }
+
+    /// <summary>
+    /// Sets one config of a group, or removes it with a null value. True once committed; false when no controller
+    /// could take it now.
+    /// </summary>
+    Task<bool> SetGroupConfigAsync(string groupId, string name, string? value, CancellationToken ct);
+}
+
+/// <summary>
 /// Manages cluster coordination including leader election and partition assignment.
 /// In a multi-broker setup, one broker becomes the controller.
 /// Supports both simple "lowest broker ID" strategy and Raft consensus.
 /// </summary>
-public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IIsrUpdateApplier, IBrokerRegistrar, IControlledShutdownCoordinator
+public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IClusterGroupConfigWriter, IIsrUpdateApplier, IBrokerRegistrar, IControlledShutdownCoordinator
 {
     private readonly ILogger<ClusterController> _logger;
     private readonly ClusterState _clusterState;
@@ -52,6 +67,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     // #180 — how a departing broker that is NOT the controller gets its partitions moved.
     private IControlledShutdownRequester? _shutdownRequester;
     private ITopicCreationRequester? _topicCreationRequester;
+    private IGroupConfigRequester? _groupConfigRequester;
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
@@ -133,6 +149,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>How this broker has a topic created while another broker is the controller (#207).</summary>
     public void SetTopicCreationRequester(ITopicCreationRequester requester)
         => _topicCreationRequester = requester;
+
+    /// <summary>How this broker has a group config changed while another broker is the controller (#228).</summary>
+    public void SetGroupConfigRequester(IGroupConfigRequester requester)
+        => _groupConfigRequester = requester;
 
     /// <summary>
     /// Set the cluster balancer for automatic partition rebalancing.
@@ -894,6 +914,29 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         if (index < 0) return false;
 
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> SetGroupConfigAsync(string groupId, string name, string? value, CancellationToken ct)
+    {
+        if (!_isController)
+        {
+            // Only the controller writes to the metadata log; any other broker asks it to.
+            if (_groupConfigRequester is null)
+            {
+                LogNotController("SetGroupConfig");
+                return false;
+            }
+            return await _groupConfigRequester.RequestSetGroupConfigAsync(groupId, name, value, ct).ConfigureAwait(false);
+        }
+
+        if (_raftNode == null || !_raftNode.IsLeader)
+            return false;
+        var data = JsonSerializer.SerializeToUtf8Bytes(
+            new GroupConfigChangedCommand(groupId, name, value), ClusteringJsonContext.Default.GroupConfigChangedCommand);
+        var index = await _raftNode.ProposeAsync(MetadataCommandType.GroupConfigChanged, data, ct).ConfigureAwait(false);
+        if (index < 0) return false;
+        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }
 
     /// <summary>

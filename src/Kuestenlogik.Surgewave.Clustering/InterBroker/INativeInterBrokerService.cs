@@ -70,4 +70,10 @@ public interface INativeInterBrokerService
     /// when it is not, so the caller asks the real one.
     /// </summary>
     ValueTask<ShareStateResponsePayload> ShareStateAsync(ShareStatePayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Change a group's config in the metadata log (#228); only the controller can. NotController when this broker
+    /// is not it, so the caller asks the real one.
+    /// </summary>
+    ValueTask<ClusterRpcStatus> ApplyGroupConfigAsync(GroupConfigPayload payload, CancellationToken ct = default);
 }

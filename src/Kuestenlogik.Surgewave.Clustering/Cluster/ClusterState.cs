@@ -12,6 +12,8 @@ public sealed class ClusterState
     private readonly ConcurrentDictionary<int, BrokerNode> _brokers = new();
     private readonly ConcurrentDictionary<string, TopicMetadata> _topics = new();
     private readonly ConcurrentDictionary<TopicPartition, PartitionState> _partitionStates = new();
+    private readonly ConcurrentDictionary<string, System.Collections.Immutable.ImmutableDictionary<string, string>> _groupConfigs =
+        new(StringComparer.Ordinal);
     private readonly object _stateLock = new();
 
     // #60 Inc6a — serializes all writes to _brokers so a read-modify-write (registration merge,
@@ -143,6 +145,29 @@ public sealed class ClusterState
     /// All partition states.
     /// </summary>
     public IReadOnlyDictionary<TopicPartition, PartitionState> PartitionStates => _partitionStates;
+
+    /// <summary>The groups' dynamic configs from the metadata log (#228), by group.</summary>
+    public IEnumerable<KeyValuePair<string, IReadOnlyDictionary<string, string>>> GroupConfigs =>
+        _groupConfigs.Select(g => KeyValuePair.Create(g.Key, (IReadOnlyDictionary<string, string>)g.Value));
+
+    /// <summary>The configs set for the group, empty where none are.</summary>
+    public IReadOnlyDictionary<string, string> GroupConfigsOf(string groupId) =>
+        _groupConfigs.TryGetValue(groupId, out var configs) ? configs : System.Collections.Immutable.ImmutableDictionary<string, string>.Empty;
+
+    /// <summary>Sets one config of a group, or removes it with a null value; a group without configs is dropped.</summary>
+    public void SetGroupConfig(string groupId, string name, string? value)
+    {
+        lock (_stateLock)
+        {
+            var configs = GroupConfigsOf(groupId) as System.Collections.Immutable.ImmutableDictionary<string, string>
+                ?? System.Collections.Immutable.ImmutableDictionary<string, string>.Empty;
+            configs = value is null ? configs.Remove(name) : configs.SetItem(name, value);
+            if (configs.IsEmpty)
+                _groupConfigs.TryRemove(groupId, out _);
+            else
+                _groupConfigs[groupId] = configs;
+        }
+    }
 
     public void AddBroker(BrokerNode broker)
     {
@@ -464,6 +489,7 @@ public sealed class ClusterState
                 _brokers.Clear();
             _topics.Clear();
             _partitionStates.Clear();
+            _groupConfigs.Clear();
             ControllerId = -1;
             ControllerEpoch = 0;
         }

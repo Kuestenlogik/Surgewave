@@ -11,8 +11,8 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
 /// A share group's state lives in its partition of <c>__consumer_offsets</c> (#219): its members and epochs as Kafka's
-/// ShareGroup records, its configs in this broker's section of the group's record; its share partitions' start offsets
-/// with their share coordinators in <c>__share_group_state</c> (#228). A coordinator that takes the partitions over —
+/// ShareGroup records; its share partitions' start offsets with their share coordinators in
+/// <c>__share_group_state</c> (#228). A coordinator that takes the partitions over —
 /// another broker, or this one after a restart — reads the group from them. It lived in the coordinator's memory only.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
@@ -43,10 +43,12 @@ public sealed class ShareGroupPersistenceTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task ACoordinatorThatTakesThePartitionOverKnowsTheGroupItsOffsetsAndConfigs()
+    public async Task ACoordinatorThatTakesThePartitionOverKnowsTheGroupAndItsOffsets()
     {
         var first = await CoordinatorAsync();
-        Assert.Null(await first.SetShareGroupConfigAsync("share-g", "share.delivery.count.limit", "7", _ct));
+        // A group, empty, so its offsets can be altered.
+        var left = await first.HeartbeatAsync(Join("c0"), _ct);
+        await first.HeartbeatAsync(Join("c0") with { MemberId = left.MemberId, MemberEpoch = -1 }, _ct);
         var altered = await first.AlterOffsetsAsync(new AlterShareOffsetsCommand
         {
             GroupId = "share-g",

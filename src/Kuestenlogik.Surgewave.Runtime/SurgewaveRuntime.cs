@@ -619,6 +619,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // #180 — how this broker asks the controller to move its partitions when it leaves.
         _clusterController.SetControlledShutdownRequester(nativeControllerClient);
         _clusterController.SetTopicCreationRequester(nativeControllerClient);
+        // #228 — a group's configs are in the metadata log, changed through the controller and read by every broker.
+        _clusterController.SetGroupConfigRequester(nativeControllerClient);
+        _shareGroupCoordinator?.SetGroupConfigStore(new ClusterGroupConfigStore(_clusterState, _clusterController));
 
         // #60 Inc4/Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the
         // ReplicationServer's shared port. It applies decoded native control-plane frames
@@ -644,6 +647,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 registrationCoordinator: registrationCoordinator,
                 shutdownCoordinator: _clusterController,
                 topicCreator: _clusterController,
+                groupConfigs: _clusterController,
                 transactionVerifier: _transactionCoordinator,
                 commitGate: new ReplicaCommitGate(_clusterState, _replicaManager),
                 shareState: _shareStateStore)));

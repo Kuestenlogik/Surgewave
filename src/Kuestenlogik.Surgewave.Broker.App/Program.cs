@@ -1032,6 +1032,10 @@ nativeControllerClient.SetIsrUpdateApplier(clusterController);
 // #180 — how this broker asks the controller to move its partitions when it leaves.
 clusterController.SetControlledShutdownRequester(nativeControllerClient);
 clusterController.SetTopicCreationRequester(nativeControllerClient);
+// #228 — a group's configs are in the metadata log, changed through the controller and read by every broker.
+clusterController.SetGroupConfigRequester(nativeControllerClient);
+app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>()
+    .SetGroupConfigStore(new ClusterGroupConfigStore(clusterState, clusterController));
 
 replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
     app.Services.GetRequiredService<ILogger<NativeInterBrokerServer>>(),
@@ -1043,6 +1047,7 @@ replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
         registrationCoordinator: registrationCoordinator,
         shutdownCoordinator: clusterController,
         topicCreator: clusterController,
+        groupConfigs: clusterController,
         transactionVerifier: app.Services.GetRequiredService<TransactionCoordinator>(),
         commitGate: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(),
         shareState: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore>())));

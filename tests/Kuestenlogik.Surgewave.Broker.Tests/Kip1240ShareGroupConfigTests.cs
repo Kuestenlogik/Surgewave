@@ -1,7 +1,6 @@
-using System.Reflection;
-using System.Text.Json;
 using Kuestenlogik.Surgewave.Broker.Queue;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Coordination.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
@@ -19,14 +18,10 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 ///   <item><c>share.renew.acknowledge.enable</c> (default true) — gates KIP-1222 RENEW ack-type.</item>
 /// </list>
 ///
-/// Surgewave captures all three as structural state on
-/// <see cref="ShareGroupState"/>. <c>RenewAcknowledgeEnabled</c> is enforced
-/// inline in the coordinator's ack-batch loop: a RENEW ack against a group
-/// where the flag is <c>false</c> returns <see cref="ShareGroupErrorStatus.InvalidRequest"/>
-/// (per the KIP). The other two are forward-compat state today — full
-/// archive-on-overflow and per-partition lock-cap enforcement are
-/// documented follow-ups (see kips.md). Exercises the protocol-neutral
-/// coordinator surface directly (#59).
+/// A group's configs are in the group config store — the metadata log in a cluster (#228) — and the coordinator runs
+/// the group with them: a RENEW ack against a group where <c>share.renew.acknowledge.enable</c> is <c>false</c>
+/// returns <see cref="ShareGroupErrorStatus.InvalidRequest"/> (per the KIP). Exercises the protocol-neutral coordinator
+/// surface directly (#59).
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class Kip1240ShareGroupConfigTests : IDisposable
@@ -35,6 +30,7 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
     private readonly LogManager _logManager;
     private readonly QueueViewManager _queueViewManager;
     private readonly ShareGroupCoordinator _coordinator;
+    private readonly InMemoryGroupConfigStore _groupConfigs = new();
 
     private const string Topic = "kip1240-topic";
 
@@ -55,7 +51,7 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         }, NullLoggerFactory.Instance, _logManager);
 
         _coordinator = new ShareGroupCoordinator(
-            NullLogger<ShareGroupCoordinator>.Instance, _logManager);
+            NullLogger<ShareGroupCoordinator>.Instance, _logManager, groupConfigs: _groupConfigs);
     }
 
     public void Dispose()
@@ -66,47 +62,20 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
     }
 
     [Fact]
-    public void ShareGroupState_Defaults_MatchUpstreamKafkaKip1240Values()
+    public void AGroupWithoutConfigs_RunsWithUpstreamKafkaKip1240Defaults()
     {
-        var state = new ShareGroupState();
-        Assert.Equal(5, state.MaxDeliveryCount);                  // upstream: SHARE_GROUP_DELIVERY_COUNT_LIMIT_DEFAULT
-        Assert.Equal(2000, state.MaxRecordLocks);                 // upstream: SHARE_GROUP_PARTITION_MAX_RECORD_LOCKS_DEFAULT
-        Assert.True(state.RenewAcknowledgeEnabled);               // upstream: SHARE_RENEW_ACKNOWLEDGE_ENABLE_DEFAULT
-    }
-
-    [Fact]
-    public void ShareGroupState_JsonRoundTrip_PreservesAllThreeConfigs()
-    {
-        // KIP-932 9c uses System.Text.Json for share-group persistence; the
-        // new fields must round-trip just like the rest of the state.
-        var original = new ShareGroupState
-        {
-            GroupId = "g-roundtrip",
-            GroupEpoch = 3,
-            MaxDeliveryCount = 7,
-            MaxRecordLocks = 1500,
-            RenewAcknowledgeEnabled = false,
-        };
-
-        var json = JsonSerializer.Serialize(original);
-        var roundtripped = JsonSerializer.Deserialize<ShareGroupState>(json)!;
-
-        Assert.Equal(7, roundtripped.MaxDeliveryCount);
-        Assert.Equal(1500, roundtripped.MaxRecordLocks);
-        Assert.False(roundtripped.RenewAcknowledgeEnabled);
-        // Sanity: existing fields still survive
-        Assert.Equal("g-roundtrip", roundtripped.GroupId);
-        Assert.Equal(3, roundtripped.GroupEpoch);
+        var (deliveryLimit, maxRecordLocks, renewEnabled) = ShareGroupConfigs.Of(new Dictionary<string, string>());
+        Assert.Equal(5, deliveryLimit);      // upstream: SHARE_GROUP_DELIVERY_COUNT_LIMIT_DEFAULT
+        Assert.Equal(2000, maxRecordLocks);  // upstream: SHARE_GROUP_PARTITION_MAX_RECORD_LOCKS_DEFAULT
+        Assert.True(renewEnabled);           // upstream: SHARE_RENEW_ACKNOWLEDGE_ENABLE_DEFAULT
     }
 
     [Fact]
     public async Task RenewAck_AgainstGroupWithRenewDisabled_ReturnsInvalidRequest()
     {
-        // Set up: establish the group via a heartbeat, then flip
-        // RenewAcknowledgeEnabled to false (the IncrementalAlterConfigs path
-        // for share groups isn't wired yet — see kips.md follow-up).
+        // Set up: establish the group via a heartbeat, then turn renew off in the group's configs.
         var hb = await _coordinator.HeartbeatAsync(Join("c1", "g-renew-off"), TestContext.Current.CancellationToken);
-        FlipRenewEnabled("g-renew-off", false);
+        Assert.Null(await _coordinator.SetShareGroupConfigAsync("g-renew-off", "share.renew.acknowledge.enable", "false", TestContext.Current.CancellationToken));
 
         var ack = await _coordinator.ShareAcknowledgeAsync(RenewAck("g-renew-off"), TestContext.Current.CancellationToken);
 
@@ -177,22 +146,4 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
                 },
             ],
         };
-
-    /// <summary>
-    /// Reaches into the coordinator's private <c>_shareGroups</c> dictionary to
-    /// flip the per-group flag. The IncrementalAlterConfigs admin-side wire-up
-    /// for share-group configs is a documented follow-up; until that lands the
-    /// flag is only mutable internally, so the test goes via reflection.
-    /// </summary>
-    private void FlipRenewEnabled(string groupId, bool value)
-    {
-        var field = typeof(ShareGroupCoordinator).GetField("_shareGroups", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var dict = (Dictionary<string, ShareGroupState>)field.GetValue(_coordinator)!;
-        var lockField = typeof(ShareGroupCoordinator).GetField("_groupLock", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var groupLock = lockField.GetValue(_coordinator)!;
-        lock (groupLock)
-        {
-            dict[groupId].RenewAcknowledgeEnabled = value;
-        }
-    }
 }

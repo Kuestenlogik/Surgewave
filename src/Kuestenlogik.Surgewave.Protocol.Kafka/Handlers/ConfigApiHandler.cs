@@ -554,24 +554,10 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                                 if (error != null) errors.Add(error);
                                 break;
                             }
-                            case 1: // DELETE — reset to default by setting the upstream default
+                            case 1: // DELETE — the group runs with Kafka's default again
                             {
-                                string? defaultValue = config.Name switch
-                                {
-                                    "share.delivery.count.limit" => "5",
-                                    "share.partition.max.record.locks" => "2000",
-                                    "share.renew.acknowledge.enable" => "true",
-                                    _ => null,
-                                };
-                                if (defaultValue is null)
-                                {
-                                    errors.Add($"Config '{config.Name}' is not a recognized share-group config (KIP-1240).");
-                                }
-                                else
-                                {
-                                    var error = await _shareGroupCoordinator.SetShareGroupConfigAsync(resource.ResourceName, config.Name, defaultValue, cancellationToken);
-                                    if (error != null) errors.Add(error);
-                                }
+                                var error = await _shareGroupCoordinator.SetShareGroupConfigAsync(resource.ResourceName, config.Name, null, cancellationToken);
+                                if (error != null) errors.Add(error);
                                 break;
                             }
                             default:

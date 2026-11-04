@@ -8,10 +8,8 @@ namespace Kuestenlogik.Surgewave.Broker.GroupOffsets;
 /// (<see cref="FlexibleRecordCodec"/>). A record without a value is a tombstone.
 /// </summary>
 /// <remarks>
-/// The share partitions' state, their start offsets among it, is in <c>__share_group_state</c> as in Kafka (#228). The
-/// group's configs, which Kafka keeps in the metadata log, this broker keeps with the group, in a tagged field of the
-/// group's metadata record that Kafka readers skip: the delivery count limit, the record-lock limit and whether a renew
-/// is accepted.
+/// As in Kafka, the share partitions' state, their start offsets among it, is in <c>__share_group_state</c>, and the
+/// group's configs are in the metadata log (#228).
 /// </remarks>
 internal static class ShareGroupRecords
 {
@@ -19,8 +17,6 @@ internal static class ShareGroupRecords
     public const short GroupMetadataKeyVersion = 11;
     public const short CurrentMemberAssignmentKeyVersion = 14;
 
-    // The tag of this broker's section in the group's metadata record, far past Kafka's own tags.
-    private const uint SurgewaveSectionTag = 10_000;
     private const sbyte StableState = 0;
 
     /// <summary>Whether a key of <c>__consumer_offsets</c> is one of a share group's records.</summary>
@@ -30,15 +26,10 @@ internal static class ShareGroupRecords
     /// <summary>Every record of the group's state as it is now.</summary>
     public static List<(byte[] Key, byte[] Value)> Of(ShareGroupState group)
     {
-        var section = new FlexibleWriter();
-        section.Int32(group.MaxDeliveryCount);
-        section.Int32(group.MaxRecordLocks);
-        section.Int8(group.RenewAcknowledgeEnabled ? (sbyte)1 : (sbyte)0);
-
         var records = new List<(byte[], byte[])>
         {
             (FlexibleRecordCodec.Key(GroupMetadataKeyVersion, group.GroupId),
-             FlexibleRecordCodec.Value(w => w.Int32(group.GroupEpoch), [(SurgewaveSectionTag, section.ToArray())])),
+             FlexibleRecordCodec.Value(w => w.Int32(group.GroupEpoch))),
         };
         foreach (var member in group.Members.Values.OrderBy(m => m.MemberId, StringComparer.Ordinal))
         {
@@ -79,8 +70,6 @@ internal static class ShareGroupRecords
                 case GroupMetadataKeyVersion:
                 {
                     group = new ShareGroupState { GroupId = groupId, GroupEpoch = r.Int32() };
-                    if (r.TaggedFields().TryGetValue(SurgewaveSectionTag, out var section))
-                        ReadSection(group, section);
                     break;
                 }
                 case MemberMetadataKeyVersion:
@@ -107,13 +96,5 @@ internal static class ShareGroupRecords
                 group.SubscribedTopics.Add(topic);
         }
         return group;
-    }
-
-    private static void ReadSection(ShareGroupState group, byte[] section)
-    {
-        var r = new FlexibleReader(section, at: 0);
-        group.MaxDeliveryCount = r.Int32();
-        group.MaxRecordLocks = r.Int32();
-        group.RenewAcknowledgeEnabled = r.Int8() != 0;
     }
 }

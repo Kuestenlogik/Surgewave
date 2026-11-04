@@ -75,6 +75,10 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
                     ApplyConfigChanged(entry.Data);
                     break;
 
+                case MetadataCommandType.GroupConfigChanged:
+                    ApplyGroupConfigChanged(entry.Data);
+                    break;
+
                 default:
                     LogUnknownCommandType(entry.CommandType, entry.Index);
                     break;
@@ -101,7 +105,9 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
                 })
                 .ToList(),
             ControllerId = _clusterState.ControllerId,
-            ControllerEpoch = _clusterState.ControllerEpoch
+            ControllerEpoch = _clusterState.ControllerEpoch,
+            GroupConfigs = _clusterState.GroupConfigs.ToDictionary(
+                g => g.Key, g => new Dictionary<string, string>(g.Value, StringComparer.Ordinal), StringComparer.Ordinal),
         };
 
         var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, ClusteringJsonContext.Default.MetadataSnapshot);
@@ -138,6 +144,10 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
 
         _clusterState.ControllerId = data.ControllerId;
         _clusterState.ControllerEpoch = data.ControllerEpoch;
+
+        foreach (var (groupId, configs) in data.GroupConfigs)
+            foreach (var (name, value) in configs)
+                _clusterState.SetGroupConfig(groupId, name, value);
 
         LogSnapshotRestored(data.Brokers.Count, data.Topics.Count, data.PartitionStates.Count);
 
@@ -276,6 +286,18 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         LogConfigChanged(cmd.Topic, cmd.Key, cmd.Value);
     }
 
+    private void ApplyGroupConfigChanged(byte[] data)
+    {
+        var cmd = JsonSerializer.Deserialize(data, ClusteringJsonContext.Default.GroupConfigChangedCommand);
+        if (cmd == null) return;
+
+        _clusterState.SetGroupConfig(cmd.GroupId, cmd.Name, cmd.Value);
+        LogGroupConfigChanged(cmd.GroupId, cmd.Name, cmd.Value);
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Config {Name} of group {GroupId} is now {Value}")]
+    private partial void LogGroupConfigChanged(string groupId, string name, string? value);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Unknown command type {CommandType} at index {Index}")]
     private partial void LogUnknownCommandType(MetadataCommandType commandType, long index);
 
@@ -391,6 +413,15 @@ public sealed record ConfigChangedCommand(
     string Value
 );
 
+/// <summary>
+/// Command to set one dynamic config of a group, or remove it with a null value (#228).
+/// </summary>
+public sealed record GroupConfigChangedCommand(
+    string GroupId,
+    string Name,
+    string? Value
+);
+
 #endregion
 
 #region Snapshot Types
@@ -405,6 +436,9 @@ internal sealed class MetadataSnapshot
     public List<PartitionStateSnapshot> PartitionStates { get; set; } = [];
     public int ControllerId { get; set; }
     public int ControllerEpoch { get; set; }
+
+    /// <summary>The groups' dynamic configs (#228), by group and name.</summary>
+    public Dictionary<string, Dictionary<string, string>> GroupConfigs { get; set; } = [];
 }
 
 /// <summary>

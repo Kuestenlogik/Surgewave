@@ -24,6 +24,19 @@ public interface IControlledShutdownRequester
 }
 
 /// <summary>
+/// How a broker that is not the controller has a group config changed (#228): it asks the controller, which writes the
+/// change to the metadata log.
+/// </summary>
+public interface IGroupConfigRequester
+{
+    /// <summary>
+    /// Asks the controller to set one config of a group, or remove it with a null value (#228). True once the
+    /// controller committed it; false when it refused or could not be reached — the client retries.
+    /// </summary>
+    Task<bool> RequestSetGroupConfigAsync(string groupId, string name, string? value, CancellationToken ct = default);
+}
+
+/// <summary>
 /// How a broker that is not the controller has a topic created (#207): it asks the controller, which writes the topic
 /// to the metadata log. A broker never creates a cluster topic for itself alone.
 /// </summary>

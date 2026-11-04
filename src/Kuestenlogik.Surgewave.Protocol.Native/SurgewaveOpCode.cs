@@ -209,6 +209,9 @@ public enum SurgewaveOpCode : ushort
     // #228 — a partition leader or group coordinator asks a share partition's share coordinator about its state.
     InterBrokerShareState = 0x150B,
 
+    // #228 — a broker asks the controller to change a group's config in the metadata log.
+    InterBrokerGroupConfig = 0x150C,
+
     // #60 — inter-broker Raft/KRaft consensus (0x16xx). The real consensus already rides a
     // hand-rolled framing on the ReplicationPort (Family B); these opcodes are for unifying it
     // onto the SRWV frame later (Inc8, optional).

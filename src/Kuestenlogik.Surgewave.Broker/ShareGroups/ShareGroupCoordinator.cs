@@ -23,6 +23,8 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private readonly LogManager logManager;
     private readonly SharePartitionManager _sharePartitions;
     private IPartitionLeadership? _leadership;
+    // The groups' configs, as every broker knows them (#228).
+    private IGroupConfigStore _groupConfigs;
     // The groups' records live in their partitions of __consumer_offsets (#219).
     private readonly OffsetStore _offsets;
     private readonly GroupStateLog<ShareGroupState> _state;
@@ -38,10 +40,12 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         OffsetStore? offsets = null,
         TimeSpan? recordLockDuration = null,
         TimeProvider? timeProvider = null,
-        IShareStatePersister? shareState = null)
+        IShareStatePersister? shareState = null,
+        IGroupConfigStore? groupConfigs = null)
     {
         this.logger = logger;
         this.logManager = logManager;
+        _groupConfigs = groupConfigs ?? new InMemoryGroupConfigStore();
         _sharePartitions = new SharePartitionManager(
             shareState ?? ShareStateStore.InMemory(), recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
         _offsets = offsets ?? OffsetStore.InMemory();
@@ -56,6 +60,12 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     /// broker on its own — every partition is this broker's.
     /// </summary>
     public void SetPartitionLeadership(IPartitionLeadership? leadership) => _leadership = leadership;
+
+    /// <summary>
+    /// Where the groups' configs are (#228): the metadata log once this broker is in a cluster, so a partition's leader
+    /// applies a group's limits as its coordinator does.
+    /// </summary>
+    public void SetGroupConfigStore(IGroupConfigStore groupConfigs) => _groupConfigs = groupConfigs;
 
     // Whether this broker serves the group's partition of __consumer_offsets now (#219).
     private ShareGroupErrorStatus Ownership(string groupId) => _offsets.OwnershipOf(groupId) switch
@@ -489,18 +499,12 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private ShareLeader LeaderOf(TopicPartition tp) =>
         _leadership?.LeaderOf(tp) is { } leader ? new ShareLeader(leader.BrokerId, leader.LeaderEpoch) : NoLeader;
 
-    // The group's limits as its coordinator holds them; the defaults where this broker is not its coordinator.
+    // The group's limits from its configs, which every broker knows (#228); Kafka's defaults where it set none.
     private ShareSettings SettingsOf(string? groupId)
     {
-        var defaults = new ShareGroupState();
-        if (string.IsNullOrEmpty(groupId))
-            return new ShareSettings(defaults.MaxDeliveryCount, defaults.MaxRecordLocks, defaults.RenewAcknowledgeEnabled);
-        lock (_groupLock)
-        {
-            var group = _offsets.OwnershipOf(groupId) == CoordinatorOwnership.Owned ? _state.Current(groupId) : null;
-            group ??= defaults;
-            return new ShareSettings(group.MaxDeliveryCount, group.MaxRecordLocks, group.RenewAcknowledgeEnabled);
-        }
+        var (deliveryLimit, maxRecordLocks, renewEnabled) = ShareGroupConfigs.Of(
+            string.IsNullOrEmpty(groupId) ? new Dictionary<string, string>() : _groupConfigs.ConfigsOf(groupId));
+        return new ShareSettings(deliveryLimit, maxRecordLocks, renewEnabled);
     }
 
     // Writes the share partition's state with the share coordinator; a fenced write leaves it stale, read again next time.
@@ -680,11 +684,9 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
 
     /// <summary>
-    /// KIP-1240 — mutate a share-group config via IncrementalAlterConfigs.
-    /// Returns null on success or an error message describing why the
-    /// mutation was rejected. The group is auto-created with default state
-    /// if it doesn't exist yet (matches upstream's "configs precede group"
-    /// behaviour — an admin may set retention before the first consumer joins).
+    /// KIP-1240 — sets a share-group config via IncrementalAlterConfigs, or resets it to Kafka's default with a null
+    /// value. Null on success, else why the change was refused. A group's configs need no group: an admin may set them
+    /// before the first member joins.
     /// Supported configs:
     /// <list type="bullet">
     ///   <item><c>share.delivery.count.limit</c> — int, clamp [2, 10]</item>
@@ -692,55 +694,22 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     ///   <item><c>share.renew.acknowledge.enable</c> — bool</item>
     /// </list>
     /// </summary>
-    /// <remarks>Answered once the config is durable in the group's records (#219).</remarks>
-    public Task<string?> SetShareGroupConfigAsync(string groupId, string name, string? value, CancellationToken cancellationToken)
+    /// <remarks>
+    /// Answered once the config is in the metadata log (#228), whichever broker takes the request: every broker reads a
+    /// group's configs from there.
+    /// </remarks>
+    public async Task<string?> SetShareGroupConfigAsync(string groupId, string name, string? value, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(groupId)) return Task.FromResult<string?>("Group name must not be empty.");
-        var here = Ownership(groupId);
-        if (here != ShareGroupErrorStatus.None)
-            return Task.FromResult<string?>($"This broker does not coordinate share group {groupId} now ({here}).");
-        return _state.ChangeAsync(groupId, () => SetShareGroupConfigLocked(groupId, name, value),
-            written => (string?)$"The config of share group {groupId} could not be made durable now ({StatusOf(written)}).", cancellationToken);
-    }
+        if (string.IsNullOrEmpty(groupId)) return "Group name must not be empty.";
+        if (!ShareGroupConfigs.IsKnown(name))
+            return $"Config '{name}' is not a recognized share-group config (KIP-1240).";
+        if (value is not null && ShareGroupConfigs.Validate(name, value) is { } invalid)
+            return invalid;
 
-    private string? SetShareGroupConfigLocked(string groupId, string name, string? value)
-    {
-        {
-            var group = _state.Current(groupId);
-            if (group is null)
-            {
-                group = new ShareGroupState { GroupId = groupId };
-                _state.Add(groupId, group);
-            }
-
-            switch (name)
-            {
-                case "share.delivery.count.limit":
-                    if (!int.TryParse(value, out var deliveryCount))
-                        return $"Config '{name}' must be an integer.";
-                    if (deliveryCount < 2 || deliveryCount > 10)
-                        return $"Config '{name}' must be between 2 and 10 (KIP-1240 clamp).";
-                    group.MaxDeliveryCount = deliveryCount;
-                    return null;
-
-                case "share.partition.max.record.locks":
-                    if (!int.TryParse(value, out var maxLocks))
-                        return $"Config '{name}' must be an integer.";
-                    if (maxLocks < 100 || maxLocks > 10000)
-                        return $"Config '{name}' must be between 100 and 10000 (KIP-1240 clamp).";
-                    group.MaxRecordLocks = maxLocks;
-                    return null;
-
-                case "share.renew.acknowledge.enable":
-                    if (!bool.TryParse(value, out var renewEnabled))
-                        return $"Config '{name}' must be 'true' or 'false'.";
-                    group.RenewAcknowledgeEnabled = renewEnabled;
-                    return null;
-
-                default:
-                    return $"Config '{name}' is not a recognized share-group config (KIP-1240).";
-            }
-        }
+        var written = await _groupConfigs.SetAsync(groupId, name, value, cancellationToken);
+        return written == GroupConfigWriteStatus.Ok
+            ? null
+            : $"The config of share group {groupId} could not be written to the metadata log now; retry.";
     }
 
     /// <summary>

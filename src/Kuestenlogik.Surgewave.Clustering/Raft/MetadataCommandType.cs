@@ -59,5 +59,11 @@ public enum MetadataCommandType
     /// these entries — operators reconfigure the static voter set and
     /// restart; see <c>docs/raft/voter-changes.md</c>.
     /// </summary>
-    VoterChange = 9
+    VoterChange = 9,
+
+    /// <summary>
+    /// Set or remove one dynamic config of a group (#228) — Kafka's ConfigRecord of a GROUP resource — so every
+    /// broker applies a share group's limits as its coordinator does.
+    /// </summary>
+    GroupConfigChanged = 10
 }

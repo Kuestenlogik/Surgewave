@@ -1,7 +1,7 @@
-using System.Reflection;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 using Kuestenlogik.Surgewave.Broker.Queue;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
@@ -13,13 +13,9 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
-/// KIP-1240 follow-up — IncrementalAlterConfigs admin wire-up for share-group
-/// configs. The earlier KIP-1240 commit captured the three configs as state on
-/// <see cref="ShareGroupState"/> and enforced <c>share.renew.acknowledge.enable</c>
-/// inline in the coordinator's ack-batch loop, but admins could only mutate
-/// the flag via reflection in tests. This commit wires the admin path:
-/// <c>ConfigResourceType.Group (32)</c> + <c>IncrementalAlterConfigsRequest</c>
-/// → <see cref="ShareGroupCoordinator.SetShareGroupConfig"/>.
+/// KIP-1240 — IncrementalAlterConfigs for share-group configs: <c>ConfigResourceType.Group (32)</c> →
+/// <see cref="ShareGroupCoordinator.SetShareGroupConfigAsync"/> → the group config store, the metadata log in a cluster
+/// (#228).
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
@@ -28,6 +24,7 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
     private readonly LogManager _logManager;
     private readonly QueueViewManager _queueViewManager;
     private readonly ShareGroupCoordinator _coordinator;
+    private readonly InMemoryGroupConfigStore _groupConfigs = new();
     private readonly ConfigApiHandler _configHandler;
 
     public Kip1240IncrementalAlterConfigsTests()
@@ -44,7 +41,7 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
             MaxInFlightPerConsumer = 100,
         }, NullLoggerFactory.Instance, _logManager);
         _coordinator = new ShareGroupCoordinator(
-            NullLogger<ShareGroupCoordinator>.Instance, _logManager);
+            NullLogger<ShareGroupCoordinator>.Instance, _logManager, groupConfigs: _groupConfigs);
 
         var brokerConfig = new BrokerConfig { DataDirectory = _dataDir };
         var dynamicConfig = new DynamicBrokerConfig(brokerConfig, NullLogger<DynamicBrokerConfig>.Instance);
@@ -96,30 +93,15 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
         return (IncrementalAlterConfigsResponse)response;
     }
 
-    /// <summary>
-    /// Reach into the coordinator's private state map to verify the
-    /// IncrementalAlterConfigs round-trip actually persisted. Production
-    /// code uses LookupRenewEnabled which we can't see from here.
-    /// </summary>
-    private T ReadGroupField<T>(string groupId, string fieldName)
-    {
-        var groupsField = typeof(ShareGroupCoordinator).GetField("_shareGroups", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var lockField = typeof(ShareGroupCoordinator).GetField("_groupLock", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var lockObj = lockField.GetValue(_coordinator)!;
-        var groups = (Dictionary<string, ShareGroupState>)groupsField.GetValue(_coordinator)!;
-        lock (lockObj)
-        {
-            var prop = typeof(ShareGroupState).GetProperty(fieldName)!;
-            return (T)prop.GetValue(groups[groupId])!;
-        }
-    }
+    // What the store holds for the group's config, null where the group runs with Kafka's default.
+    private string? ConfigOf(string groupId, string name) => _groupConfigs.ConfigsOf(groupId).GetValueOrDefault(name);
 
     [Fact]
-    public async Task SetRenewAcknowledgeEnableFalse_PersistsOnShareGroupState()
+    public async Task SetRenewAcknowledgeEnableFalse_IsInTheGroupConfigStore()
     {
         var response = await InvokeAsync(BuildRequest("g1", "share.renew.acknowledge.enable", op: 0, value: "false"));
         Assert.Equal(ErrorCode.None, response.Responses[0].ErrorCode);
-        Assert.False(ReadGroupField<bool>("g1", nameof(ShareGroupState.RenewAcknowledgeEnabled)));
+        Assert.Equal("false", ConfigOf("g1", "share.renew.acknowledge.enable"));
     }
 
     [Fact]
@@ -147,13 +129,13 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteOperation_RestoresUpstreamDefault()
+    public async Task DeleteOperation_RemovesTheConfigSoTheGroupRunsWithTheDefault()
     {
-        // First set to non-default, then DELETE — should restore to upstream default.
+        // First set to non-default, then DELETE — the group runs with the upstream default again.
         await InvokeAsync(BuildRequest("g4", "share.delivery.count.limit", op: 0, value: "10"));
         var deleteResp = await InvokeAsync(BuildRequest("g4", "share.delivery.count.limit", op: 1, value: null));
         Assert.Equal(ErrorCode.None, deleteResp.Responses[0].ErrorCode);
-        Assert.Equal(5, ReadGroupField<int>("g4", nameof(ShareGroupState.MaxDeliveryCount))); // upstream default
+        Assert.Null(ConfigOf("g4", "share.delivery.count.limit"));
     }
 
     [Fact]
@@ -169,7 +151,7 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
     {
         // First set a non-default value.
         await InvokeAsync(BuildRequest("g6", "share.delivery.count.limit", op: 0, value: "8"));
-        Assert.Equal(8, ReadGroupField<int>("g6", nameof(ShareGroupState.MaxDeliveryCount)));
+        Assert.Equal("8", ConfigOf("g6", "share.delivery.count.limit"));
 
         // Now send a ValidateOnly request with a different value — state must stay 8.
         var validateRequest = new IncrementalAlterConfigsRequest
@@ -199,6 +181,6 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
         };
         var response = await InvokeAsync(validateRequest);
         Assert.Equal(ErrorCode.None, response.Responses[0].ErrorCode);
-        Assert.Equal(8, ReadGroupField<int>("g6", nameof(ShareGroupState.MaxDeliveryCount))); // unchanged
+        Assert.Equal("8", ConfigOf("g6", "share.delivery.count.limit")); // unchanged
     }
 }

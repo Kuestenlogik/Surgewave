@@ -23,6 +23,8 @@ namespace Kuestenlogik.Surgewave.Clustering;
 [JsonSerializable(typeof(IsrChangedCommand))]
 [JsonSerializable(typeof(LeaderChangedCommand))]
 [JsonSerializable(typeof(ConfigChangedCommand))]
+[JsonSerializable(typeof(GroupConfigChangedCommand))]
+[JsonSerializable(typeof(Dictionary<string, Dictionary<string, string>>))]
 // Raft State/Snapshots
 [JsonSerializable(typeof(MetadataSnapshot))]
 [JsonSerializable(typeof(PartitionStateSnapshot))]

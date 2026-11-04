@@ -81,6 +81,10 @@ public sealed partial class NativeInterBrokerServer
             case SurgewaveOpCode.InterBrokerShareState:
                 return await HandleShareStateAsync(payload, ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerGroupConfig:
+                return await HandleAsync<GroupConfigPayload>(
+                    opcode, payload, static (s, p, ct) => s.ApplyGroupConfigAsync(p, ct), ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);

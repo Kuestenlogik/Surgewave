@@ -339,24 +339,33 @@ per group and partition, held by the partition's leader, as in KIP-932:
   old state has its next write refused, and it then reads the new start.
   DeleteShareGroupOffsets removes the state, and DescribeShareGroupOffsets
   reads it.
+- **Group configs in the metadata log:** a share group's KIP-1240 configs
+  (`share.delivery.count.limit`, `share.partition.max.record.locks`,
+  `share.renew.acknowledge.enable`) are entries of the metadata log, as
+  Kafka's group configs are. Every partition leader applies the group's
+  limits; a leader that was not the group's coordinator used to run the
+  group with Kafka's defaults. Any broker takes an IncrementalAlterConfigs
+  for a group and hands it to the controller. Setting a config no longer
+  creates the group, and a DELETE removes the config so the group runs with
+  the default again.
 
 Rejected records are archived, as in Kafka; they are no longer routed to a
 dead-letter topic.
 
-**Breaking:** the start offsets are no longer in the share group's record
-of `__consumer_offsets`. A start offset set before this release is gone.
+**Breaking:** the start offsets and the configs are no longer in the share
+group's record of `__consumer_offsets`. Start offsets and configs set before
+this release are gone.
 
 ### A share group outlives its coordinator (#219)
 
-A share group's members, epochs and configs lived only in the memory of
-the broker that served it. They are now in the group's partition of
-`__consumer_offsets`: the members and epochs as Kafka's ShareGroup
-records, the KIP-1240 configs in a tagged field of the group's record that
-Kafka readers skip. A heartbeat and a share-group config change are
-answered once their changes are on the in-sync replicas, and a broker that
+A share group's members and epochs lived only in the memory of the broker
+that served it. They are now in the group's partition of
+`__consumer_offsets`, as Kafka's ShareGroup records. A heartbeat is
+answered once its changes are on the in-sync replicas, and a broker that
 takes the partition over reads the group from them. A broker that does not
 coordinate the group answers `NOT_COORDINATOR`. The start offsets are kept
-with the share partitions' state in `__share_group_state` (#228).
+with the share partitions' state in `__share_group_state`, and the configs
+are kept in the metadata log (#228).
 
 ### A group taken over by another coordinator can be described (#224)
 
