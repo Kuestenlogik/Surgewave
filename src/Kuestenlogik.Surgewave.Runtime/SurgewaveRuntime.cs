@@ -319,7 +319,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             v2Coordinator: consumerGroupV2Coordinator);
         var streamsGroupCoordinator = new Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator(
             _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>(), _logManager);
-        var producerStateManager = new ProducerStateManager();
+        var producerStateManager = new ProducerStateManager(new ProducerIdBlocks(_options.BrokerId, _dataDirectory));
         var transactionIndex = new TransactionIndex();
         _transactionStateStore = new TransactionStateStore(_dataDirectory, txnStateStoreLogger);
         var transactionCoordinator = new TransactionCoordinator(

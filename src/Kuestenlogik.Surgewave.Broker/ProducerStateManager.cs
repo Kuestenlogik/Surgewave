@@ -10,10 +10,12 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// Manages producer state for idempotent and transactional producers.
 /// Tracks producer IDs, epochs, and sequence numbers to ensure exactly-once delivery.
 /// </summary>
-public sealed class ProducerStateManager
+public sealed class ProducerStateManager(IProducerIdSource? producerIds = null)
 {
     private readonly ConcurrentDictionary<long, ProducerState> _producers = new();
-    private long _nextProducerId = 1;
+
+    // Unique in the cluster and over restarts with the broker's blocks (#223); a plain counter under test.
+    private readonly IProducerIdSource _producerIds = producerIds ?? new InMemoryProducerIds();
     private readonly Lock _idLock = new();
 
     /// <summary>
@@ -59,7 +61,7 @@ public sealed class ProducerStateManager
     {
         lock (_idLock)
         {
-            var producerId = _nextProducerId++;
+            var producerId = _producerIds.Next();
             var state = new ProducerState(producerId, 0);
             _producers[producerId] = state;
             return (producerId, 0);
@@ -68,17 +70,13 @@ public sealed class ProducerStateManager
 
     /// <summary>
     /// Registers an existing producer ID and epoch (used during recovery from persistent state).
-    /// Ensures _nextProducerId is always greater than any registered producer ID.
+    /// The id source never hands a registered id out again.
     /// </summary>
     public void RegisterProducerId(long producerId, short epoch)
     {
         lock (_idLock)
         {
-            // Ensure next allocated ID is always higher than any registered ID
-            if (producerId >= _nextProducerId)
-            {
-                _nextProducerId = producerId + 1;
-            }
+            _producerIds.Observe(producerId);
 
             var state = new ProducerState(producerId, epoch);
             _producers[producerId] = state;

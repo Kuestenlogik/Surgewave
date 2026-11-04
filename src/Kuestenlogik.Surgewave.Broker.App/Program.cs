@@ -736,7 +736,11 @@ builder.Services.AddSingleton(sp =>
 
 // Transaction + quota + delegation stack in DI (#59 phase 2a). Same singletons,
 // now DI-managed so the Kafka handlers can be DI-resolved. Behaviour-preserving.
-builder.Services.AddSingleton(sp => new ProducerStateManager());
+builder.Services.AddSingleton(sp =>
+{
+    var config = sp.GetRequiredService<BrokerConfig>();
+    return new ProducerStateManager(new ProducerIdBlocks(config.BrokerId, config.DataDirectory));
+});
 builder.Services.AddSingleton(sp => new TransactionIndex());
 builder.Services.AddSingleton(sp => new TransactionStateStore(
     sp.GetRequiredService<BrokerConfig>().DataDirectory,

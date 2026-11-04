@@ -143,6 +143,14 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### Producer ids are unique in the cluster and over restarts (#223)
+
+Every broker handed out producer ids from a counter that started at 1 on each
+broker and at every start. Producers on two brokers, or before and after a
+restart, could share an id, and a partition leader then mixed their sequences.
+Ids are now `brokerId · 2^40 + n`, and `n` comes from blocks of 1000. A broker
+writes each block to its data directory before it uses an id from it.
+
 ### A broker that did not stop cleanly keeps its records (#222)
 
 A file segment reopened after a broker was killed or crashed took its end
