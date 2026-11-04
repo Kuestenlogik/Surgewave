@@ -120,6 +120,7 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
             _writePosition = _logFile.Length;
             LoadIndex();
             LoadTimeIndex();
+            RecoverTailFromLog();
         }
 
         // Initialize mmap manager for zero-copy reads (after file is created/opened).
@@ -651,16 +652,11 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
         }
     }
 
+    // Reads the index file. Which batches the log really holds, and where it ends, RecoverTailFromLog decides.
     private void LoadIndex()
     {
         if (_indexFile.Length == 0)
-        {
-            if (_logFile.Length > 0)
-            {
-                RebuildIndexFromLog();
-            }
             return;
-        }
 
         // Batch read entire index file (16 bytes per entry)
         var indexLength = (int)_indexFile.Length;
@@ -681,6 +677,11 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
                 var span = buffer.AsSpan(i * 16, 16);
                 var batchBaseOffset = BinaryPrimitives.ReadInt64LittleEndian(span);
                 var filePosition = BinaryPrimitives.ReadInt64LittleEndian(span.Slice(8));
+
+                // An entry for a batch the log does not hold — the log lost its tail, the index did not — is dropped.
+                if (filePosition + BatchHeaderSize > _logFile.Length)
+                    break;
+
                 _offsetIndex[batchBaseOffset] = filePosition;
                 _offsetsInOrder.Add(batchBaseOffset);
             }
@@ -689,48 +690,98 @@ public sealed class FileStorageEngine : ISurgewaveStorageEngine
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
-
-        if (_offsetsInOrder.Count > 0 && _logFile.Length > 0)
-        {
-            var lastBatchOffset = _offsetsInOrder[^1];
-            var lastBatchPosition = _offsetIndex[lastBatchOffset];
-
-            // Read record count from last batch header (only need bytes 57-60)
-            Span<byte> headerBuffer = stackalloc byte[61];
-            _logFile.Seek(lastBatchPosition, SeekOrigin.Begin);
-            _logFile.ReadExactly(headerBuffer);
-
-            var recordCount = BinaryPrimitives.ReadInt32BigEndian(headerBuffer.Slice(57, 4));
-            _currentOffset = lastBatchOffset + recordCount;
-            _logFile.Seek(0, SeekOrigin.End);
-        }
     }
 
-    private void RebuildIndexFromLog()
+    // A Kafka v2 batch header up to and including the record count: baseOffset (8), batchLength (4),
+    // partitionLeaderEpoch (4), magic (1), crc (4), attributes (2), lastOffsetDelta (4), firstTimestamp (8),
+    // maxTimestamp (8), producerId (8), producerEpoch (2), baseSequence (4), recordCount (4).
+    private const int BatchHeaderSize = 61;
+
+    /// <summary>
+    /// Makes the log, not the index, the record of what the segment holds. The index is written behind the log and
+    /// flushed in batches, so after a broker that did not shut down cleanly it lacks the newest batches — or is
+    /// empty. Every complete batch after the last indexed one is indexed now, a batch cut short by the stop is
+    /// truncated, and the end offset is where the last complete batch ends. The end used to be taken from the index
+    /// alone, so a segment whose index was never flushed reopened as empty: its records could not be read, and new
+    /// ones were written over their offsets.
+    /// </summary>
+    private void RecoverTailFromLog()
     {
-        _logFile.Seek(0, SeekOrigin.Begin);
-        Span<byte> headerBuffer = stackalloc byte[12]; // baseOffset(8) + batchLength(4)
-
-        while (_logFile.Position < _logFile.Length)
+        long position = 0;
+        long nextOffset = _baseOffset;
+        if (_offsetsInOrder.Count > 0)
         {
-            var batchStartPos = _logFile.Position;
-
-            // Try to read header
-            var bytesRead = _logFile.Read(headerBuffer);
-            if (bytesRead < 12)
-                break;
-
-            var baseOffset = BinaryPrimitives.ReadInt64BigEndian(headerBuffer);
-            var batchLength = BinaryPrimitives.ReadInt32BigEndian(headerBuffer.Slice(8));
-
-            _offsetIndex[baseOffset] = batchStartPos;
-            _offsetsInOrder.Add(baseOffset);
-
-            // Seek past batch data
-            _logFile.Seek(batchStartPos + 12 + batchLength, SeekOrigin.Begin);
+            position = _offsetIndex[_offsetsInOrder[^1]];
         }
 
+        Span<byte> header = stackalloc byte[BatchHeaderSize];
+        var recovered = new List<(long Offset, long Position, long Timestamp)>();
+        var length = _logFile.Length;
+        while (position + BatchHeaderSize <= length)
+        {
+            _logFile.Seek(position, SeekOrigin.Begin);
+            _logFile.ReadExactly(header);
+            var baseOffset = BinaryPrimitives.ReadInt64BigEndian(header);
+            var batchLength = BinaryPrimitives.ReadInt32BigEndian(header.Slice(8));
+            var end = position + 12 + batchLength;
+            if (batchLength < BatchHeaderSize - 12 || end > length)
+                break; // cut short: written in part when the broker stopped
+
+            var maxTimestamp = BinaryPrimitives.ReadInt64BigEndian(header.Slice(35));
+            var recordCount = BinaryPrimitives.ReadInt32BigEndian(header.Slice(57));
+            if (!_offsetIndex.ContainsKey(baseOffset))
+            {
+                _offsetIndex[baseOffset] = position;
+                _offsetsInOrder.Add(baseOffset);
+                recovered.Add((baseOffset, position, maxTimestamp));
+                if (maxTimestamp > 0)
+                {
+                    _timestampIndex[maxTimestamp] = baseOffset;
+                    _timestampsInOrder.Add(maxTimestamp);
+                }
+            }
+            if (maxTimestamp > MaxTimestamp)
+                MaxTimestamp = maxTimestamp;
+
+            nextOffset = baseOffset + recordCount;
+            position = end;
+        }
+
+        if (position < length)
+        {
+            _logFile.SetLength(position);
+            // An indexed batch in the part cut off goes from the index too.
+            while (_offsetsInOrder.Count > 0 && _offsetIndex[_offsetsInOrder[^1]] >= position)
+            {
+                _offsetIndex.TryRemove(_offsetsInOrder[^1], out _);
+                _offsetsInOrder.RemoveAt(_offsetsInOrder.Count - 1);
+            }
+        }
+        _writePosition = position;
+        _currentOffset = nextOffset;
         _logFile.Seek(0, SeekOrigin.End);
+
+        // The index catches up, so the next start finds these batches in it.
+        if (recovered.Count > 0)
+        {
+            _indexFile.Seek(0, SeekOrigin.End);
+            _timeIndexFile.Seek(0, SeekOrigin.End);
+            Span<byte> entry = stackalloc byte[16];
+            foreach (var (offset, filePosition, timestamp) in recovered)
+            {
+                BinaryPrimitives.WriteInt64LittleEndian(entry, offset);
+                BinaryPrimitives.WriteInt64LittleEndian(entry.Slice(8), filePosition);
+                _indexFile.Write(entry);
+                if (timestamp > 0)
+                {
+                    BinaryPrimitives.WriteInt64LittleEndian(entry, timestamp);
+                    BinaryPrimitives.WriteInt64LittleEndian(entry.Slice(8), offset);
+                    _timeIndexFile.Write(entry);
+                }
+            }
+            _indexFile.Flush(flushToDisk: true);
+            _timeIndexFile.Flush(flushToDisk: true);
+        }
     }
 
     private void LoadTimeIndex()
