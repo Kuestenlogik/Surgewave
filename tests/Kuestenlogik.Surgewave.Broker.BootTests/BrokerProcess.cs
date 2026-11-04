@@ -52,13 +52,17 @@ internal sealed class BrokerProcess : IAsyncDisposable
     /// Starts the broker on fresh ports with its data in <paramref name="dataDir"/> and waits until it is ready and
     /// Kestrel is bound. Fails the test if it exits first or does not get there in time.
     /// </summary>
-    public static async Task<BrokerProcess> StartAsync(string dataDir, CancellationToken cancellationToken, params string[] extraArgs)
+    public static Task<BrokerProcess> StartAsync(string dataDir, CancellationToken cancellationToken, params string[] extraArgs)
+        => StartAsync(dataDir, BrokerPorts.Reserve(), cancellationToken, extraArgs);
+
+    /// <summary>
+    /// Starts the broker on <paramref name="ports"/> chosen beforehand: a cluster's brokers name each other's ports in
+    /// their configuration before any of them starts.
+    /// </summary>
+    public static async Task<BrokerProcess> StartAsync(string dataDir, BrokerPorts ports, CancellationToken cancellationToken, params string[] extraArgs)
     {
         var brokerDll = ResolveBrokerDll();
-
-        // Four distinct ephemeral ports: BrokerConfig requires Port, GrpcPort and ReplicationPort
-        // to all differ, and fixed defaults (9092/9093/10092/9094) would collide across runs.
-        int kafkaPort = FreeTcpPort(), grpcPort = FreeTcpPort(), http3Port = FreeTcpPort(), replPort = FreeTcpPort();
+        var (kafkaPort, grpcPort, http3Port, replPort) = (ports.Kafka, ports.Grpc, ports.Http3, ports.Replication);
 
         var psi = new ProcessStartInfo
         {
@@ -167,7 +171,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
         }
     }
 
-    private static int FreeTcpPort()
+    internal static int FreeTcpPort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -210,4 +214,14 @@ internal sealed class BrokerProcess : IAsyncDisposable
         try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
         catch { /* a leftover temp dir is harmless; Windows file locks can linger briefly */ }
     }
+}
+
+/// <summary>
+/// The four ports a broker binds — Kafka, gRPC, HTTP/3 (the REST port of the tests) and replication — distinct, as
+/// BrokerConfig requires, and ephemeral, as fixed defaults would collide across runs.
+/// </summary>
+internal sealed record BrokerPorts(int Kafka, int Grpc, int Http3, int Replication)
+{
+    public static BrokerPorts Reserve() =>
+        new(BrokerProcess.FreeTcpPort(), BrokerProcess.FreeTcpPort(), BrokerProcess.FreeTcpPort(), BrokerProcess.FreeTcpPort());
 }

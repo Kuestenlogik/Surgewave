@@ -619,6 +619,10 @@ builder.Services.AddSingleton(sp => new ReplicaManager(
     sp.GetRequiredService<Kuestenlogik.Surgewave.Transport.IPeerTransport>(),
     sp.GetRequiredService<BrokerMetrics>(),
     sp.GetService<IIsrChangeNotifier>()));
+// #164, #227 — who leads a partition, for the produce paths of both protocols: the Kafka plugin resolves it, and the
+// native handler is given it below.
+builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>(sp =>
+    new ClusterStatePartitionLeadership(sp.GetRequiredService<ClusterState>(), sp.GetRequiredService<ClusteringConfig>().BrokerId));
 // #122 — the durability gate behind acks=all, registered through the neutral Core contract so the
 // Kafka plugin can resolve it without an edge to Clustering.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(sp =>
@@ -1667,6 +1671,7 @@ var lagCalculator = new Kuestenlogik.Surgewave.Core.Monitoring.DefaultLagCalcula
     new LogManagerWatermarkProvider(logManager));
 
 var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, nativeGroupCoordinator, transactionCoordinator, quotaManager, metrics, brokerLogger, connectionHandlers: kafkaConnectionHandlers, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator, loggerFactory: app.Services.GetRequiredService<ILoggerFactory>());
+surgewaveBroker.SetPartitionLeadership(app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>());
 
 // Publish the broker as the Surgewave stream handler so alternative transports
 // (QUIC, shared memory, ...) can pump connections into the shared pipeline.

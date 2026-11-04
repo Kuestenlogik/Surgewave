@@ -143,6 +143,15 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### The shipped broker refuses a produce for a partition another broker leads (#227)
+
+The embedded runtime answered a produce for a partition another broker
+leads with `NOT_LEADER_OR_FOLLOWER` since #164, so a client with stale
+metadata refreshes it. The shipped broker never wired that check and
+appended the records to a follower's copy, where nobody would read them.
+It now answers as the runtime does, over the Kafka and the native
+protocol.
+
 ### A topic is created whole or not at all (#217)
 
 Creating a topic wrote the topic and then the replicas of each partition as

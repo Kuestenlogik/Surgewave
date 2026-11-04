@@ -102,6 +102,9 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             // Resolved through the neutral Core contract, so this stays a Kafka plugin with no edge
             // to Clustering; the host registers whichever implementation it has (#122).
             dataApiHandler.SetCommitGate(sp.GetService<IPartitionCommitGate>());
+            // Who leads a partition, when the host knows (#164, #227): a produce for one another broker leads is
+            // answered NOT_LEADER_OR_FOLLOWER instead of being appended to a follower's copy.
+            dataApiHandler.SetPartitionLeadership(sp.GetService<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>());
             return dataApiHandler;
         });
 
