@@ -167,6 +167,19 @@ public class ReplicationTests : IAsyncLifetime
     [Fact]
     public async Task Cluster_ThreeBrokersStart_AllBrokersRespond()
     {
+        // The topic exists in the cluster before the brokers are asked: auto-creation goes through the controller
+        // (#207) and is covered by TopicCreationClusterTests; here it would only race the producer's message timeout.
+        const string topic = "cluster-test-topic";
+        using (var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = _bootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([new TopicSpecification { Name = topic, NumPartitions = 3, ReplicationFactor = 3 }]);
+        }
+        Assert.True(await TestWaitHelpers.WaitForConditionAsync(
+                () => _brokers.All(b => Enumerable.Range(0, 3).All(p =>
+                    b.ClusterState!.GetPartitionState(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = p })?.LeaderBrokerId > 0)),
+                timeout: TimeSpan.FromSeconds(60), ct: TestContext.Current.CancellationToken, output: _output),
+            $"{topic} did not get a leader for every partition on every broker");
+
         // Verify all 3 brokers are responding
         foreach (var broker in _brokers)
         {
@@ -179,7 +192,7 @@ public class ReplicationTests : IAsyncLifetime
             using var producer = new ProducerBuilder<string, string>(config).Build();
 
             var result = await producer.ProduceAsync(
-                "cluster-test-topic",
+                topic,
                 new Message<string, string>
                 {
                     Key = $"broker-{broker.BrokerId}",
