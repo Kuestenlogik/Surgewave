@@ -51,4 +51,10 @@ public interface INativeInterBrokerService
     /// </summary>
     ValueTask<ControlledShutdownResponsePayload> ApplyControlledShutdownAsync(
         ControlledShutdownPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a topic another broker was asked for (#207). <see cref="ClusterRpcStatus.NotController"/> when this
+    /// broker is not the controller, so the caller asks the real one.
+    /// </summary>
+    ValueTask<ClusterRpcStatus> ApplyCreateTopicAsync(CreateTopicPayload payload, CancellationToken ct = default);
 }

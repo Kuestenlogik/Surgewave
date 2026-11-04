@@ -26,6 +26,7 @@ public class NativeControllerClientTests : IAsyncLifetime
     private readonly ClusterState _receiverState = new();
     private ReplicaManager _receiverReplicas = null!;
     private readonly NativeInterBrokerServerTests.StubIsrApplier _receiverIsrApplier = new();
+    private readonly StubTopicCreator _receiverTopicCreator = new();
     private Kuestenlogik.Surgewave.Transport.IPeerListener _listener = null!;
     private Task? _serverTask;
 
@@ -48,7 +49,8 @@ public class NativeControllerClientTests : IAsyncLifetime
             NullLogger<NativeInterBrokerServer>.Instance,
             new ClusterStateInterBrokerService(
                 NullLogger<ClusterStateInterBrokerService>.Instance,
-                _receiverState, _receiverReplicas, receiverLogs, localBrokerId: 2, _receiverIsrApplier));
+                _receiverState, _receiverReplicas, receiverLogs, localBrokerId: 2, _receiverIsrApplier,
+                topicCreator: _receiverTopicCreator));
 
         _listener = transport.CreateListener(new IPEndPoint(IPAddress.Loopback, 0));
         await _listener.StartAsync();
@@ -88,6 +90,49 @@ public class NativeControllerClientTests : IAsyncLifetime
         await _listener.DisposeAsync();
         await _receiverReplicas.DisposeAsync();
         _cts.Dispose();
+    }
+
+    // #207 — a broker that is not the controller hands a topic creation to the controller, which creates it.
+    [Fact]
+    public async Task RequestCreateTopic_TheControllerCreatesTheTopicWithItsSettings()
+    {
+        _senderState.ControllerId = 2;
+        _receiverTopicCreator.IsController = true;
+
+        var created = await _client.RequestCreateTopicAsync(
+            "orders", partitions: 3, replicationFactor: 2, new Dictionary<string, string> { ["cleanup.policy"] = "compact" }, _cts.Token);
+
+        Assert.True(created);
+        var request = Assert.Single(_receiverTopicCreator.Created);
+        Assert.Equal(("orders", 3, (short)2), (request.Topic, request.Partitions, request.ReplicationFactor));
+        Assert.Equal("compact", request.Config!["cleanup.policy"]);
+    }
+
+    // #207 — a broker that lost the controller role since the sender looked refuses; the sender reports failure, and
+    // its client retries rather than the topic being created on one broker alone.
+    [Fact]
+    public async Task RequestCreateTopic_ABrokerThatIsNoLongerTheControllerRefuses()
+    {
+        _senderState.ControllerId = 2;
+        _receiverTopicCreator.IsController = false;
+
+        var created = await _client.RequestCreateTopicAsync("orders", 1, 1, null, _cts.Token);
+
+        Assert.False(created);
+        Assert.Empty(_receiverTopicCreator.Created);
+    }
+
+    internal sealed class StubTopicCreator : IClusterTopicCreator
+    {
+        public bool IsController { get; set; }
+
+        public List<(string Topic, int Partitions, short ReplicationFactor, Dictionary<string, string>? Config)> Created { get; } = [];
+
+        public Task<bool> CreateTopicAsync(string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config, CancellationToken ct)
+        {
+            Created.Add((topic, partitionCount, replicationFactor, config));
+            return Task.FromResult(true);
+        }
     }
 
     [Fact]

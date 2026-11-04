@@ -51,6 +51,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
     // #180 — how a departing broker that is NOT the controller gets its partitions moved.
     private IControlledShutdownRequester? _shutdownRequester;
+    private ITopicCreationRequester? _topicCreationRequester;
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
@@ -128,6 +129,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// </summary>
     public void SetControlledShutdownRequester(IControlledShutdownRequester requester)
         => _shutdownRequester = requester;
+
+    /// <summary>How this broker has a topic created while another broker is the controller (#207).</summary>
+    public void SetTopicCreationRequester(ITopicCreationRequester requester)
+        => _topicCreationRequester = requester;
 
     /// <summary>
     /// Set the cluster balancer for automatic partition rebalancing.
@@ -616,8 +621,14 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     {
         if (!_isController)
         {
-            LogNotController("CreateTopic");
-            return false;
+            // Only the controller writes the topic to the metadata log; any other broker asks it to (#207). It used to
+            // be refused here, and the handlers then created the topic on their own broker alone.
+            if (_topicCreationRequester is null)
+            {
+                LogNotController("CreateTopic");
+                return false;
+            }
+            return await _topicCreationRequester.RequestCreateTopicAsync(topic, partitionCount, replicationFactor, config, ct);
         }
 
         return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, ct);

@@ -22,3 +22,17 @@ public interface IControlledShutdownRequester
     Task<IReadOnlyList<TopicPartition>?> RequestControlledShutdownAsync(
         int brokerId, long brokerEpoch, CancellationToken ct = default);
 }
+
+/// <summary>
+/// How a broker that is not the controller has a topic created (#207): it asks the controller, which writes the topic
+/// to the metadata log. A broker never creates a cluster topic for itself alone.
+/// </summary>
+public interface ITopicCreationRequester
+{
+    /// <summary>
+    /// Asks the controller to create the topic. True once the controller created it; false when it refused, or could
+    /// not be reached — the client is answered with a retriable error and asks again.
+    /// </summary>
+    Task<bool> RequestCreateTopicAsync(
+        string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config, CancellationToken ct = default);
+}

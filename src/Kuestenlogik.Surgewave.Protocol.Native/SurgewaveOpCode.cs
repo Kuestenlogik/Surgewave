@@ -200,6 +200,9 @@ public enum SurgewaveOpCode : ushort
     InterBrokerWriteTxnMarkers = 0x1507,
     InterBrokerReplicaFetch = 0x1508,
 
+    // #207 — a broker that is not the controller hands a topic creation to the controller.
+    InterBrokerCreateTopic = 0x1509,
+
     // #60 — inter-broker Raft/KRaft consensus (0x16xx). The real consensus already rides a
     // hand-rolled framing on the ReplicationPort (Family B); these opcodes are for unifying it
     // onto the SRWV frame later (Inc8, optional).

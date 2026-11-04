@@ -185,6 +185,24 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
             ? (ErrorCode.None, null)
             : (ErrorCode.CoordinatorNotAvailable, $"No broker coordinates {key} yet.");
 
+    /// <summary>
+    /// A topic as the cluster knows it (#208): in a cluster every broker applies the metadata log, so the cluster
+    /// state has every topic with its full partition count — the local log manager has only what this broker hosts,
+    /// and a broker hosting one partition of two reported a topic of one partition. A broker on its own has only the
+    /// log manager.
+    /// </summary>
+    private Kuestenlogik.Surgewave.Core.Models.TopicMetadata? TopicOf(string topic)
+        => _clusterState?.GetTopic(topic) ?? _logManager.GetTopicMetadata(topic);
+
+    // Every topic the cluster knows, and in a cluster those this broker has only locally too.
+    private List<string> AllTopicNames()
+    {
+        var names = new SortedSet<string>(_logManager.ListTopics().Select(t => t.Name), StringComparer.Ordinal);
+        if (_clusterState is not null)
+            names.UnionWith(_clusterState.Topics.Keys);
+        return [.. names];
+    }
+
     private async Task<MetadataResponse> HandleMetadataAsync(MetadataRequest request, CancellationToken cancellationToken)
     {
         List<string> topics;
@@ -192,14 +210,14 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
         if (request.Topics == null)
         {
             // Null means "all topics"
-            topics = _logManager.ListTopics().Select(t => t.Name).ToList();
+            topics = AllTopicNames();
             Log.MetadataAllTopics(_logger, topics.Count);
         }
         else if (request.Topics.Count == 0)
         {
             // Empty list means "no topics requested", but some clients send this to discover topics
             // Treat it the same as null (all topics)
-            topics = _logManager.ListTopics().Select(t => t.Name).ToList();
+            topics = AllTopicNames();
             Log.MetadataEmptyList(_logger, topics.Count);
         }
         else
@@ -230,15 +248,15 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
         foreach (var topic in topics)
         {
             Log.ProcessingMetadata(_logger, topic);
-            var metadata = _logManager.GetTopicMetadata(topic);
+            var metadata = TopicOf(topic);
 
             if (metadata == null)
             {
                 // Auto-create topic
                 Log.AutoCreatingTopic(_logger, topic);
 
-                // Use cluster controller for topic creation if in cluster mode and this is the controller
-                if (_clusterTopicCreator != null && _clusterTopicCreator.IsController)
+                // In a cluster the controller creates the topic, asked by this broker when it is another one (#207).
+                if (_clusterTopicCreator != null)
                 {
                     var success = await _clusterTopicCreator.CreateTopicAsync(
                         topic,
@@ -254,11 +272,25 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                         _logger.LogWarning("Failed to auto-create topic {Topic} through cluster controller", topic);
                     }
 
-                    // After cluster creation, get the metadata
-                    metadata = _logManager.GetTopicMetadata(topic);
+                    // The topic reaches this broker through the metadata log; until it has, the client is told to
+                    // ask again (LEADER_NOT_AVAILABLE, as Kafka answers a topic it is creating). It used to be created
+                    // here, on this broker alone.
+                    metadata = TopicOf(topic);
+                    if (metadata == null)
+                    {
+                        topicMetadata.Add(new MetadataResponse.MetadataResponseTopic
+                        {
+                            ErrorCode = ErrorCode.LeaderNotAvailable,
+                            Name = topic,
+                            TopicId = Guid.Empty,
+                            IsInternal = false,
+                            Partitions = [],
+                        });
+                        continue;
+                    }
                 }
 
-                // Fallback: create topic locally (standalone mode, not controller, or cluster creation failed)
+                // A broker on its own creates the topic itself.
                 if (metadata == null)
                 {
                     metadata = await _logManager.CreateTopicAsync(
@@ -317,7 +349,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
             // LogManager.GetTopicMetadata; without this line the next-gen
             // consumer logs "Metadata not found for the assigned topic id: ..."
             // and silently drops the assignment.
-            var resolvedMetadata = _logManager.GetTopicMetadata(topic);
+            var resolvedMetadata = TopicOf(topic);
             topicMetadata.Add(new MetadataResponse.MetadataResponseTopic
             {
                 ErrorCode = ErrorCode.None,
@@ -418,7 +450,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
         {
             if (partitionsEmitted >= limit) break;
             var topicName = orderedTopics[i];
-            var meta = _logManager.GetTopicMetadata(topicName);
+            var meta = TopicOf(topicName);
 
             if (meta is null)
             {

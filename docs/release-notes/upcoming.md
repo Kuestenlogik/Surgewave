@@ -184,6 +184,25 @@ so does Surgewave now:
 A partition led by another broker than the transaction's coordinator is not
 yet verified through the coordinator; that is the next part of #197.
 
+### A topic created through any broker is a topic of the cluster (#207, #208)
+
+A broker that was not the controller created a topic, from CreateTopics or
+from a Metadata request that auto-creates, on itself alone. There was no
+metadata log entry and there were no replicas, and the client was told it
+worked. It now hands the creation to the controller over the inter-broker
+channel. Until the topic arrives through the metadata log, the client gets a
+retriable error: `NOT_CONTROLLER` for CreateTopics, `LEADER_NOT_AVAILABLE`
+for Metadata. Metadata also takes a topic's partitions from the cluster's
+view. A broker hosting one partition of two used to report a topic of one
+partition, and a group leader that asked it assigned only that one.
+
+### Committing or aborting an empty native transaction succeeds (#218)
+
+The native client's `TransactionBuilder` sent an EndTxn for a transaction
+that had added nothing. The broker refuses that with `INVALID_TXN_STATE`, as
+Kafka does. Such a transaction now completes on the client without a
+request, as with the Java producer.
+
 ### A group keeps its offsets when its coordinator changes (#205)
 
 Committed offsets lived in a file on the broker that coordinated the group,

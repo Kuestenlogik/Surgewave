@@ -71,6 +71,10 @@ public sealed partial class NativeInterBrokerServer
             case SurgewaveOpCode.InterBrokerControlledShutdown:
                 return await HandleControlledShutdownAsync(payload, ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerCreateTopic:
+                return await HandleAsync<CreateTopicPayload>(
+                    opcode, payload, static (s, p, ct) => s.ApplyCreateTopicAsync(p, ct), ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);

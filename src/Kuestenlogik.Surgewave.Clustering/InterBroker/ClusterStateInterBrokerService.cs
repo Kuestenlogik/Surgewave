@@ -25,6 +25,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly ITransactionMarkerSink? _markerSink;
     private readonly BrokerRegistrationCoordinator? _registrationCoordinator;
     private readonly IControlledShutdownCoordinator? _shutdownCoordinator;
+    private readonly IClusterTopicCreator? _topicCreator;
 
     public ClusterStateInterBrokerService(
         ILogger<ClusterStateInterBrokerService> logger,
@@ -36,7 +37,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         ClusterMembershipService? membership = null,
         ITransactionMarkerSink? markerSink = null,
         BrokerRegistrationCoordinator? registrationCoordinator = null,
-        IControlledShutdownCoordinator? shutdownCoordinator = null)
+        IControlledShutdownCoordinator? shutdownCoordinator = null,
+        IClusterTopicCreator? topicCreator = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -48,6 +50,20 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _markerSink = markerSink;
         _registrationCoordinator = registrationCoordinator;
         _shutdownCoordinator = shutdownCoordinator;
+        _topicCreator = topicCreator;
+    }
+
+    public async ValueTask<ClusterRpcStatus> ApplyCreateTopicAsync(CreateTopicPayload payload, CancellationToken ct = default)
+    {
+        // Only the controller writes topics to the metadata log; a controller that lost the role since the caller
+        // looked says so, and the caller tries again.
+        if (_topicCreator is null || !_topicCreator.IsController)
+            return ClusterRpcStatus.NotController;
+
+        var created = await _topicCreator.CreateTopicAsync(
+            payload.Topic, payload.Partitions, payload.ReplicationFactor,
+            payload.Config.Count > 0 ? new Dictionary<string, string>(payload.Config) : null, ct).ConfigureAwait(false);
+        return created ? ClusterRpcStatus.None : ClusterRpcStatus.Unknown;
     }
 
     public async ValueTask<ControlledShutdownResponsePayload> ApplyControlledShutdownAsync(

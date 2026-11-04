@@ -23,7 +23,7 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 /// reconciles on the next push or fetch cycle.
 /// </para>
 /// </summary>
-public sealed partial class NativeControllerClient : Replication.IIsrChangeNotifier, Replication.IControlledShutdownRequester
+public sealed partial class NativeControllerClient : Replication.IIsrChangeNotifier, Replication.IControlledShutdownRequester, Replication.ITopicCreationRequester
 {
     /// <summary>
     /// Upper bound on a single controller-to-broker round-trip, mirroring the Kafka-wire
@@ -180,6 +180,69 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
         {
             LogSendFailed(SurgewaveOpCode.InterBrokerControlledShutdown, controllerId, ex);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Ask the controller to create a topic (#207). True once it did; false when it refused — it is not the controller
+    /// any more, or the creation failed — or could not be reached. Only the controller writes topics to the metadata
+    /// log, so a broker asked for a topic hands it on rather than creating it for itself alone.
+    /// </summary>
+    public async Task<bool> RequestCreateTopicAsync(
+        string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config, CancellationToken ct = default)
+    {
+        var controllerId = _clusterState.ControllerId;
+        if (controllerId < 0 || controllerId == _config.BrokerId)
+            return false; // no controller known yet, or this broker thinks it is one and is not: the client retries
+
+        var broker = _clusterState.GetBroker(controllerId);
+        if (broker is null)
+        {
+            LogBrokerNotFound(controllerId);
+            return false;
+        }
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(RequestTimeout);
+            var token = timeoutCts.Token;
+
+            var frame = InterBrokerFrameCodec.EncodeFrame(
+                SurgewaveOpCode.InterBrokerCreateTopic,
+                new CreateTopicPayload(topic, partitions, replicationFactor, config ?? new Dictionary<string, string>()));
+
+            var connection = await _connectionPool
+                .GetConnectionAsync(broker.Host, broker.ReplicationPort, token).ConfigureAwait(false);
+
+            var exchangeComplete = false;
+            try
+            {
+                await connection.Stream.WriteAsync(frame, token).ConfigureAwait(false);
+                await connection.Stream.FlushAsync(token).ConfigureAwait(false);
+
+                var response = await InterBrokerFrameCodec.ReadFrameAsync(connection.Stream, token).ConfigureAwait(false)
+                    ?? throw new EndOfStreamException("Connection closed while reading create-topic response");
+                exchangeComplete = true;
+
+                var reader = new SurgewavePayloadReader(response.Payload.Span);
+                var status = InterBrokerStatusPayload.Read(ref reader).Status;
+                if (response.Opcode != SurgewaveOpCode.InterBrokerCreateTopic || status != ClusterRpcStatus.None)
+                {
+                    LogRejected(SurgewaveOpCode.InterBrokerCreateTopic, controllerId, status);
+                    return false;
+                }
+                return true;
+            }
+            finally
+            {
+                if (exchangeComplete) connection.Return(); else connection.Discard();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogSendFailed(SurgewaveOpCode.InterBrokerCreateTopic, controllerId, ex);
+            return false;
         }
     }
 

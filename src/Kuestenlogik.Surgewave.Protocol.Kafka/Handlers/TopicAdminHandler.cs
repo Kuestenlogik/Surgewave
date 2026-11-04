@@ -128,26 +128,27 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
                 _logger.LogInformation("CreateTopic request for {Topic}: ClusterCreator={HasCreator}, IsController={IsController}",
                     topic.Name, _clusterTopicCreator != null, _clusterTopicCreator?.IsController ?? false);
 
-                // Use cluster controller for topic creation if in cluster mode and this is the controller
-                if (_clusterTopicCreator != null && _clusterTopicCreator.IsController)
+                // In a cluster the controller creates every topic, asked by this broker when it is another one (#207);
+                // a topic is never created on one broker alone. Only a broker on its own creates it locally.
+                if (_clusterTopicCreator != null)
                 {
                     var success = await _clusterTopicCreator.CreateTopicAsync(
                         topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
 
                     if (!success)
                     {
+                        // Retriable: the controller was changing hands or not reachable; the admin client asks again.
                         results.Add(new CreateTopicsResponse.TopicResult
                         {
                             Name = topic.Name,
-                            ErrorCode = ErrorCode.Unknown,
-                            ErrorMessage = "Failed to create topic through cluster controller"
+                            ErrorCode = ErrorCode.NotController,
+                            ErrorMessage = "The controller did not create the topic; retry"
                         });
                         continue;
                     }
                 }
                 else
                 {
-                    // Standalone mode or not controller: create topic locally
                     await _logManager.CreateTopicAsync(topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
                 }
 
