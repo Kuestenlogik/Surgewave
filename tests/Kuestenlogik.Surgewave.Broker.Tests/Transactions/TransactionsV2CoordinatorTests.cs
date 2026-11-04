@@ -228,14 +228,18 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncLifetime
     [Fact]
     public async Task ATransactionLeftPreparedByARestart_IsCompletedAndItsOffsetsCommitted()
     {
+        // The group's offsets wait in its partition of __consumer_offsets for the transaction's marker (#197).
+        var offsetsPartition = new TopicPartition { Topic = "__consumer_offsets", Partition = _offsetStore.PartitionFor("g") };
+        Assert.Equal(Kuestenlogik.Surgewave.Broker.Coordination.StateWriteStatus.Ok,
+            await _offsetStore.CommitTransactionalOffsetsAsync("g", 77, 3, [new CommittedOffset("orders", 0, 42)], CancellationToken.None));
         await SeedAsync(new TransactionMetadata
         {
             TransactionalId = "rec-a", ProducerId = 77, ProducerEpoch = 3, State = Core.KafkaConstants.TransactionState.PrepareCommit, TransactionTimeoutMs = 60_000,
-            Partitions = { new TopicPartition { Topic = "orders", Partition = 0 } },
+            Partitions = { new TopicPartition { Topic = "orders", Partition = 0 }, offsetsPartition },
             ConsumerGroups = { "g" },
-            PendingOffsets = { new PendingTxnOffset { GroupId = "g", Topic = "orders", Partition = 0, Offset = 42 } },
         });
         await RestartAsync();
+        Assert.Equal(-1, _offsetStore.GetCommittedOffset("g", "orders", 0));
 
         await _coordinator.ExpireTransactionsAsync(DateTimeOffset.UtcNow, CancellationToken.None);
 

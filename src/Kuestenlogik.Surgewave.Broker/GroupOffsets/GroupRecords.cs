@@ -99,8 +99,8 @@ internal static class GroupRecords
                 if (value.IsEmpty)
                     return new GroupRecord.GroupRemoved(group);
                 var v = 2;
-                _ = ReadString(value, ref v); // protocol type
-                return new GroupRecord.GroupMetadata(group, BinaryPrimitives.ReadInt32BigEndian(value[v..]));
+                var protocolType = ReadString(value, ref v);
+                return new GroupRecord.GroupMetadata(group, BinaryPrimitives.ReadInt32BigEndian(value[v..]), protocolType);
             }
             default:
                 return GroupRecord.Unknown;
@@ -143,7 +143,7 @@ internal abstract record GroupRecord
 
     public sealed record OffsetRemoved(string Group, string Topic, int Partition) : GroupRecord;
 
-    public sealed record GroupMetadata(string Group, int Generation) : GroupRecord;
+    public sealed record GroupMetadata(string Group, int Generation, string? ProtocolType) : GroupRecord;
 
     public sealed record GroupRemoved(string Group) : GroupRecord;
 

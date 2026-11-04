@@ -22,13 +22,14 @@ internal sealed class TransactionMarkerChannel
     private static readonly TimeSpan CommitTimeout = TimeSpan.FromSeconds(5);
 
     private readonly LogManager _logManager;
-    private readonly TransactionIndex _transactionIndex;
+    private readonly ITransactionMarkerSink _markerSink;
     private readonly ILogger _logger;
 
-    public TransactionMarkerChannel(LogManager logManager, TransactionIndex transactionIndex, ILogger logger)
+    /// <param name="markerSink">Told of every marker this broker writes, as a leader is told of one sent to it.</param>
+    public TransactionMarkerChannel(LogManager logManager, ITransactionMarkerSink markerSink, ILogger logger)
     {
         _logManager = logManager;
-        _transactionIndex = transactionIndex;
+        _markerSink = markerSink;
         _logger = logger;
     }
 
@@ -115,9 +116,9 @@ internal sealed class TransactionMarkerChannel
         }
 
         if (commit)
-            _transactionIndex.CommitTransaction(txn.ProducerId, [partition], offset);
+            _markerSink.CommitTransaction(txn.ProducerId, [partition], offset);
         else
-            _transactionIndex.AbortTransaction(txn.ProducerId, [partition], offset);
+            _markerSink.AbortTransaction(txn.ProducerId, [partition], offset);
 
         _logger.LogDebug(
             "Wrote {MarkerType} marker for {Topic}-{Partition}, ProducerId={ProducerId}, Offset={Offset}",

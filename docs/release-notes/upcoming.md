@@ -201,6 +201,13 @@ partition's leader asked its own broker about the transaction, was told
   missing markers on its next pass, and the producer is answered
   `CONCURRENT_TRANSACTIONS` meanwhile. EndTxn is still answered once the
   outcome is durable.
+- **Offsets through the group's coordinator:** TxnOffsetCommit writes the
+  offsets into the group's partition of `__consumer_offsets` as a batch of
+  the transaction. The offsets count once the transaction's commit marker
+  lands there, and an abort marker drops them. AddOffsetsToTxn puts that
+  partition into the transaction, as Kafka does. The offsets used to be
+  staged with the transaction's coordinator and written into its own store,
+  so a group coordinated elsewhere never saw them.
 
 ### A topic created through any broker is a topic of the cluster (#207, #208)
 
@@ -242,6 +249,15 @@ answered once the in-sync replicas of the partition have it. A broker on its
 own keeps `__consumer_offsets` too and leads all of its partitions. A consumer that
 assigns its partitions itself can commit offsets for a group nobody joined,
 outside any generation, as Kafka allows.
+
+### A group taken over by another coordinator can be described (#224)
+
+A broker that took a group's partition of `__consumer_offsets` over read
+the group's offsets, but answered `INVALID_GROUP_ID` when asked to describe
+the group, and left it out of the group list. `kafka-consumer-groups.sh
+--describe` failed after a change of coordinator. Such a group is now
+described and listed as Empty, with the protocol type of its metadata
+record, as Kafka loads it.
 
 ### Consumers of one group share the partitions (#216)
 

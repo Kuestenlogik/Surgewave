@@ -2,6 +2,7 @@ using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Replication;
 using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Core.Util;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Broker.Coordination;
@@ -105,8 +106,13 @@ public sealed class CoordinatorStateLog
     /// <paramref name="apply"/> runs under <see cref="SyncRoot"/> with the log offset of the first record — unless the
     /// partition changed hands meanwhile, when the next owner reads the records from the log instead.
     /// </summary>
+    /// <param name="transaction">
+    /// The producer whose transaction the batch belongs to, or null: a transactional batch counts once the marker of
+    /// its transaction follows it in the partition (Kafka's transactional offset commits).
+    /// </param>
     public async Task<StateWriteStatus> WriteAsync(
-        int partition, IReadOnlyList<(byte[] Key, byte[] Value)> records, Action<long> apply, CancellationToken cancellationToken)
+        int partition, IReadOnlyList<(byte[] Key, byte[] Value)> records, Action<long> apply, CancellationToken cancellationToken,
+        (long ProducerId, short ProducerEpoch)? transaction = null)
     {
         int epoch;
         lock (SyncRoot)
@@ -140,10 +146,14 @@ public sealed class CoordinatorStateLog
         for (var i = 0; i < records.Count; i++)
             messages.Add(new Message { Offset = i, Timestamp = timestamp, Key = records[i].Key, Value = records[i].Value, Headers = ReadOnlyMemory<byte>.Empty });
 
+        var batch = _serializer!.SerializeMessages(messages);
+        if (transaction is { } producer)
+            TransactionalBatches.MarkTransactional(batch, producer.ProducerId, producer.ProducerEpoch);
+
         long baseOffset;
         try
         {
-            baseOffset = await _logManager.AppendBatchAsync(tp, _serializer!.SerializeMessages(messages), cancellationToken).ConfigureAwait(false);
+            baseOffset = await _logManager.AppendBatchAsync(tp, batch, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -269,11 +279,18 @@ public sealed class CoordinatorStateLog
 
                 foreach (var batch in batches)
                 {
+                    // A transaction marker carries its producer's outcome; the records of a transactional batch count
+                    // once it follows them.
+                    var producerId = TransactionalBatches.TransactionalProducerOf(batch);
+                    var isMarker = CompressionCodec.IsControlBatch(batch);
                     foreach (var message in _serializer!.ParseRecordBatch(batch))
                     {
                         if (message.Offset < readFrom)
                             continue; // a batch that starts before where this read began was read already
-                        records.Add(new StateRecord(message.Key, message.Value, message.Offset));
+                        records.Add(isMarker
+                            ? new StateRecord(ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty, message.Offset, producerId,
+                                TransactionalBatches.IsCommitMarker(message.Value.Span))
+                            : new StateRecord(message.Key, message.Value, message.Offset, producerId));
                         position = Math.Max(position, message.Offset + 1);
                     }
                 }
@@ -330,7 +347,16 @@ public interface ICoordinatorStateOwner
 }
 
 /// <summary>A record of a state topic; an empty value is a tombstone.</summary>
-public readonly record struct StateRecord(ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value, long Offset);
+/// <param name="ProducerId">The producer whose transaction the record was written in; -1 outside any transaction.</param>
+/// <param name="Marker">
+/// For the marker of a transaction rather than a record of the owner's: true when it commits, false when it aborts.
+/// </param>
+public readonly record struct StateRecord(
+    ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Value, long Offset, long ProducerId = -1, bool? Marker = null)
+{
+    /// <summary>Whether this is the marker of a transaction rather than a record of the owner's.</summary>
+    public bool IsMarker => ProducerId >= 0 && Key.IsEmpty && Value.IsEmpty && Marker.HasValue;
+}
 
 /// <summary>Whether this broker serves a partition of a coordinator's state topic.</summary>
 public enum CoordinatorOwnership

@@ -47,7 +47,6 @@ internal sealed class TransactionMetadata
 
     public HashSet<TopicPartition> Partitions { get; } = new();
     public HashSet<string> ConsumerGroups { get; } = new();
-    public List<PendingTxnOffset> PendingOffsets { get; } = new();
 
     public SemaphoreSlim Lock { get; } = new(1, 1);
 
@@ -72,16 +71,4 @@ internal sealed class TransactionMetadata
     /// time; an epoch at <c>MaxValue - 1</c> or above is exhausted and the producer id rotates.
     /// </summary>
     public static bool IsEpochExhausted(short epoch) => epoch >= short.MaxValue - 1;
-}
-
-/// <summary>
-/// Pending offset to be committed as part of a transaction.
-/// </summary>
-internal sealed class PendingTxnOffset
-{
-    public required string GroupId { get; init; }
-    public required string Topic { get; init; }
-    public required int Partition { get; init; }
-    public required long Offset { get; init; }
-    public string? Metadata { get; init; }
 }

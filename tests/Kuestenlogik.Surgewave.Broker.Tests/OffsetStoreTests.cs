@@ -127,7 +127,30 @@ public sealed class OffsetStoreTests : IDisposable
 
         // GroupMetadataKey v2: version, group.
         Assert.Equal(new byte[] { 0, 2, 0, 1, (byte)'g' }, messages[1].Key.ToArray());
-        Assert.Equal(new GroupRecord.GroupMetadata("g", 2), GroupRecords.Read(messages[1].Key.Span, messages[1].Value.Span));
+        Assert.Equal(new GroupRecord.GroupMetadata("g", 2, "consumer"), GroupRecords.Read(messages[1].Key.Span, messages[1].Value.Span));
+    }
+
+    /// <summary>
+    /// A broker that takes a group over from the log describes and lists it — Empty, with the protocol type of its
+    /// metadata record — before any member joined it (#224). It answered INVALID_GROUP_ID, so the Kafka tools could
+    /// not describe a group after a change of coordinator.
+    /// </summary>
+    [Fact]
+    public async Task AGroupTakenOverFromTheLogIsDescribedAndListedAsEmpty()
+    {
+        var first = await LocalStoreAsync();
+        await first.CommitOffsetAsync("orders-app", "orders", 0, 42, _ct);
+        await first.RecordGenerationAsync("orders-app", "consumer", 3, "range", "m", _ct);
+
+        var takeover = new ConsumerGroupCoordinator(NullLogger<ConsumerGroupCoordinator>.Instance, await LocalStoreAsync());
+
+        var described = Assert.Single(takeover.DescribeGroups(["orders-app"]));
+        Assert.Equal((Kuestenlogik.Surgewave.Coordination.Consumer.ConsumerGroupErrorStatus.None, "Empty", "consumer"),
+            (described.Status, described.GroupState, described.ProtocolType));
+        var listed = Assert.Single(takeover.ListGroups(null), g => g.GroupId == "orders-app");
+        Assert.Equal("Empty", listed.GroupState);
+        Assert.Equal(Kuestenlogik.Surgewave.Coordination.Consumer.ConsumerGroupErrorStatus.InvalidGroupId,
+            Assert.Single(takeover.DescribeGroups(["never-seen"])).Status);
     }
 
     private async Task<OffsetStore> LocalStoreAsync()

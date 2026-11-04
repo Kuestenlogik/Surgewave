@@ -11,14 +11,14 @@ namespace Kuestenlogik.Surgewave.Broker.Transactions;
 /// its value led by the fields of Kafka's TransactionLogValue v0 — producer id and epoch, timeout, status, partitions,
 /// timestamps — so Kafka tooling that dumps the topic reads the transaction. Behind them, in a section of its own
 /// with its own version, what this coordinator needs to take a transaction over: the producer ids around an epoch
-/// rotation, the client's protocol, the groups and the offsets the transaction commits. A record without a value is
-/// a tombstone: the transactional id is gone.
+/// rotation, the client's protocol and the groups. The offsets the transaction commits are the group coordinator's,
+/// in <c>__consumer_offsets</c>. A record without a value is a tombstone: the transactional id is gone.
 /// </summary>
 internal static class TransactionRecords
 {
     private const short KeyVersion = 0;
     private const short ValueVersion = 0;
-    private const short ExtensionVersion = 1;
+    private const short ExtensionVersion = 2;
 
     public static byte[] Key(string transactionalId)
     {
@@ -60,15 +60,6 @@ internal static class TransactionRecords
         writer.Int32(txn.ConsumerGroups.Count);
         foreach (var group in txn.ConsumerGroups)
             writer.String(group);
-        writer.Int32(txn.PendingOffsets.Count);
-        foreach (var o in txn.PendingOffsets)
-        {
-            writer.String(o.GroupId);
-            writer.String(o.Topic);
-            writer.Int32(o.Partition);
-            writer.Int64(o.Offset);
-            writer.String(o.Metadata);
-        }
         return writer.ToArray();
     }
 
@@ -116,18 +107,6 @@ internal static class TransactionRecords
             var groups = Int32(value, ref at);
             for (var g = 0; g < groups; g++)
                 txn.ConsumerGroups.Add(ReadString(value, ref at)!);
-            var offsets = Int32(value, ref at);
-            for (var o = 0; o < offsets; o++)
-            {
-                txn.PendingOffsets.Add(new PendingTxnOffset
-                {
-                    GroupId = ReadString(value, ref at)!,
-                    Topic = ReadString(value, ref at)!,
-                    Partition = Int32(value, ref at),
-                    Offset = Int64(value, ref at),
-                    Metadata = ReadString(value, ref at),
-                });
-            }
         }
         return txn;
     }

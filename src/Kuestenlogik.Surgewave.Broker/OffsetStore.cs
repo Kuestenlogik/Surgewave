@@ -14,13 +14,25 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// Leading, loading and durable writes are the <see cref="CoordinatorStateLog"/>'s; this is what the records mean.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A commit's cache entry is taken once the commit is durable, unless a later record for the same key got there first.
+/// </para>
+/// <para>
+/// A transactional commit (TxnOffsetCommit, #197) is a batch of the producer's transaction in the group's partition,
+/// as in Kafka: its offsets are pending until the transaction's marker lands in the partition — committed by a commit
+/// marker, dropped by an abort marker. A broker that takes the partition over finds both in the log.
+/// </para>
 /// </remarks>
 public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
 {
     private readonly CoordinatorStateLog _log;
     private readonly TimeProvider _time;
     private readonly Dictionary<string, GroupEntry>[] _groups;
+
+    // Per partition: the offsets each producer's ongoing transaction commits, and the markers that landed while the
+    // partition was still being read.
+    private readonly Dictionary<long, List<PendingOffset>>[] _pending;
+    private readonly List<(long ProducerId, bool Commit)>[] _markersWhileLoading;
 
     /// <summary>
     /// A store over the broker's <c>__consumer_offsets</c>. It serves nothing until it is told what this broker
@@ -37,6 +49,7 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
     {
         _time = timeProvider ?? TimeProvider.System;
         _groups = NewGroups(partitionCount);
+        (_pending, _markersWhileLoading) = NewPending(partitionCount);
         _log = new CoordinatorStateLog(CoordinatorPartitioner.GroupTopic, partitionCount, this, logManager, serializer, logger, commitTimeout, _time);
     }
 
@@ -44,6 +57,7 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
     {
         _time = TimeProvider.System;
         _groups = NewGroups(1);
+        (_pending, _markersWhileLoading) = NewPending(1);
         _log = CoordinatorStateLog.InMemory(CoordinatorPartitioner.GroupTopic, this, logger);
     }
 
@@ -58,6 +72,65 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
 
     /// <summary>Whether this broker serves the group's offsets now.</summary>
     public CoordinatorOwnership OwnershipOf(string groupId) => _log.OwnershipOf(_log.PartitionFor(groupId));
+
+    /// <summary>The partition of <c>__consumer_offsets</c> the group's offsets are in.</summary>
+    public int PartitionFor(string groupId) => _log.PartitionFor(groupId);
+
+    /// <summary>
+    /// Commits the group's offsets in the transaction of <paramref name="producerId"/> (TxnOffsetCommit): one batch of
+    /// that transaction in the group's partition, answered once durable. The offsets count once the transaction's
+    /// commit marker lands in the partition (<see cref="CompleteTransaction"/>).
+    /// </summary>
+    public Task<StateWriteStatus> CommitTransactionalOffsetsAsync(
+        string groupId, long producerId, short producerEpoch, IReadOnlyList<CommittedOffset> offsets, CancellationToken cancellationToken)
+    {
+        if (offsets.Count == 0)
+            return Task.FromResult(StateWriteStatus.Ok);
+
+        var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
+        var records = new List<(byte[] Key, byte[] Value)>(offsets.Count);
+        foreach (var o in offsets)
+            records.Add((GroupRecords.OffsetCommitKey(groupId, o.Topic, o.Partition), GroupRecords.OffsetCommitValue(o.Offset, now)));
+
+        var partition = _log.PartitionFor(groupId);
+        return _log.WriteAsync(partition, records, baseOffset =>
+        {
+            var pending = Pending(_pending[partition], producerId);
+            for (var i = 0; i < offsets.Count; i++)
+                pending.Add(new PendingOffset(groupId, new TopicPartitionKey(offsets[i].Topic, offsets[i].Partition), offsets[i].Offset, baseOffset + i));
+        }, cancellationToken, (producerId, producerEpoch));
+    }
+
+    /// <summary>
+    /// The marker of <paramref name="producerId"/>'s transaction is in the partition: its pending offsets are
+    /// committed, or dropped when it aborted. A marker that lands while the partition is still being read is applied
+    /// once it is read.
+    /// </summary>
+    public void CompleteTransaction(int partition, long producerId, bool commit)
+    {
+        if (partition < 0 || partition >= _pending.Length)
+            return;
+        lock (_log.SyncRoot)
+        {
+            switch (_log.OwnershipOf(partition))
+            {
+                case CoordinatorOwnership.Owned:
+                    Complete(partition, producerId, commit);
+                    break;
+                case CoordinatorOwnership.Loading:
+                    _markersWhileLoading[partition].Add((producerId, commit));
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Whether a transaction has offsets of the group that are not committed yet.</summary>
+    public bool HasPendingOffsets(string groupId)
+    {
+        var partition = _log.PartitionFor(groupId);
+        lock (_log.SyncRoot)
+            return _pending[partition].Values.Any(offsets => offsets.Exists(o => o.Group == groupId));
+    }
 
     /// <summary>
     /// Commits the group's offsets: one batch in the group's partition, answered once it is durable. Nothing is
@@ -124,7 +197,11 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
         return WriteAsync(groupId,
             [(GroupRecords.GroupMetadataKey(groupId), GroupRecords.GroupMetadataValue(protocolType, generation, protocol, leader, now))],
-            (entry, _) => entry.Generation = Math.Max(entry.Generation, generation), cancellationToken);
+            (entry, _) =>
+            {
+                entry.Generation = Math.Max(entry.Generation, generation);
+                entry.ProtocolType = protocolType;
+            }, cancellationToken);
     }
 
     /// <summary>The last generation recorded for the group, 0 when none is.</summary>
@@ -133,6 +210,23 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         var partition = _log.PartitionFor(groupId);
         lock (_log.SyncRoot)
             return _groups[partition].TryGetValue(groupId, out var entry) ? entry.Generation : 0;
+    }
+
+    /// <summary>
+    /// The groups this broker serves that the log knows — by committed offsets or a recorded generation — with the
+    /// protocol type of their last metadata record. A group taken over from another coordinator is known here before
+    /// any of its members joined this broker (#224).
+    /// </summary>
+    public IReadOnlyList<(string GroupId, string? ProtocolType)> GetKnownGroups()
+    {
+        lock (_log.SyncRoot)
+        {
+            return [.. Enumerable.Range(0, _groups.Length)
+                .Where(p => _log.OwnershipOf(p) == CoordinatorOwnership.Owned)
+                .SelectMany(p => _groups[p])
+                .Where(g => g.Value.Offsets.Count > 0 || g.Value.Generation > 0)
+                .Select(g => (g.Key, g.Value.ProtocolType))];
+        }
     }
 
     /// <summary>The committed offset, -1 when there is none or this broker does not serve the group.</summary>
@@ -200,6 +294,22 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         var groups = _groups[partition];
         foreach (var record in records)
         {
+            if (record.IsMarker)
+            {
+                Complete(partition, record.ProducerId, record.Marker!.Value);
+                continue;
+            }
+            if (record.ProducerId >= 0)
+            {
+                // An offset commit in a transaction: pending until the transaction's marker follows.
+                if (GroupRecords.Read(record.Key.Span, record.Value.Span) is GroupRecord.OffsetCommitted pending)
+                {
+                    Pending(_pending[partition], record.ProducerId).Add(
+                        new PendingOffset(pending.Group, new TopicPartitionKey(pending.Topic, pending.Partition), pending.Offset, record.Offset));
+                }
+                continue;
+            }
+
             switch (GroupRecords.Read(record.Key.Span, record.Value.Span))
             {
                 case GroupRecord.OffsetCommitted c:
@@ -209,16 +319,50 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
                     Entry(groups, r.Group).Remove(new TopicPartitionKey(r.Topic, r.Partition), record.Offset);
                     break;
                 case GroupRecord.GroupMetadata m:
-                    Entry(groups, m.Group).Generation = m.Generation;
+                    var described = Entry(groups, m.Group);
+                    described.Generation = m.Generation;
+                    described.ProtocolType = m.ProtocolType;
                     break;
                 case GroupRecord.GroupRemoved g:
                     groups.Remove(g.Group);
                     break;
             }
         }
+
+        // Markers that landed while the partition was read; one that is in the log already finds nothing pending.
+        foreach (var (producerId, commit) in _markersWhileLoading[partition])
+            Complete(partition, producerId, commit);
+        _markersWhileLoading[partition].Clear();
     }
 
-    void ICoordinatorStateOwner.Unloaded(int partition) => _groups[partition].Clear();
+    void ICoordinatorStateOwner.Unloaded(int partition)
+    {
+        _groups[partition].Clear();
+        _pending[partition].Clear();
+        _markersWhileLoading[partition].Clear();
+    }
+
+    // Under the log's lock.
+    private void Complete(int partition, long producerId, bool commit)
+    {
+        if (!_pending[partition].Remove(producerId, out var offsets) || !commit)
+            return;
+        foreach (var o in offsets)
+            Entry(_groups[partition], o.Group).Apply(o.Key, o.Offset, o.LogOffset);
+    }
+
+    private static List<PendingOffset> Pending(Dictionary<long, List<PendingOffset>> pending, long producerId)
+    {
+        if (!pending.TryGetValue(producerId, out var offsets))
+            pending[producerId] = offsets = [];
+        return offsets;
+    }
+
+    private static (Dictionary<long, List<PendingOffset>>[], List<(long, bool)>[]) NewPending(int partitionCount) =>
+        ([.. Enumerable.Range(0, partitionCount).Select(_ => new Dictionary<long, List<PendingOffset>>())],
+         [.. Enumerable.Range(0, partitionCount).Select(_ => new List<(long, bool)>())]);
+
+    private readonly record struct PendingOffset(string Group, TopicPartitionKey Key, long Offset, long LogOffset);
 
     private Task<StateWriteStatus> WriteAsync(
         string groupId, IReadOnlyList<(byte[] Key, byte[] Value)> records, Action<GroupEntry, long> apply, CancellationToken cancellationToken)
@@ -248,6 +392,9 @@ public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
         private readonly Dictionary<TopicPartitionKey, long> _removedAt = new();
 
         public int Generation { get; set; }
+
+        // The protocol type of the group's last metadata record, null before one.
+        public string? ProtocolType { get; set; }
 
         public bool IsEmpty => Offsets.Count == 0;
 

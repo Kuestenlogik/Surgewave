@@ -235,13 +235,29 @@ public sealed partial class ConsumerGroupCoordinator(
 
     public IReadOnlyList<GroupDescription> DescribeGroups(IReadOnlyList<string> groupIds)
     {
+        var known = KnownWithoutMembers();
         lock (_groupLock)
         {
             var groups = new List<GroupDescription>();
 
             foreach (var groupId in groupIds)
             {
-                if (!_consumerGroups.TryGetValue(groupId, out var group))
+                if (!_consumerGroups.TryGetValue(groupId, out var group) && known.TryGetValue(groupId, out var protocolType))
+                {
+                    // Known from __consumer_offsets, no member here since: an Empty group, as Kafka loads it (#224).
+                    groups.Add(new GroupDescription
+                    {
+                        Status = ConsumerGroupErrorStatus.None,
+                        GroupId = groupId,
+                        GroupState = "Empty",
+                        ProtocolType = protocolType,
+                        ProtocolData = "",
+                        Members = [],
+                        AuthorizedOperations = ComputeGroupAuthorizedOperations(groupId),
+                    });
+                    continue;
+                }
+                if (group is null)
                 {
                     groups.Add(new GroupDescription
                     {
@@ -308,9 +324,20 @@ public sealed partial class ConsumerGroupCoordinator(
 
     public IReadOnlyList<GroupListing> ListGroups(IReadOnlyList<string>? statesFilter)
     {
+        var known = KnownWithoutMembers();
         lock (_groupLock)
         {
             var groups = new List<GroupListing>();
+
+            // Known from __consumer_offsets, no member here since: Empty (#224).
+            if (statesFilter is not { Count: > 0 } || statesFilter.Contains("Empty", StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var (groupId, protocolType) in known)
+                {
+                    if (!_consumerGroups.ContainsKey(groupId))
+                        groups.Add(new GroupListing(groupId, protocolType, "Empty", "classic"));
+                }
+            }
 
             foreach (var (groupId, group) in _consumerGroups)
             {
@@ -331,6 +358,11 @@ public sealed partial class ConsumerGroupCoordinator(
             return groups;
         }
     }
+
+    // The groups of the partitions this broker serves that the log knows, by protocol type ("consumer" when the log
+    // has offsets but no metadata record: a group of simple consumers).
+    private Dictionary<string, string> KnownWithoutMembers() =>
+        _offsets.GetKnownGroups().ToDictionary(g => g.GroupId, g => g.ProtocolType ?? "consumer", StringComparer.Ordinal);
 
     public async Task<IReadOnlyList<DeleteGroupResult>> DeleteGroupsAsync(IReadOnlyList<string> groupIds, CancellationToken cancellationToken)
     {

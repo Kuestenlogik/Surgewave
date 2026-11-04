@@ -1,4 +1,5 @@
 using Kuestenlogik.Surgewave.Broker.Coordination;
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
@@ -51,7 +52,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         _logger = logger;
         _logManager = logManager;
 
-        _markers = new TransactionMarkerChannel(logManager, transactionIndex, logger);
+        _markers = new TransactionMarkerChannel(logManager, this, logger);
 
         // The transactions of the partitions of __transaction_state this broker leads (#197): taken over when a
         // partition has been read, let go when another broker leads it.
@@ -118,15 +119,40 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// WriteTxnMarkers path). Forwards to the concrete <see cref="TransactionIndex"/> so the
     /// neutral <see cref="ITransactionMarkerSink"/> keeps that type off the moved handler (#59 b5).
     /// </summary>
+    /// <remarks>
+    /// A marker in a partition of <c>__consumer_offsets</c> also completes the transactional offset commits of the
+    /// producer there (#197).
+    /// </remarks>
     public void CommitTransaction(long producerId, IEnumerable<TopicPartition> partitions, long commitOffset)
-        => _transactionIndex.CommitTransaction(producerId, partitions, commitOffset);
+    {
+        var marked = partitions as IReadOnlyCollection<TopicPartition> ?? [.. partitions];
+        _transactionIndex.CommitTransaction(producerId, marked, commitOffset);
+        CompleteOffsetCommits(producerId, marked, commit: true);
+    }
 
     /// <summary>
     /// Aborts the producer's transaction across the given partitions. Forwards to the concrete
     /// <see cref="TransactionIndex"/>.
     /// </summary>
     public void AbortTransaction(long producerId, IEnumerable<TopicPartition> partitions, long abortOffset)
-        => _transactionIndex.AbortTransaction(producerId, partitions, abortOffset);
+    {
+        var marked = partitions as IReadOnlyCollection<TopicPartition> ?? [.. partitions];
+        _transactionIndex.AbortTransaction(producerId, marked, abortOffset);
+        CompleteOffsetCommits(producerId, marked, commit: false);
+    }
+
+    private void CompleteOffsetCommits(long producerId, IReadOnlyCollection<TopicPartition> partitions, bool commit)
+    {
+        foreach (var partition in partitions)
+        {
+            if (string.Equals(partition.Topic, CoordinatorPartitioner.GroupTopic, StringComparison.Ordinal))
+                _offsetStore.CompleteTransaction(partition.Partition, producerId, commit);
+        }
+    }
+
+    // The partition of __consumer_offsets a group's transactional offset commits go into, and its marker.
+    private TopicPartition OffsetsPartitionOf(string groupId) =>
+        new() { Topic = CoordinatorPartitioner.GroupTopic, Partition = _offsetStore.PartitionFor(groupId) };
 
     /// <summary>
     /// Records a transactional batch being written. Called from produce path, after
@@ -374,12 +400,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     }
 
     /// <summary>
-    /// Handles AddOffsetsToTxn - adds consumer group offsets to a transaction.
+    /// Handles AddOffsetsToTxn: the group's partition of <c>__consumer_offsets</c> joins the transaction, as in Kafka,
+    /// so its marker completes the offsets the group coordinator stages there (#197).
     /// </summary>
     public async Task<AddOffsetsToTxnResult> AddOffsetsToTxnAsync(AddOffsetsToTxnCommand request, CancellationToken cancellationToken)
     {
         var status = await WithTransactionAsync(request.TransactionalId, request.ProducerId, request.ProducerEpoch,
-            txn => AddToTransaction(txn, partition: null, request.GroupId), cancellationToken);
+            txn => AddToTransaction(txn, OffsetsPartitionOf(request.GroupId), request.GroupId), cancellationToken);
 
         if (status == TxnErrorStatus.None)
         {
@@ -426,54 +453,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             resolved.Add((name, topicId, resolveError, t.Partitions));
         }
 
-        var stagedCount = 0;
         var partitionStatus = new Dictionary<(int Topic, int Partition), TxnErrorStatus>();
-
-        (TxnErrorStatus, bool) Stage(TransactionMetadata txn)
-        {
-            if (txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
-                return (TxnErrorStatus.ConcurrentTransactions, false);
-
-            if (request.TransactionVersion >= TransactionVersion.Tv2)
-            {
-                // V2 sends no AddOffsetsToTxn: the commit puts the group into the transaction.
-                txn.ClientTransactionVersion = request.TransactionVersion;
-                var (added, _) = AddToTransaction(txn, partition: null, request.GroupId);
-                if (added != TxnErrorStatus.None)
-                    return (added, false);
-            }
-            else if (txn.State != TransactionState.Ongoing || !txn.ConsumerGroups.Contains(request.GroupId))
-            {
-                // Kafka's verification: the group was added with AddOffsetsToTxn.
-                return (TxnErrorStatus.TransactionAbortable, false);
-            }
-
-            for (var i = 0; i < resolved.Count; i++)
-            {
-                var r = resolved[i];
-                foreach (var partition in r.Partitions)
-                {
-                    if (r.ResolveError != TxnErrorStatus.None)
-                    {
-                        partitionStatus[(i, partition.Partition)] = r.ResolveError;
-                        continue;
-                    }
-                    txn.PendingOffsets.Add(new PendingTxnOffset
-                    {
-                        GroupId = request.GroupId,
-                        Topic = r.Name ?? string.Empty,
-                        Partition = partition.Partition,
-                        Offset = partition.CommittedOffset,
-                        Metadata = partition.Metadata,
-                    });
-                    stagedCount++;
-                }
-            }
-            // The staged offsets are part of the transaction's state: a coordinator that takes it over commits them.
-            return (TxnErrorStatus.None, true);
-        }
-
-        var status = await WithTransactionAsync(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Stage, cancellationToken);
+        var status = await StageTransactionalOffsetsAsync(request, resolved, partitionStatus, cancellationToken);
 
         var topics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
         for (var i = 0; i < resolved.Count; i++)
@@ -490,12 +471,68 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             topics.Add(new TxnOffsetCommitTopicResult { Name = r.Name, TopicId = r.TopicId, Partitions = partitionResults });
         }
 
-        if (status == TxnErrorStatus.None)
+        return new TxnOffsetCommitResult(topics);
+    }
+
+    /// <summary>
+    /// TxnOffsetCommit reaches the group's coordinator, as in Kafka (#197): the broker that leads the group's partition
+    /// of <c>__consumer_offsets</c>. It asks the transactional id's coordinator whether that partition is in the
+    /// transaction — under transactions V2 the coordinator adds it — and writes the offsets into the partition as a
+    /// batch of the transaction, pending until its marker.
+    /// </summary>
+    private async Task<TxnErrorStatus> StageTransactionalOffsetsAsync(
+        TxnOffsetCommitCommand request,
+        List<(string? Name, Guid TopicId, TxnErrorStatus ResolveError, IReadOnlyList<TxnOffsetCommitPartition> Partitions)> resolved,
+        Dictionary<(int Topic, int Partition), TxnErrorStatus> partitionStatus,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(request.TransactionalId) || string.IsNullOrEmpty(request.GroupId))
+            return TxnErrorStatus.InvalidRequest;
+        switch (_offsetStore.OwnershipOf(request.GroupId))
+        {
+            case CoordinatorOwnership.NotOwned:
+                return TxnErrorStatus.NotCoordinator;
+            case CoordinatorOwnership.Loading:
+                return TxnErrorStatus.CoordinatorLoadInProgress;
+        }
+
+        // The transaction's answer, from its coordinator wherever that is. That it could not be asked is no word on
+        // the group: the client retries rather than looking for another group coordinator.
+        var verified = await VerifyTransactionalBatchAsync(
+            request.TransactionalId, request.ProducerId, request.ProducerEpoch, OffsetsPartitionOf(request.GroupId),
+            request.TransactionVersion, cancellationToken);
+        if (verified is TxnErrorStatus.NotCoordinator or TxnErrorStatus.CoordinatorLoadInProgress)
+            return TxnErrorStatus.CoordinatorNotAvailable;
+        if (verified != TxnErrorStatus.None)
+            return verified;
+
+        var offsets = new List<CommittedOffset>();
+        for (var i = 0; i < resolved.Count; i++)
+        {
+            var r = resolved[i];
+            foreach (var partition in r.Partitions)
+            {
+                if (r.ResolveError != TxnErrorStatus.None)
+                    partitionStatus[(i, partition.Partition)] = r.ResolveError;
+                else
+                    offsets.Add(new CommittedOffset(r.Name ?? string.Empty, partition.Partition, partition.CommittedOffset));
+            }
+        }
+
+        var written = await _offsetStore.CommitTransactionalOffsetsAsync(
+            request.GroupId, request.ProducerId, request.ProducerEpoch, offsets, cancellationToken);
+        if (written == StateWriteStatus.Ok)
         {
             _logger.LogDebug("Staged {Count} offsets for transaction {TransactionalId}, group {GroupId}",
-                stagedCount, request.TransactionalId, request.GroupId);
+                offsets.Count, request.TransactionalId, request.GroupId);
         }
-        return new TxnOffsetCommitResult(topics);
+        return written switch
+        {
+            StateWriteStatus.Ok => TxnErrorStatus.None,
+            StateWriteStatus.NotCoordinator => TxnErrorStatus.NotCoordinator,
+            StateWriteStatus.LoadInProgress => TxnErrorStatus.CoordinatorLoadInProgress,
+            _ => TxnErrorStatus.CoordinatorNotAvailable,
+        };
     }
 
     /// <summary>
@@ -827,24 +864,6 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             }
         }
 
-        if (commit)
-        {
-            // One write per group into __consumer_offsets (#205).
-            foreach (var group in txn.PendingOffsets.GroupBy(o => o.GroupId))
-            {
-                var written = await _offsetStore.CommitOffsetsAsync(group.Key,
-                    [.. group.Select(o => new CommittedOffset(o.Topic, o.Partition, o.Offset))], cancellationToken);
-                if (written == StateWriteStatus.Ok)
-                    _logger.LogDebug("Committed {Count} transactional offset(s) for group {GroupId}", group.Count(), group.Key);
-                else
-                    _logger.LogWarning("The transactional offsets of group {GroupId} were not committed: {Status}", group.Key, written);
-            }
-        }
-        else if (txn.PendingOffsets.Count > 0)
-        {
-            _logger.LogDebug("Discarded {Count} pending offsets due to transaction abort", txn.PendingOffsets.Count);
-        }
-
         // The markers are written: completing must not be cancelled, or the transaction stays prepared.
         await txn.Lock.WaitAsync(CancellationToken.None);
         try
@@ -890,7 +909,6 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         txn.Partitions.Clear();
         txn.MarkersWritten.Clear();
         txn.ConsumerGroups.Clear();
-        txn.PendingOffsets.Clear();
     }
 
     /// <summary>

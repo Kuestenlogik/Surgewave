@@ -146,6 +146,52 @@ public sealed class TransactionCoordinatorClusterTests(ITestOutputHelper output)
         Assert.Equal(Enumerable.Range(0, partitions).Select(p => $"committed-{p}").Order(), seen.Order());
     }
 
+    /// <summary>
+    /// A transaction commits a group's offsets through the group's coordinator, another broker than its own (#197):
+    /// TxnOffsetCommit writes them into the group's partition of <c>__consumer_offsets</c>, and the transaction's
+    /// commit marker there makes them the group's. They used to be staged with the transaction's coordinator, which
+    /// wrote them into its own store — not the group's coordinator, so the group never saw them.
+    /// </summary>
+    [Fact(Timeout = 240_000)]
+    public async Task OffsetsSentToATransactionAreTheGroupsOnceItCommits()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var topic = $"orders-{Guid.NewGuid():N}";
+        var controller = _cluster.Brokers.Single(b => b.IsController);
+        using (var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = controller.BootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 3 }]);
+        }
+        Assert.True(await TestWaitHelpers.WaitForConditionAsync(
+            () => _cluster.Brokers.All(b => CoordinatorCluster.LeaderOf(b, topic, 0) > 0), timeout: TimeSpan.FromSeconds(30), ct: ct, output: output));
+
+        var txnCoordinator = _cluster.CoordinatorOf(CoordinatorKind.Transaction, "orders-tx");
+        var group = Enumerable.Range(0, 1000).Select(i => $"billing-{i}")
+            .First(g => _cluster.CoordinatorOf(CoordinatorKind.Group, g) != txnCoordinator);
+        output.WriteLine($"orders-tx is coordinated by broker {txnCoordinator.BrokerId}, {group} by broker {_cluster.CoordinatorOf(CoordinatorKind.Group, group).BrokerId}");
+
+        using var consumer = new ConsumerBuilder<Null, string>(new ConsumerConfig
+        {
+            BootstrapServers = controller.BootstrapServers,
+            GroupId = group,
+            EnableAutoCommit = false,
+        }).Build();
+        var partition = new TopicPartition(topic, 0);
+
+        using var producer = NewProducer(controller, "orders-tx");
+        producer.InitTransactions(TimeSpan.FromSeconds(60));
+        producer.BeginTransaction();
+        await producer.ProduceAsync(partition, new Message<Null, string> { Value = "processed" }, ct);
+        producer.SendOffsetsToTransaction([new TopicPartitionOffset(partition, 42)], consumer.ConsumerGroupMetadata, TimeSpan.FromSeconds(60));
+
+        // Pending in the group's partition until the transaction commits.
+        Assert.Equal(Offset.Unset, consumer.Committed([partition], TimeSpan.FromSeconds(30)).Single().Offset);
+
+        producer.CommitTransaction(TimeSpan.FromSeconds(60));
+
+        Assert.Equal(42, consumer.Committed([partition], TimeSpan.FromSeconds(30)).Single().Offset.Value);
+    }
+
     private static IProducer<Null, string> NewProducer(SurgewaveRuntime broker, string transactionalId) =>
         new ProducerBuilder<Null, string>(new ProducerConfig
         {

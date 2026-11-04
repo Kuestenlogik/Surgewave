@@ -60,7 +60,6 @@ public sealed class TransactionStateLogTests : IAsyncDisposable
             LastActivityTime = DateTimeOffset.FromUnixTimeMilliseconds(2_000),
             Partitions = { new TopicPartition { Topic = "orders", Partition = 0 }, new TopicPartition { Topic = "orders", Partition = 2 } },
             ConsumerGroups = { "billing" },
-            PendingOffsets = { new PendingTxnOffset { GroupId = "billing", Topic = "orders", Partition = 0, Offset = 42, Metadata = "m" } },
         };
 
         // Kafka's TransactionLogKey v0: version, transactional id.
@@ -75,8 +74,6 @@ public sealed class TransactionStateLogTests : IAsyncDisposable
         Assert.Equal((txn.TxnStartTime, txn.LastActivityTime), (read.TxnStartTime, read.LastActivityTime));
         Assert.Equal(txn.Partitions.OrderBy(p => p.Partition), read.Partitions.OrderBy(p => p.Partition));
         Assert.Equal(txn.ConsumerGroups, read.ConsumerGroups);
-        var offset = Assert.Single(read.PendingOffsets);
-        Assert.Equal(("billing", "orders", 0, 42L, "m"), (offset.GroupId, offset.Topic, offset.Partition, offset.Offset, offset.Metadata));
     }
 
     [Fact]
