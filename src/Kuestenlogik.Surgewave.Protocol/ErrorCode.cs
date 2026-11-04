@@ -163,4 +163,7 @@ public enum ErrorCode : short
 
     /// <summary>The transaction cannot continue and the client must abort it, e.g. a partition that was not added to it.</summary>
     TransactionAbortable = 120,
+
+    /// <summary>A share-group acknowledgement names a record the member does not hold (KIP-932, #228).</summary>
+    InvalidRecordState = 121,
 }

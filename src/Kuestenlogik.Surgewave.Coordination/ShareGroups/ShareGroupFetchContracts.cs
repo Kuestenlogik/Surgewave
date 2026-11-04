@@ -70,6 +70,9 @@ public sealed record ShareAcknowledgeTopic
 public sealed record ShareAcknowledgeCommand
 {
     public required string? GroupId { get; init; }
+
+    /// <summary>The member acknowledging: only the records it holds can be acknowledged (#228).</summary>
+    public string? MemberId { get; init; }
     public required IReadOnlyList<ShareAcknowledgeTopic> Topics { get; init; }
 }
 

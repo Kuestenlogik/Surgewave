@@ -65,6 +65,8 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
         ShareGroupErrorStatus.NotCoordinator => ErrorCode.NotCoordinator,
         ShareGroupErrorStatus.CoordinatorLoadInProgress => ErrorCode.CoordinatorLoadInProgress,
         ShareGroupErrorStatus.CoordinatorNotAvailable => ErrorCode.CoordinatorNotAvailable,
+        ShareGroupErrorStatus.NotLeaderOrFollower => ErrorCode.NotLeaderForPartition,
+        ShareGroupErrorStatus.InvalidRecordState => ErrorCode.InvalidRecordState,
         _ => ErrorCode.Unknown,
     };
 
@@ -269,7 +271,7 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
             }
             topics.Add(new ShareAcknowledgeTopic { TopicId = t.TopicId, Partitions = partitions });
         }
-        return new ShareAcknowledgeCommand { GroupId = r.GroupId, Topics = topics };
+        return new ShareAcknowledgeCommand { GroupId = r.GroupId, MemberId = r.MemberId, Topics = topics };
     }
 
     private static IReadOnlyList<ShareAcknowledgementBatch> ToAckBatches(List<ShareAcknowledgeRequest.AcknowledgementBatch> batches)

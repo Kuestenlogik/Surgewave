@@ -52,6 +52,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private SurgewaveBroker? _broker;
     private LogManager? _logManager;
     private OffsetStore? _offsetStore;
+    private Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator? _shareGroupCoordinator;
     private Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog? _transactionStateLog;
     private BrokerMetrics? _metrics;
     private QuotaManager? _quotaManager;
@@ -308,7 +309,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var queueViewManager = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager(queueViewConfig, _loggerFactory, _logManager);
         _queueViewManager = queueViewManager;
         var shareGroupCoordinatorLogger = _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>();
-        var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(shareGroupCoordinatorLogger, _logManager, queueViewManager, _offsetStore);
+        var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
+            shareGroupCoordinatorLogger, _logManager, _offsetStore, TimeSpan.FromMilliseconds(config.ShareRecordLockDurationMs));
+        _shareGroupCoordinator = shareGroupCoordinator;
         var consumerGroupV2Coordinator = new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(
             _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>(), _logManager, _offsetStore);
         // Classic coordinator gets the v2 reference so OffsetCommit/Fetch from a
@@ -561,6 +564,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // only the Kafka compatibility surface would protect the wrong one. It lives on
         // SurgewaveBroker, which owns the native handler.
         _broker?.SetPartitionLeadership(partitionLeadership);
+
+        // #228 — a share partition is served by its partition's leader.
+        _shareGroupCoordinator?.SetPartitionLeadership(partitionLeadership);
 
         // Wire up heartbeat manager
         _clusterController.SetHeartbeatManager(_heartbeatManager);

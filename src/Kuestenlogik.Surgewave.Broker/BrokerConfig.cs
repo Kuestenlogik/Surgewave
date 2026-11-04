@@ -608,6 +608,13 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int ShareGroupAssignmentIntervalMs { get; set; } = 1000;
 
     /// <summary>
+    /// How long a share-group member holds a record it fetched before the record goes back to the group (#228). Maps
+    /// to <c>share.record.lock.duration.ms</c> upstream. Default 30 s.
+    /// </summary>
+    [Range(1000, int.MaxValue)]
+    public int ShareRecordLockDurationMs { get; set; } = 30_000;
+
+    /// <summary>
     /// KIP-1263 — same as <see cref="ConsumerGroupAssignmentIntervalMs"/>
     /// but for streams groups. Maps to <c>group.streams.assignment.interval.ms</c>
     /// upstream. Default 1000 ms.

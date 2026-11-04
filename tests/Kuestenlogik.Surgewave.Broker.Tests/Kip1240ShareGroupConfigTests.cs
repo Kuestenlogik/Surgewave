@@ -55,7 +55,7 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         }, NullLoggerFactory.Instance, _logManager);
 
         _coordinator = new ShareGroupCoordinator(
-            NullLogger<ShareGroupCoordinator>.Instance, _logManager, _queueViewManager);
+            NullLogger<ShareGroupCoordinator>.Instance, _logManager);
     }
 
     public void Dispose()

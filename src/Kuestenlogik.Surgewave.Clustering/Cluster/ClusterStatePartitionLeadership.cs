@@ -39,4 +39,11 @@ public sealed class ClusterStatePartitionLeadership : IPartitionLeadership
 
         return state.LeaderBrokerId != _localBrokerId;
     }
+
+    /// <inheritdoc />
+    public PartitionLeader? LeaderOf(TopicPartition partition)
+    {
+        var state = _clusterState.GetPartitionState(partition);
+        return state is null || state.LeaderBrokerId < 0 ? null : new PartitionLeader(state.LeaderBrokerId, state.LeaderEpoch);
+    }
 }

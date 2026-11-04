@@ -696,11 +696,17 @@ builder.Services.AddSingleton(sp =>
     return store;
 });
 // Share group state lives in __consumer_offsets with the group's offsets (#219).
-builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
-    sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
-    sp.GetRequiredService<LogManager>(),
-    sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Queue.IQueueViewManager>(),
-    sp.GetRequiredService<OffsetStore>()));
+// A share partition is served by the partition's leader (#228).
+builder.Services.AddSingleton(sp =>
+{
+    var coordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
+        sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<OffsetStore>(),
+        TimeSpan.FromMilliseconds(sp.GetRequiredService<BrokerConfig>().ShareRecordLockDurationMs));
+    coordinator.SetPartitionLeadership(sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>());
+    return coordinator;
+});
 // Neutral contract (#59) resolves to the same singleton so the Kafka adapter (ShareGroupApiHandler)
 // depends only on Coordination, not the broker-internal coordinator type.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareGroupCoordinator>(

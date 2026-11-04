@@ -44,7 +44,7 @@ public sealed class Kip1240IncrementalAlterConfigsTests : IDisposable
             MaxInFlightPerConsumer = 100,
         }, NullLoggerFactory.Instance, _logManager);
         _coordinator = new ShareGroupCoordinator(
-            NullLogger<ShareGroupCoordinator>.Instance, _logManager, _queueViewManager);
+            NullLogger<ShareGroupCoordinator>.Instance, _logManager);
 
         var brokerConfig = new BrokerConfig { DataDirectory = _dataDir };
         var dynamicConfig = new DynamicBrokerConfig(brokerConfig, NullLogger<DynamicBrokerConfig>.Instance);

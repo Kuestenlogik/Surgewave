@@ -42,4 +42,10 @@ public interface IPartitionLeadership
     /// Unknown, unled, or led by us all answer <c>false</c>.
     /// </summary>
     bool IsLedByAnotherBroker(TopicPartition partition);
+
+    /// <summary>The partition's leader and its epoch, null when this broker does not know one (#228).</summary>
+    PartitionLeader? LeaderOf(TopicPartition partition);
 }
+
+/// <summary>A partition's leader as this broker knows it.</summary>
+public readonly record struct PartitionLeader(int BrokerId, int LeaderEpoch);

@@ -2,7 +2,8 @@ using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Broker.GroupOffsets;
 using Kuestenlogik.Surgewave.Coordination.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Models;
-using Kuestenlogik.Surgewave.Core.Queue;
+using Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -20,7 +21,8 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 {
     private readonly ILogger<ShareGroupCoordinator> logger;
     private readonly LogManager logManager;
-    private readonly IQueueViewManager queueViewManager;
+    private readonly SharePartitionManager _sharePartitions;
+    private IPartitionLeadership? _leadership;
     // The groups' records live in their partitions of __consumer_offsets (#219).
     private readonly OffsetStore _offsets;
     private readonly GroupStateLog<ShareGroupState> _state;
@@ -33,18 +35,25 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     public ShareGroupCoordinator(
         ILogger<ShareGroupCoordinator> logger,
         LogManager logManager,
-        IQueueViewManager queueViewManager,
-        OffsetStore? offsets = null)
+        OffsetStore? offsets = null,
+        TimeSpan? recordLockDuration = null,
+        TimeProvider? timeProvider = null)
     {
         this.logger = logger;
         this.logManager = logManager;
-        this.queueViewManager = queueViewManager;
+        _sharePartitions = new SharePartitionManager(recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
         _offsets = offsets ?? OffsetStore.InMemory();
         _state = new GroupStateLog<ShareGroupState>(
             _offsets, k => ShareGroupRecords.IsShareGroupKey(k), ShareGroupRecords.Read, ShareGroupRecords.Of);
         _shareGroups = _state.Groups;
         _groupLock = _state.SyncRoot;
     }
+
+    /// <summary>
+    /// Who leads which partition (#228): a share partition is served by its partition's leader only. Without it — a
+    /// broker on its own — every partition is this broker's.
+    /// </summary>
+    public void SetPartitionLeadership(IPartitionLeadership? leadership) => _leadership = leadership;
 
     // Whether this broker serves the group's partition of __consumer_offsets now (#219).
     private ShareGroupErrorStatus Ownership(string groupId) => _offsets.OwnershipOf(groupId) switch
@@ -253,11 +262,16 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // ShareFetch (API Key 78)
     // ─────────────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// Served by the partition's leader, which holds the group's share partition (#228): a broker that does not lead the
+    /// partition answers NOT_LEADER_OR_FOLLOWER and names the leader. Acknowledgements carried by the fetch are applied
+    /// first, then the member gets records — those waiting for a member, then new ones — as the group's limits allow.
+    /// </remarks>
     public async Task<ShareFetchResult> ShareFetchAsync(ShareFetchCommand request, CancellationToken cancellationToken)
     {
         var responses = new List<ShareFetchTopicResult>(request.Topics.Count);
-        // KIP-1240 — group-level renew gate, looked up once per request.
-        var renewEnabled = LookupRenewEnabled(request.GroupId);
+        var settings = SettingsOf(request.GroupId);
+        var memberId = request.MemberId ?? string.Empty;
 
         foreach (var fetchTopic in request.Topics)
         {
@@ -266,117 +280,68 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
             foreach (var fetchPartition in fetchTopic.Partitions)
             {
-                var acknowledgeStatus = ShareGroupErrorStatus.None;
-
-                // Process inline acknowledgement batches first
-                if (fetchPartition.AcknowledgementBatches.Count > 0 && topicName != null)
-                {
-                    acknowledgeStatus = ProcessAcknowledgementBatches(
-                        topicName, fetchPartition.PartitionIndex, fetchPartition.AcknowledgementBatches, renewEnabled);
-                }
-
-                // KAFKA-20533: When a topic is deleted during ShareFetch, the per-partition
-                // error code must correctly be returned as UnknownTopicId (Java's bug was an
-                // NPE in brokerTopicStats.updateBytesOut(null, ...) and a mapping to
-                // UNKNOWN_SERVER_ERROR). Surgewave tests topicName==null here directly and
-                // emits no metrics for null topics, so there is no NPE path.
+                // KAFKA-20533: a topic deleted during ShareFetch is UnknownTopicId for the partition.
                 if (topicName == null)
                 {
                     partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
                         Status = ShareGroupErrorStatus.UnknownTopicId,
-                        AcknowledgeStatus = acknowledgeStatus,
-                        CurrentLeader = new ShareLeader(-1, -1),
+                        AcknowledgeStatus = ShareGroupErrorStatus.UnknownTopicId,
+                        CurrentLeader = NoLeader,
                         AcquiredRecords = []
                     });
                     continue;
                 }
 
                 var tp = new TopicPartition { Topic = topicName, Partition = fetchPartition.PartitionIndex };
-                var log = logManager.GetLog(tp);
-                if (log == null)
+                if (NotLeaderHere(tp) is { } leader)
                 {
                     partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
-                        Status = ShareGroupErrorStatus.UnknownTopicOrPartition,
-                        AcknowledgeStatus = acknowledgeStatus,
-                        CurrentLeader = new ShareLeader(-1, -1),
+                        Status = ShareGroupErrorStatus.NotLeaderOrFollower,
+                        AcknowledgeStatus = ShareGroupErrorStatus.NotLeaderOrFollower,
+                        CurrentLeader = leader,
                         AcquiredRecords = []
                     });
                     continue;
                 }
 
-                // Get or create queue view for this topic+partition
-                var queueView = queueViewManager.GetOrCreate(topicName, log);
+                var log = logManager.GetLog(tp);
+                if (log == null || string.IsNullOrEmpty(request.GroupId))
+                {
+                    partitions.Add(new ShareFetchPartitionResult
+                    {
+                        PartitionIndex = fetchPartition.PartitionIndex,
+                        Status = ShareGroupErrorStatus.UnknownTopicOrPartition,
+                        AcknowledgeStatus = ShareGroupErrorStatus.UnknownTopicOrPartition,
+                        CurrentLeader = NoLeader,
+                        AcquiredRecords = []
+                    });
+                    continue;
+                }
 
-                // Determine max messages to fetch
-                var maxMessages = request.MaxRecords > 0 ? request.MaxRecords : 100;
+                var share = _sharePartitions.GetOrCreate(request.GroupId, tp, log, () => StartOffsetOf(request.GroupId, tp) ?? log.LogStartOffset);
+                var acknowledgeStatus = fetchPartition.AcknowledgementBatches.Count > 0
+                    ? Acknowledge(share, memberId, fetchPartition.AcknowledgementBatches, settings)
+                    : ShareGroupErrorStatus.None;
 
                 try
                 {
-                    var messages = await queueView.ReceiveAsync(
-                        fetchPartition.PartitionIndex,
-                        maxMessages,
-                        request.MemberId,
-                        cancellationToken);
-
-                    // Build records from in-flight messages
-                    byte[]? records = null;
-                    var acquiredRecords = new List<ShareAcquiredRecords>();
-
-                    if (messages.Count > 0)
-                    {
-                        // Concatenate record bodies into a single byte array
-                        var totalSize = 0;
-                        foreach (var msg in messages)
-                        {
-                            totalSize += msg.Body.Length;
-                        }
-
-                        var buffer = new byte[totalSize];
-                        var offset = 0;
-                        foreach (var msg in messages)
-                        {
-                            Buffer.BlockCopy(msg.Body, 0, buffer, offset, msg.Body.Length);
-                            offset += msg.Body.Length;
-                        }
-                        records = buffer;
-
-                        // Group consecutive messages into acquired record ranges
-                        var rangeStart = messages[0];
-                        var rangeLast = messages[0];
-
-                        for (int i = 1; i < messages.Count; i++)
-                        {
-                            var current = messages[i];
-                            if (current.Offset == rangeLast.Offset + 1 && current.DeliveryCount == rangeStart.DeliveryCount)
-                            {
-                                rangeLast = current;
-                            }
-                            else
-                            {
-                                acquiredRecords.Add(new ShareAcquiredRecords(rangeStart.Offset, rangeLast.Offset, (short)rangeStart.DeliveryCount));
-                                rangeStart = current;
-                                rangeLast = current;
-                            }
-                        }
-
-                        acquiredRecords.Add(new ShareAcquiredRecords(rangeStart.Offset, rangeLast.Offset, (short)rangeStart.DeliveryCount));
-                    }
-
+                    var maxRecords = request.MaxRecords > 0 ? request.MaxRecords : 100;
+                    var acquired = await share.AcquireAsync(memberId, maxRecords, settings.DeliveryLimit, settings.MaxRecordLocks, cancellationToken);
                     partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
                         Status = ShareGroupErrorStatus.None,
                         AcknowledgeStatus = acknowledgeStatus,
-                        CurrentLeader = new ShareLeader(0, 0),
-                        Records = records,
-                        AcquiredRecords = acquiredRecords
+                        CurrentLeader = LeaderOf(tp),
+                        Records = acquired.Batches,
+                        AcquiredRecords = [.. acquired.Ranges.Select(r => new ShareAcquiredRecords(r.FirstOffset, r.LastOffset, r.DeliveryCount))],
                     });
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     logger.LogError(ex, "ShareFetch error for {Topic}-{Partition}", topicName, fetchPartition.PartitionIndex);
                     partitions.Add(new ShareFetchPartitionResult
@@ -384,7 +349,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                         PartitionIndex = fetchPartition.PartitionIndex,
                         Status = ShareGroupErrorStatus.Unknown,
                         AcknowledgeStatus = acknowledgeStatus,
-                        CurrentLeader = new ShareLeader(-1, -1),
+                        CurrentLeader = NoLeader,
                         AcquiredRecords = []
                     });
                 }
@@ -400,11 +365,11 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // ShareAcknowledge (API Key 79)
     // ─────────────────────────────────────────────────────────────
 
+    /// <remarks>Served by the partition's leader, as ShareFetch (#228).</remarks>
     public ShareAcknowledgeResult ShareAcknowledge(ShareAcknowledgeCommand request)
     {
         var responses = new List<ShareAcknowledgeTopicResult>(request.Topics.Count);
-        // KIP-1240 — group-level renew gate, looked up once per request.
-        var renewEnabled = LookupRenewEnabled(request.GroupId);
+        var settings = SettingsOf(request.GroupId);
 
         foreach (var ackTopic in request.Topics)
         {
@@ -419,19 +384,33 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                     {
                         PartitionIndex = ackPartition.PartitionIndex,
                         Status = ShareGroupErrorStatus.UnknownTopicId,
-                        CurrentLeader = new ShareLeader(-1, -1)
+                        CurrentLeader = NoLeader
                     });
                     continue;
                 }
 
-                var status = ProcessAcknowledgementBatches(
-                    topicName, ackPartition.PartitionIndex, ackPartition.AcknowledgementBatches, renewEnabled);
+                var tp = new TopicPartition { Topic = topicName, Partition = ackPartition.PartitionIndex };
+                if (NotLeaderHere(tp) is { } leader)
+                {
+                    partitions.Add(new ShareAcknowledgePartitionResult
+                    {
+                        PartitionIndex = ackPartition.PartitionIndex,
+                        Status = ShareGroupErrorStatus.NotLeaderOrFollower,
+                        CurrentLeader = leader
+                    });
+                    continue;
+                }
 
+                // Nothing acquired here — no share partition of the group — is nothing a member can acknowledge.
+                var share = string.IsNullOrEmpty(request.GroupId) ? null : _sharePartitions.Get(request.GroupId, tp);
                 partitions.Add(new ShareAcknowledgePartitionResult
                 {
                     PartitionIndex = ackPartition.PartitionIndex,
-                    Status = status,
-                    CurrentLeader = new ShareLeader(0, 0)
+                    // The group's renew gate first (KIP-1240): a Renew it forbids is an invalid request wherever it lands.
+                    Status = RenewForbidden(ackPartition.AcknowledgementBatches, settings) ? ShareGroupErrorStatus.InvalidRequest
+                        : share is null ? ShareGroupErrorStatus.InvalidRecordState
+                        : Acknowledge(share, request.MemberId, ackPartition.AcknowledgementBatches, settings),
+                    CurrentLeader = LeaderOf(tp)
                 });
             }
 
@@ -440,6 +419,64 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
         return new ShareAcknowledgeResult(responses);
     }
+
+    // A member's acknowledgements on a share partition, with the group's renew gate (KIP-1240).
+    private static ShareGroupErrorStatus Acknowledge(
+        SharePartition share, string? memberId, IReadOnlyList<ShareAcknowledgementBatch> batches, ShareSettings settings)
+    {
+        if (RenewForbidden(batches, settings))
+            return ShareGroupErrorStatus.InvalidRequest;
+        return share.Acknowledge(memberId, [.. batches.Select(b => (b.FirstOffset, b.LastOffset, b.AcknowledgeTypes))], settings.DeliveryLimit) switch
+        {
+            ShareGroupAckOutcome.Ok => ShareGroupErrorStatus.None,
+            _ => ShareGroupErrorStatus.InvalidRecordState,
+        };
+    }
+
+    private static bool RenewForbidden(IReadOnlyList<ShareAcknowledgementBatch> batches, ShareSettings settings) =>
+        !settings.RenewEnabled && batches.Any(b => b.AcknowledgeTypes.Contains((sbyte)4));
+
+    private static readonly ShareLeader NoLeader = new(-1, -1);
+
+    // The leader when another broker leads the partition; null when this one does, or nobody knows another.
+    private ShareLeader? NotLeaderHere(TopicPartition tp)
+    {
+        if (_leadership?.IsLedByAnotherBroker(tp) != true)
+            return null;
+        _sharePartitions.Drop(tp);
+        return LeaderOf(tp);
+    }
+
+    private ShareLeader LeaderOf(TopicPartition tp) =>
+        _leadership?.LeaderOf(tp) is { } leader ? new ShareLeader(leader.BrokerId, leader.LeaderEpoch) : NoLeader;
+
+    // The group's limits as its coordinator holds them; the defaults where this broker is not its coordinator.
+    private ShareSettings SettingsOf(string? groupId)
+    {
+        var defaults = new ShareGroupState();
+        if (string.IsNullOrEmpty(groupId))
+            return new ShareSettings(defaults.MaxDeliveryCount, defaults.MaxRecordLocks, defaults.RenewAcknowledgeEnabled);
+        lock (_groupLock)
+        {
+            var group = _offsets.OwnershipOf(groupId) == CoordinatorOwnership.Owned ? _state.Current(groupId) : null;
+            group ??= defaults;
+            return new ShareSettings(group.MaxDeliveryCount, group.MaxRecordLocks, group.RenewAcknowledgeEnabled);
+        }
+    }
+
+    // The start offset the group set for the partition (AlterShareGroupOffsets), where this broker holds the group.
+    private long? StartOffsetOf(string groupId, TopicPartition tp)
+    {
+        lock (_groupLock)
+        {
+            if (_offsets.OwnershipOf(groupId) != CoordinatorOwnership.Owned || _state.Current(groupId) is not { } group)
+                return null;
+            var key = string.Concat(tp.Topic, ":", tp.Partition.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return group.StartOffsets.TryGetValue(key, out var offset) ? offset : null;
+        }
+    }
+
+    private readonly record struct ShareSettings(int DeliveryLimit, int MaxRecordLocks, bool RenewEnabled);
 
     // ─────────────────────────────────────────────────────────────
     // DescribeShareGroupOffsets (API Key 90)
@@ -721,98 +758,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // Internal helpers
     // ─────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Processes acknowledgement batches against the QueueView for a given topic+partition.
-    /// AcknowledgeType (KIP-932):
-    ///   0=Gap (skip), 1=Accept (Ack), 2=Release (Nack+requeue), 3=Reject (DLQ), 4=Renew (extend lease).
-    /// </summary>
-    private ShareGroupErrorStatus ProcessAcknowledgementBatches(
-        string topicName,
-        int partitionIndex,
-        IReadOnlyList<ShareAcknowledgementBatch> batches,
-        bool renewAcknowledgeEnabled)
-    {
-        // KIP-1240 — RENEW gate is checked up-front so it takes precedence
-        // over QueueView absence: the AckType is invalid because the group
-        // config says so, regardless of whether the queue happens to exist.
-        if (!renewAcknowledgeEnabled)
-        {
-            foreach (var ack in batches)
-            {
-                foreach (var ackType in ack.AcknowledgeTypes)
-                {
-                    if (ackType == 4) return ShareGroupErrorStatus.InvalidRequest;
-                }
-            }
-        }
 
-        var queueView = queueViewManager.Get(topicName);
-        if (queueView == null)
-        {
-            return ShareGroupErrorStatus.UnknownTopicOrPartition;
-        }
-
-        try
-        {
-            foreach (var ack in batches)
-            {
-                for (long offset = ack.FirstOffset; offset <= ack.LastOffset; offset++)
-                {
-                    var ackTypeIndex = (int)(offset - ack.FirstOffset);
-                    var ackType = ackTypeIndex < ack.AcknowledgeTypes.Count
-                        ? ack.AcknowledgeTypes[ackTypeIndex]
-                        : ack.AcknowledgeTypes[^1];
-
-                    var messageId = string.Concat(topicName, "-", partitionIndex.ToString(), "-", offset.ToString());
-
-                    switch (ackType)
-                    {
-                        case 0: // Gap - skip, no action needed
-                            break;
-                        case 1: // Accept - acknowledge
-                            queueView.Ack(messageId);
-                            break;
-                        case 2: // Release - nack with requeue
-                            queueView.Nack(messageId, requeue: true);
-                            break;
-                        case 3: // Reject - route to DLQ
-                            _ = queueView.RejectAsync(messageId, CancellationToken.None);
-                            break;
-                        case 4: // Renew (KIP-1222) - extend visibility timeout.
-                            // KIP-1240 gate was already enforced above; the
-                            // queueView path here is the success branch.
-                            queueView.ExtendVisibility(messageId);
-                            break;
-                    }
-                }
-            }
-
-            return ShareGroupErrorStatus.None;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error processing acknowledgement batches for {Topic}-{Partition}",
-                topicName, partitionIndex);
-            return ShareGroupErrorStatus.Unknown;
-        }
-    }
-
-    /// <summary>
-    /// KIP-1240 — look up a group's <see cref="ShareGroupState.RenewAcknowledgeEnabled"/>
-    /// once at the entry of an ack-bearing request. If the group hasn't been
-    /// established yet we return the broker default (<c>true</c>) so first-time
-    /// clients aren't surprised by a Renew rejection.
-    /// </summary>
-    private bool LookupRenewEnabled(string? groupId)
-    {
-        if (string.IsNullOrEmpty(groupId)) return true;
-        lock (_groupLock)
-        {
-            return _state.Current(groupId) is { } group
-                ? group.RenewAcknowledgeEnabled
-                : true;
-        }
-    }
 
     /// <summary>
     /// KIP-1240 — mutate a share-group config via IncrementalAlterConfigs.

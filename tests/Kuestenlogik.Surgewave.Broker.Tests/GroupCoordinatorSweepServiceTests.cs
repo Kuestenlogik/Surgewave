@@ -50,7 +50,7 @@ public sealed class GroupCoordinatorSweepServiceTests : IDisposable
         _queueViewManager = new QueueViewManager(queueViewConfig, NullLoggerFactory.Instance, _logManager);
 
         _v2 = new ConsumerGroupV2Coordinator(NullLogger<ConsumerGroupV2Coordinator>.Instance, _logManager);
-        _share = new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager, _queueViewManager);
+        _share = new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager);
         _streams = new StreamsGroupCoordinator(NullLogger<StreamsGroupCoordinator>.Instance, _logManager);
 
         _sweep = new GroupCoordinatorSweepService(_v2, _share, _streams,

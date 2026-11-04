@@ -35,4 +35,10 @@ public enum ShareGroupErrorStatus
 
     /// <summary>The group's change could not be made durable now (wire CoordinatorNotAvailable) — #219.</summary>
     CoordinatorNotAvailable,
+
+    /// <summary>Another broker leads the partition (wire NotLeaderOrFollower) — #228.</summary>
+    NotLeaderOrFollower,
+
+    /// <summary>A record acknowledged is not one the member holds (wire InvalidRecordState) — #228.</summary>
+    InvalidRecordState,
 }

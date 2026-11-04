@@ -69,7 +69,7 @@ public sealed class ShareGroupPersistenceTests : IAsyncDisposable
     public async Task ABrokerThatDoesNotLeadTheGroupsPartitionIsNotItsCoordinator()
     {
         // A store of a broker in a cluster that leads no partition of __consumer_offsets.
-        var coordinator = new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager, _queues,
+        var coordinator = new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager,
             new OffsetStore(_logManager, _serializer, Partitions, NullLogger<OffsetStore>.Instance));
 
         var response = await coordinator.HeartbeatAsync(Join("c1"), _ct);
@@ -91,6 +91,6 @@ public sealed class ShareGroupPersistenceTests : IAsyncDisposable
     {
         var store = new OffsetStore(_logManager, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
         await store.StartLocalAsync(_ct);
-        return new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager, _queues, store);
+        return new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager, store);
     }
 }

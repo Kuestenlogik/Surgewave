@@ -305,6 +305,30 @@ reads the group from them, and every member gets a session from then on.
 A broker that does not coordinate the group answers `NOT_COORDINATOR`, and
 one still reading the partition answers `COORDINATOR_LOAD_IN_PROGRESS`.
 
+### Share fetches are served per group by the partition's leader (#228)
+
+A share group's records were handed out by one queue per topic, shared by
+every share group of the topic: two groups took records from each other.
+The queue counted a batch of several records as one record, and every
+broker served it, a follower from its copy. A share partition is now one
+per group and partition, held by the partition's leader, as in KIP-932:
+- **Record states:** each record is available, acquired by a member until
+  its lock runs out (`ShareRecordLockDurationMs`, Kafka's
+  `share.record.lock.duration.ms`), acknowledged or archived. The start
+  offset moves past the records that are done.
+- **Group limits:** a record delivered as often as the group allows
+  (`share.delivery.count.limit`) is archived instead of offered again, and
+  the group holds at most `share.partition.max.record.locks` records.
+- **Who acknowledges:** only the member holding a record can acknowledge
+  it; anything else is `INVALID_RECORD_STATE`.
+- **Leaders only:** a broker that does not lead the partition answers
+  `NOT_LEADER_OR_FOLLOWER` and names the leader.
+- **Start offsets:** a start offset set with AlterShareGroupOffsets is
+  where the group's share partition starts.
+
+Rejected records are archived, as in Kafka; they are no longer routed to a
+dead-letter topic.
+
 ### A share group outlives its coordinator (#219)
 
 A share group's members, epochs, start offsets and configs lived only in
