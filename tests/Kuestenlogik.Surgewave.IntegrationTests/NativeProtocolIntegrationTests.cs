@@ -70,7 +70,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var offsetStoreLogger = _loggerFactory.CreateLogger<OffsetStore>();
 
         var recordBatchSerializer = new RecordBatchSerializer(serializerLogger);
-        _offsetStore = new OffsetStore(_dataDir, offsetStoreLogger);
+        _offsetStore = OffsetStore.InMemory();
         var consumerGroupCoordinator = new ConsumerGroupCoordinator(coordinatorLogger, _offsetStore);
         var queueViewConfig = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewConfig();
         var queueViewManager = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager(queueViewConfig, _loggerFactory, _logManager);

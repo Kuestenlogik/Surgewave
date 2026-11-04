@@ -37,7 +37,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
         _logManager = new LogManager(_testDirectory, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _producerStateManager = new ProducerStateManager();
         _transactionIndex = new TransactionIndex();
-        _offsetStore = new OffsetStore(_testDirectory, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _stateStore = new TransactionStateStore(Path.Combine(_testDirectory, "txn-state"), NullLogger<TransactionStateStore>.Instance);
 
         _coordinator = new TransactionCoordinator(

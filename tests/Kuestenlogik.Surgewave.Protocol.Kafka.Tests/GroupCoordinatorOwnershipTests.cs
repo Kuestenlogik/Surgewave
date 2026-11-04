@@ -83,7 +83,7 @@ public sealed class GroupCoordinatorOwnershipTests
         var partitions = Assert.Single(response.Topics).Partitions;
         Assert.Equal(2, partitions.Count);
         Assert.All(partitions, p => Assert.Equal(ErrorCode.NotCoordinator, p.ErrorCode));
-        _classic.DidNotReceiveWithAnyArgs().CommitOffsets(default!);
+        await _classic.DidNotReceiveWithAnyArgs().CommitOffsetsAsync(default!, default);
     }
 
     [Fact]

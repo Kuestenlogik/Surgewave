@@ -358,28 +358,28 @@ public class NativeGroupCoordinatorTests
     #region Offset Management Tests
 
     [Fact]
-    public void CommitOffset_StoresOffset()
+    public async Task CommitOffset_StoresOffset()
     {
         var groupId = "offset-group-1";
         var topic = "test-topic";
         var partition = 0;
         var offset = 100L;
 
-        var result = _coordinator.CommitOffset(
-            groupId, "member-1", 1, topic, partition, offset, null);
+        var result = await _coordinator.CommitOffsetAsync(
+            groupId, "member-1", 1, topic, partition, offset, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, result.ErrorCode);
     }
 
     [Fact]
-    public void FetchOffset_ReturnsCommittedOffset()
+    public async Task FetchOffset_ReturnsCommittedOffset()
     {
         var groupId = "offset-group-2";
         var topic = "test-topic";
         var partition = 0;
         var offset = 200L;
 
-        _coordinator.CommitOffset(groupId, "member-1", 1, topic, partition, offset, null);
+        await _coordinator.CommitOffsetAsync(groupId, "member-1", 1, topic, partition, offset, null, TestContext.Current.CancellationToken);
 
         var result = _coordinator.FetchOffset(groupId, topic, partition);
 
@@ -397,13 +397,13 @@ public class NativeGroupCoordinatorTests
     }
 
     [Fact]
-    public void CommitOffset_AutoCreatesGroup()
+    public async Task CommitOffset_AutoCreatesGroup()
     {
         var groupId = "auto-create-group";
         var topic = "test-topic";
 
         // Commit to non-existent group - should auto-create
-        var result = _coordinator.CommitOffset(groupId, "member-1", 0, topic, 0, 50L, null);
+        var result = await _coordinator.CommitOffsetAsync(groupId, "member-1", 0, topic, 0, 50L, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, result.ErrorCode);
 

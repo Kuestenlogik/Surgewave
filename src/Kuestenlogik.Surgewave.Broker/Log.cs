@@ -156,30 +156,24 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Information, Message = "Broker shutdown complete")]
     public static partial void ShutdownComplete(ILogger logger);
 
-    // OffsetStore logging
-    [LoggerMessage(Level = LogLevel.Debug, Message = "OffsetStore: Loaded group {GroupId} with {OffsetCount} committed offsets")]
-    public static partial void OffsetStoreLoadedGroup(ILogger logger, string groupId, int offsetCount);
+    // OffsetStore: __consumer_offsets (#205)
+    [LoggerMessage(Level = LogLevel.Information, Message = "Loading the groups of __consumer_offsets-{Partition}")]
+    public static partial void OffsetsPartitionLoading(ILogger logger, int partition);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "OffsetStore: Failed to load offsets from {FilePath}")]
-    public static partial void OffsetStoreLoadError(ILogger logger, string filePath, Exception ex);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Loaded __consumer_offsets-{Partition}: {Groups} group(s) from {Records} record(s)")]
+    public static partial void OffsetsPartitionLoaded(ILogger logger, int partition, int groups, int records);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "OffsetStore: Initialized with {GroupCount} consumer groups")]
-    public static partial void OffsetStoreInitialized(ILogger logger, int groupCount);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Reading __consumer_offsets-{Partition} failed; its groups are served from what was read")]
+    public static partial void OffsetsPartitionLoadFailed(ILogger logger, int partition, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "OffsetStore: Failed to persist offsets for group {GroupId}")]
-    public static partial void OffsetStorePersistError(ILogger logger, string groupId, Exception ex);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Reading __consumer_offsets-{Partition} made no progress at offset {Position} of {End}; its groups are served from what was read")]
+    public static partial void OffsetsPartitionLoadStalled(ILogger logger, int partition, long position, long end);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "OffsetStore: Committed offset {Offset} for {GroupId}/{Topic}/{Partition}")]
-    public static partial void OffsetStoreCommitted(ILogger logger, long offset, string groupId, string topic, int partition);
+    [LoggerMessage(Level = LogLevel.Information, Message = "No longer serving the groups of __consumer_offsets-{Partition}")]
+    public static partial void OffsetsPartitionUnloaded(ILogger logger, int partition);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "OffsetStore: Flushed {GroupCount} dirty groups to disk")]
-    public static partial void OffsetStoreFlushed(ILogger logger, int groupCount);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "OffsetStore: Deleted group {GroupId}")]
-    public static partial void OffsetStoreGroupDeleted(ILogger logger, string groupId);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "OffsetStore: Failed to delete group {GroupId}")]
-    public static partial void OffsetStoreDeleteError(ILogger logger, string groupId, Exception ex);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Writing to __consumer_offsets-{Partition} for group {GroupId} failed")]
+    public static partial void OffsetsAppendFailed(ILogger logger, string groupId, int partition, Exception ex);
 
     // OffsetFetch debugging
     [LoggerMessage(Level = LogLevel.Debug, Message = "[OffsetFetch] GroupId={GroupId}, Topics={TopicCount}")]
@@ -224,6 +218,9 @@ internal static partial class Log
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Group {GroupId} is at generation {Generation} with {Members} member(s), led by {LeaderId}")]
     public static partial void GroupRebalanceCompleted(ILogger logger, string groupId, int generation, int members, string leaderId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Group {GroupId}: generation {Generation} did not reach __consumer_offsets; a coordinator taking the group over counts from the last one that did")]
+    public static partial void GroupGenerationNotRecorded(ILogger logger, string groupId, int generation, Exception? ex);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Group {GroupId} dropped member {MemberId}: {Reason}")]
     public static partial void GroupMemberDropped(ILogger logger, string groupId, string memberId, string reason);

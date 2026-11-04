@@ -143,6 +143,19 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### A group keeps its offsets when its coordinator changes (#205)
+
+Committed offsets lived in a file on the broker that coordinated the group,
+so a broker that took a group over after a failover knew none of them, and
+the group read its partitions again from the start. A group's offsets and
+the generation it reached are now records in its partition of
+`__consumer_offsets`, in Kafka's OffsetCommit and GroupMetadata shapes, and
+compacted. A broker that becomes leader of a partition loads its groups from
+the log and answers `COORDINATOR_LOAD_IN_PROGRESS` until it has; one that
+loses the leadership lets them go and answers `NOT_COORDINATOR`. A commit is
+answered once the in-sync replicas of the partition have it. A broker on its
+own keeps `__consumer_offsets` too and leads all of its partitions.
+
 ### Consumers of one group share the partitions (#216)
 
 The classic group protocol never rebalanced: a member that joined later was
@@ -247,6 +260,14 @@ installer's icon use `images/icon.png`; the web manifest's 512 px icon is `icon-
 files differ from the drawing.
 
 ## Breaking changes
+
+### Group offsets are not carried over from an upgrade (#205)
+
+Committed offsets were kept in `.metadata/groups/*.json` under the data
+directory. They are now kept in `__consumer_offsets`, and the files are
+neither read nor migrated. A group without offsets starts where its
+`auto.offset.reset` says. Before 1.0 there is no migration; reset the
+offsets of a group that must not start over, after the upgrade.
 
 ### `UseRaftConsensus` is gone; there is no non-Raft mode (#163)
 

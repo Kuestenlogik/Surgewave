@@ -20,7 +20,8 @@ public interface IConsumerGroupCoordinator
 
     LeaveGroupResult LeaveGroup(LeaveGroupCommand request);
 
-    OffsetCommitResult CommitOffsets(OffsetCommitCommand request);
+    /// <summary>Completes once the offsets are in <c>__consumer_offsets</c> and on its in-sync replicas (#205).</summary>
+    Task<OffsetCommitResult> CommitOffsetsAsync(OffsetCommitCommand request, CancellationToken cancellationToken);
 
     OffsetFetchResult FetchOffsets(OffsetFetchCommand request);
 
@@ -29,7 +30,7 @@ public interface IConsumerGroupCoordinator
     /// <summary>Lists groups, optionally filtered to the supplied set of states (case-insensitive).</summary>
     IReadOnlyList<GroupListing> ListGroups(IReadOnlyList<string>? statesFilter);
 
-    IReadOnlyList<DeleteGroupResult> DeleteGroups(IReadOnlyList<string> groupIds);
+    Task<IReadOnlyList<DeleteGroupResult>> DeleteGroupsAsync(IReadOnlyList<string> groupIds, CancellationToken cancellationToken);
 
-    OffsetDeleteResult DeleteOffsets(OffsetDeleteCommand request);
+    Task<OffsetDeleteResult> DeleteOffsetsAsync(OffsetDeleteCommand request, CancellationToken cancellationToken);
 }

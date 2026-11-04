@@ -155,7 +155,7 @@ public sealed class DescribeProducersTests
             var psm = new ProducerStateManager();
             var idx = new TransactionIndex();
             var logManager = TestLogManager.CreateInMemory(temp);
-            var offsetStore = new OffsetStore(temp, Microsoft.Extensions.Logging.Abstractions.NullLogger<OffsetStore>.Instance);
+            var offsetStore = OffsetStore.InMemory();
             var stateStore = new TransactionStateStore(temp, Microsoft.Extensions.Logging.Abstractions.NullLogger<TransactionStateStore>.Instance);
             var coord = new TransactionCoordinator(psm, logManager, idx, offsetStore, stateStore,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<TransactionCoordinator>.Instance);

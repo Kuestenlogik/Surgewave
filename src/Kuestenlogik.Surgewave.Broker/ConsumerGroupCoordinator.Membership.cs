@@ -26,6 +26,10 @@ public sealed partial class ConsumerGroupCoordinator
 
     public async Task<JoinGroupResult> JoinGroupAsync(JoinGroupCommand request, CancellationToken cancellationToken)
     {
+        // A coordinator still reading the group's partition has no group to join yet (#205).
+        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+            return JoinGroupResult.Failed(ConsumerGroupErrorStatus.CoordinatorLoadInProgress, request.MemberId);
+
         TaskCompletionSource<JoinGroupResult> joined;
         string memberId;
         ConsumerGroupState group;
@@ -38,10 +42,11 @@ public sealed partial class ConsumerGroupCoordinator
 
             if (!_consumerGroups.TryGetValue(request.GroupId, out group!))
             {
+                // A group taken over from another coordinator counts on from the generation it reached there.
                 group = new ConsumerGroupState
                 {
                     GroupId = request.GroupId,
-                    GenerationId = 0,
+                    GenerationId = _offsets.GetGeneration(request.GroupId),
                     ProtocolType = request.ProtocolType,
                     ProtocolName = firstProtocol?.Name ?? "range",
                 };
@@ -121,6 +126,9 @@ public sealed partial class ConsumerGroupCoordinator
 
     public async Task<SyncGroupResult> SyncGroupAsync(SyncGroupCommand request, CancellationToken cancellationToken)
     {
+        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+            return new SyncGroupResult(ConsumerGroupErrorStatus.CoordinatorLoadInProgress, []);
+
         TaskCompletionSource<SyncGroupResult> synced;
         ConsumerGroupState? group;
 
@@ -178,6 +186,9 @@ public sealed partial class ConsumerGroupCoordinator
 
     public GroupHeartbeatResult Heartbeat(GroupHeartbeatCommand request)
     {
+        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+            return new GroupHeartbeatResult(ConsumerGroupErrorStatus.CoordinatorLoadInProgress);
+
         lock (_groupLock)
         {
             if (!_consumerGroups.TryGetValue(request.GroupId, out var group) || !group.Members.TryGetValue(request.MemberId, out var member))
@@ -300,6 +311,7 @@ public sealed partial class ConsumerGroupCoordinator
             .ToArray();
 
         Log.GroupRebalanceCompleted(logger, group.GroupId, group.GenerationId, group.Members.Count, group.LeaderId);
+        RecordGeneration(group);
 
         foreach (var (memberId, pending) in group.PendingJoins)
         {
@@ -315,6 +327,20 @@ public sealed partial class ConsumerGroupCoordinator
             });
         }
         group.PendingJoins.Clear();
+    }
+
+    // Under _groupLock. The generation goes to __consumer_offsets for the coordinator that takes the group over; the
+    // join round does not wait for it — losing the record costs a later coordinator generation numbers, not offsets.
+    private void RecordGeneration(ConsumerGroupState group)
+    {
+        var groupId = group.GroupId;
+        var generation = group.GenerationId;
+        _offsets.RecordGenerationAsync(groupId, group.ProtocolType, generation, group.ProtocolName, group.LeaderId, CancellationToken.None)
+            .ContinueWith(write =>
+            {
+                if (write.IsFaulted || write.Result != OffsetWriteStatus.Ok)
+                    Log.GroupGenerationNotRecorded(logger, groupId, generation, write.Exception?.GetBaseException());
+            }, TaskScheduler.Default);
     }
 
     // Under _groupLock. The leader's assignment: every member gets its part, waiting followers included.

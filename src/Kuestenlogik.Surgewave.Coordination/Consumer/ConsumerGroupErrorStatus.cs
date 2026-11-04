@@ -39,4 +39,13 @@ public enum ConsumerGroupErrorStatus
 
     /// <summary>The request names a generation the group has left behind (#216).</summary>
     IllegalGeneration,
+
+    /// <summary>This broker does not coordinate the group (#205).</summary>
+    NotCoordinator,
+
+    /// <summary>This broker coordinates the group and is still reading its state (#205).</summary>
+    CoordinatorLoadInProgress,
+
+    /// <summary>The group's state could not be written durably now; the client retries (#205).</summary>
+    CoordinatorNotAvailable,
 }

@@ -56,19 +56,23 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
             return ToJoinGroupResponse(await _coordinator.JoinGroupAsync(ToJoinGroupCommand(join), cancellationToken).ConfigureAwait(false), join);
         if (request is SyncGroupRequest sync)
             return ToSyncGroupResponse(await _coordinator.SyncGroupAsync(ToSyncGroupCommand(sync), cancellationToken).ConfigureAwait(false), sync);
+        // A commit, a group delete and an offset delete are answered once __consumer_offsets has them (#205).
+        if (request is OffsetCommitRequest commit)
+            return ToOffsetCommitResponse(await _coordinator.CommitOffsetsAsync(ToOffsetCommitCommand(commit), cancellationToken).ConfigureAwait(false), commit);
+        if (request is DeleteGroupsRequest delete)
+            return await DeleteGroupsHereAsync(delete, cancellationToken).ConfigureAwait(false);
+        if (request is OffsetDeleteRequest offsetDelete)
+            return ToOffsetDeleteResponse(await _coordinator.DeleteOffsetsAsync(ToOffsetDeleteCommand(offsetDelete), cancellationToken).ConfigureAwait(false), offsetDelete);
 
         KafkaResponse response = request switch
         {
             HeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(new GroupHeartbeatCommand(r.GroupId, r.MemberId, r.GenerationId)), r),
             LeaveGroupRequest r => ToLeaveGroupResponse(_coordinator.LeaveGroup(ToLeaveGroupCommand(r)), r),
-            OffsetCommitRequest r => ToOffsetCommitResponse(_coordinator.CommitOffsets(ToOffsetCommitCommand(r)), r),
             OffsetFetchRequest { ApiVersion: >= 8, Groups: not null } r => OffsetFetchGroupsHere(r),
             OffsetFetchRequest r => ToOffsetFetchResponse(_coordinator.FetchOffsets(ToOffsetFetchCommand(r)), r),
             DescribeGroupsRequest r => DescribeGroupsHere(r),
             ListGroupsRequest r => ToListGroupsResponse(
                 [.. _coordinator.ListGroups(r.StatesFilter), .. _consumerGroups.ListGroups(r.StatesFilter)], r),
-            DeleteGroupsRequest r => DeleteGroupsHere(r),
-            OffsetDeleteRequest r => ToOffsetDeleteResponse(_coordinator.DeleteOffsets(ToOffsetDeleteCommand(r)), r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConsumerGroupApiHandler")
         };
 
@@ -90,6 +94,9 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
         ConsumerGroupErrorStatus.GroupSubscribedToTopic => ErrorCode.GroupSubscribedToTopic,
         ConsumerGroupErrorStatus.RebalanceInProgress => ErrorCode.RebalanceInProgress,
         ConsumerGroupErrorStatus.IllegalGeneration => ErrorCode.IllegalGeneration,
+        ConsumerGroupErrorStatus.NotCoordinator => ErrorCode.NotCoordinator,
+        ConsumerGroupErrorStatus.CoordinatorLoadInProgress => ErrorCode.CoordinatorLoadInProgress,
+        ConsumerGroupErrorStatus.CoordinatorNotAvailable => ErrorCode.CoordinatorNotAvailable,
         _ => ErrorCode.None,
     };
 
@@ -336,7 +343,7 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
                 {
                     GroupId = g.GroupId,
                     Topics = ToWireFetchTopics(g.Topics),
-                    ErrorCode = ErrorCode.None,
+                    ErrorCode = ToErrorCode(g.Status),
                 });
             }
 
@@ -355,7 +362,7 @@ public sealed partial class ConsumerGroupApiHandler : IKafkaRequestHandler
             CorrelationId = r.CorrelationId,
             ApiVersion = r.ApiVersion,
             Topics = ToWireFetchTopics(result.Groups[0].Topics),
-            ErrorCode = ErrorCode.None,
+            ErrorCode = ToErrorCode(result.Groups[0].Status),
         };
     }
 

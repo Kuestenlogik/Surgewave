@@ -39,7 +39,7 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
         _dataDir = Path.Combine(Path.GetTempPath(), "surgewave-txnverify-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dataDir);
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
-        _offsetStore = new OffsetStore(_dataDir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _stateStore = new TransactionStateStore(Path.Combine(_dataDir, "txn-state"), NullLogger<TransactionStateStore>.Instance);
         _coordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _stateStore,

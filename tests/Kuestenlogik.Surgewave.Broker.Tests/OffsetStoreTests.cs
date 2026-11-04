@@ -1,3 +1,7 @@
+using Kuestenlogik.Surgewave.Broker.GroupOffsets;
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
+using Kuestenlogik.Surgewave.Core.Storage;
+using Kuestenlogik.Surgewave.Storage.Engine.Memory;
 using Kuestenlogik.Surgewave.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -5,274 +9,132 @@ using Xunit;
 namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
-/// Tests for the OffsetStore: commit, retrieve, persist, and delete offsets.
+/// Group offsets in <c>__consumer_offsets</c> (#205): what a store writes is what the next store over the same log
+/// reads back, a store serves only the partitions it leads, and the records are Kafka's.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class OffsetStoreTests : IDisposable
 {
-    private readonly string _tempDir;
-    private readonly OffsetStore _store;
+    private const int Partitions = 4;
+
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "surgewave-offsets-" + Guid.NewGuid().ToString("N"));
+    private readonly LogManager _log;
+    private readonly RecordBatchSerializer _serializer = new(NullLogger<RecordBatchSerializer>.Instance);
+    private readonly CancellationToken _ct = TestContext.Current.CancellationToken;
 
     public OffsetStoreTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), "surgewave-offset-tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_tempDir);
-        // Use a large flush interval to avoid background timer interfering with tests
-        _store = new OffsetStore(_tempDir, NullLogger<OffsetStore>.Instance, flushIntervalMs: 60_000);
+        _log = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
     }
 
     public void Dispose()
     {
-        _store.Dispose();
-        try { Directory.Delete(_tempDir, recursive: true); }
-        catch { /* ignore */ }
-    }
-
-    // ── CommitOffset / GetCommittedOffset ─────────────────────────────────────
-
-    [Fact]
-    public void GetCommittedOffset_NoOffset_ReturnsMinusOne()
-    {
-        var offset = _store.GetCommittedOffset("group-1", "topic-a", 0);
-        Assert.Equal(-1, offset);
+        _log.Dispose();
+        try { Directory.Delete(_dataDir, recursive: true); } catch { /* best-effort cleanup */ }
     }
 
     [Fact]
-    public void CommitOffset_ThenGet_ReturnsCommittedOffset()
+    public async Task ACommitIsReadBackByTheNextStoreOverTheLog()
     {
-        _store.CommitOffset("group-1", "topic-a", 0, offset: 42);
+        var first = await LocalStoreAsync();
+        Assert.Equal(OffsetWriteStatus.Ok, await first.CommitOffsetsAsync("orders-app",
+            [new CommittedOffset("orders", 0, 42), new CommittedOffset("orders", 1, 7)], _ct));
+        Assert.Equal(OffsetWriteStatus.Ok, await first.CommitOffsetAsync("orders-app", "orders", 0, 43, _ct));
 
-        var result = _store.GetCommittedOffset("group-1", "topic-a", 0);
-        Assert.Equal(42, result);
+        // A restart, or another broker taking the partition over: everything comes from the log.
+        var next = await LocalStoreAsync();
+
+        Assert.Equal(43, next.GetCommittedOffset("orders-app", "orders", 0));
+        Assert.Equal(7, next.GetCommittedOffset("orders-app", "orders", 1));
+        Assert.Equal(-1, next.GetCommittedOffset("orders-app", "orders", 2));
+        Assert.Contains("orders-app", next.GetGroupIds());
     }
 
     [Fact]
-    public void CommitOffset_Overwrites_PreviousOffset()
+    public async Task DeletedOffsetsAndGroupsStayDeleted()
     {
-        _store.CommitOffset("group-1", "topic-a", 0, offset: 10);
-        _store.CommitOffset("group-1", "topic-a", 0, offset: 99);
+        var first = await LocalStoreAsync();
+        await first.CommitOffsetsAsync("keeps", [new CommittedOffset("orders", 0, 1), new CommittedOffset("orders", 1, 2)], _ct);
+        await first.CommitOffsetAsync("goes", "orders", 0, 3, _ct);
 
-        var result = _store.GetCommittedOffset("group-1", "topic-a", 0);
-        Assert.Equal(99, result);
+        Assert.Equal(OffsetWriteStatus.Ok, await first.DeleteOffsetAsync("keeps", "orders", 1, _ct));
+        Assert.Equal(OffsetWriteStatus.Ok, await first.DeleteGroupAsync("goes", _ct));
+        Assert.Equal(-1, first.GetCommittedOffset("goes", "orders", 0));
+
+        var next = await LocalStoreAsync();
+        Assert.Equal(1, next.GetCommittedOffset("keeps", "orders", 0));
+        Assert.Equal(-1, next.GetCommittedOffset("keeps", "orders", 1));
+        Assert.Equal(-1, next.GetCommittedOffset("goes", "orders", 0));
+        Assert.DoesNotContain("goes", next.GetGroupIds());
     }
 
     [Fact]
-    public void CommitOffset_MultipleTopicsAndPartitions_AllTracked()
+    public async Task TheGenerationAGroupReachedIsReadBack()
     {
-        _store.CommitOffset("group-1", "topic-a", 0, 100);
-        _store.CommitOffset("group-1", "topic-a", 1, 200);
-        _store.CommitOffset("group-1", "topic-b", 0, 300);
+        var first = await LocalStoreAsync();
+        Assert.Equal(OffsetWriteStatus.Ok, await first.RecordGenerationAsync("orders-app", "consumer", 5, "range", "member-1", _ct));
 
-        Assert.Equal(100, _store.GetCommittedOffset("group-1", "topic-a", 0));
-        Assert.Equal(200, _store.GetCommittedOffset("group-1", "topic-a", 1));
-        Assert.Equal(300, _store.GetCommittedOffset("group-1", "topic-b", 0));
+        var next = await LocalStoreAsync();
+        Assert.Equal(5, next.GetGeneration("orders-app"));
+        Assert.Equal(0, next.GetGeneration("never-joined"));
     }
 
     [Fact]
-    public void CommitOffset_DifferentGroups_AreIsolated()
+    public async Task AStoreThatLosesThePartitionNeitherServesNorWritesItsGroups()
     {
-        _store.CommitOffset("group-1", "topic-a", 0, 50);
-        _store.CommitOffset("group-2", "topic-a", 0, 999);
+        var store = await LocalStoreAsync();
+        await store.CommitOffsetAsync("orders-app", "orders", 0, 42, _ct);
 
-        Assert.Equal(50, _store.GetCommittedOffset("group-1", "topic-a", 0));
-        Assert.Equal(999, _store.GetCommittedOffset("group-2", "topic-a", 0));
-    }
+        store.OnLeadershipChanged(PartitionOf("orders-app"), isLeader: false);
 
-    // ── GetAllOffsets ─────────────────────────────────────────────────────────
-
-    [Fact]
-    public void GetAllOffsets_ReturnsAllCommittedOffsets()
-    {
-        _store.CommitOffset("grp", "t", 0, 10);
-        _store.CommitOffset("grp", "t", 1, 20);
-
-        var all = _store.GetAllOffsets("grp");
-
-        Assert.Equal(2, all.Count);
-        Assert.Equal(10L, all["t:0"]);
-        Assert.Equal(20L, all["t:1"]);
+        Assert.Equal(GroupOwnership.NotOwned, store.OwnershipOf("orders-app"));
+        Assert.Equal(-1, store.GetCommittedOffset("orders-app", "orders", 0));
+        Assert.Equal(OffsetWriteStatus.NotCoordinator, await store.CommitOffsetAsync("orders-app", "orders", 0, 43, _ct));
     }
 
     [Fact]
-    public void GetAllOffsets_UnknownGroup_ReturnsEmpty()
+    public async Task ABrokerThatTakesThePartitionOverServesWhatThePreviousLeaderCommitted()
     {
-        var all = _store.GetAllOffsets("unknown-group");
-        Assert.Empty(all);
+        var previous = await LocalStoreAsync();
+        await previous.CommitOffsetAsync("orders-app", "orders", 0, 42, _ct);
+
+        // A store that leads nothing yet, then is told it leads the group's partition.
+        var takeover = new OffsetStore(_log, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
+        Assert.Equal(GroupOwnership.NotOwned, takeover.OwnershipOf("orders-app"));
+
+        takeover.OnLeadershipChanged(PartitionOf("orders-app"), isLeader: true);
+        await takeover.WhenLoadedAsync("orders-app").WaitAsync(TimeSpan.FromSeconds(30), _ct);
+
+        Assert.Equal(GroupOwnership.Owned, takeover.OwnershipOf("orders-app"));
+        Assert.Equal(42, takeover.GetCommittedOffset("orders-app", "orders", 0));
     }
 
     [Fact]
-    public void GetAllOffsets_ReturnsCopy_ModifyingDoesNotAffectStore()
+    public async Task TheRecordsAreKafkasOffsetCommitAndGroupMetadataShapes()
     {
-        _store.CommitOffset("grp", "t", 0, 42);
-        var all = _store.GetAllOffsets("grp");
+        var store = await LocalStoreAsync();
+        await store.CommitOffsetAsync("g", "t", 3, 99, _ct);
+        await store.RecordGenerationAsync("g", "consumer", 2, "range", "m", _ct);
 
-        // Mutate the returned dictionary
-        all["t:0"] = 999;
+        var tp = new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = CoordinatorPartitioner.GroupTopic, Partition = PartitionOf("g") };
+        var messages = (await _log.ReadBatchesAsync(tp, 0, cancellationToken: _ct)).SelectMany(_serializer.ParseRecordBatch).ToList();
+        Assert.Equal(2, messages.Count);
 
-        // Store value should be unchanged
-        Assert.Equal(42, _store.GetCommittedOffset("grp", "t", 0));
+        // OffsetCommitKey v1: version, group, topic, partition.
+        Assert.Equal(new byte[] { 0, 1, 0, 1, (byte)'g', 0, 1, (byte)'t', 0, 0, 0, 3 }, messages[0].Key.ToArray());
+        Assert.Equal(new GroupRecord.OffsetCommitted("g", "t", 3, 99), GroupRecords.Read(messages[0].Key.Span, messages[0].Value.Span));
+
+        // GroupMetadataKey v2: version, group.
+        Assert.Equal(new byte[] { 0, 2, 0, 1, (byte)'g' }, messages[1].Key.ToArray());
+        Assert.Equal(new GroupRecord.GroupMetadata("g", 2), GroupRecords.Read(messages[1].Key.Span, messages[1].Value.Span));
     }
 
-    // ── HasCommittedOffsets ────────────────────────────────────────────────────
-
-    [Fact]
-    public void HasCommittedOffsets_NoOffsets_ReturnsFalse()
+    private async Task<OffsetStore> LocalStoreAsync()
     {
-        Assert.False(_store.HasCommittedOffsets("group-1"));
+        var store = new OffsetStore(_log, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
+        await store.StartLocalAsync(_ct);
+        return store;
     }
 
-    [Fact]
-    public void HasCommittedOffsets_AfterCommit_ReturnsTrue()
-    {
-        _store.CommitOffset("group-1", "topic", 0, 1);
-        Assert.True(_store.HasCommittedOffsets("group-1"));
-    }
-
-    // ── DeleteOffset ──────────────────────────────────────────────────────────
-
-    [Fact]
-    public void DeleteOffset_RemovesSpecificPartition()
-    {
-        _store.CommitOffset("grp", "t", 0, 100);
-        _store.CommitOffset("grp", "t", 1, 200);
-
-        _store.DeleteOffset("grp", "t", 0);
-
-        Assert.Equal(-1, _store.GetCommittedOffset("grp", "t", 0));
-        Assert.Equal(200, _store.GetCommittedOffset("grp", "t", 1));
-    }
-
-    [Fact]
-    public void DeleteOffset_UnknownGroup_IsNoOp()
-    {
-        // Should not throw
-        _store.DeleteOffset("unknown-group", "t", 0);
-    }
-
-    [Fact]
-    public void DeleteOffset_UnknownPartition_IsNoOp()
-    {
-        _store.CommitOffset("grp", "t", 0, 50);
-        _store.DeleteOffset("grp", "t", 99); // partition 99 doesn't exist
-
-        Assert.Equal(50, _store.GetCommittedOffset("grp", "t", 0));
-    }
-
-    // ── DeleteGroup ────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void DeleteGroup_RemovesAllOffsets()
-    {
-        _store.CommitOffset("grp", "t", 0, 10);
-        _store.CommitOffset("grp", "t", 1, 20);
-
-        _store.DeleteGroup("grp");
-
-        Assert.False(_store.HasCommittedOffsets("grp"));
-        Assert.Equal(-1, _store.GetCommittedOffset("grp", "t", 0));
-    }
-
-    [Fact]
-    public void DeleteGroup_UnknownGroup_IsNoOp()
-    {
-        _store.DeleteGroup("nonexistent-group");
-    }
-
-    [Fact]
-    public void DeleteGroup_OtherGroupsUnaffected()
-    {
-        _store.CommitOffset("grp-a", "t", 0, 100);
-        _store.CommitOffset("grp-b", "t", 0, 200);
-
-        _store.DeleteGroup("grp-a");
-
-        Assert.Equal(200, _store.GetCommittedOffset("grp-b", "t", 0));
-    }
-
-    // ── Flush / Persistence ────────────────────────────────────────────────────
-
-    [Fact]
-    public void Flush_WritesGroupFileToDisk()
-    {
-        _store.CommitOffset("grp", "t", 0, 42);
-        _store.Flush();
-
-        var groupsDir = Path.Combine(_tempDir, ".metadata", "groups");
-        Assert.True(Directory.Exists(groupsDir));
-        var files = Directory.GetFiles(groupsDir, "*.json");
-        Assert.NotEmpty(files);
-    }
-
-    [Fact]
-    public void Flush_AfterDelete_RemovesFileFromDisk()
-    {
-        _store.CommitOffset("grp", "t", 0, 42);
-        _store.Flush();
-
-        var groupsDir = Path.Combine(_tempDir, ".metadata", "groups");
-        var filesBefore = Directory.GetFiles(groupsDir, "*.json").Length;
-        Assert.True(filesBefore > 0);
-
-        _store.DeleteGroup("grp");
-        // After delete, file is removed directly (not debounced)
-        var filesAfter = Directory.GetFiles(groupsDir, "*.json").Length;
-        Assert.True(filesAfter < filesBefore);
-    }
-
-    [Fact]
-    public void Persistence_LoadsBackOnRestart()
-    {
-        _store.CommitOffset("grp", "t", 0, 77);
-        _store.Flush();
-
-        // Create a new store pointing to the same directory (simulates restart)
-        using var store2 = new OffsetStore(_tempDir, NullLogger<OffsetStore>.Instance, flushIntervalMs: 60_000);
-
-        var offset = store2.GetCommittedOffset("grp", "t", 0);
-        Assert.Equal(77, offset);
-    }
-
-    // ── Edge cases ─────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void CommitOffset_PartitionZero_Works()
-    {
-        _store.CommitOffset("g", "t", 0, 0);
-        Assert.Equal(0L, _store.GetCommittedOffset("g", "t", 0));
-    }
-
-    [Fact]
-    public void CommitOffset_LargeOffset_Works()
-    {
-        _store.CommitOffset("g", "t", 0, long.MaxValue);
-        Assert.Equal(long.MaxValue, _store.GetCommittedOffset("g", "t", 0));
-    }
-
-    [Fact]
-    public void CommitOffset_TopicWithColon_HandledCorrectly()
-    {
-        // Topics can contain colons — make sure the key parsing handles it
-        _store.CommitOffset("grp", "my-topic:v2", 3, 55);
-        _store.Flush();
-
-        // Reload from disk and verify
-        using var store2 = new OffsetStore(_tempDir, NullLogger<OffsetStore>.Instance, flushIntervalMs: 60_000);
-        var offset = store2.GetCommittedOffset("grp", "my-topic:v2", 3);
-        Assert.Equal(55, offset);
-    }
-
-    [Fact]
-    public void MultipleGroups_IndependentlyPersisted()
-    {
-        _store.CommitOffset("grp-a", "t", 0, 11);
-        _store.CommitOffset("grp-b", "t", 0, 22);
-        _store.CommitOffset("grp-c", "t", 0, 33);
-        _store.Flush();
-
-        using var store2 = new OffsetStore(_tempDir, NullLogger<OffsetStore>.Instance, flushIntervalMs: 60_000);
-
-        Assert.Equal(11, store2.GetCommittedOffset("grp-a", "t", 0));
-        Assert.Equal(22, store2.GetCommittedOffset("grp-b", "t", 0));
-        Assert.Equal(33, store2.GetCommittedOffset("grp-c", "t", 0));
-    }
+    private static int PartitionOf(string group) => CoordinatorPartitioner.PartitionFor(group, Partitions);
 }

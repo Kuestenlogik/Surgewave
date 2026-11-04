@@ -11,7 +11,8 @@ namespace Kuestenlogik.Surgewave.Broker.Native;
 public sealed class NativeGroupCoordinator
 {
     private readonly ILogger<NativeGroupCoordinator> _logger;
-    private readonly OffsetStore? _offsetStore;
+    // The offsets every group commits, in __consumer_offsets (#205); in memory without a store.
+    private readonly OffsetStore _offsetStore;
     private readonly SubscriptionManager _subscriptionManager = new();
     private readonly Dictionary<string, NativeConsumerGroup> _groups = new();
     private readonly Lock _lock = new();
@@ -19,7 +20,7 @@ public sealed class NativeGroupCoordinator
     public NativeGroupCoordinator(ILogger<NativeGroupCoordinator> logger, OffsetStore? offsetStore = null)
     {
         _logger = logger;
-        _offsetStore = offsetStore;
+        _offsetStore = offsetStore ?? OffsetStore.InMemory();
     }
 
     /// <summary>
@@ -387,21 +388,23 @@ public sealed class NativeGroupCoordinator
         };
     }
 
-    public CommitOffsetResult CommitOffset(
+    /// <summary>Commits the offset; answered once <c>__consumer_offsets</c> has it durably (#205).</summary>
+    public async Task<CommitOffsetResult> CommitOffsetAsync(
         string groupId,
         string memberId,
         int generationId,
         string topic,
         int partition,
         long offset,
-        string? metadata)
+        string? metadata,
+        CancellationToken cancellationToken)
     {
         lock (_lock)
         {
-            if (!_groups.TryGetValue(groupId, out var group))
+            // A commit for a group nobody joined creates it, as Kafka does for a group without members.
+            if (!_groups.ContainsKey(groupId))
             {
-                // Auto-create group for offset commits (similar to Kafka behavior)
-                group = new NativeConsumerGroup
+                _groups[groupId] = new NativeConsumerGroup
                 {
                     GroupId = groupId,
                     GenerationId = 0,
@@ -409,35 +412,29 @@ public sealed class NativeGroupCoordinator
                     ProtocolName = "",
                     State = GroupState.Empty
                 };
-                _groups[groupId] = group;
             }
-
-            var key = $"{topic}:{partition}";
-            group.CommittedOffsets[key] = offset;
-
-            // Persist to offset store
-            _offsetStore?.CommitOffset(groupId, topic, partition, offset);
-
-            return new CommitOffsetResult { ErrorCode = 0 };
         }
+
+        var written = await _offsetStore.CommitOffsetAsync(groupId, topic, partition, offset, cancellationToken).ConfigureAwait(false);
+        return new CommitOffsetResult { ErrorCode = ToNativeErrorCode(written) };
     }
+
+    // The native protocol has no load-in-progress code; a coordinator still loading is not available yet, and retried.
+    private static ushort ToNativeErrorCode(OffsetWriteStatus status) => status switch
+    {
+        OffsetWriteStatus.Ok => 0,
+        OffsetWriteStatus.NotCoordinator => 20, // NotCoordinator
+        _ => 21, // CoordinatorNotAvailable
+    };
 
     public FetchOffsetResult FetchOffset(string groupId, string topic, int partition)
     {
-        lock (_lock)
+        return _offsetStore.OwnershipOf(groupId) switch
         {
-            var key = $"{topic}:{partition}";
-
-            if (_groups.TryGetValue(groupId, out var group) &&
-                group.CommittedOffsets.TryGetValue(key, out var offset))
-            {
-                return new FetchOffsetResult { ErrorCode = 0, Offset = offset };
-            }
-
-            // Try persisted store
-            var storedOffset = _offsetStore?.GetCommittedOffset(groupId, topic, partition) ?? -1;
-            return new FetchOffsetResult { ErrorCode = 0, Offset = storedOffset };
-        }
+            GroupOwnership.Owned => new FetchOffsetResult { ErrorCode = 0, Offset = _offsetStore.GetCommittedOffset(groupId, topic, partition) },
+            GroupOwnership.Loading => new FetchOffsetResult { ErrorCode = 21, Offset = -1 }, // CoordinatorNotAvailable
+            _ => new FetchOffsetResult { ErrorCode = 20, Offset = -1 }, // NotCoordinator
+        };
     }
 
     private static string GetGroupStateString(GroupState state) => state switch
@@ -459,7 +456,6 @@ internal sealed class NativeConsumerGroup
     public required string ProtocolName { get; set; }
     public required GroupState State { get; set; }
     public Dictionary<string, NativeGroupMember> Members { get; } = new();
-    public Dictionary<string, long> CommittedOffsets { get; } = new();
 }
 
 internal sealed class NativeGroupMember

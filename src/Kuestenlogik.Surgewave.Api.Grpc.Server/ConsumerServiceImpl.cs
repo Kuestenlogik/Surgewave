@@ -15,7 +15,7 @@ public delegate List<Message> ParseRecordBatchDelegate(byte[] recordBatch);
 /// <summary>
 /// Delegate for committing consumer group offsets.
 /// </summary>
-public delegate void CommitOffsetDelegate(string groupId, string topic, int partition, long offset);
+public delegate Task<bool> CommitOffsetDelegate(string groupId, string topic, int partition, long offset, CancellationToken cancellationToken);
 
 /// <summary>
 /// Delegate for fetching committed offsets.
@@ -202,7 +202,7 @@ public class ConsumerServiceImpl : ConsumerService.ConsumerServiceBase
         return response;
     }
 
-    public override Task<CommitResponse> Commit(CommitRequest request, ServerCallContext context)
+    public override async Task<CommitResponse> Commit(CommitRequest request, ServerCallContext context)
     {
         var response = new CommitResponse();
 
@@ -217,19 +217,21 @@ public class ConsumerServiceImpl : ConsumerService.ConsumerServiceBase
                     Status = ResponseStatusFactory.CoordinatorNotAvailable("Offset storage not configured")
                 });
             }
-            return Task.FromResult(response);
+            return response;
         }
 
         foreach (var offset in request.Offsets)
         {
             try
             {
-                _commitOffset(request.ConsumerGroup, offset.Topic, offset.Partition, offset.Offset);
+                var committed = await _commitOffset(request.ConsumerGroup, offset.Topic, offset.Partition, offset.Offset, context.CancellationToken);
                 response.Results.Add(new OffsetCommitResult
                 {
                     Topic = offset.Topic,
                     Partition = offset.Partition,
-                    Status = ResponseStatusFactory.Success
+                    Status = committed
+                        ? ResponseStatusFactory.Success
+                        : ResponseStatusFactory.CoordinatorNotAvailable("The offset could not be committed now")
                 });
             }
             catch (Exception ex)
@@ -243,7 +245,7 @@ public class ConsumerServiceImpl : ConsumerService.ConsumerServiceBase
             }
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 
     public override Task<FetchOffsetsResponse> FetchOffsets(FetchOffsetsRequest request, ServerCallContext context)

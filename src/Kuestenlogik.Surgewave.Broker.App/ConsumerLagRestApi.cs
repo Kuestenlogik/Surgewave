@@ -33,8 +33,8 @@ public static class ConsumerLagRestApi
             .Produces<GroupLagResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        group.MapPost("/{groupId}/offsets", (string groupId, ResetOffsetsRequest request) =>
-                ResetOffsets(offsetStore, logManager, getActiveMemberCount, groupId, request))
+        group.MapPost("/{groupId}/offsets", (string groupId, ResetOffsetsRequest request, CancellationToken cancellationToken) =>
+                ResetOffsetsAsync(offsetStore, logManager, getActiveMemberCount, groupId, request, cancellationToken))
             .WithName("ResetConsumerGroupOffsets")
             .WithSummary("Reset committed offsets of an (empty) consumer group for one topic")
             .Produces<ResetOffsetsResponse>()
@@ -60,12 +60,13 @@ public static class ConsumerLagRestApi
             : Results.Ok(ToResponse(info));
     }
 
-    private static IResult ResetOffsets(
+    private static async Task<IResult> ResetOffsetsAsync(
         OffsetStore offsetStore,
         LogManager logManager,
         Func<string, int> getActiveMemberCount,
         string groupId,
-        ResetOffsetsRequest request)
+        ResetOffsetsRequest request,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Topic))
         {
@@ -131,7 +132,14 @@ public static class ConsumerLagRestApi
                     return Results.BadRequest(new { message = $"Unknown reset strategy '{request.Strategy}' — expected earliest|latest|timestamp|offset" });
             }
 
-            offsetStore.CommitOffset(groupId, request.Topic, partition, newOffset);
+            var written = await offsetStore.CommitOffsetAsync(groupId, request.Topic, partition, newOffset, cancellationToken);
+            if (written != OffsetWriteStatus.Ok)
+            {
+                // This broker does not coordinate the group, or cannot write durably now (#205).
+                return Results.Problem(
+                    $"The offsets of '{groupId}' could not be reset here: {written}",
+                    statusCode: written == OffsetWriteStatus.NotCoordinator ? StatusCodes.Status421MisdirectedRequest : StatusCodes.Status503ServiceUnavailable);
+            }
             resetPartitions.Add(new ResetPartitionResult(partition, newOffset));
         }
 

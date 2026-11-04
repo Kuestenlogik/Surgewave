@@ -674,9 +674,20 @@ builder.Services.AddSingleton(sp => new BandwidthQuotaManager(
 // Group-coordination + offset services in DI (#59 phase 2a). Same singletons as
 // before, now DI-managed, so both hosts compose them identically and the Kafka
 // handlers can later be DI-resolved. Behaviour-preserving.
-builder.Services.AddSingleton(sp => new OffsetStore(
-    sp.GetRequiredService<BrokerConfig>().DataDirectory,
-    sp.GetRequiredService<ILogger<OffsetStore>>()));
+// Group offsets live in __consumer_offsets (#205): this broker serves the groups of the partitions it leads, loaded
+// when it takes a partition over, and answers a commit once the in-sync replicas have it.
+builder.Services.AddSingleton(sp =>
+{
+    var store = new OffsetStore(
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<RecordBatchSerializer>(),
+        sp.GetRequiredService<BrokerConfig>().OffsetsTopicNumPartitions,
+        sp.GetRequiredService<ILogger<OffsetStore>>());
+    store.FollowLeadershipOf(
+        sp.GetRequiredService<ReplicaManager>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>());
+    return store;
+});
 builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
     sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
     sp.GetRequiredService<LogManager>(),
@@ -1027,7 +1038,8 @@ ProducerServiceImplHolder.Instance = new ProducerServiceImpl(logManager, recordB
 ConsumerServiceImplHolder.Instance = new ConsumerServiceImpl(
     logManager,
     recordBatchSerializer.ParseRecordBatch,
-    offsetStore.CommitOffset,
+    async (groupId, topic, partition, offset, ct) =>
+        await offsetStore.CommitOffsetAsync(groupId, topic, partition, offset, ct) == OffsetWriteStatus.Ok,
     (groupId, topic, partition) => (long?)offsetStore.GetCommittedOffset(groupId, topic, partition));
 TopicServiceImplHolder.Instance = new TopicServiceImpl(logManager);
 AdminServiceImplHolder.Instance = new AdminServiceImpl(

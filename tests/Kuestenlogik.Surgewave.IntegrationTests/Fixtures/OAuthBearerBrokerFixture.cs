@@ -263,7 +263,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
         var jwksLogger = _loggerFactory.CreateLogger<JwksTokenValidator>();
 
         var recordBatchSerializer = new RecordBatchSerializer(serializerLogger);
-        _offsetStore = new OffsetStore(_dataDirectory!, offsetStoreLogger);
+        _offsetStore = OffsetStore.InMemory();
         var consumerGroupCoordinator = new ConsumerGroupCoordinator(coordinatorLogger, _offsetStore);
         var queueViewConfig = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewConfig();
         var queueViewManager = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager(queueViewConfig, _loggerFactory, _logManager);

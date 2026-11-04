@@ -57,7 +57,7 @@ public sealed class ProduceMultiBatchSectionTests : IDisposable
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
 
         var config = new BrokerConfig();
-        _offsetStore = new OffsetStore(_dataDir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _transactionStateStore = new TransactionStateStore(_dataDir, NullLogger<TransactionStateStore>.Instance);
         var transactionCoordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _transactionStateStore,

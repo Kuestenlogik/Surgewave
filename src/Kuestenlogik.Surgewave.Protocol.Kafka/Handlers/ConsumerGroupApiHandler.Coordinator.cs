@@ -119,10 +119,10 @@ public sealed partial class ConsumerGroupApiHandler
     }
 
     /// <summary>DeleteGroups: this broker deletes its own groups, NOT_COORDINATOR for the rest.</summary>
-    private DeleteGroupsResponse DeleteGroupsHere(DeleteGroupsRequest r)
+    private async Task<DeleteGroupsResponse> DeleteGroupsHereAsync(DeleteGroupsRequest r, CancellationToken cancellationToken)
     {
         var local = r.GroupIds.Where(IsLocal).ToList();
-        var deleted = ToDeleteGroupsResponse(_coordinator.DeleteGroups(local), r).Results
+        var deleted = ToDeleteGroupsResponse(await _coordinator.DeleteGroupsAsync(local, cancellationToken).ConfigureAwait(false), r).Results
             .ToDictionary(g => g.GroupId, StringComparer.Ordinal);
 
         return new DeleteGroupsResponse

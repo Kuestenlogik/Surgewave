@@ -19,7 +19,7 @@ public sealed class OffsetFetchAllTopicsTests : IDisposable
     public OffsetFetchAllTopicsTests()
     {
         Directory.CreateDirectory(_dataDir);
-        _store = new OffsetStore(_dataDir, NullLogger<OffsetStore>.Instance);
+        _store = OffsetStore.InMemory();
         _coordinator = new ConsumerGroupCoordinator(NullLogger<ConsumerGroupCoordinator>.Instance, _store);
     }
 
@@ -30,13 +30,13 @@ public sealed class OffsetFetchAllTopicsTests : IDisposable
     }
 
     [Fact]
-    public void NullTopicsFetchEveryCommittedOffsetOfTheGroup()
+    public async Task NullTopicsFetchEveryCommittedOffsetOfTheGroup()
     {
         // A KIP-848 group's commits live only in the store, so the group has no in-memory entry.
-        _store.CommitOffset("g-all", "orders", 1, 40);
-        _store.CommitOffset("g-all", "orders", 0, 25);
-        _store.CommitOffset("g-all", "audit.log", 0, 7);
-        _store.CommitOffset("g-other", "orders", 0, 99);
+        await _store.CommitOffsetAsync("g-all", "orders", 1, 40, TestContext.Current.CancellationToken);
+        await _store.CommitOffsetAsync("g-all", "orders", 0, 25, TestContext.Current.CancellationToken);
+        await _store.CommitOffsetAsync("g-all", "audit.log", 0, 7, TestContext.Current.CancellationToken);
+        await _store.CommitOffsetAsync("g-other", "orders", 0, 99, TestContext.Current.CancellationToken);
 
         var result = _coordinator.FetchOffsets(new OffsetFetchCommand
         {

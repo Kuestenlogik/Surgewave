@@ -26,7 +26,7 @@ public sealed class TransactionCoordinatorShutdownTests : IDisposable
     {
         Directory.CreateDirectory(_dir);
         _logManager = TestLogManager.CreateInMemory(_dir);
-        _offsetStore = new OffsetStore(_dir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _stateStore = new TransactionStateStore(_dir, NullLogger<TransactionStateStore>.Instance);
     }
 

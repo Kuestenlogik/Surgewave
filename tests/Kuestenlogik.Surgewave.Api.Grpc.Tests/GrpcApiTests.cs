@@ -40,7 +40,11 @@ public sealed class GrpcApiTests : IDisposable
         _consumerService = new ConsumerServiceImpl(
             _logManager,
             ParseRecordBatch,
-            (groupId, topic, partition, offset) => _committedOffsets.Add((groupId, topic, partition, offset)),
+            (groupId, topic, partition, offset, _) =>
+            {
+                _committedOffsets.Add((groupId, topic, partition, offset));
+                return Task.FromResult(true);
+            },
             (groupId, topic, partition) => _committedOffsets
                 .Where(o => o.groupId == groupId && o.topic == topic && o.partition == partition)
                 .Select(o => (long?)o.offset)

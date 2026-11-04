@@ -115,6 +115,81 @@ public sealed class GroupCoordinatorClusterTests : IAsyncLifetime
         Assert.Single(located.Select(l => l.BrokerId).Distinct());
     }
 
+    /// <summary>
+    /// A group resumes from its committed offsets on a new coordinator once the old one is gone (#205). The offsets
+    /// used to live in the coordinator's local file, so the broker that took the group over knew none, and the group
+    /// read its partition again from the start.
+    /// </summary>
+    [Fact(Timeout = 240_000)]
+    public async Task AGroupResumesFromItsCommittedOffsetsAfterItsCoordinatorIsStopped()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var topic = $"orders-{Guid.NewGuid():N}";
+        var group = $"orders-app-{Guid.NewGuid():N}";
+        const int records = 20;
+        const int consumedBefore = 10;
+
+        var controller = _brokers.Single(b => b.IsController);
+        using (var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = controller.BootstrapServers }).Build())
+        {
+            await admin.CreateTopicsAsync([new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 3 }]);
+        }
+
+        // The group's coordinator, and a broker that is not it to talk to throughout.
+        var coordinatorId = new ClusterCoordinatorLocator(controller.ClusterState!).Locate(CoordinatorKind.Group, group).BrokerId;
+        var coordinator = _brokers.Single(b => b.BrokerId == coordinatorId);
+        var survivor = _brokers.First(b => b.BrokerId != coordinatorId);
+        _output.WriteLine($"group {group} is coordinated by broker {coordinatorId}; clients use broker {survivor.BrokerId}");
+
+        using (var producer = new ProducerBuilder<Null, string>(new ProducerConfig { BootstrapServers = survivor.BootstrapServers, Acks = Acks.All }).Build())
+        {
+            for (var i = 0; i < records; i++)
+                await producer.ProduceAsync(topic, new Message<Null, string> { Value = $"record-{i}" }, ct);
+        }
+
+        // Half of the records consumed and their offset committed, then the consumer leaves.
+        using (var first = NewConsumer(survivor.BootstrapServers, group, autoCommit: false))
+        {
+            first.Subscribe(topic);
+            var consumed = 0;
+            Assert.True(await TestWaitHelpers.WaitForConditionAsync(
+                () =>
+                {
+                    if (first.Consume(TimeSpan.FromMilliseconds(100)) is { } result)
+                    {
+                        consumed++;
+                        if (consumed == consumedBefore)
+                            first.Commit(result); // synchronous: answered once the coordinator has it
+                    }
+                    return consumed >= consumedBefore;
+                },
+                timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(10), ct: ct, output: _output),
+                $"the first consumer read {consumed} of {consumedBefore} records");
+            first.Close();
+        }
+
+        await coordinator.DisposeAsync();
+        _output.WriteLine($"coordinator broker {coordinatorId} stopped");
+
+        // A new member of the group, on a surviving broker: it must start where the group left off, not from the
+        // beginning that auto.offset.reset would give a group without offsets.
+        using var second = NewConsumer(survivor.BootstrapServers, group, autoCommit: false);
+        second.Subscribe(topic);
+        ConsumeResult<Ignore, string>? resumed = null;
+        Assert.True(await TestWaitHelpers.WaitForConditionAsync(
+            () =>
+            {
+                try { resumed = second.Consume(TimeSpan.FromMilliseconds(200)); }
+                catch (ConsumeException ex) { _output.WriteLine($"consume: {ex.Error}"); }
+                return resumed is not null;
+            },
+            timeout: TimeSpan.FromSeconds(150), pollInterval: TimeSpan.FromMilliseconds(10), ct: ct, output: _output),
+            "the group did not resume on its new coordinator");
+
+        Assert.Equal(consumedBefore, resumed!.Offset.Value);
+        Assert.Equal($"record-{consumedBefore}", resumed.Message.Value);
+    }
+
     [Fact(Timeout = 180_000)]
     public async Task TwoConsumersBootstrappedAtDifferentBrokersShareOneGroup()
     {
@@ -156,13 +231,14 @@ public sealed class GroupCoordinatorClusterTests : IAsyncLifetime
             $"the group had {members} member(s); first [{string.Join(",", first.Assignment)}], second [{string.Join(",", second.Assignment)}]");
     }
 
-    private static IConsumer<Ignore, string> NewConsumer(string bootstrap, string group) =>
+    private static IConsumer<Ignore, string> NewConsumer(string bootstrap, string group, bool autoCommit = true) =>
         new ConsumerBuilder<Ignore, string>(new ConsumerConfig
         {
             BootstrapServers = bootstrap,
             GroupId = group,
             AutoOffsetReset = AutoOffsetReset.Earliest,
             SessionTimeoutMs = 10_000,
+            EnableAutoCommit = autoCommit,
         }).Build();
 
     private static int[] ReservePorts(int count)

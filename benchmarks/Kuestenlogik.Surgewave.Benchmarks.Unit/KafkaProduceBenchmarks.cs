@@ -61,7 +61,7 @@ public class KafkaProduceBenchmarks
         await _logManager.CreateTopicAsync(Topic, partitionCount: 8);
 
         var config = new BrokerConfig();
-        _offsetStore = new OffsetStore(_dataDir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _transactionStateStore = new TransactionStateStore(_dataDir, NullLogger<TransactionStateStore>.Instance);
         _transactionCoordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _transactionStateStore,

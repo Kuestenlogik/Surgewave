@@ -27,113 +27,55 @@ public sealed partial class ConsumerGroupCoordinator(
     private readonly Dictionary<string, ConsumerGroupState> _consumerGroups = [];
     private readonly Lock _groupLock = new();
 
+    // Every offset and the generation a group reached live in __consumer_offsets (#205); without a store, in memory.
+    private readonly OffsetStore _offsets = offsetStore ?? OffsetStore.InMemory();
+
     public OffsetFetchResult FetchOffsets(OffsetFetchCommand request)
     {
-        lock (_groupLock)
+        var groups = new List<OffsetFetchGroupResult>(request.Groups.Count);
+        foreach (var groupRequest in request.Groups)
         {
-            var groups = new List<OffsetFetchGroupResult>(request.Groups.Count);
-            foreach (var groupRequest in request.Groups)
+            // A group of a partition this broker is still reading has no answer yet (#205).
+            if (_offsets.OwnershipOf(groupRequest.GroupId) != GroupOwnership.Owned)
             {
-                var topics = FetchOffsetsForGroup(groupRequest.GroupId, groupRequest.Topics, request.UseTopicId);
-                groups.Add(new OffsetFetchGroupResult { GroupId = groupRequest.GroupId, Topics = topics });
+                groups.Add(new OffsetFetchGroupResult
+                {
+                    GroupId = groupRequest.GroupId,
+                    Topics = [],
+                    Status = ConsumerGroupErrorStatus.CoordinatorLoadInProgress,
+                });
+                continue;
             }
 
-            return new OffsetFetchResult(groups);
+            var topics = FetchOffsetsForGroup(groupRequest.GroupId, groupRequest.Topics, request.UseTopicId);
+            groups.Add(new OffsetFetchGroupResult { GroupId = groupRequest.GroupId, Topics = topics });
         }
+
+        return new OffsetFetchResult(groups);
     }
 
     private List<OffsetFetchTopicResult> FetchOffsetsForGroup(string groupId, IReadOnlyList<OffsetFetchTopicRequest>? topicRequests, bool useTopicId)
     {
         topicRequests ??= AllCommittedTopics(groupId);
-        var topics = new List<OffsetFetchTopicResult>();
-
+        var topics = new List<OffsetFetchTopicResult>(topicRequests.Count);
         Log.OffsetFetchRequest(logger, groupId, topicRequests.Count);
 
-        if (!_consumerGroups.TryGetValue(groupId, out var group))
-        {
-            Log.OffsetFetchGroupNotInMemory(logger, groupId);
-            // Group doesn't exist in memory - try to get from persisted store
-            foreach (var topicRequest in topicRequests)
-            {
-                // For v10+, resolve TopicId to topic name
-                string topicName = topicRequest.Topic;
-                Guid topicId = topicRequest.TopicId;
-
-                if (useTopicId && topicRequest.TopicId != Guid.Empty)
-                {
-                    var resolved = logManager?.ResolveTopicId(topicRequest.TopicId);
-                    if (resolved == null)
-                    {
-                        // Unknown TopicId - return error for all partitions (inline loop)
-                        var errorPartitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
-                        foreach (var p in topicRequest.PartitionIndexes)
-                        {
-                            errorPartitions.Add(new OffsetFetchPartitionResult(p, -1, ConsumerGroupErrorStatus.UnknownTopicId));
-                        }
-
-                        topics.Add(new OffsetFetchTopicResult
-                        {
-                            Topic = string.Empty,
-                            TopicId = topicRequest.TopicId,
-                            Partitions = errorPartitions
-                        });
-                        continue;
-                    }
-                    topicName = resolved;
-                }
-                else if (!useTopicId && !string.IsNullOrEmpty(topicRequest.Topic))
-                {
-                    // For older versions, get TopicId from topic name for response
-                    topicId = logManager?.GetTopicId(topicRequest.Topic) ?? Guid.Empty;
-                }
-
-                var partitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
-                foreach (var partitionIndex in topicRequest.PartitionIndexes)
-                {
-                    // Try to get from persisted store
-                    var offset = offsetStore?.GetCommittedOffset(groupId, topicName, partitionIndex) ?? -1;
-                    Log.OffsetFetchFromStore(logger, groupId, topicName, partitionIndex, offset);
-
-                    partitions.Add(new OffsetFetchPartitionResult(partitionIndex, offset, ConsumerGroupErrorStatus.None));
-                }
-
-                topics.Add(new OffsetFetchTopicResult
-                {
-                    Topic = topicName,
-                    TopicId = topicId,
-                    Partitions = partitions
-                });
-            }
-
-            return topics;
-        }
-
-        Log.OffsetFetchGroupInMemory(logger, groupId, group.CommittedOffsets.Count);
-
-        // Group exists in memory - return committed offsets (check store as fallback)
         foreach (var topicRequest in topicRequests)
         {
-            // For v10+, resolve TopicId to topic name
+            // v10+ names topics by id; older versions get the id from the name for the response.
             string topicName = topicRequest.Topic;
             Guid topicId = topicRequest.TopicId;
-
             if (useTopicId && topicRequest.TopicId != Guid.Empty)
             {
                 var resolved = logManager?.ResolveTopicId(topicRequest.TopicId);
                 if (resolved == null)
                 {
-                    // Unknown TopicId - return error for all partitions (inline loop)
-                    var errorPartitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
-                    foreach (var p in topicRequest.PartitionIndexes)
-                    {
-                        errorPartitions.Add(new OffsetFetchPartitionResult(p, -1, ConsumerGroupErrorStatus.UnknownTopicId));
-                    }
-
                     topics.Add(new OffsetFetchTopicResult
                     {
                         Topic = string.Empty,
                         TopicId = topicRequest.TopicId,
-                        Partitions = errorPartitions
+                        Partitions = [.. topicRequest.PartitionIndexes.Select(p =>
+                            new OffsetFetchPartitionResult(p, -1, ConsumerGroupErrorStatus.UnknownTopicId))],
                     });
                     continue;
                 }
@@ -141,216 +83,119 @@ public sealed partial class ConsumerGroupCoordinator(
             }
             else if (!useTopicId && !string.IsNullOrEmpty(topicRequest.Topic))
             {
-                // For older versions, get TopicId from topic name for response
                 topicId = logManager?.GetTopicId(topicRequest.Topic) ?? Guid.Empty;
             }
 
             var partitions = new List<OffsetFetchPartitionResult>(topicRequest.PartitionIndexes.Count);
             foreach (var partitionIndex in topicRequest.PartitionIndexes)
             {
-                var key = string.Concat(topicName, ":", partitionIndex.ToString());
-                var offset = group.CommittedOffsets.GetValueOrDefault(key, -1);
-                Log.OffsetFetchFromMemory(logger, key, offset);
-
-                // If not in memory, check persisted store
-                if (offset == -1 && offsetStore != null)
-                {
-                    offset = offsetStore.GetCommittedOffset(groupId, topicName, partitionIndex);
-                    Log.OffsetFetchFallbackToStore(logger, groupId, topicName, partitionIndex, offset);
-                }
-
+                var offset = _offsets.GetCommittedOffset(groupId, topicName, partitionIndex);
+                Log.OffsetFetchFromStore(logger, groupId, topicName, partitionIndex, offset);
                 partitions.Add(new OffsetFetchPartitionResult(partitionIndex, offset, ConsumerGroupErrorStatus.None));
             }
 
-            topics.Add(new OffsetFetchTopicResult
-            {
-                Topic = topicName,
-                TopicId = topicId,
-                Partitions = partitions
-            });
+            topics.Add(new OffsetFetchTopicResult { Topic = topicName, TopicId = topicId, Partitions = partitions });
         }
 
         return topics;
     }
 
-    public OffsetCommitResult CommitOffsets(OffsetCommitCommand request)
+    public async Task<OffsetCommitResult> CommitOffsetsAsync(OffsetCommitCommand request, CancellationToken cancellationToken)
     {
+        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+            return BuildOffsetCommitErrorResponse(request, ConsumerGroupErrorStatus.CoordinatorLoadInProgress);
+
+        bool isV2Group;
         lock (_groupLock)
         {
-            bool useTopicId = request.UseTopicId;
-
-            if (!_consumerGroups.TryGetValue(request.GroupId, out var group))
+            if (_consumerGroups.ContainsKey(request.GroupId))
             {
-                // KIP-848 path: the group may live in the v2 coordinator. Validate the
-                // member + epoch there, and if it checks out, route the commit straight
-                // to the offset store — v2 groups don't carry their own _consumerGroups
-                // entry but they share the same offset persistence.
-                if (v2Coordinator != null)
-                {
-                    var v2Status = v2Coordinator.ValidateMemberForOffsetOperation(
-                        request.GroupId, request.MemberId, request.GenerationIdOrMemberEpoch);
-
-                    if (v2Status == ConsumerGroupFenceStatus.Ok)
-                    {
-                        return CommitOffsetsForV2Group(request, useTopicId);
-                    }
-
-                    // NotAV2Group is the sentinel for "not a v2 group, fall through to the
-                    // classic coordinator" — anything else is an authoritative fence, mapped
-                    // from the neutral v2 fence status onto the classic error status.
-                    if (v2Status != ConsumerGroupFenceStatus.NotAV2Group)
-                    {
-                        return BuildOffsetCommitErrorResponse(request, v2Status switch
-                        {
-                            ConsumerGroupFenceStatus.UnknownMember => ConsumerGroupErrorStatus.UnknownMember,
-                            ConsumerGroupFenceStatus.FencedEpoch => ConsumerGroupErrorStatus.FencedMemberEpoch,
-                            ConsumerGroupFenceStatus.StaleEpoch => ConsumerGroupErrorStatus.StaleMemberEpoch,
-                            _ => ConsumerGroupErrorStatus.UnknownMember,
-                        });
-                    }
-                }
-
-                // Group genuinely unknown.
-                return BuildOffsetCommitErrorResponse(request, ConsumerGroupErrorStatus.UnknownMember);
+                isV2Group = false;
             }
-
-            // Commit the offsets
-            var responseTopics = new List<OffsetCommitTopicResult>();
-            foreach (var topic in request.Topics)
+            else
             {
-                // For v10+, resolve TopicId to topic name
-                string topicName = topic.Topic;
-                Guid topicId = topic.TopicId;
+                // KIP-848 path: the group may live in the v2 coordinator. Validate the member and epoch there; v2
+                // groups have no entry here but share the offsets.
+                var v2Status = v2Coordinator?.ValidateMemberForOffsetOperation(
+                    request.GroupId, request.MemberId, request.GenerationIdOrMemberEpoch) ?? ConsumerGroupFenceStatus.NotAV2Group;
 
-                if (useTopicId && topic.TopicId != Guid.Empty)
+                if (v2Status != ConsumerGroupFenceStatus.Ok)
                 {
-                    var resolved = logManager?.ResolveTopicId(topic.TopicId);
-                    if (resolved == null)
+                    // NotAV2Group: not a v2 group either, so the group is unknown. Anything else is the v2 fence.
+                    return BuildOffsetCommitErrorResponse(request, v2Status switch
                     {
-                        // Unknown TopicId - return error for all partitions (inline loop)
-                        var errorPartitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
-                        foreach (var p in topic.Partitions)
-                        {
-                            errorPartitions.Add(new OffsetCommitPartitionResult(p.PartitionIndex, ConsumerGroupErrorStatus.UnknownTopicId));
-                        }
-
-                        responseTopics.Add(new OffsetCommitTopicResult
-                        {
-                            Topic = string.Empty,
-                            TopicId = topic.TopicId,
-                            Partitions = errorPartitions
-                        });
-                        continue;
-                    }
-                    topicName = resolved;
+                        ConsumerGroupFenceStatus.FencedEpoch => ConsumerGroupErrorStatus.FencedMemberEpoch,
+                        ConsumerGroupFenceStatus.StaleEpoch => ConsumerGroupErrorStatus.StaleMemberEpoch,
+                        _ => ConsumerGroupErrorStatus.UnknownMember,
+                    });
                 }
-                else if (!useTopicId && !string.IsNullOrEmpty(topic.Topic))
-                {
-                    // For older versions, get TopicId from topic name for response
-                    topicId = logManager?.GetTopicId(topic.Topic) ?? Guid.Empty;
-                }
-
-                var partitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
-                foreach (var partition in topic.Partitions)
-                {
-                    var key = string.Concat(topicName, ":", partition.PartitionIndex.ToString());
-                    group.CommittedOffsets[key] = partition.CommittedOffset;
-
-                    // Persist to offset store
-                    offsetStore?.CommitOffset(request.GroupId, topicName, partition.PartitionIndex, partition.CommittedOffset);
-
-                    partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, ConsumerGroupErrorStatus.None));
-                }
-
-                responseTopics.Add(new OffsetCommitTopicResult
-                {
-                    Topic = topicName,
-                    TopicId = topicId,
-                    Partitions = partitions
-                });
+                isV2Group = true;
             }
-
-            return new OffsetCommitResult(responseTopics);
         }
-    }
 
-    /// <summary>
-    /// Persists offsets for a KIP-848 v2 group through the shared <see cref="OffsetStore"/>.
-    /// The v2 coordinator already validated member identity and epoch; this method just
-    /// resolves topic IDs (for v10+) and writes the offsets.
-    /// </summary>
-    private OffsetCommitResult CommitOffsetsForV2Group(OffsetCommitCommand request, bool useTopicId)
-    {
-        var responseTopics = new List<OffsetCommitTopicResult>(request.Topics.Count);
+        // Resolve every partition to its answer; the ones that pass are written in one batch and get its verdict.
+        var responseTopics = new List<(string Topic, Guid TopicId, List<(int Partition, ConsumerGroupErrorStatus? Status)> Partitions)>();
+        var toWrite = new List<CommittedOffset>();
         foreach (var topic in request.Topics)
         {
             string topicName = topic.Topic;
             Guid topicId = topic.TopicId;
-
-            if (useTopicId && topic.TopicId != Guid.Empty)
+            if (request.UseTopicId && topic.TopicId != Guid.Empty)
             {
                 var resolved = logManager?.ResolveTopicId(topic.TopicId);
                 if (resolved == null)
                 {
-                    var errorPartitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
-                    foreach (var p in topic.Partitions)
-                    {
-                        errorPartitions.Add(new OffsetCommitPartitionResult(p.PartitionIndex, ConsumerGroupErrorStatus.UnknownTopicId));
-                    }
-                    responseTopics.Add(new OffsetCommitTopicResult
-                    {
-                        Topic = string.Empty,
-                        TopicId = topic.TopicId,
-                        Partitions = errorPartitions,
-                    });
+                    responseTopics.Add((string.Empty, topic.TopicId,
+                        [.. topic.Partitions.Select(p => (p.PartitionIndex, (ConsumerGroupErrorStatus?)ConsumerGroupErrorStatus.UnknownTopicId))]));
                     continue;
                 }
                 topicName = resolved;
             }
-            else if (!useTopicId && !string.IsNullOrEmpty(topic.Topic))
+            else if (!request.UseTopicId && !string.IsNullOrEmpty(topic.Topic))
             {
                 topicId = logManager?.GetTopicId(topic.Topic) ?? Guid.Empty;
             }
 
-            var partitions = new List<OffsetCommitPartitionResult>(topic.Partitions.Count);
+            var partitions = new List<(int Partition, ConsumerGroupErrorStatus? Status)>(topic.Partitions.Count);
             foreach (var partition in topic.Partitions)
             {
-                // KIP-1251 — per-partition fence. The member's claimed
-                // memberEpoch must be at least the per-partition
-                // assignment epoch for (topicId, partition). Older
-                // commits for partitions the member still owns are
-                // accepted (the KIP's whole point); older commits for
-                // partitions that got re-assigned are rejected as
-                // STALE_MEMBER_EPOCH.
-                var partitionTopicId = topicId != Guid.Empty
-                    ? topicId
-                    : (logManager?.GetTopicId(topicName) ?? Guid.Empty);
-                if (v2Coordinator is not null && partitionTopicId != Guid.Empty
-                    && !v2Coordinator.IsPartitionAssignmentValid(
-                        request.GroupId,
-                        request.MemberId,
-                        request.GenerationIdOrMemberEpoch,
-                        partitionTopicId,
-                        partition.PartitionIndex))
+                // KIP-1251: a v2 member's epoch must be at least the per-partition assignment epoch. Older commits for
+                // partitions it still owns are accepted; for partitions assigned elsewhere since, STALE_MEMBER_EPOCH.
+                if (isV2Group && v2Coordinator is not null)
                 {
-                    partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, ConsumerGroupErrorStatus.StaleMemberEpoch));
-                    continue;
+                    var partitionTopicId = topicId != Guid.Empty ? topicId : (logManager?.GetTopicId(topicName) ?? Guid.Empty);
+                    if (partitionTopicId != Guid.Empty && !v2Coordinator.IsPartitionAssignmentValid(
+                            request.GroupId, request.MemberId, request.GenerationIdOrMemberEpoch, partitionTopicId, partition.PartitionIndex))
+                    {
+                        partitions.Add((partition.PartitionIndex, ConsumerGroupErrorStatus.StaleMemberEpoch));
+                        continue;
+                    }
                 }
 
-                offsetStore?.CommitOffset(request.GroupId, topicName, partition.PartitionIndex, partition.CommittedOffset);
-                partitions.Add(new OffsetCommitPartitionResult(partition.PartitionIndex, ConsumerGroupErrorStatus.None));
+                toWrite.Add(new CommittedOffset(topicName, partition.PartitionIndex, partition.CommittedOffset));
+                partitions.Add((partition.PartitionIndex, null)); // the write's verdict
             }
-
-            responseTopics.Add(new OffsetCommitTopicResult
-            {
-                Topic = topicName,
-                TopicId = topicId,
-                Partitions = partitions,
-            });
+            responseTopics.Add((topicName, topicId, partitions));
         }
 
-        return new OffsetCommitResult(responseTopics);
+        var written = ToStatus(await _offsets.CommitOffsetsAsync(request.GroupId, toWrite, cancellationToken).ConfigureAwait(false));
+
+        return new OffsetCommitResult([.. responseTopics.Select(t => new OffsetCommitTopicResult
+        {
+            Topic = t.Topic,
+            TopicId = t.TopicId,
+            Partitions = [.. t.Partitions.Select(p => new OffsetCommitPartitionResult(p.Partition, p.Status ?? written))],
+        })]);
     }
+
+    // What a write to __consumer_offsets means for the request that asked for it.
+    private static ConsumerGroupErrorStatus ToStatus(OffsetWriteStatus status) => status switch
+    {
+        OffsetWriteStatus.Ok => ConsumerGroupErrorStatus.None,
+        OffsetWriteStatus.NotCoordinator => ConsumerGroupErrorStatus.NotCoordinator,
+        OffsetWriteStatus.LoadInProgress => ConsumerGroupErrorStatus.CoordinatorLoadInProgress,
+        _ => ConsumerGroupErrorStatus.CoordinatorNotAvailable,
+    };
 
     /// <summary>
     /// Builds an error result that flat-fills every requested partition with the
@@ -477,48 +322,39 @@ public sealed partial class ConsumerGroupCoordinator(
         }
     }
 
-    public IReadOnlyList<DeleteGroupResult> DeleteGroups(IReadOnlyList<string> groupIds)
+    public async Task<IReadOnlyList<DeleteGroupResult>> DeleteGroupsAsync(IReadOnlyList<string> groupIds, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        Log.DeleteGroupsRequest(logger, groupIds.Count);
+        var results = new List<DeleteGroupResult>(groupIds.Count);
+
+        foreach (var groupId in groupIds)
         {
-            Log.DeleteGroupsRequest(logger, groupIds.Count);
-
-            var results = new List<DeleteGroupResult>();
-
-            foreach (var groupId in groupIds)
+            if (_offsets.OwnershipOf(groupId) != GroupOwnership.Owned)
             {
-                ConsumerGroupErrorStatus status;
-
-                if (!_consumerGroups.TryGetValue(groupId, out var group))
-                {
-                    // Group doesn't exist - report as success per Kafka protocol
-                    // (idempotent delete - deleting non-existent group is not an error)
-                    Log.DeleteGroupsNotFound(logger, groupId);
-                    status = ConsumerGroupErrorStatus.None;
-                }
-                else if (group.Members.Count > 0)
-                {
-                    // Group has active members - cannot delete
-                    Log.DeleteGroupsNotEmpty(logger, groupId, group.Members.Count);
-                    status = ConsumerGroupErrorStatus.NonEmptyGroup;
-                }
-                else
-                {
-                    // Group is empty - safe to delete
-                    _consumerGroups.Remove(groupId);
-
-                    // Also clear any committed offsets from the offset store
-                    offsetStore?.DeleteGroup(groupId);
-
-                    Log.DeleteGroupsDeleted(logger, groupId);
-                    status = ConsumerGroupErrorStatus.None;
-                }
-
-                results.Add(new DeleteGroupResult(groupId, status));
+                results.Add(new DeleteGroupResult(groupId, ConsumerGroupErrorStatus.CoordinatorLoadInProgress));
+                continue;
             }
 
-            return results;
+            lock (_groupLock)
+            {
+                if (_consumerGroups.TryGetValue(groupId, out var group) && group.Members.Count > 0)
+                {
+                    Log.DeleteGroupsNotEmpty(logger, groupId, group.Members.Count);
+                    results.Add(new DeleteGroupResult(groupId, ConsumerGroupErrorStatus.NonEmptyGroup));
+                    continue;
+                }
+                _consumerGroups.Remove(groupId);
+            }
+
+            // A group without members may still have offsets, from before a restart or a change of coordinator; they
+            // go with it. Deleting a group that is not there is no error (an idempotent delete).
+            var status = ToStatus(await _offsets.DeleteGroupAsync(groupId, cancellationToken).ConfigureAwait(false));
+            if (status == ConsumerGroupErrorStatus.None)
+                Log.DeleteGroupsDeleted(logger, groupId);
+            results.Add(new DeleteGroupResult(groupId, status));
         }
+
+        return results;
     }
 
     /// <summary>
@@ -535,66 +371,49 @@ public sealed partial class ConsumerGroupCoordinator(
     ///         to begin with — KIP-496 makes the operation idempotent).</item>
     /// </list>
     /// </summary>
-    public OffsetDeleteResult DeleteOffsets(OffsetDeleteCommand request)
+    public async Task<OffsetDeleteResult> DeleteOffsetsAsync(OffsetDeleteCommand request, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        ConsumerGroupErrorStatus groupError;
+        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
         {
-            var topicResults = new List<OffsetDeleteTopicResult>(request.Topics.Count);
-
-            // Group-level pre-check: if the group is unknown every partition
-            // result inherits GroupIdNotFound. We still emit per-partition rows
-            // so the response shape matches what the client decoded.
-            _consumerGroups.TryGetValue(request.GroupId, out var group);
-
-            // Classic-protocol groups store member subscriptions as opaque
-            // Kafka-encoded bytes; Surgewave does not decode them, so the precise
-            // "is THIS topic subscribed by any active member" question can't
-            // be answered without parsing the Subscription protocol. We pick
-            // the conservative reading of KIP-496: if the group has any
-            // active member, every topic is treated as potentially subscribed
-            // and the delete is rejected with GroupSubscribedToTopic. The
-            // operator is then expected to LeaveGroup / DeleteGroup first,
-            // matching the librdkafka admin-client's typical retry path. If
-            // the group has zero members the offsets are stale by definition
-            // and deletion is safe.
-            var groupHasActiveMembers = group?.Members.Count > 0;
-
-            foreach (var topicReq in request.Topics)
+            groupError = ConsumerGroupErrorStatus.CoordinatorLoadInProgress;
+        }
+        else
+        {
+            lock (_groupLock)
             {
-                var partitionResults = new List<OffsetDeletePartitionResult>(topicReq.Partitions.Count);
+                // Classic groups carry member subscriptions as opaque Kafka bytes, which are not decoded here, so
+                // "does an active member subscribe to THIS topic" has no precise answer: the conservative reading of
+                // KIP-496 treats every topic as subscribed while the group has any member. A group known only by
+                // its offsets has none.
+                _consumerGroups.TryGetValue(request.GroupId, out var group);
+                groupError = group?.Members.Count > 0
+                    ? ConsumerGroupErrorStatus.GroupSubscribedToTopic
+                    : group is null && !_offsets.HasCommittedOffsets(request.GroupId)
+                        ? ConsumerGroupErrorStatus.GroupIdNotFound
+                        : ConsumerGroupErrorStatus.None;
+            }
+        }
 
-                ConsumerGroupErrorStatus topicError;
-                if (group is null)
+        var topicResults = new List<OffsetDeleteTopicResult>(request.Topics.Count);
+        foreach (var topicReq in request.Topics)
+        {
+            var partitionResults = new List<OffsetDeletePartitionResult>(topicReq.Partitions.Count);
+            foreach (var partitionIndex in topicReq.Partitions)
+            {
+                var status = groupError;
+                if (status == ConsumerGroupErrorStatus.None)
                 {
-                    topicError = ConsumerGroupErrorStatus.GroupIdNotFound;
+                    status = ToStatus(await _offsets.DeleteOffsetAsync(request.GroupId, topicReq.Name, partitionIndex, cancellationToken)
+                        .ConfigureAwait(false));
                 }
-                else if (groupHasActiveMembers)
-                {
-                    topicError = ConsumerGroupErrorStatus.GroupSubscribedToTopic;
-                }
-                else
-                {
-                    topicError = ConsumerGroupErrorStatus.None;
-                }
-
-                foreach (var partitionIndex in topicReq.Partitions)
-                {
-                    if (topicError == ConsumerGroupErrorStatus.None)
-                    {
-                        offsetStore?.DeleteOffset(request.GroupId, topicReq.Name, partitionIndex);
-                    }
-                    partitionResults.Add(new OffsetDeletePartitionResult(partitionIndex, topicError));
-                }
-
-                topicResults.Add(new OffsetDeleteTopicResult
-                {
-                    Name = topicReq.Name,
-                    Partitions = partitionResults,
-                });
+                partitionResults.Add(new OffsetDeletePartitionResult(partitionIndex, status));
             }
 
-            return new OffsetDeleteResult(topicResults);
+            topicResults.Add(new OffsetDeleteTopicResult { Name = topicReq.Name, Partitions = partitionResults });
         }
+
+        return new OffsetDeleteResult(topicResults);
     }
 
     private static string GetGroupState(ConsumerGroupState group) => StateName(group.Phase);
@@ -612,24 +431,13 @@ public sealed partial class ConsumerGroupCoordinator(
     }
 
     /// <summary>
-    /// Get all committed offsets for a group from memory.
-    /// Returns empty dictionary if group doesn't exist.
-    /// </summary>
-    /// <summary>
-    /// Every topic partition the group has committed an offset for, in memory or in the store — what an
-    /// OffsetFetch with null topics answers.
+    /// Every topic partition the group has committed an offset for — what an OffsetFetch with null topics answers.
     /// </summary>
     private List<OffsetFetchTopicRequest> AllCommittedTopics(string groupId)
     {
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        if (_consumerGroups.TryGetValue(groupId, out var group))
-            keys.UnionWith(group.CommittedOffsets.Keys);
-        if (offsetStore != null)
-            keys.UnionWith(offsetStore.GetAllOffsets(groupId).Keys);
-
         // Keys are "topic:partition"; a Kafka topic name cannot contain ':'.
         var partitionsByTopic = new SortedDictionary<string, List<int>>(StringComparer.Ordinal);
-        foreach (var key in keys)
+        foreach (var key in _offsets.GetAllOffsets(groupId).Keys)
         {
             var colon = key.LastIndexOf(':');
             if (colon <= 0 || !int.TryParse(key.AsSpan(colon + 1), out var partition))
@@ -654,18 +462,8 @@ public sealed partial class ConsumerGroupCoordinator(
         return requests;
     }
 
-    public Dictionary<string, long> GetGroupCommittedOffsets(string groupId)
-    {
-        lock (_groupLock)
-        {
-            if (!_consumerGroups.TryGetValue(groupId, out var group))
-            {
-                return [];
-            }
-
-            return new Dictionary<string, long>(group.CommittedOffsets);
-        }
-    }
+    /// <summary>The group's committed offsets, keyed "topic:partition".</summary>
+    public Dictionary<string, long> GetGroupCommittedOffsets(string groupId) => _offsets.GetAllOffsets(groupId);
 
     /// <summary>
     /// Compute authorized operations bitmask for a consumer group.
@@ -700,7 +498,6 @@ internal sealed class ConsumerGroupState
     public required string ProtocolType { get; init; }
     public required string ProtocolName { get; init; }
     public Dictionary<string, GroupMember> Members { get; } = new();
-    public Dictionary<string, long> CommittedOffsets { get; } = new(); // "topic:partition" -> offset
 
     // The rebalance cycle (#216): where the group is, who leads, and who is waiting for the next step.
     public ClassicGroupPhase Phase { get; set; } = ClassicGroupPhase.Empty;

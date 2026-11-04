@@ -24,7 +24,7 @@ in the repository root.
 
 | Key | API | Surgewave | Status | Handler | Notes |
 |---:|-----|-------|--------|---------|-------|
-| 8  | OffsetCommit     | 2–10 | Wired | `ConsumerGroupApiHandler` | Persisted via `OffsetStore`. |
+| 8  | OffsetCommit     | 2–10 | Wired | `ConsumerGroupApiHandler` | Records in the group's `__consumer_offsets` partition, answered once its in-sync replicas have them (#205). |
 | 9  | OffsetFetch      | 1–10 | Wired | `ConsumerGroupApiHandler` | |
 | 10 | FindCoordinator  | 0–6  | Wired | `MetadataApiHandler` | Routes to group/transaction coordinator. |
 | 11 | JoinGroup        | 0–9  | Wired | `ConsumerGroupApiHandler` | |

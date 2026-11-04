@@ -294,7 +294,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
 
         var recordBatchSerializer = new RecordBatchSerializer(serializerLogger);
-        _offsetStore = new OffsetStore(_dataDirectory, offsetStoreLogger);
+        // Group offsets live in __consumer_offsets (#205): led locally by a broker on its own, followed through the
+        // replica manager in a cluster.
+        _offsetStore = new OffsetStore(_logManager, recordBatchSerializer, config.OffsetsTopicNumPartitions, offsetStoreLogger);
         var nativeGroupCoordinator = new NativeGroupCoordinator(nativeGroupCoordinatorLogger, _offsetStore);
         _nativeGroupCoordinator = nativeGroupCoordinator;
         // On its own the broker coordinates every group, at the address it actually bound; a cluster replaces this
@@ -393,6 +395,10 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         if (_options.EnableCluster)
         {
             await InitializeClusterAsync(config, cancellationToken);
+        }
+        else
+        {
+            await _offsetStore!.StartLocalAsync(cancellationToken);
         }
     }
 
@@ -536,6 +542,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // in-sync replicas. Wired here because the gate needs the cluster state, which is built
         // after the request handlers.
         _dataApiHandler?.SetCommitGate(new ReplicaCommitGate(_clusterState, _replicaManager));
+        _offsetStore?.FollowLeadershipOf(_replicaManager, new ReplicaCommitGate(_clusterState, _replicaManager));
 
         // #164 — the produce path refuses a partition another broker leads. Supplied here
         // rather than in the constructor because clustering does not exist yet up there;

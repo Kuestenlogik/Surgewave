@@ -50,7 +50,7 @@ public sealed class KafkaFetchOverMappedSegmentTests : IDisposable
         _logManager = new LogManager(_dataDir, FileLogSegmentFactory.Create(useMmap: true), persistTopicsToFile: false);
 
         var config = new BrokerConfig();
-        _offsetStore = new OffsetStore(_dataDir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _transactionStateStore = new TransactionStateStore(_dataDir, NullLogger<TransactionStateStore>.Instance);
         _quotaManager = new QuotaManager(config.Quotas, NullLogger<QuotaManager>.Instance);
 

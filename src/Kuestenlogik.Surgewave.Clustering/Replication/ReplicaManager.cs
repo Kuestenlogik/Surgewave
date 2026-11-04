@@ -119,6 +119,24 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Raised when this broker starts leading a partition (true) or stops (false): becoming its follower, or no
+    /// longer a replica of it. A coordinator that keeps its state in a partition loads it or lets it go here (#205).
+    /// </summary>
+    public event Action<TopicPartition, bool>? LeadershipChanged;
+
+    private void RaiseLeadershipChanged(TopicPartition tp, bool isLeader)
+    {
+        try
+        {
+            LeadershipChanged?.Invoke(tp, isLeader);
+        }
+        catch (Exception ex)
+        {
+            LogLeadershipHandlerFailed(tp.Topic, tp.Partition, ex);
+        }
+    }
+
+    /// <summary>
     /// Called when this broker becomes leader for a partition.
     /// </summary>
     /// <param name="topicId">
@@ -162,6 +180,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         replica.HighWatermark = log.HighWatermark;
 
         LogBecameLeader(tp.Topic, tp.Partition, leaderEpoch);
+        RaiseLeadershipChanged(tp, isLeader: true);
     }
 
     /// <summary>
@@ -196,6 +215,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         _replicaFetcher?.StartFetching(tp, leaderId);
 
         LogBecameFollower(tp.Topic, tp.Partition, leaderId, leaderEpoch);
+        RaiseLeadershipChanged(tp, isLeader: false);
     }
 
     /// <summary>
@@ -294,6 +314,8 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
         // Clear follower LEO tracking if we were leader
         _followerLeos.TryRemove(tp, out _);
+
+        RaiseLeadershipChanged(tp, isLeader: false);
     }
 
     /// <summary>
@@ -710,6 +732,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to notify controller of ISR change for {Topic}-{Partition}")]
     private partial void LogIsrNotifyFailed(string topic, int partition, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "A leadership handler failed for {Topic}-{Partition}")]
+    private partial void LogLeadershipHandlerFailed(string topic, int partition, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error in ISR check loop")]
     private partial void LogIsrCheckError(Exception ex);

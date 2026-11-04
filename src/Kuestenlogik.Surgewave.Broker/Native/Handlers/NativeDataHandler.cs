@@ -660,7 +660,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var partition = reader.ReadInt32();
         var offset = reader.ReadInt64();
 
-        var result = _groupCoordinator.CommitOffset(groupId, memberId, generationId, topic, partition, offset, null);
+        var result = await _groupCoordinator.CommitOffsetAsync(groupId, memberId, generationId, topic, partition, offset, null, cancellationToken);
 
         using var writer = new BigEndianWriter();
         writer.Write((ushort)result.ErrorCode);

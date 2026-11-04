@@ -778,11 +778,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
         if (commit)
         {
-            foreach (var pendingOffset in txn.PendingOffsets)
+            // One write per group into __consumer_offsets (#205).
+            foreach (var group in txn.PendingOffsets.GroupBy(o => o.GroupId))
             {
-                _offsetStore.CommitOffset(pendingOffset.GroupId, pendingOffset.Topic, pendingOffset.Partition, pendingOffset.Offset);
-                _logger.LogDebug("Committed transactional offset for group {GroupId}, {Topic}-{Partition} at offset {Offset}",
-                    pendingOffset.GroupId, pendingOffset.Topic, pendingOffset.Partition, pendingOffset.Offset);
+                var written = await _offsetStore.CommitOffsetsAsync(group.Key,
+                    [.. group.Select(o => new CommittedOffset(o.Topic, o.Partition, o.Offset))], cancellationToken);
+                if (written == OffsetWriteStatus.Ok)
+                    _logger.LogDebug("Committed {Count} transactional offset(s) for group {GroupId}", group.Count(), group.Key);
+                else
+                    _logger.LogWarning("The transactional offsets of group {GroupId} were not committed: {Status}", group.Key, written);
             }
         }
         else if (txn.PendingOffsets.Count > 0)

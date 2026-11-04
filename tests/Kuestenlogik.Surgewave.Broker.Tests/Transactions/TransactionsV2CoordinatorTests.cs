@@ -28,7 +28,7 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
         _dir = Path.Combine(Path.GetTempPath(), $"surgewave-tv2-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_dir);
         _logManager = new LogManager(_dir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
-        _offsetStore = new OffsetStore(_dir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _stateStore = new TransactionStateStore(Path.Combine(_dir, "txn-state"), NullLogger<TransactionStateStore>.Instance);
         _coordinator = NewCoordinator();
     }

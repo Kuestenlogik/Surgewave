@@ -25,7 +25,7 @@ public sealed class OffsetDeleteTests : IDisposable
     {
         _testDir = Path.Combine(Path.GetTempPath(), "surgewave-offset-delete-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testDir);
-        _offsetStore = new OffsetStore(_testDir, NullLogger<OffsetStore>.Instance);
+        _offsetStore = OffsetStore.InMemory();
         _coordinator = new ConsumerGroupCoordinator(NullLogger<ConsumerGroupCoordinator>.Instance, _offsetStore);
     }
 
@@ -36,30 +36,30 @@ public sealed class OffsetDeleteTests : IDisposable
     }
 
     [Fact]
-    public void UnknownGroup_ReturnsGroupIdNotFoundPerPartition()
+    public async Task UnknownGroup_ReturnsGroupIdNotFoundPerPartition()
     {
-        var resp = _coordinator.DeleteOffsets(new OffsetDeleteCommand
+        var resp = await _coordinator.DeleteOffsetsAsync(new OffsetDeleteCommand
         {
             GroupId = "ghost-group",
             Topics =
             [
                 new OffsetDeleteTopic { Name = "orders", Partitions = [0, 1] },
             ],
-        });
+        }, TestContext.Current.CancellationToken);
 
         var topic = Assert.Single(resp.Topics);
         Assert.All(topic.Partitions, p => Assert.Equal(ConsumerGroupErrorStatus.GroupIdNotFound, p.Status));
     }
 
     [Fact]
-    public void EmptyGroup_DeletesOffsetsAndReturnsNone()
+    public async Task EmptyGroup_DeletesOffsetsAndReturnsNone()
     {
         // Seed an offset directly on the store, then create an empty group so
         // the coordinator knows the id (DeleteOffset works against any group).
-        _offsetStore.CommitOffset("g-empty", "orders", 0, offset: 42);
+        await _offsetStore.CommitOffsetAsync("g-empty", "orders", 0, offset: 42, TestContext.Current.CancellationToken);
         ForceGroupExists("g-empty");
 
-        var resp = _coordinator.DeleteOffsets(MakeCommand("g-empty", ("orders", 0)));
+        var resp = await _coordinator.DeleteOffsetsAsync(MakeCommand("g-empty", ("orders", 0)), TestContext.Current.CancellationToken);
 
         var partition = Assert.Single(Assert.Single(resp.Topics).Partitions);
         Assert.Equal(ConsumerGroupErrorStatus.None, partition.Status);
@@ -68,12 +68,12 @@ public sealed class OffsetDeleteTests : IDisposable
     }
 
     [Fact]
-    public void GroupWithActiveMembers_RejectsWithGroupSubscribedToTopic()
+    public async Task GroupWithActiveMembers_RejectsWithGroupSubscribedToTopic()
     {
         ForceGroupExists("g-active", memberCount: 2);
-        _offsetStore.CommitOffset("g-active", "orders", 0, offset: 100);
+        await _offsetStore.CommitOffsetAsync("g-active", "orders", 0, offset: 100, TestContext.Current.CancellationToken);
 
-        var resp = _coordinator.DeleteOffsets(MakeCommand("g-active", ("orders", 0)));
+        var resp = await _coordinator.DeleteOffsetsAsync(MakeCommand("g-active", ("orders", 0)), TestContext.Current.CancellationToken);
 
         var partition = Assert.Single(Assert.Single(resp.Topics).Partitions);
         Assert.Equal(ConsumerGroupErrorStatus.GroupSubscribedToTopic, partition.Status);
@@ -82,27 +82,27 @@ public sealed class OffsetDeleteTests : IDisposable
     }
 
     [Fact]
-    public void IdempotentDelete_OnNonExistentOffset_ReturnsNone()
+    public async Task IdempotentDelete_OnNonExistentOffset_ReturnsNone()
     {
         // KIP-496 is idempotent: deleting an offset that was never committed
         // returns None for that partition rather than a "not found" error.
         ForceGroupExists("g-idempotent");
 
-        var resp = _coordinator.DeleteOffsets(MakeCommand("g-idempotent", ("never-seen", 7)));
+        var resp = await _coordinator.DeleteOffsetsAsync(MakeCommand("g-idempotent", ("never-seen", 7)), TestContext.Current.CancellationToken);
 
         var partition = Assert.Single(Assert.Single(resp.Topics).Partitions);
         Assert.Equal(ConsumerGroupErrorStatus.None, partition.Status);
     }
 
     [Fact]
-    public void MultipleTopicsAndPartitions_AllDeletedIndividually()
+    public async Task MultipleTopicsAndPartitions_AllDeletedIndividually()
     {
         ForceGroupExists("g-multi");
-        _offsetStore.CommitOffset("g-multi", "orders", 0, offset: 1);
-        _offsetStore.CommitOffset("g-multi", "orders", 1, offset: 2);
-        _offsetStore.CommitOffset("g-multi", "payments", 0, offset: 3);
+        await _offsetStore.CommitOffsetAsync("g-multi", "orders", 0, offset: 1, TestContext.Current.CancellationToken);
+        await _offsetStore.CommitOffsetAsync("g-multi", "orders", 1, offset: 2, TestContext.Current.CancellationToken);
+        await _offsetStore.CommitOffsetAsync("g-multi", "payments", 0, offset: 3, TestContext.Current.CancellationToken);
 
-        var resp = _coordinator.DeleteOffsets(new OffsetDeleteCommand
+        var resp = await _coordinator.DeleteOffsetsAsync(new OffsetDeleteCommand
         {
             GroupId = "g-multi",
             Topics =
@@ -110,7 +110,7 @@ public sealed class OffsetDeleteTests : IDisposable
                 new OffsetDeleteTopic { Name = "orders", Partitions = [0, 1] },
                 new OffsetDeleteTopic { Name = "payments", Partitions = [0] },
             ],
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, resp.Topics.Count);
         Assert.All(resp.Topics, t => Assert.All(t.Partitions, p => Assert.Equal(ConsumerGroupErrorStatus.None, p.Status)));

@@ -86,6 +86,9 @@ public sealed record OffsetFetchGroupResult
 {
     public required string GroupId { get; init; }
     public required IReadOnlyList<OffsetFetchTopicResult> Topics { get; init; }
+
+    /// <summary>Why the group has no offsets to give, such as a coordinator still loading it (#205).</summary>
+    public ConsumerGroupErrorStatus Status { get; init; } = ConsumerGroupErrorStatus.None;
 }
 
 public sealed record OffsetFetchResult(IReadOnlyList<OffsetFetchGroupResult> Groups);
