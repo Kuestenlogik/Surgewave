@@ -21,6 +21,9 @@ internal static class TxnStatusMapper
             TxnErrorStatus.InvalidProducerEpoch => SurgewaveErrorCode.InvalidProducerEpoch,
             TxnErrorStatus.UnknownProducerId => SurgewaveErrorCode.UnknownProducerId,
             TxnErrorStatus.InvalidTxnState => SurgewaveErrorCode.InvalidTxnState,
+            TxnErrorStatus.NotCoordinator => SurgewaveErrorCode.NotCoordinator,
+            // The native protocol has no load-in-progress code; a coordinator still loading is not available yet.
+            TxnErrorStatus.CoordinatorLoadInProgress or TxnErrorStatus.CoordinatorNotAvailable => SurgewaveErrorCode.CoordinatorNotAvailable,
             _ => SurgewaveErrorCode.UnknownError
         };
     }
@@ -112,7 +115,7 @@ public sealed class AddPartitionsToTxnOperation : IOperationHandler<AddPartition
 
     public void ValidateRequest(in AddPartitionsToTxnRequestPayload request) { }
 
-    public Task<AddPartitionsToTxnResult> ExecuteAsync(AddPartitionsToTxnRequestPayload request, CancellationToken cancellationToken)
+    public async Task<AddPartitionsToTxnResult> ExecuteAsync(AddPartitionsToTxnRequestPayload request, CancellationToken cancellationToken)
     {
         var commandTopics = new List<AddPartitionsTopic>();
         foreach (var (topic, partitions) in request.Topics)
@@ -128,7 +131,7 @@ public sealed class AddPartitionsToTxnOperation : IOperationHandler<AddPartition
             Topics = commandTopics
         };
 
-        var result = _coordinator.AddPartitionsToTxn(command);
+        var result = await _coordinator.AddPartitionsToTxnAsync(command, cancellationToken);
 
         var results = new Dictionary<string, List<PartitionResult>>();
         foreach (var topic in result.Topics)
@@ -146,7 +149,7 @@ public sealed class AddPartitionsToTxnOperation : IOperationHandler<AddPartition
         }
 
         var responsePayload = new AddPartitionsToTxnResponsePayload { Results = results };
-        return Task.FromResult(new AddPartitionsToTxnResult { Response = responsePayload });
+        return new AddPartitionsToTxnResult { Response = responsePayload };
     }
 
     public void WriteResponse(IPayloadWriter writer, in AddPartitionsToTxnResult response)
@@ -202,7 +205,7 @@ public sealed class AddOffsetsToTxnOperation : IOperationHandler<AddOffsetsToTxn
 
     public void ValidateRequest(in AddOffsetsToTxnRequest request) { }
 
-    public Task<AddOffsetsToTxnResult> ExecuteAsync(AddOffsetsToTxnRequest request, CancellationToken cancellationToken)
+    public async Task<AddOffsetsToTxnResult> ExecuteAsync(AddOffsetsToTxnRequest request, CancellationToken cancellationToken)
     {
         var command = new AddOffsetsToTxnCommand
         {
@@ -212,10 +215,10 @@ public sealed class AddOffsetsToTxnOperation : IOperationHandler<AddOffsetsToTxn
             GroupId = request.GroupId
         };
 
-        var response = _coordinator.AddOffsetsToTxn(command);
+        var response = await _coordinator.AddOffsetsToTxnAsync(command, cancellationToken);
         var errorCode = TxnStatusMapper.ToSurgewave(response.Status);
 
-        return Task.FromResult(new AddOffsetsToTxnResult { ErrorCode = errorCode });
+        return new AddOffsetsToTxnResult { ErrorCode = errorCode };
     }
 
     public void WriteResponse(IPayloadWriter writer, in AddOffsetsToTxnResult response)
@@ -251,7 +254,7 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
 
     public void ValidateRequest(in TxnOffsetCommitRequestPayload request) { }
 
-    public Task<TxnOffsetCommitResult> ExecuteAsync(TxnOffsetCommitRequestPayload request, CancellationToken cancellationToken)
+    public async Task<TxnOffsetCommitResult> ExecuteAsync(TxnOffsetCommitRequestPayload request, CancellationToken cancellationToken)
     {
         // The Surgewave native protocol's TxnOffsetCommit payload still
         // identifies topics by name. We build the neutral command with Name set
@@ -277,7 +280,7 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
             Topics = commandTopics
         };
 
-        var result = _coordinator.TxnOffsetCommit(command);
+        var result = await _coordinator.TxnOffsetCommitAsync(command, cancellationToken);
 
         var results = new Dictionary<string, List<PartitionResult>>();
         foreach (var topic in result.Topics)
@@ -297,7 +300,7 @@ public sealed class TxnOffsetCommitOperation : IOperationHandler<TxnOffsetCommit
         }
 
         var responsePayload = new TxnOffsetCommitResponsePayload { Topics = results };
-        return Task.FromResult(new TxnOffsetCommitResult { Response = responsePayload });
+        return new TxnOffsetCommitResult { Response = responsePayload };
     }
 
     public void WriteResponse(IPayloadWriter writer, in TxnOffsetCommitResult response)

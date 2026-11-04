@@ -34,7 +34,7 @@ public sealed class KafkaFetchBorrowedReadTests : IDisposable
     private readonly LeaseTrackingLogSegmentFactory _segmentFactory;
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _transactionStateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _transactionStateStore;
     private readonly DataApiHandler _handler;
 
     public KafkaFetchBorrowedReadTests()
@@ -47,7 +47,7 @@ public sealed class KafkaFetchBorrowedReadTests : IDisposable
 
         var config = new BrokerConfig();
         _offsetStore = OffsetStore.InMemory();
-        _transactionStateStore = new TransactionStateStore(_dataDir, NullLogger<TransactionStateStore>.Instance);
+        _transactionStateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         var transactionCoordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _transactionStateStore,
             NullLogger<TransactionCoordinator>.Instance);
@@ -70,7 +70,6 @@ public sealed class KafkaFetchBorrowedReadTests : IDisposable
     {
         _logManager.Dispose();
         _offsetStore.Dispose();
-        _transactionStateStore.Dispose();
         try { Directory.Delete(_dataDir, recursive: true); } catch { /* best-effort */ }
     }
 

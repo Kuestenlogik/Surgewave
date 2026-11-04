@@ -161,6 +161,29 @@ again. On reopen the log now decides. Every complete batch after the last
 indexed one is indexed, a batch cut short by the stop is truncated, and the
 segment ends where its last complete batch ends.
 
+### A transactional id has one coordinator, and its state outlives it (#197)
+
+Every broker coordinated every transactional id it was asked about, from a
+file of its own. A producer that came back after a failover met a broker
+that knew nothing of its id, and the producer that had used the id before
+was not fenced. Kafka puts transaction state in `__transaction_state`, and
+so does Surgewave now:
+
+- **One coordinator per id:** the controller creates the compacted topic
+  (`TransactionStateLogNumPartitions`, `TransactionStateLogReplicationFactor`),
+  and FindCoordinator(TRANSACTION) names the leader of the id's partition.
+- **Durable before the answer:** a transaction's state is a record in that
+  partition, and a change is answered once the in-sync replicas have it.
+- **Taking over:** a broker that takes the partition over reads its
+  transactions from the log. It fences the previous producer and completes
+  what was left prepared.
+- **Errors:** a broker that does not coordinate the id answers
+  `NOT_COORDINATOR` (KAFKA-21181), and one still reading the partition
+  answers `COORDINATOR_LOAD_IN_PROGRESS`.
+
+A partition led by another broker than the transaction's coordinator is not
+yet verified through the coordinator; that is the next part of #197.
+
 ### A group keeps its offsets when its coordinator changes (#205)
 
 Committed offsets lived in a file on the broker that coordinated the group,
@@ -280,6 +303,13 @@ installer's icon use `images/icon.png`; the web manifest's 512 px icon is `icon-
 files differ from the drawing.
 
 ## Breaking changes
+
+### Transaction state is not carried over from an upgrade (#197)
+
+Transaction state was kept in a file under the data directory. It is now
+kept in `__transaction_state`, and the file is neither read nor migrated.
+A transactional producer initialises afresh after the upgrade. Finish or
+abort open transactions before upgrading.
 
 ### Group offsets are not carried over from an upgrade (#205)
 

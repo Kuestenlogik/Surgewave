@@ -1,6 +1,6 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Broker.GroupOffsets;
 using Kuestenlogik.Surgewave.Coordination.Coordinators;
-using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Replication;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Microsoft.Extensions.Logging;
@@ -11,31 +11,16 @@ namespace Kuestenlogik.Surgewave.Broker;
 /// Committed group offsets, kept in <c>__consumer_offsets</c> (#205). A group's offsets and metadata are records in
 /// the topic's partition for the group — the partition whose leader coordinates the group (#204) — so a broker that
 /// takes over a partition takes over its groups from the log, and nothing of them lives in a local file any more.
+/// Leading, loading and durable writes are the <see cref="CoordinatorStateLog"/>'s; this is what the records mean.
 /// </summary>
 /// <remarks>
-/// <para>
-/// This broker serves the groups of the partitions it leads. Becoming leader starts a load of the partition, during
-/// which its groups answer <see cref="GroupOwnership.Loading"/>; losing the leadership drops them, and they answer
-/// <see cref="GroupOwnership.NotOwned"/> — the coordinator's COORDINATOR_LOAD_IN_PROGRESS and NOT_COORDINATOR.
-/// </para>
-/// <para>
-/// A commit is answered once its records are in the leader's log and, through the commit gate, on the in-sync
-/// replicas — the acks=all of Kafka's offsets topic. The cache then takes the commit, unless a later record for the
-/// same key got there first.
-/// </para>
+/// A commit's cache entry is taken once the commit is durable, unless a later record for the same key got there first.
 /// </remarks>
-public sealed class OffsetStore : IDisposable
+public sealed class OffsetStore : IDisposable, ICoordinatorStateOwner
 {
-    private static readonly TimeSpan DefaultCommitTimeout = TimeSpan.FromSeconds(5);
-
-    private readonly LogManager? _logManager;
-    private readonly RecordBatchSerializer? _serializer;
-    private IPartitionCommitGate? _commitGate;
-    private readonly ILogger _logger;
-    private readonly TimeSpan _commitTimeout;
+    private readonly CoordinatorStateLog _log;
     private readonly TimeProvider _time;
-    private readonly Lock _lock = new();
-    private readonly OffsetsPartition[] _partitions;
+    private readonly Dictionary<string, GroupEntry>[] _groups;
 
     /// <summary>
     /// A store over the broker's <c>__consumer_offsets</c>. It serves nothing until it is told what this broker
@@ -49,127 +34,115 @@ public sealed class OffsetStore : IDisposable
         ILogger<OffsetStore> logger,
         TimeSpan? commitTimeout = null,
         TimeProvider? timeProvider = null)
-        : this(partitionCount, logger, timeProvider)
     {
-        _logManager = logManager;
-        _serializer = serializer;
-        _commitTimeout = commitTimeout ?? DefaultCommitTimeout;
+        _time = timeProvider ?? TimeProvider.System;
+        _groups = NewGroups(partitionCount);
+        _log = new CoordinatorStateLog(CoordinatorPartitioner.GroupTopic, partitionCount, this, logManager, serializer, logger, commitTimeout, _time);
     }
 
-    private OffsetStore(int partitionCount, ILogger logger, TimeProvider? timeProvider)
+    private OffsetStore(ILogger? logger)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(partitionCount, 1);
-        _logger = logger;
-        _time = timeProvider ?? TimeProvider.System;
-        _commitTimeout = DefaultCommitTimeout;
-        _partitions = new OffsetsPartition[partitionCount];
-        for (var i = 0; i < partitionCount; i++)
-            _partitions[i] = new OffsetsPartition();
+        _time = TimeProvider.System;
+        _groups = NewGroups(1);
+        _log = CoordinatorStateLog.InMemory(CoordinatorPartitioner.GroupTopic, this, logger);
     }
 
     /// <summary>
     /// A store without a log that owns every group, for a coordinator under test: what it is told is what it keeps,
     /// for as long as it lives.
     /// </summary>
-    public static OffsetStore InMemory(ILogger? logger = null)
-    {
-        var store = new OffsetStore(1, logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, null);
-        store._partitions[0].Ownership = GroupOwnership.Owned;
-        return store;
-    }
+    public static OffsetStore InMemory(ILogger? logger = null) => new(logger);
 
     /// <summary>The partitions groups are hashed over.</summary>
-    public int PartitionCount => _partitions.Length;
+    public int PartitionCount => _log.PartitionCount;
 
     /// <summary>Whether this broker serves the group's offsets now.</summary>
-    public GroupOwnership OwnershipOf(string groupId)
-    {
-        lock (_lock)
-            return PartitionOf(groupId).Ownership;
-    }
+    public CoordinatorOwnership OwnershipOf(string groupId) => _log.OwnershipOf(_log.PartitionFor(groupId));
 
     /// <summary>
     /// Commits the group's offsets: one batch in the group's partition, answered once it is durable. Nothing is
     /// written unless this broker owns the group and its partition is loaded.
     /// </summary>
-    public async Task<OffsetWriteStatus> CommitOffsetsAsync(
-        string groupId, IReadOnlyList<CommittedOffset> offsets, CancellationToken cancellationToken)
+    public Task<StateWriteStatus> CommitOffsetsAsync(string groupId, IReadOnlyList<CommittedOffset> offsets, CancellationToken cancellationToken)
     {
         if (offsets.Count == 0)
-            return OffsetWriteStatus.Ok;
+            return Task.FromResult(StateWriteStatus.Ok);
 
         var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
         var records = new List<(byte[] Key, byte[] Value)>(offsets.Count);
         foreach (var o in offsets)
             records.Add((GroupRecords.OffsetCommitKey(groupId, o.Topic, o.Partition), GroupRecords.OffsetCommitValue(o.Offset, now)));
 
-        return await WriteAsync(groupId, records, (entry, logOffset, i) =>
+        return WriteAsync(groupId, records, (entry, baseOffset) =>
         {
-            var o = offsets[i];
-            entry.Apply(new TopicPartitionKey(o.Topic, o.Partition), o.Offset, logOffset);
-        }, cancellationToken).ConfigureAwait(false);
+            for (var i = 0; i < offsets.Count; i++)
+                entry.Apply(new TopicPartitionKey(offsets[i].Topic, offsets[i].Partition), offsets[i].Offset, baseOffset + i);
+        }, cancellationToken);
     }
 
     /// <summary>Commits one offset; <see cref="CommitOffsetsAsync"/> for several.</summary>
-    public Task<OffsetWriteStatus> CommitOffsetAsync(string groupId, string topic, int partition, long offset, CancellationToken cancellationToken)
+    public Task<StateWriteStatus> CommitOffsetAsync(string groupId, string topic, int partition, long offset, CancellationToken cancellationToken)
         => CommitOffsetsAsync(groupId, [new CommittedOffset(topic, partition, offset)], cancellationToken);
 
     /// <summary>Removes one committed offset: a tombstone for its key.</summary>
-    public Task<OffsetWriteStatus> DeleteOffsetAsync(string groupId, string topic, int partition, CancellationToken cancellationToken)
+    public Task<StateWriteStatus> DeleteOffsetAsync(string groupId, string topic, int partition, CancellationToken cancellationToken)
         => WriteAsync(groupId, [(GroupRecords.OffsetCommitKey(groupId, topic, partition), [])],
-            (entry, logOffset, _) => entry.Remove(new TopicPartitionKey(topic, partition), logOffset), cancellationToken);
+            (entry, baseOffset) => entry.Remove(new TopicPartitionKey(topic, partition), baseOffset), cancellationToken);
 
     /// <summary>Removes the group: tombstones for every offset it committed and for its metadata.</summary>
-    public Task<OffsetWriteStatus> DeleteGroupAsync(string groupId, CancellationToken cancellationToken)
+    public Task<StateWriteStatus> DeleteGroupAsync(string groupId, CancellationToken cancellationToken)
     {
+        var partition = _log.PartitionFor(groupId);
         List<TopicPartitionKey> keys;
-        lock (_lock)
-        {
-            keys = PartitionOf(groupId).Groups.TryGetValue(groupId, out var entry) ? [.. entry.Offsets.Keys] : [];
-        }
+        lock (_log.SyncRoot)
+            keys = _groups[partition].TryGetValue(groupId, out var entry) ? [.. entry.Offsets.Keys] : [];
 
         var records = new List<(byte[] Key, byte[] Value)>(keys.Count + 1);
         foreach (var key in keys)
             records.Add((GroupRecords.OffsetCommitKey(groupId, key.Topic, key.Partition), []));
         records.Add((GroupRecords.GroupMetadataKey(groupId), []));
 
-        return WriteAsync(groupId, records, (entry, logOffset, i) =>
+        return _log.WriteAsync(partition, records, baseOffset =>
         {
-            if (i < keys.Count)
-                entry.Remove(keys[i], logOffset);
-            else
-                entry.Generation = 0;
-        }, cancellationToken, removesGroup: true);
+            if (!_groups[partition].TryGetValue(groupId, out var entry))
+                return;
+            for (var i = 0; i < keys.Count; i++)
+                entry.Remove(keys[i], baseOffset + i);
+            entry.Generation = 0;
+            if (entry.IsEmpty)
+                _groups[partition].Remove(groupId);
+        }, cancellationToken);
     }
 
     /// <summary>
     /// Records the generation a rebalance of the group completed, so a coordinator that takes the group over counts
     /// on from it rather than starting at one again.
     /// </summary>
-    public Task<OffsetWriteStatus> RecordGenerationAsync(
+    public Task<StateWriteStatus> RecordGenerationAsync(
         string groupId, string protocolType, int generation, string? protocol, string? leader, CancellationToken cancellationToken)
     {
         var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
         return WriteAsync(groupId,
             [(GroupRecords.GroupMetadataKey(groupId), GroupRecords.GroupMetadataValue(protocolType, generation, protocol, leader, now))],
-            (entry, _, _) => entry.Generation = Math.Max(entry.Generation, generation), cancellationToken);
+            (entry, _) => entry.Generation = Math.Max(entry.Generation, generation), cancellationToken);
     }
 
     /// <summary>The last generation recorded for the group, 0 when none is.</summary>
     public int GetGeneration(string groupId)
     {
-        lock (_lock)
-            return PartitionOf(groupId).Groups.TryGetValue(groupId, out var entry) ? entry.Generation : 0;
+        var partition = _log.PartitionFor(groupId);
+        lock (_log.SyncRoot)
+            return _groups[partition].TryGetValue(groupId, out var entry) ? entry.Generation : 0;
     }
 
     /// <summary>The committed offset, -1 when there is none or this broker does not serve the group.</summary>
     public long GetCommittedOffset(string groupId, string topic, int partition)
     {
-        lock (_lock)
+        var owner = _log.PartitionFor(groupId);
+        lock (_log.SyncRoot)
         {
-            var owner = PartitionOf(groupId);
-            return owner.Ownership == GroupOwnership.Owned
-                && owner.Groups.TryGetValue(groupId, out var entry)
+            return _log.OwnershipOf(owner) == CoordinatorOwnership.Owned
+                && _groups[owner].TryGetValue(groupId, out var entry)
                 && entry.Offsets.TryGetValue(new TopicPartitionKey(topic, partition), out var committed)
                 ? committed.Offset
                 : -1;
@@ -179,10 +152,10 @@ public sealed class OffsetStore : IDisposable
     /// <summary>Every committed offset of the group, keyed "topic:partition".</summary>
     public Dictionary<string, long> GetAllOffsets(string groupId)
     {
-        lock (_lock)
+        var owner = _log.PartitionFor(groupId);
+        lock (_log.SyncRoot)
         {
-            var owner = PartitionOf(groupId);
-            if (owner.Ownership != GroupOwnership.Owned || !owner.Groups.TryGetValue(groupId, out var entry))
+            if (_log.OwnershipOf(owner) != CoordinatorOwnership.Owned || !_groups[owner].TryGetValue(groupId, out var entry))
                 return [];
             return entry.Offsets.ToDictionary(kv => string.Concat(kv.Key.Topic, ":", kv.Key.Partition.ToString()), kv => kv.Value.Offset);
         }
@@ -194,284 +167,77 @@ public sealed class OffsetStore : IDisposable
     /// <summary>The groups with committed offsets among those this broker serves.</summary>
     public IReadOnlyList<string> GetGroupIds()
     {
-        lock (_lock)
+        lock (_log.SyncRoot)
         {
-            return [.. _partitions
-                .Where(p => p.Ownership == GroupOwnership.Owned)
-                .SelectMany(p => p.Groups)
+            return [.. Enumerable.Range(0, _groups.Length)
+                .Where(p => _log.OwnershipOf(p) == CoordinatorOwnership.Owned)
+                .SelectMany(p => _groups[p])
                 .Where(g => g.Value.Offsets.Count > 0)
                 .Select(g => g.Key)];
         }
     }
 
-    /// <summary>
-    /// This broker leads <paramref name="partition"/> of <c>__consumer_offsets</c> now, or no longer does. Leading
-    /// starts the load of its groups; following drops them.
-    /// </summary>
-    public void OnLeadershipChanged(int partition, bool isLeader)
-    {
-        if (partition < 0 || partition >= _partitions.Length || _logManager is null)
-            return;
+    /// <inheritdoc cref="CoordinatorStateLog.OnLeadershipChanged"/>
+    public void OnLeadershipChanged(int partition, bool isLeader) => _log.OnLeadershipChanged(partition, isLeader);
 
-        int epoch;
-        lock (_lock)
-        {
-            var owner = _partitions[partition];
-            if (isLeader && owner.Ownership != GroupOwnership.NotOwned)
-                return; // already leading it; a repeated signal starts no second load
-
-            owner.Epoch++;
-            epoch = owner.Epoch;
-            owner.Groups.Clear();
-            owner.Ownership = isLeader ? GroupOwnership.Loading : GroupOwnership.NotOwned;
-            owner.Loaded = isLeader ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) : owner.Loaded;
-            if (!isLeader)
-                owner.Loaded.TrySetResult();
-        }
-
-        if (isLeader)
-        {
-            Log.OffsetsPartitionLoading(_logger, partition);
-            _ = LoadAsync(partition, epoch);
-        }
-        else
-        {
-            Log.OffsetsPartitionUnloaded(_logger, partition);
-        }
-    }
-
-    /// <summary>
-    /// Follows this broker's leadership of <c>__consumer_offsets</c>: the partitions it leads already are loaded at
-    /// once, and every later change as the replica manager makes it. A commit is answered once
-    /// <paramref name="commitGate"/> says the in-sync replicas have it.
-    /// </summary>
+    /// <inheritdoc cref="CoordinatorStateLog.FollowLeadershipOf"/>
     public void FollowLeadershipOf(Kuestenlogik.Surgewave.Clustering.Replication.ReplicaManager replicas, IPartitionCommitGate commitGate)
-    {
-        _commitGate = commitGate;
-        replicas.LeadershipChanged += (tp, isLeader) =>
-        {
-            if (string.Equals(tp.Topic, CoordinatorPartitioner.GroupTopic, StringComparison.Ordinal))
-                OnLeadershipChanged(tp.Partition, isLeader);
-        };
+        => _log.FollowLeadershipOf(replicas, commitGate);
 
-        for (var p = 0; p < _partitions.Length; p++)
-        {
-            if (replicas.IsLeader(new TopicPartition { Topic = CoordinatorPartitioner.GroupTopic, Partition = p }))
-                OnLeadershipChanged(p, isLeader: true);
-        }
-    }
+    /// <summary>Completes once the group's partition has been read, or at once when it is not loading.</summary>
+    public Task WhenLoadedAsync(string groupId) => _log.WhenLoadedAsync(_log.PartitionFor(groupId));
 
-    /// <summary>Completes once the partition's current load has finished, or at once when it is not loading.</summary>
-    public Task WhenLoadedAsync(string groupId)
-    {
-        lock (_lock)
-            return PartitionOf(groupId).Loaded.Task;
-    }
-
-    /// <summary>
-    /// For a broker that is not part of a cluster: creates <c>__consumer_offsets</c> if it is missing and leads every
-    /// partition of it. Completes when every partition is loaded.
-    /// </summary>
-    public async Task StartLocalAsync(CancellationToken cancellationToken)
-    {
-        if (_logManager is null)
-            return;
-
-        if (_logManager.GetTopicMetadata(CoordinatorPartitioner.GroupTopic) is null)
-        {
-            await _logManager.CreateTopicAsync(CoordinatorPartitioner.GroupTopic, _partitions.Length, 1,
-                new Dictionary<string, string> { ["cleanup.policy"] = "compact" }, cancellationToken).ConfigureAwait(false);
-        }
-
-        for (var p = 0; p < _partitions.Length; p++)
-            OnLeadershipChanged(p, isLeader: true);
-
-        Task[] loads;
-        lock (_lock)
-            loads = [.. _partitions.Select(p => p.Loaded.Task)];
-        await Task.WhenAll(loads).WaitAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<OffsetWriteStatus> WriteAsync(
-        string groupId,
-        IReadOnlyList<(byte[] Key, byte[] Value)> records,
-        Action<GroupEntry, long, int> apply,
-        CancellationToken cancellationToken,
-        bool removesGroup = false)
-    {
-        var partition = CoordinatorPartitioner.PartitionFor(groupId, _partitions.Length);
-        int epoch;
-        lock (_lock)
-        {
-            var owner = _partitions[partition];
-            switch (owner.Ownership)
-            {
-                case GroupOwnership.NotOwned:
-                    return OffsetWriteStatus.NotCoordinator;
-                case GroupOwnership.Loading:
-                    return OffsetWriteStatus.LoadInProgress;
-            }
-            epoch = owner.Epoch;
-
-            // Without a log there is nothing to wait for: the cache is the store.
-            if (_logManager is null)
-            {
-                var entry = owner.Entry(groupId);
-                for (var i = 0; i < records.Count; i++)
-                    apply(entry, long.MaxValue, i);
-                if (removesGroup)
-                    owner.Groups.Remove(groupId);
-                return OffsetWriteStatus.Ok;
-            }
-        }
-
-        var tp = new TopicPartition { Topic = CoordinatorPartitioner.GroupTopic, Partition = partition };
-        if (_commitGate is not null && !_commitGate.CanAdmitDurableWrite(tp))
-            return OffsetWriteStatus.NotAvailable;
-
-        var timestamp = _time.GetUtcNow().ToUnixTimeMilliseconds();
-        // Offsets relative to the batch: each record its own delta, so the log reserves one offset per record.
-        var messages = new List<Message>(records.Count);
-        for (var i = 0; i < records.Count; i++)
-            messages.Add(new Message { Offset = i, Timestamp = timestamp, Key = records[i].Key, Value = records[i].Value, Headers = ReadOnlyMemory<byte>.Empty });
-
-        long baseOffset;
-        try
-        {
-            baseOffset = await _logManager.AppendBatchAsync(tp, _serializer!.SerializeMessages(messages), cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Log.OffsetsAppendFailed(_logger, groupId, partition, ex);
-            return OffsetWriteStatus.NotAvailable;
-        }
-
-        if (_commitGate is not null
-            && !await _commitGate.WaitForDurableCommitAsync(tp, baseOffset + records.Count, _commitTimeout, cancellationToken).ConfigureAwait(false))
-        {
-            return OffsetWriteStatus.NotAvailable;
-        }
-
-        lock (_lock)
-        {
-            var owner = _partitions[partition];
-            // The partition changed hands while the write was on its way: the next owner reads it from the log.
-            if (owner.Epoch != epoch || owner.Ownership != GroupOwnership.Owned)
-                return OffsetWriteStatus.NotCoordinator;
-
-            var entry = owner.Entry(groupId);
-            for (var i = 0; i < records.Count; i++)
-                apply(entry, baseOffset + i, i);
-            if (removesGroup && entry.IsEmpty)
-                owner.Groups.Remove(groupId);
-        }
-        return OffsetWriteStatus.Ok;
-    }
-
-    // Reads the partition from its start to its end and applies every record in log order; the partition's groups
-    // are served once the end is reached, unless the leadership moved on in the meantime.
-    private async Task LoadAsync(int partition, int epoch)
-    {
-        var tp = new TopicPartition { Topic = CoordinatorPartitioner.GroupTopic, Partition = partition };
-        var loaded = new OffsetsPartition();
-        var records = 0;
-        try
-        {
-            var log = _logManager!.GetOrCreateLog(tp);
-            var end = log.NextOffset;
-            var position = log.LogStartOffset;
-            while (position < end)
-            {
-                var batches = await _logManager.ReadBatchesAsync(tp, position, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                if (batches.Count == 0)
-                    break;
-                var readFrom = position;
-
-                foreach (var batch in batches)
-                {
-                    foreach (var message in _serializer!.ParseRecordBatch(batch))
-                    {
-                        Apply(loaded, GroupRecords.Read(message.Key.Span, message.Value.Span), message.Offset);
-                        position = Math.Max(position, message.Offset + 1);
-                        records++;
-                    }
-                }
-
-                // A read that brought nothing past where it started would be read again forever.
-                if (position <= readFrom)
-                {
-                    Log.OffsetsPartitionLoadStalled(_logger, partition, position, end);
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.OffsetsPartitionLoadFailed(_logger, partition, ex);
-        }
-
-        lock (_lock)
-        {
-            var owner = _partitions[partition];
-            if (owner.Epoch != epoch)
-                return; // a newer change of leadership owns this partition now
-
-            foreach (var (group, entry) in loaded.Groups)
-                owner.Groups[group] = entry;
-            owner.Ownership = GroupOwnership.Owned;
-            owner.Loaded.TrySetResult();
-        }
-        Log.OffsetsPartitionLoaded(_logger, partition, loaded.Groups.Count, records);
-    }
-
-    private static void Apply(OffsetsPartition partition, GroupRecord record, long logOffset)
-    {
-        switch (record)
-        {
-            case GroupRecord.OffsetCommitted c:
-                partition.Entry(c.Group).Apply(new TopicPartitionKey(c.Topic, c.Partition), c.Offset, logOffset);
-                break;
-            case GroupRecord.OffsetRemoved r:
-                partition.Entry(r.Group).Remove(new TopicPartitionKey(r.Topic, r.Partition), logOffset);
-                break;
-            case GroupRecord.GroupMetadata m:
-                partition.Entry(m.Group).Generation = m.Generation;
-                break;
-            case GroupRecord.GroupRemoved g:
-                partition.Groups.Remove(g.Group);
-                break;
-        }
-    }
-
-    // Under _lock.
-    private OffsetsPartition PartitionOf(string groupId)
-        => _partitions[CoordinatorPartitioner.PartitionFor(groupId, _partitions.Length)];
+    /// <inheritdoc cref="CoordinatorStateLog.StartLocalAsync"/>
+    public Task StartLocalAsync(CancellationToken cancellationToken) => _log.StartLocalAsync(cancellationToken);
 
     public void Dispose()
     {
         // Nothing to flush: every commit was in the log before it was answered.
     }
 
-    private sealed class OffsetsPartition
+    void ICoordinatorStateOwner.Loaded(int partition, IReadOnlyList<StateRecord> records)
     {
-        public GroupOwnership Ownership { get; set; } = GroupOwnership.NotOwned;
-        public int Epoch { get; set; }
-        public Dictionary<string, GroupEntry> Groups { get; } = new(StringComparer.Ordinal);
-        public TaskCompletionSource Loaded { get; set; } = Completed();
-
-        public GroupEntry Entry(string groupId)
+        var groups = _groups[partition];
+        foreach (var record in records)
         {
-            if (!Groups.TryGetValue(groupId, out var entry))
-                Groups[groupId] = entry = new GroupEntry();
-            return entry;
+            switch (GroupRecords.Read(record.Key.Span, record.Value.Span))
+            {
+                case GroupRecord.OffsetCommitted c:
+                    Entry(groups, c.Group).Apply(new TopicPartitionKey(c.Topic, c.Partition), c.Offset, record.Offset);
+                    break;
+                case GroupRecord.OffsetRemoved r:
+                    Entry(groups, r.Group).Remove(new TopicPartitionKey(r.Topic, r.Partition), record.Offset);
+                    break;
+                case GroupRecord.GroupMetadata m:
+                    Entry(groups, m.Group).Generation = m.Generation;
+                    break;
+                case GroupRecord.GroupRemoved g:
+                    groups.Remove(g.Group);
+                    break;
+            }
         }
+    }
 
-        private static TaskCompletionSource Completed()
-        {
-            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            done.TrySetResult();
-            return done;
-        }
+    void ICoordinatorStateOwner.Unloaded(int partition) => _groups[partition].Clear();
+
+    private Task<StateWriteStatus> WriteAsync(
+        string groupId, IReadOnlyList<(byte[] Key, byte[] Value)> records, Action<GroupEntry, long> apply, CancellationToken cancellationToken)
+    {
+        var partition = _log.PartitionFor(groupId);
+        return _log.WriteAsync(partition, records, baseOffset => apply(Entry(_groups[partition], groupId), baseOffset), cancellationToken);
+    }
+
+    private static GroupEntry Entry(Dictionary<string, GroupEntry> groups, string groupId)
+    {
+        if (!groups.TryGetValue(groupId, out var entry))
+            groups[groupId] = entry = new GroupEntry();
+        return entry;
+    }
+
+    private static Dictionary<string, GroupEntry>[] NewGroups(int partitionCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(partitionCount, 1);
+        return [.. Enumerable.Range(0, partitionCount).Select(_ => new Dictionary<string, GroupEntry>(StringComparer.Ordinal))];
     }
 
     private sealed class GroupEntry
@@ -502,35 +268,6 @@ public sealed class OffsetStore : IDisposable
             _removedAt[key] = logOffset;
         }
     }
-}
-
-/// <summary>Whether this broker serves a group's offsets.</summary>
-public enum GroupOwnership
-{
-    /// <summary>Another broker leads the group's partition of <c>__consumer_offsets</c>.</summary>
-    NotOwned,
-
-    /// <summary>This broker leads the partition and is still reading it.</summary>
-    Loading,
-
-    /// <summary>This broker leads the partition and has read it.</summary>
-    Owned,
-}
-
-/// <summary>How a write to <c>__consumer_offsets</c> went.</summary>
-public enum OffsetWriteStatus
-{
-    /// <summary>In the log and on the in-sync replicas.</summary>
-    Ok,
-
-    /// <summary>This broker does not lead the group's partition.</summary>
-    NotCoordinator,
-
-    /// <summary>This broker leads the partition and is still loading it.</summary>
-    LoadInProgress,
-
-    /// <summary>The partition could not take a durable write now: too few in-sync replicas, or the append failed.</summary>
-    NotAvailable,
 }
 
 /// <summary>An offset to commit.</summary>

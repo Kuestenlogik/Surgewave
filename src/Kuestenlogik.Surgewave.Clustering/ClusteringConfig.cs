@@ -204,6 +204,21 @@ public sealed class ClusteringConfig : IValidatableConfig
     [Range(1, short.MaxValue)]
     public short OffsetsTopicReplicationFactor { get; set; } = 3;
 
+    /// <summary>
+    /// Partitions of <c>__transaction_state</c>, the internal topic whose partition leaders coordinate transactional
+    /// ids (#197). Kafka's transaction.state.log.num.partitions. Fixed once the topic exists: an id's partition is a
+    /// hash over it.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int TransactionStateLogNumPartitions { get; set; } = 50;
+
+    /// <summary>
+    /// Replication factor of <c>__transaction_state</c>, capped at the number of brokers the cluster is configured
+    /// with. Kafka's transaction.state.log.replication.factor.
+    /// </summary>
+    [Range(1, short.MaxValue)]
+    public short TransactionStateLogReplicationFactor { get; set; } = 3;
+
     // Auto-rebalancing settings
     public bool AutoRebalanceEnabled { get; set; } = true;
 
@@ -332,12 +347,16 @@ public sealed class ClusteringConfig : IValidatableConfig
         string processRoles = Raft.NodeRolesParser.CombinedMode,
         string controllerQuorumVoters = "",
         int offsetsTopicNumPartitions = 50,
-        short offsetsTopicReplicationFactor = 3)
+        short offsetsTopicReplicationFactor = 3,
+        int transactionStateLogNumPartitions = 50,
+        short transactionStateLogReplicationFactor = 3)
     {
         return new ClusteringConfig
         {
             OffsetsTopicNumPartitions = offsetsTopicNumPartitions,
             OffsetsTopicReplicationFactor = offsetsTopicReplicationFactor,
+            TransactionStateLogNumPartitions = transactionStateLogNumPartitions,
+            TransactionStateLogReplicationFactor = transactionStateLogReplicationFactor,
             BrokerId = brokerId,
             Host = host,
             Port = port,

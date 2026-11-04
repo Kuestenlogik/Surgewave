@@ -27,7 +27,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
     private readonly ProducerStateManager _producerStateManager;
     private readonly TransactionIndex _transactionIndex;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _stateStore;
     private readonly TransactionCoordinator _coordinator;
 
     public Kip892TransactionDefenseTests()
@@ -38,7 +38,7 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
         _producerStateManager = new ProducerStateManager();
         _transactionIndex = new TransactionIndex();
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(Path.Combine(_testDirectory, "txn-state"), NullLogger<TransactionStateStore>.Instance);
+        _stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
 
         _coordinator = new TransactionCoordinator(
             _producerStateManager,
@@ -53,7 +53,6 @@ public sealed class Kip892TransactionDefenseTests : IAsyncDisposable
     {
         await _coordinator.DisposeAsync();
         _offsetStore.Dispose();
-        _stateStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_testDirectory, recursive: true); } catch { /* best-effort */ }
     }

@@ -13,11 +13,11 @@ public interface ITransactionCoordinator
 {
     Task<InitProducerIdResult> InitProducerIdAsync(InitProducerIdCommand request, CancellationToken cancellationToken);
 
-    AddPartitionsToTxnResult AddPartitionsToTxn(AddPartitionsToTxnCommand request);
+    Task<AddPartitionsToTxnResult> AddPartitionsToTxnAsync(AddPartitionsToTxnCommand request, CancellationToken cancellationToken);
 
-    AddOffsetsToTxnResult AddOffsetsToTxn(AddOffsetsToTxnCommand request);
+    Task<AddOffsetsToTxnResult> AddOffsetsToTxnAsync(AddOffsetsToTxnCommand request, CancellationToken cancellationToken);
 
-    TxnOffsetCommitResult TxnOffsetCommit(TxnOffsetCommitCommand request);
+    Task<TxnOffsetCommitResult> TxnOffsetCommitAsync(TxnOffsetCommitCommand request, CancellationToken cancellationToken);
 
     Task<EndTxnResult> EndTxnAsync(EndTxnCommand request, CancellationToken cancellationToken);
 

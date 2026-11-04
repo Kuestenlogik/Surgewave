@@ -28,7 +28,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
     private readonly ProducerStateManager _producerStateManager;
     private readonly TransactionIndex _transactionIndex;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _stateStore;
     private readonly TransactionCoordinator _coordinator;
     private readonly TransactionApiHandler _handler;
 
@@ -40,7 +40,7 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
         _producerStateManager = new ProducerStateManager();
         _transactionIndex = new TransactionIndex();
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(Path.Combine(_testDirectory, "txn"), NullLogger<TransactionStateStore>.Instance);
+        _stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         _coordinator = new TransactionCoordinator(
             _producerStateManager, _logManager, _transactionIndex, _offsetStore, _stateStore,
             NullLogger<TransactionCoordinator>.Instance);
@@ -50,7 +50,6 @@ public sealed class DescribeAndListTransactionsWireTests : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _coordinator.DisposeAsync();
-        _stateStore.Dispose();
         _offsetStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_testDirectory, recursive: true); } catch { /* best-effort */ }

@@ -20,19 +20,18 @@ public sealed class TransactionCoordinatorShutdownTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "surgewave-txn-shutdown-" + Guid.NewGuid().ToString("N"));
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _stateStore;
 
     public TransactionCoordinatorShutdownTests()
     {
         Directory.CreateDirectory(_dir);
         _logManager = TestLogManager.CreateInMemory(_dir);
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(_dir, NullLogger<TransactionStateStore>.Instance);
+        _stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
     }
 
     public void Dispose()
     {
-        _stateStore.Dispose();
         _offsetStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort cleanup */ }

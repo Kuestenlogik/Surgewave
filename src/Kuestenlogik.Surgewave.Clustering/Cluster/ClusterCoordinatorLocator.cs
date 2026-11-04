@@ -4,10 +4,10 @@ using Kuestenlogik.Surgewave.Core.Models;
 namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 
 /// <summary>
-/// In a cluster, a group's coordinator is the leader of its partition of <c>__consumer_offsets</c> (#204), as in
-/// Kafka. Every broker answers the same, so consumers of one group meet at one coordinator whichever broker they
-/// bootstrapped from. Transactional ids are still coordinated by the broker asked until the transaction
-/// coordinator moves onto <c>__transaction_state</c> (#197).
+/// In a cluster, a group's coordinator is the leader of its partition of <c>__consumer_offsets</c> (#204), and a
+/// transactional id's the leader of its partition of <c>__transaction_state</c> (#197), as in Kafka. Every broker
+/// answers the same, so the clients of one group or one transactional id meet at one coordinator whichever broker
+/// they bootstrapped from.
 /// </summary>
 public sealed class ClusterCoordinatorLocator(ClusterState clusterState) : ICoordinatorLocator
 {
@@ -26,18 +26,17 @@ public sealed class ClusterCoordinatorLocator(ClusterState clusterState) : ICoor
 
     private BrokerNode? LeaderOf(CoordinatorKind kind, string key)
     {
-        if (kind != CoordinatorKind.Group)
-            return clusterState.GetBroker(clusterState.LocalBrokerId);
+        var topicName = kind == CoordinatorKind.Transaction ? CoordinatorPartitioner.TransactionTopic : CoordinatorPartitioner.GroupTopic;
 
         // The topic's actual partition count, not the configured one: a topic created before a config change keeps
-        // its partitions, and hashing over a different count would send a group to a partition it never used.
-        var topic = clusterState.GetTopic(CoordinatorPartitioner.GroupTopic);
+        // its partitions, and hashing over a different count would send a key to a partition it never used.
+        var topic = clusterState.GetTopic(topicName);
         if (topic is null || topic.PartitionCount < 1)
             return null;
 
         var tp = new TopicPartition
         {
-            Topic = CoordinatorPartitioner.GroupTopic,
+            Topic = topicName,
             Partition = CoordinatorPartitioner.PartitionFor(key, topic.PartitionCount),
         };
         var leaderId = clusterState.GetPartitionState(tp)?.LeaderBrokerId ?? -1;

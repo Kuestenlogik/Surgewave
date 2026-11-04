@@ -44,9 +44,9 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
         return request switch
         {
             InitProducerIdRequest r => ToInitProducerIdResponse(await _coordinator.InitProducerIdAsync(ToInitProducerIdCommand(r), cancellationToken), r),
-            AddPartitionsToTxnRequest r => ToAddPartitionsToTxnResponse(_coordinator.AddPartitionsToTxn(ToAddPartitionsToTxnCommand(r)), r),
-            AddOffsetsToTxnRequest r => ToAddOffsetsToTxnResponse(_coordinator.AddOffsetsToTxn(ToAddOffsetsToTxnCommand(r)), r),
-            TxnOffsetCommitRequest r => ToTxnOffsetCommitResponse(_coordinator.TxnOffsetCommit(ToTxnOffsetCommitCommand(r)), r),
+            AddPartitionsToTxnRequest r => ToAddPartitionsToTxnResponse(await _coordinator.AddPartitionsToTxnAsync(ToAddPartitionsToTxnCommand(r), cancellationToken), r),
+            AddOffsetsToTxnRequest r => ToAddOffsetsToTxnResponse(await _coordinator.AddOffsetsToTxnAsync(ToAddOffsetsToTxnCommand(r), cancellationToken), r),
+            TxnOffsetCommitRequest r => ToTxnOffsetCommitResponse(await _coordinator.TxnOffsetCommitAsync(ToTxnOffsetCommitCommand(r), cancellationToken), r),
             EndTxnRequest r => ToEndTxnResponse(await _coordinator.EndTxnAsync(ToEndTxnCommand(r), cancellationToken), r),
             DescribeProducersRequest r => ToDescribeProducersResponse(_coordinator.DescribeProducers(ToDescribeProducersCommand(r)), r),
             DescribeTransactionsRequest r => ToDescribeTransactionsResponse(_coordinator.DescribeTransactions(r.TransactionalIds), r),
@@ -74,6 +74,9 @@ public sealed class TransactionApiHandler : IKafkaRequestHandler
         TxnErrorStatus.InvalidRequest => ErrorCode.InvalidRequest,
         TxnErrorStatus.TransactionalIdAuthorizationFailed => ErrorCode.TransactionalIdAuthorizationFailed,
         TxnErrorStatus.UnsupportedVersion => ErrorCode.UnsupportedVersion,
+        TxnErrorStatus.NotCoordinator => ErrorCode.NotCoordinator,
+        TxnErrorStatus.CoordinatorLoadInProgress => ErrorCode.CoordinatorLoadInProgress,
+        TxnErrorStatus.CoordinatorNotAvailable => ErrorCode.CoordinatorNotAvailable,
         _ => ErrorCode.Unknown,
     };
 

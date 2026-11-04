@@ -40,7 +40,7 @@ public sealed class TransactionMarkerReplicationWiringTests : IAsyncDisposable
     private readonly string _dir;
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _stateStore;
     private readonly TransactionCoordinator _coordinator;
     private readonly RecordingReplicator _replicator = new();
 
@@ -50,7 +50,7 @@ public sealed class TransactionMarkerReplicationWiringTests : IAsyncDisposable
         Directory.CreateDirectory(_dir);
         _logManager = new LogManager(_dir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(Path.Combine(_dir, "txn-state"), NullLogger<TransactionStateStore>.Instance);
+        _stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         _coordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _stateStore,
             NullLogger<TransactionCoordinator>.Instance);
@@ -61,7 +61,6 @@ public sealed class TransactionMarkerReplicationWiringTests : IAsyncDisposable
     {
         await _coordinator.DisposeAsync();
         _offsetStore.Dispose();
-        _stateStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort */ }
     }
@@ -72,13 +71,13 @@ public sealed class TransactionMarkerReplicationWiringTests : IAsyncDisposable
             new InitProducerIdCommand { TransactionalId = txnId, TransactionTimeoutMs = 60_000, ProducerId = -1, ProducerEpoch = -1 },
             CancellationToken.None);
 
-        _coordinator.AddPartitionsToTxn(new AddPartitionsToTxnCommand
+        await _coordinator.AddPartitionsToTxnAsync(new AddPartitionsToTxnCommand
         {
             TransactionalId = txnId,
             ProducerId = init.ProducerId,
             ProducerEpoch = init.ProducerEpoch,
             Topics = [new AddPartitionsTopic("orders", [0])],
-        });
+        }, TestContext.Current.CancellationToken);
 
         return (init.ProducerId, init.ProducerEpoch);
     }
@@ -171,13 +170,13 @@ public sealed class TransactionMarkerReplicationWiringTests : IAsyncDisposable
             new InitProducerIdCommand { TransactionalId = txnId, TransactionTimeoutMs = 60_000, ProducerId = -1, ProducerEpoch = -1 },
             CancellationToken.None);
 
-        _coordinator.AddPartitionsToTxn(new AddPartitionsToTxnCommand
+        await _coordinator.AddPartitionsToTxnAsync(new AddPartitionsToTxnCommand
         {
             TransactionalId = txnId,
             ProducerId = init.ProducerId,
             ProducerEpoch = init.ProducerEpoch,
             Topics = [new AddPartitionsTopic("orders", partitions)],
-        });
+        }, TestContext.Current.CancellationToken);
 
         return (init.ProducerId, init.ProducerEpoch);
     }

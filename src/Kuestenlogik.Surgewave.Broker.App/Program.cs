@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using System.Runtime;
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.Plugins;
@@ -501,7 +502,9 @@ builder.Services.AddSingleton(sp =>
         processRoles: c.ProcessRoles,
         controllerQuorumVoters: c.ControllerQuorumVoters,
         offsetsTopicNumPartitions: c.OffsetsTopicNumPartitions,
-        offsetsTopicReplicationFactor: c.OffsetsTopicReplicationFactor);
+        offsetsTopicReplicationFactor: c.OffsetsTopicReplicationFactor,
+        transactionStateLogNumPartitions: c.TransactionStateLogNumPartitions,
+        transactionStateLogReplicationFactor: c.TransactionStateLogReplicationFactor);
 });
 // Inter-broker transport (TCP by default, QUIC when Surgewave:InterBrokerTransport=quic).
 // Explicitly invoke both registrations so the module initializers run even if no
@@ -742,9 +745,13 @@ builder.Services.AddSingleton(sp =>
     return new ProducerStateManager(new ProducerIdBlocks(config.BrokerId, config.DataDirectory));
 });
 builder.Services.AddSingleton(sp => new TransactionIndex());
-builder.Services.AddSingleton(sp => new TransactionStateStore(
-    sp.GetRequiredService<BrokerConfig>().DataDirectory,
-    sp.GetRequiredService<ILogger<TransactionStateStore>>()));
+// Transaction state lives in __transaction_state (#197): this broker coordinates the transactional ids of the
+// partitions it leads, read when it takes a partition over.
+builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog(
+    sp.GetRequiredService<LogManager>(),
+    sp.GetRequiredService<RecordBatchSerializer>(),
+    sp.GetRequiredService<BrokerConfig>().TransactionStateLogNumPartitions,
+    sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog>>()));
 builder.Services.AddSingleton(sp =>
 {
     var coordinator = new TransactionCoordinator(
@@ -752,8 +759,12 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<LogManager>(),
         sp.GetRequiredService<TransactionIndex>(),
         sp.GetRequiredService<OffsetStore>(),
-        sp.GetRequiredService<TransactionStateStore>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog>(),
         sp.GetRequiredService<ILogger<TransactionCoordinator>>());
+    // Followed only once the coordinator is attached, so no partition is read before it can take the transactions.
+    sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog>().FollowLeadershipOf(
+        sp.GetRequiredService<ReplicaManager>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>());
     // #72 Inc7 — wire the gated (native / Kafka-wire) marker replicator so EndTxn replicates markers
     // to follower brokers best-effort. The gate is the host's unkeyed ITransactionMarkerReplicator.
     coordinator.SetMarkerReplicator(sp.GetService<Kuestenlogik.Surgewave.Coordination.Transactions.ITransactionMarkerReplicator>());
@@ -1043,7 +1054,7 @@ ConsumerServiceImplHolder.Instance = new ConsumerServiceImpl(
     logManager,
     recordBatchSerializer.ParseRecordBatch,
     async (groupId, topic, partition, offset, ct) =>
-        await offsetStore.CommitOffsetAsync(groupId, topic, partition, offset, ct) == OffsetWriteStatus.Ok,
+        await offsetStore.CommitOffsetAsync(groupId, topic, partition, offset, ct) == StateWriteStatus.Ok,
     (groupId, topic, partition) => (long?)offsetStore.GetCommittedOffset(groupId, topic, partition));
 TopicServiceImplHolder.Instance = new TopicServiceImpl(logManager);
 AdminServiceImplHolder.Instance = new AdminServiceImpl(
@@ -1284,7 +1295,6 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
 
 var producerStateManager = app.Services.GetRequiredService<ProducerStateManager>();
 var transactionIndex = app.Services.GetRequiredService<TransactionIndex>();
-var transactionStateStore = app.Services.GetRequiredService<TransactionStateStore>();
 var transactionCoordinator = app.Services.GetRequiredService<TransactionCoordinator>();
 
 // #59 b5: the native gRPC transaction service returns Kafka-numbered txn error codes; map the
@@ -1302,7 +1312,7 @@ static int TxnStatusToWireCode(Kuestenlogik.Surgewave.Coordination.Transactions.
 
 // Register TransactionServiceImpl with delegates wired to TransactionCoordinator
 TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
-    initProducerId: (transactionalId, transactionTimeoutMs, producerId, producerEpoch) =>
+    initProducerId: async (transactionalId, transactionTimeoutMs, producerId, producerEpoch, ct) =>
     {
         var command = new Kuestenlogik.Surgewave.Coordination.Transactions.InitProducerIdCommand
         {
@@ -1311,10 +1321,10 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerId = producerId,
             ProducerEpoch = (short)producerEpoch
         };
-        var response = transactionCoordinator.InitProducerIdAsync(command, CancellationToken.None).GetAwaiter().GetResult();
+        var response = await transactionCoordinator.InitProducerIdAsync(command, ct);
         return new InitProducerIdResultDto(TxnStatusToWireCode(response.Status), response.ProducerId, response.ProducerEpoch);
     },
-    addPartitionsToTxn: (transactionalId, producerId, producerEpoch, partitions) =>
+    addPartitionsToTxn: async (transactionalId, producerId, producerEpoch, partitions, ct) =>
     {
         var commandTopics = partitions.GroupBy(p => p.Topic)
             .Select(g => new Kuestenlogik.Surgewave.Coordination.Transactions.AddPartitionsTopic(g.Key, g.Select(p => p.Partition).ToList()))
@@ -1326,12 +1336,12 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch,
             Topics = commandTopics
         };
-        var response = transactionCoordinator.AddPartitionsToTxn(command);
+        var response = await transactionCoordinator.AddPartitionsToTxnAsync(command, ct);
         var results = response.Topics.SelectMany(t =>
             t.Partitions.Select(p => (t.Topic, p.Partition, TxnStatusToWireCode(p.Status)))).ToList();
         return new AddPartitionsToTxnResultDto(results);
     },
-    addOffsetsToTxn: (transactionalId, producerId, producerEpoch, groupId) =>
+    addOffsetsToTxn: async (transactionalId, producerId, producerEpoch, groupId, ct) =>
     {
         var command = new Kuestenlogik.Surgewave.Coordination.Transactions.AddOffsetsToTxnCommand
         {
@@ -1340,10 +1350,10 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch,
             GroupId = groupId
         };
-        var response = transactionCoordinator.AddOffsetsToTxn(command);
+        var response = await transactionCoordinator.AddOffsetsToTxnAsync(command, ct);
         return new AddOffsetsToTxnResultDto(TxnStatusToWireCode(response.Status));
     },
-    txnOffsetCommit: (transactionalId, groupId, producerId, producerEpoch, generationId, memberId, offsets) =>
+    txnOffsetCommit: async (transactionalId, groupId, producerId, producerEpoch, generationId, memberId, offsets, ct) =>
     {
         // gRPC path is name-keyed; v6 (TopicId) is a wire-only concern.
         var topicEntries = offsets.GroupBy(o => o.Topic)
@@ -1362,12 +1372,12 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch,
             Topics = topicEntries
         };
-        var response = transactionCoordinator.TxnOffsetCommit(command);
+        var response = await transactionCoordinator.TxnOffsetCommitAsync(command, ct);
         var results = response.Topics.SelectMany(t =>
             t.Partitions.Select(p => (t.Name ?? string.Empty, p.Partition, TxnStatusToWireCode(p.Status)))).ToList();
         return new TxnOffsetCommitResultDto(results);
     },
-    endTxn: (transactionalId, producerId, producerEpoch, commit) =>
+    endTxn: async (transactionalId, producerId, producerEpoch, commit, ct) =>
     {
         var command = new Kuestenlogik.Surgewave.Coordination.Transactions.EndTxnCommand
         {
@@ -1376,7 +1386,7 @@ TransactionServiceImplHolder.Instance = new TransactionServiceImpl(
             ProducerEpoch = (short)producerEpoch,
             Committed = commit
         };
-        var response = transactionCoordinator.EndTxnAsync(command, CancellationToken.None).GetAwaiter().GetResult();
+        var response = await transactionCoordinator.EndTxnAsync(command, ct);
         return new EndTxnResultDto(TxnStatusToWireCode(response.Status));
     },
     listTransactions: (statesFilter, producerIdFilter) =>
@@ -2051,7 +2061,6 @@ dlqManager?.Dispose();
 quotaManager.Dispose();
 bandwidthQuotaManager.Dispose();
 metrics.Dispose();
-transactionStateStore.Dispose();
 offsetStore.Dispose();
 logManager.Dispose();
 cts.Dispose();

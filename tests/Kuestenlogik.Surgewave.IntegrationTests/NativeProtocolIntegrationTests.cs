@@ -30,7 +30,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     private SurgewaveBroker? _broker;
     private LogManager? _logManager;
     private OffsetStore? _offsetStore;
-    private TransactionStateStore? _transactionStateStore;
+    private Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog? _transactionStateStore;
     private BrokerMetrics? _metrics;
     private QuotaManager? _quotaManager;
     private CancellationTokenSource? _brokerCts;
@@ -66,7 +66,6 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var serializerLogger = _loggerFactory.CreateLogger<RecordBatchSerializer>();
         var coordinatorLogger = _loggerFactory.CreateLogger<ConsumerGroupCoordinator>();
         var txnCoordinatorLogger = _loggerFactory.CreateLogger<TransactionCoordinator>();
-        var txnStateStoreLogger = _loggerFactory.CreateLogger<TransactionStateStore>();
         var offsetStoreLogger = _loggerFactory.CreateLogger<OffsetStore>();
 
         var recordBatchSerializer = new RecordBatchSerializer(serializerLogger);
@@ -84,7 +83,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var nativeGroupCoordinator = new Kuestenlogik.Surgewave.Broker.Native.NativeGroupCoordinator(nativeGroupCoordinatorLogger, _offsetStore);
         var producerStateManager = new ProducerStateManager();
         var transactionIndex = new TransactionIndex();
-        _transactionStateStore = new TransactionStateStore(_dataDir, txnStateStoreLogger);
+        _transactionStateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         var transactionCoordinator = new TransactionCoordinator(
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
@@ -162,7 +161,6 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
 
         _metrics?.Dispose();
         _quotaManager?.Dispose();
-        _transactionStateStore?.Dispose();
         _offsetStore?.Dispose();
         _logManager?.Dispose();
         _loggerFactory?.Dispose();

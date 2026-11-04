@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Broker.Security;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Observability;
@@ -36,7 +37,7 @@ public sealed partial class ConsumerGroupCoordinator(
         foreach (var groupRequest in request.Groups)
         {
             // A group of a partition this broker is still reading has no answer yet (#205).
-            if (_offsets.OwnershipOf(groupRequest.GroupId) != GroupOwnership.Owned)
+            if (_offsets.OwnershipOf(groupRequest.GroupId) != CoordinatorOwnership.Owned)
             {
                 groups.Add(new OffsetFetchGroupResult
                 {
@@ -102,7 +103,7 @@ public sealed partial class ConsumerGroupCoordinator(
 
     public async Task<OffsetCommitResult> CommitOffsetsAsync(OffsetCommitCommand request, CancellationToken cancellationToken)
     {
-        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+        if (_offsets.OwnershipOf(request.GroupId) != CoordinatorOwnership.Owned)
             return BuildOffsetCommitErrorResponse(request, ConsumerGroupErrorStatus.CoordinatorLoadInProgress);
 
         bool isV2Group;
@@ -198,11 +199,11 @@ public sealed partial class ConsumerGroupCoordinator(
     }
 
     // What a write to __consumer_offsets means for the request that asked for it.
-    private static ConsumerGroupErrorStatus ToStatus(OffsetWriteStatus status) => status switch
+    private static ConsumerGroupErrorStatus ToStatus(StateWriteStatus status) => status switch
     {
-        OffsetWriteStatus.Ok => ConsumerGroupErrorStatus.None,
-        OffsetWriteStatus.NotCoordinator => ConsumerGroupErrorStatus.NotCoordinator,
-        OffsetWriteStatus.LoadInProgress => ConsumerGroupErrorStatus.CoordinatorLoadInProgress,
+        StateWriteStatus.Ok => ConsumerGroupErrorStatus.None,
+        StateWriteStatus.NotCoordinator => ConsumerGroupErrorStatus.NotCoordinator,
+        StateWriteStatus.LoadInProgress => ConsumerGroupErrorStatus.CoordinatorLoadInProgress,
         _ => ConsumerGroupErrorStatus.CoordinatorNotAvailable,
     };
 
@@ -338,7 +339,7 @@ public sealed partial class ConsumerGroupCoordinator(
 
         foreach (var groupId in groupIds)
         {
-            if (_offsets.OwnershipOf(groupId) != GroupOwnership.Owned)
+            if (_offsets.OwnershipOf(groupId) != CoordinatorOwnership.Owned)
             {
                 results.Add(new DeleteGroupResult(groupId, ConsumerGroupErrorStatus.CoordinatorLoadInProgress));
                 continue;
@@ -383,7 +384,7 @@ public sealed partial class ConsumerGroupCoordinator(
     public async Task<OffsetDeleteResult> DeleteOffsetsAsync(OffsetDeleteCommand request, CancellationToken cancellationToken)
     {
         ConsumerGroupErrorStatus groupError;
-        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+        if (_offsets.OwnershipOf(request.GroupId) != CoordinatorOwnership.Owned)
         {
             groupError = ConsumerGroupErrorStatus.CoordinatorLoadInProgress;
         }

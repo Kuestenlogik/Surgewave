@@ -55,8 +55,10 @@ public interface IProduceTransactionCoordinator
     /// <see cref="TxnErrorStatus.ConcurrentTransactions"/> while the transaction's markers are written, and
     /// <see cref="TxnErrorStatus.TransactionAbortable"/> for a partition that was not added.
     /// </summary>
-    TxnErrorStatus VerifyTransactionalBatch(
-        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version);
+    /// <remarks>A partition it adds is written to the transaction's state before the answer (#197).</remarks>
+    Task<TxnErrorStatus> VerifyTransactionalBatchAsync(
+        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Records a transactional batch being written (produce path) so the Last Stable Offset

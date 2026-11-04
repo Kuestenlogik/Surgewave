@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Broker.Native.Coordination;
 using Microsoft.Extensions.Logging;
@@ -420,10 +421,10 @@ public sealed class NativeGroupCoordinator
     }
 
     // The native protocol has no load-in-progress code; a coordinator still loading is not available yet, and retried.
-    private static ushort ToNativeErrorCode(OffsetWriteStatus status) => status switch
+    private static ushort ToNativeErrorCode(StateWriteStatus status) => status switch
     {
-        OffsetWriteStatus.Ok => 0,
-        OffsetWriteStatus.NotCoordinator => 20, // NotCoordinator
+        StateWriteStatus.Ok => 0,
+        StateWriteStatus.NotCoordinator => 20, // NotCoordinator
         _ => 21, // CoordinatorNotAvailable
     };
 
@@ -431,8 +432,8 @@ public sealed class NativeGroupCoordinator
     {
         return _offsetStore.OwnershipOf(groupId) switch
         {
-            GroupOwnership.Owned => new FetchOffsetResult { ErrorCode = 0, Offset = _offsetStore.GetCommittedOffset(groupId, topic, partition) },
-            GroupOwnership.Loading => new FetchOffsetResult { ErrorCode = 21, Offset = -1 }, // CoordinatorNotAvailable
+            CoordinatorOwnership.Owned => new FetchOffsetResult { ErrorCode = 0, Offset = _offsetStore.GetCommittedOffset(groupId, topic, partition) },
+            CoordinatorOwnership.Loading => new FetchOffsetResult { ErrorCode = 21, Offset = -1 }, // CoordinatorNotAvailable
             _ => new FetchOffsetResult { ErrorCode = 20, Offset = -1 }, // NotCoordinator
         };
     }

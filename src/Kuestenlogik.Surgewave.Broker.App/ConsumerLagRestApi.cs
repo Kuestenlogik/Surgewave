@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Monitoring;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -133,12 +134,12 @@ public static class ConsumerLagRestApi
             }
 
             var written = await offsetStore.CommitOffsetAsync(groupId, request.Topic, partition, newOffset, cancellationToken);
-            if (written != OffsetWriteStatus.Ok)
+            if (written != StateWriteStatus.Ok)
             {
                 // This broker does not coordinate the group, or cannot write durably now (#205).
                 return Results.Problem(
                     $"The offsets of '{groupId}' could not be reset here: {written}",
-                    statusCode: written == OffsetWriteStatus.NotCoordinator ? StatusCodes.Status421MisdirectedRequest : StatusCodes.Status503ServiceUnavailable);
+                    statusCode: written == StateWriteStatus.NotCoordinator ? StatusCodes.Status421MisdirectedRequest : StatusCodes.Status503ServiceUnavailable);
             }
             resetPartitions.Add(new ResetPartitionResult(partition, newOffset));
         }

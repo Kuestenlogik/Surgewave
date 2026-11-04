@@ -38,6 +38,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     private string _processRoles = "broker,controller";
     private string _controllerQuorumVoters = "";
     private int? _offsetsTopicNumPartitions;
+    private int? _transactionStateLogNumPartitions;
     private int _raftElectionTimeoutMinMs = 150;
     private int _raftElectionTimeoutMaxMs = 300;
     private int _raftHeartbeatIntervalMs = 50;
@@ -272,6 +273,16 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
+    /// Sets how many partitions <c>__transaction_state</c> gets — the internal topic whose partition leaders
+    /// coordinate transactional ids (#197).
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithTransactionStateLogPartitions(int partitions)
+    {
+        _transactionStateLogNumPartitions = partitions;
+        return this;
+    }
+
+    /// <summary>
     /// Sets what this node does — <c>broker</c>, <c>controller</c>, or both (#168).
     /// </summary>
     /// <remarks>
@@ -490,6 +501,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         ProcessRoles = _processRoles,
         ControllerQuorumVoters = _controllerQuorumVoters,
         OffsetsTopicNumPartitions = _offsetsTopicNumPartitions,
+        TransactionStateLogNumPartitions = _transactionStateLogNumPartitions,
         RaftElectionTimeoutMinMs = _raftElectionTimeoutMinMs,
         RaftElectionTimeoutMaxMs = _raftElectionTimeoutMaxMs,
         RaftHeartbeatIntervalMs = _raftHeartbeatIntervalMs,

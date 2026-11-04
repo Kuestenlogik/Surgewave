@@ -156,24 +156,24 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Information, Message = "Broker shutdown complete")]
     public static partial void ShutdownComplete(ILogger logger);
 
-    // OffsetStore: __consumer_offsets (#205)
-    [LoggerMessage(Level = LogLevel.Information, Message = "Loading the groups of __consumer_offsets-{Partition}")]
-    public static partial void OffsetsPartitionLoading(ILogger logger, int partition);
+    // CoordinatorStateLog: __consumer_offsets (#205), __transaction_state (#197)
+    [LoggerMessage(Level = LogLevel.Information, Message = "Loading {Topic}-{Partition}")]
+    public static partial void StatePartitionLoading(ILogger logger, string topic, int partition);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Loaded __consumer_offsets-{Partition}: {Groups} group(s) from {Records} record(s)")]
-    public static partial void OffsetsPartitionLoaded(ILogger logger, int partition, int groups, int records);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Loaded {Topic}-{Partition}: {Records} record(s)")]
+    public static partial void StatePartitionLoaded(ILogger logger, string topic, int partition, int records);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Reading __consumer_offsets-{Partition} failed; its groups are served from what was read")]
-    public static partial void OffsetsPartitionLoadFailed(ILogger logger, int partition, Exception ex);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Reading {Topic}-{Partition} failed; it is served from what was read")]
+    public static partial void StatePartitionLoadFailed(ILogger logger, string topic, int partition, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Reading __consumer_offsets-{Partition} made no progress at offset {Position} of {End}; its groups are served from what was read")]
-    public static partial void OffsetsPartitionLoadStalled(ILogger logger, int partition, long position, long end);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Reading {Topic}-{Partition} made no progress at offset {Position} of {End}; it is served from what was read")]
+    public static partial void StatePartitionLoadStalled(ILogger logger, string topic, int partition, long position, long end);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "No longer serving the groups of __consumer_offsets-{Partition}")]
-    public static partial void OffsetsPartitionUnloaded(ILogger logger, int partition);
+    [LoggerMessage(Level = LogLevel.Information, Message = "No longer serving {Topic}-{Partition}")]
+    public static partial void StatePartitionUnloaded(ILogger logger, string topic, int partition);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Writing to __consumer_offsets-{Partition} for group {GroupId} failed")]
-    public static partial void OffsetsAppendFailed(ILogger logger, string groupId, int partition, Exception ex);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Writing to {Topic}-{Partition} failed")]
+    public static partial void StateAppendFailed(ILogger logger, string topic, int partition, Exception ex);
 
     // OffsetFetch debugging
     [LoggerMessage(Level = LogLevel.Debug, Message = "[OffsetFetch] GroupId={GroupId}, Topics={TopicCount}")]

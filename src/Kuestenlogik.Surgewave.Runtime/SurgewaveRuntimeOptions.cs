@@ -145,6 +145,9 @@ public sealed record SurgewaveRuntimeOptions
     /// <summary>Partitions of <c>__consumer_offsets</c> (#204); null keeps the broker default.</summary>
     public int? OffsetsTopicNumPartitions { get; init; }
 
+    /// <summary>Partitions of <c>__transaction_state</c> (#197); null keeps the broker default.</summary>
+    public int? TransactionStateLogNumPartitions { get; init; }
+
     /// <summary>
     /// Minimum election timeout in milliseconds (Raft).
     /// </summary>

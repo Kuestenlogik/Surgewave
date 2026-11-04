@@ -8,54 +8,29 @@ public sealed partial class ClusterController
     private int _ensuringInternalTopics;
 
     /// <summary>
-    /// Creates <c>__consumer_offsets</c> once the cluster can carry it (#204). Called when this broker becomes
-    /// controller and after every broker registration, so the topic appears as soon as enough brokers are known
-    /// for its replication factor; concurrent calls collapse into one. Compacted, as Kafka's.
+    /// Creates the coordinators' topics once the cluster can carry them: <c>__consumer_offsets</c> (#204) and
+    /// <c>__transaction_state</c> (#197). Called when this broker becomes controller and after every broker
+    /// registration, so a topic appears as soon as enough brokers are known for its replication factor; concurrent
+    /// calls collapse into one. Compacted, as Kafka's.
     /// </summary>
     /// <remarks>
     /// Created up front rather than on the first FindCoordinator as Kafka does: a broker that is not the
     /// controller has no way yet to ask the controller to create a topic, and a FindCoordinator that reached the
-    /// controller only by chance would leave groups waiting on luck.
+    /// controller only by chance would leave groups and transactions waiting on luck.
     /// </remarks>
     private async Task EnsureInternalTopicsAsync(CancellationToken ct)
     {
         if (!_isController)
-            return;
-        var existing = _clusterState.GetTopic(CoordinatorPartitioner.GroupTopic);
-        if (existing is not null && UnassignedPartitions(existing).Count == 0)
             return;
         if (Interlocked.Exchange(ref _ensuringInternalTopics, 1) == 1)
             return;
 
         try
         {
-            if (existing is not null)
-            {
-                // A controller that lost its leadership between TopicCreated and the partition assignments left the
-                // topic without them; every group mapped to such a partition would have no coordinator.
-                var missing = UnassignedPartitions(existing);
-                LogInternalTopicCompleting(existing.Name, missing.Count);
-                if (!await AssignPartitionsViaRaftAsync(existing.Name, existing.TopicId, missing, existing.ReplicationFactor, ct)
-                        .ConfigureAwait(false))
-                    LogInternalTopicNotCreated(existing.Name);
-                return;
-            }
-
-            var replicationFactor = (short)Math.Min(_config.OffsetsTopicReplicationFactor, ConfiguredClusterSize());
-            if (_clusterState.Brokers.Count < replicationFactor)
-            {
-                LogInternalTopicWaitingForBrokers(CoordinatorPartitioner.GroupTopic, _clusterState.Brokers.Count, replicationFactor);
-                return;
-            }
-
-            var created = await CreateTopicAsync(
-                CoordinatorPartitioner.GroupTopic,
-                _config.OffsetsTopicNumPartitions,
-                replicationFactor,
-                new Dictionary<string, string> { ["cleanup.policy"] = "compact" },
-                ct).ConfigureAwait(false);
-            if (!created)
-                LogInternalTopicNotCreated(CoordinatorPartitioner.GroupTopic);
+            await EnsureInternalTopicAsync(CoordinatorPartitioner.GroupTopic,
+                _config.OffsetsTopicNumPartitions, _config.OffsetsTopicReplicationFactor, ct).ConfigureAwait(false);
+            await EnsureInternalTopicAsync(CoordinatorPartitioner.TransactionTopic,
+                _config.TransactionStateLogNumPartitions, _config.TransactionStateLogReplicationFactor, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -65,6 +40,38 @@ public sealed partial class ClusterController
         {
             Volatile.Write(ref _ensuringInternalTopics, 0);
         }
+    }
+
+    // Creates the topic, or completes one an earlier controller left without partition assignments.
+    private async Task EnsureInternalTopicAsync(string topic, int partitions, short configuredReplicationFactor, CancellationToken ct)
+    {
+        var existing = _clusterState.GetTopic(topic);
+        if (existing is not null)
+        {
+            // A controller that lost its leadership between TopicCreated and the partition assignments left the
+            // topic without them; every key mapped to such a partition would have no coordinator.
+            var missing = UnassignedPartitions(existing);
+            if (missing.Count == 0)
+                return;
+            LogInternalTopicCompleting(existing.Name, missing.Count);
+            if (!await AssignPartitionsViaRaftAsync(existing.Name, existing.TopicId, missing, existing.ReplicationFactor, ct)
+                    .ConfigureAwait(false))
+                LogInternalTopicNotCreated(existing.Name);
+            return;
+        }
+
+        var replicationFactor = (short)Math.Min(configuredReplicationFactor, ConfiguredClusterSize());
+        if (_clusterState.Brokers.Count < replicationFactor)
+        {
+            LogInternalTopicWaitingForBrokers(topic, _clusterState.Brokers.Count, replicationFactor);
+            return;
+        }
+
+        var created = await CreateTopicAsync(
+            topic, partitions, replicationFactor,
+            new Dictionary<string, string> { ["cleanup.policy"] = "compact" }, ct).ConfigureAwait(false);
+        if (!created)
+            LogInternalTopicNotCreated(topic);
     }
 
     // The partitions of a topic the metadata log has no replica assignment for.

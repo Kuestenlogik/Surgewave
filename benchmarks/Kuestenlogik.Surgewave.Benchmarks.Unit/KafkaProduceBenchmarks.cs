@@ -42,7 +42,7 @@ public class KafkaProduceBenchmarks
     private string _dataDir = null!;
     private LogManager _logManager = null!;
     private OffsetStore _offsetStore = null!;
-    private TransactionStateStore _transactionStateStore = null!;
+    private Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _transactionStateStore = null!;
     private TransactionCoordinator _transactionCoordinator = null!;
     private QuotaManager _quotaManager = null!;
     private DataApiHandler _handler = null!;
@@ -62,7 +62,7 @@ public class KafkaProduceBenchmarks
 
         var config = new BrokerConfig();
         _offsetStore = OffsetStore.InMemory();
-        _transactionStateStore = new TransactionStateStore(_dataDir, NullLogger<TransactionStateStore>.Instance);
+        _transactionStateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         _transactionCoordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _transactionStateStore,
             NullLogger<TransactionCoordinator>.Instance);
@@ -94,7 +94,6 @@ public class KafkaProduceBenchmarks
         _quotaManager.Dispose();
         _logManager.Dispose();
         _offsetStore.Dispose();
-        _transactionStateStore.Dispose();
         try { Directory.Delete(_dataDir, recursive: true); } catch { /* best-effort */ }
     }
 

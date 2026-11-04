@@ -30,7 +30,7 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
     private readonly string _dataDir;
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _stateStore;
     private readonly TransactionCoordinator _coordinator;
     private readonly DataApiHandler _handler;
 
@@ -40,7 +40,7 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
         Directory.CreateDirectory(_dataDir);
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(Path.Combine(_dataDir, "txn-state"), NullLogger<TransactionStateStore>.Instance);
+        _stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         _coordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _stateStore,
             NullLogger<TransactionCoordinator>.Instance);
@@ -58,7 +58,6 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
     {
         await _coordinator.DisposeAsync();
         _offsetStore.Dispose();
-        _stateStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_dataDir, recursive: true); } catch { /* best-effort */ }
     }
@@ -82,7 +81,7 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
     {
         var (pid, epoch) = await InitAsync();
 
-        var status = _coordinator.VerifyTransactionalBatch(TxnId, pid, epoch, Tp, TransactionVersion.Tv2);
+        var status = await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, epoch, Tp, TransactionVersion.Tv2, TestContext.Current.CancellationToken);
 
         Assert.Equal(TxnErrorStatus.None, status);
         Assert.Equal("Ongoing", State());
@@ -95,14 +94,14 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
         var (pid, epoch) = await InitAsync();
 
         Assert.Equal(TxnErrorStatus.TransactionAbortable,
-            _coordinator.VerifyTransactionalBatch(TxnId, pid, epoch, Tp, TransactionVersion.Tv0));
+            await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, epoch, Tp, TransactionVersion.Tv0, TestContext.Current.CancellationToken));
 
-        _coordinator.AddPartitionsToTxn(new AddPartitionsToTxnCommand
+        await _coordinator.AddPartitionsToTxnAsync(new AddPartitionsToTxnCommand
         {
             TransactionalId = TxnId, ProducerId = pid, ProducerEpoch = epoch, Topics = [new AddPartitionsTopic(Topic, [0])],
-        });
+        }, TestContext.Current.CancellationToken);
         Assert.Equal(TxnErrorStatus.None,
-            _coordinator.VerifyTransactionalBatch(TxnId, pid, epoch, Tp, TransactionVersion.Tv0));
+            await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, epoch, Tp, TransactionVersion.Tv0, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -111,14 +110,14 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
         var (pid, epoch) = await InitAsync();
 
         Assert.Equal(TxnErrorStatus.ProducerFenced,
-            _coordinator.VerifyTransactionalBatch(TxnId, pid, (short)(epoch - 1), Tp, TransactionVersion.Tv2));
+            await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, (short)(epoch - 1), Tp, TransactionVersion.Tv2, TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task V2_ACompleteCycle_CommitsTheProducedPartition_AndTheNextTransactionAddsItAgain()
     {
         var (pid, epoch) = await InitAsync();
-        _coordinator.VerifyTransactionalBatch(TxnId, pid, epoch, Tp, TransactionVersion.Tv2);
+        await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, epoch, Tp, TransactionVersion.Tv2, TestContext.Current.CancellationToken);
 
         var first = await _coordinator.EndTxnAsync(
             new EndTxnCommand { TransactionalId = TxnId, ProducerId = pid, ProducerEpoch = epoch, Committed = true, TransactionVersion = TransactionVersion.Tv2 },
@@ -127,10 +126,10 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
 
         // The next transaction runs at the bumped epoch; its first produce starts it.
         Assert.Equal(TxnErrorStatus.None,
-            _coordinator.VerifyTransactionalBatch(TxnId, pid, first.ProducerEpoch, Tp, TransactionVersion.Tv2));
+            await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, first.ProducerEpoch, Tp, TransactionVersion.Tv2, TestContext.Current.CancellationToken));
         Assert.Equal("Ongoing", State());
         Assert.Equal(TxnErrorStatus.ProducerFenced,
-            _coordinator.VerifyTransactionalBatch(TxnId, pid, epoch, Tp, TransactionVersion.Tv2));
+            await _coordinator.VerifyTransactionalBatchAsync(TxnId, pid, epoch, Tp, TransactionVersion.Tv2, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -138,11 +137,11 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
     {
         var (pid, epoch) = await InitAsync();
 
-        var staged = _coordinator.TxnOffsetCommit(new TxnOffsetCommitCommand
+        var staged = await _coordinator.TxnOffsetCommitAsync(new TxnOffsetCommitCommand
         {
             TransactionalId = TxnId, GroupId = "g", ProducerId = pid, ProducerEpoch = epoch, TransactionVersion = TransactionVersion.Tv2,
             Topics = [new TxnOffsetCommitTopic { Name = Topic, TopicId = Guid.Empty, Partitions = [new TxnOffsetCommitPartition(0, 17, null)] }],
-        });
+        }, TestContext.Current.CancellationToken);
         Assert.Equal(TxnErrorStatus.None, staged.Topics[0].Partitions[0].Status);
         Assert.Equal("Ongoing", State());
 
@@ -158,11 +157,11 @@ public sealed class TransactionalProduceVerificationTests : IAsyncDisposable
     {
         var (pid, epoch) = await InitAsync();
 
-        var staged = _coordinator.TxnOffsetCommit(new TxnOffsetCommitCommand
+        var staged = await _coordinator.TxnOffsetCommitAsync(new TxnOffsetCommitCommand
         {
             TransactionalId = TxnId, GroupId = "g", ProducerId = pid, ProducerEpoch = epoch,
             Topics = [new TxnOffsetCommitTopic { Name = Topic, TopicId = Guid.Empty, Partitions = [new TxnOffsetCommitPartition(0, 17, null)] }],
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(TxnErrorStatus.TransactionAbortable, staged.Topics[0].Partitions[0].Status);
     }

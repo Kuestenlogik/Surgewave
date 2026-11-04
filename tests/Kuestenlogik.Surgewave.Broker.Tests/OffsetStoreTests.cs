@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Broker.GroupOffsets;
 using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -37,9 +38,9 @@ public sealed class OffsetStoreTests : IDisposable
     public async Task ACommitIsReadBackByTheNextStoreOverTheLog()
     {
         var first = await LocalStoreAsync();
-        Assert.Equal(OffsetWriteStatus.Ok, await first.CommitOffsetsAsync("orders-app",
+        Assert.Equal(StateWriteStatus.Ok, await first.CommitOffsetsAsync("orders-app",
             [new CommittedOffset("orders", 0, 42), new CommittedOffset("orders", 1, 7)], _ct));
-        Assert.Equal(OffsetWriteStatus.Ok, await first.CommitOffsetAsync("orders-app", "orders", 0, 43, _ct));
+        Assert.Equal(StateWriteStatus.Ok, await first.CommitOffsetAsync("orders-app", "orders", 0, 43, _ct));
 
         // A restart, or another broker taking the partition over: everything comes from the log.
         var next = await LocalStoreAsync();
@@ -57,8 +58,8 @@ public sealed class OffsetStoreTests : IDisposable
         await first.CommitOffsetsAsync("keeps", [new CommittedOffset("orders", 0, 1), new CommittedOffset("orders", 1, 2)], _ct);
         await first.CommitOffsetAsync("goes", "orders", 0, 3, _ct);
 
-        Assert.Equal(OffsetWriteStatus.Ok, await first.DeleteOffsetAsync("keeps", "orders", 1, _ct));
-        Assert.Equal(OffsetWriteStatus.Ok, await first.DeleteGroupAsync("goes", _ct));
+        Assert.Equal(StateWriteStatus.Ok, await first.DeleteOffsetAsync("keeps", "orders", 1, _ct));
+        Assert.Equal(StateWriteStatus.Ok, await first.DeleteGroupAsync("goes", _ct));
         Assert.Equal(-1, first.GetCommittedOffset("goes", "orders", 0));
 
         var next = await LocalStoreAsync();
@@ -72,7 +73,7 @@ public sealed class OffsetStoreTests : IDisposable
     public async Task TheGenerationAGroupReachedIsReadBack()
     {
         var first = await LocalStoreAsync();
-        Assert.Equal(OffsetWriteStatus.Ok, await first.RecordGenerationAsync("orders-app", "consumer", 5, "range", "member-1", _ct));
+        Assert.Equal(StateWriteStatus.Ok, await first.RecordGenerationAsync("orders-app", "consumer", 5, "range", "member-1", _ct));
 
         var next = await LocalStoreAsync();
         Assert.Equal(5, next.GetGeneration("orders-app"));
@@ -87,9 +88,9 @@ public sealed class OffsetStoreTests : IDisposable
 
         store.OnLeadershipChanged(PartitionOf("orders-app"), isLeader: false);
 
-        Assert.Equal(GroupOwnership.NotOwned, store.OwnershipOf("orders-app"));
+        Assert.Equal(CoordinatorOwnership.NotOwned, store.OwnershipOf("orders-app"));
         Assert.Equal(-1, store.GetCommittedOffset("orders-app", "orders", 0));
-        Assert.Equal(OffsetWriteStatus.NotCoordinator, await store.CommitOffsetAsync("orders-app", "orders", 0, 43, _ct));
+        Assert.Equal(StateWriteStatus.NotCoordinator, await store.CommitOffsetAsync("orders-app", "orders", 0, 43, _ct));
     }
 
     [Fact]
@@ -100,12 +101,12 @@ public sealed class OffsetStoreTests : IDisposable
 
         // A store that leads nothing yet, then is told it leads the group's partition.
         var takeover = new OffsetStore(_log, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
-        Assert.Equal(GroupOwnership.NotOwned, takeover.OwnershipOf("orders-app"));
+        Assert.Equal(CoordinatorOwnership.NotOwned, takeover.OwnershipOf("orders-app"));
 
         takeover.OnLeadershipChanged(PartitionOf("orders-app"), isLeader: true);
         await takeover.WhenLoadedAsync("orders-app").WaitAsync(TimeSpan.FromSeconds(30), _ct);
 
-        Assert.Equal(GroupOwnership.Owned, takeover.OwnershipOf("orders-app"));
+        Assert.Equal(CoordinatorOwnership.Owned, takeover.OwnershipOf("orders-app"));
         Assert.Equal(42, takeover.GetCommittedOffset("orders-app", "orders", 0));
     }
 

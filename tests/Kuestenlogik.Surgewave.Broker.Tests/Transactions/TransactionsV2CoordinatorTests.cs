@@ -1,4 +1,6 @@
 using Kuestenlogik.Surgewave.Broker;
+using Kuestenlogik.Surgewave.Broker.Transactions;
+using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Storage.Engine.Memory;
@@ -15,13 +17,14 @@ namespace Kuestenlogik.Surgewave.Broker.Tests.Transactions;
 /// restart is completed.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
-public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
+public sealed class TransactionsV2CoordinatorTests : IAsyncLifetime
 {
     private readonly string _dir;
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
-    private TransactionCoordinator _coordinator;
+    private readonly RecordBatchSerializer _serializer = new(NullLogger<RecordBatchSerializer>.Instance);
+    private TransactionStateLog _stateLog = null!;
+    private TransactionCoordinator _coordinator = null!;
 
     public TransactionsV2CoordinatorTests()
     {
@@ -29,19 +32,31 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
         Directory.CreateDirectory(_dir);
         _logManager = new LogManager(_dir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(Path.Combine(_dir, "txn-state"), NullLogger<TransactionStateStore>.Instance);
+    }
+
+    // The coordinator's state is in __transaction_state of the test's log, so a restart reads it back (#197).
+    public async ValueTask InitializeAsync()
+    {
+        _stateLog = new TransactionStateLog(_logManager, _serializer, 1, NullLogger<TransactionStateLog>.Instance);
         _coordinator = NewCoordinator();
+        await _stateLog.StartLocalAsync(CancellationToken.None);
     }
 
     private TransactionCoordinator NewCoordinator() => new(
-        new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _stateStore,
+        new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _stateLog,
         NullLogger<TransactionCoordinator>.Instance);
+
+    // A new coordinator over the same log: everything it knows it reads from __transaction_state.
+    private async Task RestartAsync()
+    {
+        await _coordinator.DisposeAsync();
+        await InitializeAsync();
+    }
 
     public async ValueTask DisposeAsync()
     {
         await _coordinator.DisposeAsync();
         _offsetStore.Dispose();
-        _stateStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort */ }
     }
@@ -55,14 +70,14 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
         return (init.ProducerId, init.ProducerEpoch);
     }
 
-    private TxnErrorStatus AddPartition(string txnId, long pid, short epoch)
-        => _coordinator.AddPartitionsToTxn(new AddPartitionsToTxnCommand
+    private async Task<TxnErrorStatus> AddPartitionAsync(string txnId, long pid, short epoch)
+        => (await _coordinator.AddPartitionsToTxnAsync(new AddPartitionsToTxnCommand
         {
             TransactionalId = txnId,
             ProducerId = pid,
             ProducerEpoch = epoch,
             Topics = [new AddPartitionsTopic("orders", [0])],
-        }).Topics[0].Partitions[0].Status;
+        }, CancellationToken.None)).Topics[0].Partitions[0].Status;
 
     private Task<EndTxnResult> EndAsync(string txnId, long pid, short epoch, bool commit, TransactionVersion version)
         => _coordinator.EndTxnAsync(
@@ -71,7 +86,8 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
 
     private TransactionDescription Describe(string txnId) => Assert.Single(_coordinator.DescribeTransactions([txnId]));
 
-    private void Seed(PersistedTransactionState state) => _stateStore.SaveTransactionState(state);
+    private async Task SeedAsync(TransactionMetadata txn)
+        => Assert.Equal(Kuestenlogik.Surgewave.Broker.Coordination.StateWriteStatus.Ok, await _stateLog.WriteAsync(txn, CancellationToken.None));
 
     // ── Transactions V2 ─────────────────────────────────────────────────────
 
@@ -79,7 +95,7 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     public async Task V2_Commit_BumpsTheEpochAndReturnsIt()
     {
         var (pid, epoch) = await InitAsync("tv2-a");
-        Assert.Equal(TxnErrorStatus.None, AddPartition("tv2-a", pid, epoch));
+        Assert.Equal(TxnErrorStatus.None, await AddPartitionAsync("tv2-a", pid, epoch));
 
         var result = await EndAsync("tv2-a", pid, epoch, commit: true, TransactionVersion.Tv2);
 
@@ -91,7 +107,7 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     public async Task V2_ARetriedCommit_IsAnsweredWithTheSameEpoch()
     {
         var (pid, epoch) = await InitAsync("tv2-b");
-        AddPartition("tv2-b", pid, epoch);
+        await AddPartitionAsync("tv2-b", pid, epoch);
         await EndAsync("tv2-b", pid, epoch, commit: true, TransactionVersion.Tv2);
 
         var retry = await EndAsync("tv2-b", pid, epoch, commit: true, TransactionVersion.Tv2);
@@ -117,12 +133,11 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     {
         const long oldPid = 4242;
         const short lastEpoch = short.MaxValue - 1;
-        Seed(new PersistedTransactionState
+        await SeedAsync(new TransactionMetadata
         {
-            TransactionalId = "tv2-d", ProducerId = oldPid, ProducerEpoch = lastEpoch, State = "Empty", TransactionTimeoutMs = 60_000,
+            TransactionalId = "tv2-d", ProducerId = oldPid, ProducerEpoch = lastEpoch, State = Core.KafkaConstants.TransactionState.Empty, TransactionTimeoutMs = 60_000,
         });
-        await _coordinator.DisposeAsync();
-        _coordinator = NewCoordinator();
+        await RestartAsync();
 
         var result = await EndAsync("tv2-d", oldPid, lastEpoch, commit: true, TransactionVersion.Tv2);
         var retry = await EndAsync("tv2-d", oldPid, lastEpoch, commit: true, TransactionVersion.Tv2);
@@ -137,11 +152,10 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     public async Task V2_TheLastEpochSurvivesARestart_SoARetryIsStillRecognised()
     {
         var (pid, epoch) = await InitAsync("tv2-e");
-        AddPartition("tv2-e", pid, epoch);
+        await AddPartitionAsync("tv2-e", pid, epoch);
         await EndAsync("tv2-e", pid, epoch, commit: true, TransactionVersion.Tv2);
 
-        await _coordinator.DisposeAsync();
-        _coordinator = NewCoordinator();
+        await RestartAsync();
         var retry = await EndAsync("tv2-e", pid, epoch, commit: true, TransactionVersion.Tv2);
 
         Assert.Equal(new EndTxnResult(TxnErrorStatus.None, pid, (short)(epoch + 1)), retry);
@@ -153,7 +167,7 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     public async Task V1_ARetriedCommit_IsASuccessAndTheEpochStays()
     {
         var (pid, epoch) = await InitAsync("tv1-a");
-        AddPartition("tv1-a", pid, epoch);
+        await AddPartitionAsync("tv1-a", pid, epoch);
 
         var first = await EndAsync("tv1-a", pid, epoch, commit: true, TransactionVersion.Tv0);
         var retry = await EndAsync("tv1-a", pid, epoch, commit: true, TransactionVersion.Tv0);
@@ -166,7 +180,7 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     public async Task V1_AnOldEpoch_IsProducerFenced()
     {
         var (pid, epoch) = await InitAsync("tv1-b");
-        AddPartition("tv1-b", pid, epoch);
+        await AddPartitionAsync("tv1-b", pid, epoch);
 
         var result = await EndAsync("tv1-b", pid, (short)(epoch - 1), commit: true, TransactionVersion.Tv0);
 
@@ -179,13 +193,13 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
         // Was INVALID_TXN_STATE: AddOffsetsToTxn accepted only Empty and Ongoing, so a consume-transform-produce
         // loop that adds its offsets before its partitions failed on its second transaction.
         var (pid, epoch) = await InitAsync("tv1-c");
-        AddPartition("tv1-c", pid, epoch);
+        await AddPartitionAsync("tv1-c", pid, epoch);
         await EndAsync("tv1-c", pid, epoch, commit: true, TransactionVersion.Tv0);
 
-        var added = _coordinator.AddOffsetsToTxn(new AddOffsetsToTxnCommand
+        var added = await _coordinator.AddOffsetsToTxnAsync(new AddOffsetsToTxnCommand
         {
             TransactionalId = "tv1-c", ProducerId = pid, ProducerEpoch = epoch, GroupId = "g",
-        });
+        }, CancellationToken.None);
 
         Assert.Equal(TxnErrorStatus.None, added.Status);
         Assert.Equal("Ongoing", Describe("tv1-c").State);
@@ -199,7 +213,7 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     public async Task TheTimeoutAbort_FencesTheProducer_AndACommitInFlightIsProducerFenced(TransactionVersion version)
     {
         var (pid, epoch) = await InitAsync("to-" + version, timeoutMs: 1_000);
-        AddPartition("to-" + version, pid, epoch);
+        await AddPartitionAsync("to-" + version, pid, epoch);
 
         await _coordinator.ExpireTransactionsAsync(DateTimeOffset.UtcNow.AddSeconds(5), CancellationToken.None);
 
@@ -214,15 +228,14 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     [Fact]
     public async Task ATransactionLeftPreparedByARestart_IsCompletedAndItsOffsetsCommitted()
     {
-        Seed(new PersistedTransactionState
+        await SeedAsync(new TransactionMetadata
         {
-            TransactionalId = "rec-a", ProducerId = 77, ProducerEpoch = 3, State = "PrepareCommit", TransactionTimeoutMs = 60_000,
-            Partitions = [new PersistedPartition { Topic = "orders", Partition = 0 }],
-            ConsumerGroups = ["g"],
-            PendingOffsets = [new PendingOffsetEntry { GroupId = "g", Topic = "orders", Partition = 0, Offset = 42 }],
+            TransactionalId = "rec-a", ProducerId = 77, ProducerEpoch = 3, State = Core.KafkaConstants.TransactionState.PrepareCommit, TransactionTimeoutMs = 60_000,
+            Partitions = { new TopicPartition { Topic = "orders", Partition = 0 } },
+            ConsumerGroups = { "g" },
+            PendingOffsets = { new PendingTxnOffset { GroupId = "g", Topic = "orders", Partition = 0, Offset = 42 } },
         });
-        await _coordinator.DisposeAsync();
-        _coordinator = NewCoordinator();
+        await RestartAsync();
 
         await _coordinator.ExpireTransactionsAsync(DateTimeOffset.UtcNow, CancellationToken.None);
 
@@ -233,12 +246,11 @@ public sealed class TransactionsV2CoordinatorTests : IAsyncDisposable
     [Fact]
     public async Task WhileATransactionIsPrepared_EndTxnAndInitProducerIdAreConcurrentTransactions()
     {
-        Seed(new PersistedTransactionState
+        await SeedAsync(new TransactionMetadata
         {
-            TransactionalId = "prep-a", ProducerId = 78, ProducerEpoch = 3, State = "PrepareCommit", TransactionTimeoutMs = 60_000,
+            TransactionalId = "prep-a", ProducerId = 78, ProducerEpoch = 3, State = Core.KafkaConstants.TransactionState.PrepareCommit, TransactionTimeoutMs = 60_000,
         });
-        await _coordinator.DisposeAsync();
-        _coordinator = NewCoordinator();
+        await RestartAsync();
 
         var end = await EndAsync("prep-a", 78, 3, commit: true, TransactionVersion.Tv0);
         var init = await _coordinator.InitProducerIdAsync(

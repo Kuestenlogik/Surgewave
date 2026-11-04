@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using System.Collections.Concurrent;
 using Kuestenlogik.Surgewave.Coordination.Transactions;
 using Kuestenlogik.Surgewave.Core;
@@ -26,7 +27,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     private readonly LogManager _logManager;
     private readonly ConcurrentDictionary<string, TransactionMetadata> _transactionsByTxnId = new();
     private readonly TransactionMarkerWriter _markerWriter;
-    private readonly TransactionStatePersistence _statePersistence;
+    private readonly TransactionStateLog _stateLog;
     private readonly TransactionTimeoutManager _timeoutManager;
 
     // #72 Inc7 — best-effort inter-broker marker replication (merged from the now-deleted
@@ -45,7 +46,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         LogManager logManager,
         TransactionIndex transactionIndex,
         OffsetStore offsetStore,
-        TransactionStateStore stateStore,
+        TransactionStateLog stateLog,
         ILogger<TransactionCoordinator> logger)
     {
         _producerStateManager = producerStateManager;
@@ -56,10 +57,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
         // Create helper components
         _markerWriter = new TransactionMarkerWriter(logManager, logger);
-        _statePersistence = new TransactionStatePersistence(stateStore, producerStateManager, logger);
 
-        // Load persisted transaction state on startup
-        _statePersistence.LoadPersistedState(_transactionsByTxnId);
+        // The transactions of the partitions of __transaction_state this broker leads (#197): taken over when a
+        // partition has been read, let go when another broker leads it.
+        _stateLog = stateLog;
+        _stateLog.Attach(LoadPartition, UnloadPartition);
 
         // Start timeout manager: aborts expired transactions and finishes prepared ones
         _timeoutManager = new TransactionTimeoutManager(ExpireTransactionsAsync, logger);
@@ -222,29 +224,33 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
     /// <summary>
     /// Records a transactional batch being written. Called from produce path, after
-    /// <see cref="VerifyTransactionalBatch"/> has put the partition into its transaction.
+    /// <see cref="VerifyTransactionalBatchAsync"/> has put the partition into its transaction.
     /// </summary>
     public void RecordTransactionalBatch(TopicPartition partition, long producerId, long baseOffset)
         => _transactionIndex.RecordTransactionalBatch(partition, producerId, baseOffset);
 
     /// <inheritdoc />
-    public TxnErrorStatus VerifyTransactionalBatch(
-        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version)
-        => WithTransaction(transactionalId, producerId, producerEpoch, txn =>
+    public Task<TxnErrorStatus> VerifyTransactionalBatchAsync(
+        string transactionalId, long producerId, short producerEpoch, TopicPartition partition, TransactionVersion version,
+        CancellationToken cancellationToken)
+        => WithTransactionAsync(transactionalId, producerId, producerEpoch, txn =>
         {
             if (version >= TransactionVersion.Tv2)
             {
+                // V2 adds the partition implicitly with its first batch; the added partition is persisted.
+                var changed = txn.ClientTransactionVersion != version;
                 txn.ClientTransactionVersion = version;
-                return AddToTransaction(txn, partition, groupId: null);
+                var (status, added) = AddToTransaction(txn, partition, groupId: null);
+                return (status, changed || added);
             }
 
             // Kafka's verification (KIP-890 part 1): the partition was added with AddPartitionsToTxn.
             if (txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
-                return TxnErrorStatus.ConcurrentTransactions;
-            return txn.State == TransactionState.Ongoing && txn.Partitions.Contains(partition)
+                return (TxnErrorStatus.ConcurrentTransactions, false);
+            return (txn.State == TransactionState.Ongoing && txn.Partitions.Contains(partition)
                 ? TxnErrorStatus.None
-                : TxnErrorStatus.TransactionAbortable;
-        });
+                : TxnErrorStatus.TransactionAbortable, false);
+        }, cancellationToken);
 
     /// <summary>
     /// Validates a produce batch for idempotence (sequence number validation). Produce-hot-path;
@@ -285,7 +291,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             return new InitProducerIdResult(TxnErrorStatus.None, producerId, epoch);
         }
 
-        // Transactional producer
+        // Transactional producer: only the leader of the id's partition of __transaction_state answers (KAFKA-21181).
+        var here = OwnershipStatus(request.TransactionalId);
+        if (here != TxnErrorStatus.None)
+            return new InitProducerIdResult(here, -1, -1);
+
         var txnMetadata = _transactionsByTxnId.GetOrAdd(request.TransactionalId, txnId =>
         {
             var (pid, ep) = _producerStateManager.AllocateProducerId();
@@ -379,7 +389,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
             txnMetadata.State = TransactionState.Empty;
             txnMetadata.TransactionTimeoutMs = request.TransactionTimeoutMs;
-            _statePersistence.PersistState(txnMetadata);
+            var persisted = await PersistAsync(txnMetadata, cancellationToken);
+            if (persisted != TxnErrorStatus.None)
+                return new InitProducerIdResult(persisted, NoProducerId, NoProducerEpoch);
 
             return new InitProducerIdResult(TxnErrorStatus.None, txnMetadata.ProducerId, txnMetadata.ProducerEpoch);
         }
@@ -392,23 +404,25 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// <summary>
     /// Handles AddPartitionsToTxn.
     /// </summary>
-    public AddPartitionsToTxnResult AddPartitionsToTxn(AddPartitionsToTxnCommand request)
+    public async Task<AddPartitionsToTxnResult> AddPartitionsToTxnAsync(AddPartitionsToTxnCommand request, CancellationToken cancellationToken)
     {
-        TxnErrorStatus Add(TransactionMetadata txn)
+        (TxnErrorStatus, bool) Add(TransactionMetadata txn)
         {
+            var changed = false;
             foreach (var topic in request.Topics)
             {
                 foreach (var partition in topic.Partitions)
                 {
-                    var status = AddToTransaction(txn, new TopicPartition { Topic = topic.Topic, Partition = partition }, groupId: null);
+                    var (status, added) = AddToTransaction(txn, new TopicPartition { Topic = topic.Topic, Partition = partition }, groupId: null);
                     if (status != TxnErrorStatus.None)
-                        return status;
+                        return (status, changed);
+                    changed |= added;
                 }
             }
-            return TxnErrorStatus.None;
+            return (TxnErrorStatus.None, changed);
         }
 
-        var status = WithTransaction(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Add);
+        var status = await WithTransactionAsync(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Add, cancellationToken);
 
         var results = new List<AddPartitionsTopicResult>(request.Topics.Count);
         foreach (var topic in request.Topics)
@@ -426,10 +440,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// <summary>
     /// Handles AddOffsetsToTxn - adds consumer group offsets to a transaction.
     /// </summary>
-    public AddOffsetsToTxnResult AddOffsetsToTxn(AddOffsetsToTxnCommand request)
+    public async Task<AddOffsetsToTxnResult> AddOffsetsToTxnAsync(AddOffsetsToTxnCommand request, CancellationToken cancellationToken)
     {
-        var status = WithTransaction(request.TransactionalId, request.ProducerId, request.ProducerEpoch,
-            txn => AddToTransaction(txn, partition: null, request.GroupId));
+        var status = await WithTransactionAsync(request.TransactionalId, request.ProducerId, request.ProducerEpoch,
+            txn => AddToTransaction(txn, partition: null, request.GroupId), cancellationToken);
 
         if (status == TxnErrorStatus.None)
         {
@@ -442,7 +456,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// <summary>
     /// Handles TxnOffsetCommit - commits consumer offsets as part of a transaction.
     /// </summary>
-    public TxnOffsetCommitResult TxnOffsetCommit(TxnOffsetCommitCommand request)
+    public async Task<TxnOffsetCommitResult> TxnOffsetCommitAsync(TxnOffsetCommitCommand request, CancellationToken cancellationToken)
     {
         // Resolve each topic to its (Name, TopicId) pair once so both the
         // pending-offset store (name-keyed) and the v6 response wire (id-keyed)
@@ -479,23 +493,23 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         var stagedCount = 0;
         var partitionStatus = new Dictionary<(int Topic, int Partition), TxnErrorStatus>();
 
-        TxnErrorStatus Stage(TransactionMetadata txn)
+        (TxnErrorStatus, bool) Stage(TransactionMetadata txn)
         {
             if (txn.State is TransactionState.PrepareCommit or TransactionState.PrepareAbort)
-                return TxnErrorStatus.ConcurrentTransactions;
+                return (TxnErrorStatus.ConcurrentTransactions, false);
 
             if (request.TransactionVersion >= TransactionVersion.Tv2)
             {
                 // V2 sends no AddOffsetsToTxn: the commit puts the group into the transaction.
                 txn.ClientTransactionVersion = request.TransactionVersion;
-                var added = AddToTransaction(txn, partition: null, request.GroupId);
+                var (added, _) = AddToTransaction(txn, partition: null, request.GroupId);
                 if (added != TxnErrorStatus.None)
-                    return added;
+                    return (added, false);
             }
             else if (txn.State != TransactionState.Ongoing || !txn.ConsumerGroups.Contains(request.GroupId))
             {
                 // Kafka's verification: the group was added with AddOffsetsToTxn.
-                return TxnErrorStatus.TransactionAbortable;
+                return (TxnErrorStatus.TransactionAbortable, false);
             }
 
             for (var i = 0; i < resolved.Count; i++)
@@ -519,11 +533,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
                     stagedCount++;
                 }
             }
-            _statePersistence.PersistState(txn);
-            return TxnErrorStatus.None;
+            // The staged offsets are part of the transaction's state: a coordinator that takes it over commits them.
+            return (TxnErrorStatus.None, true);
         }
 
-        var status = WithTransaction(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Stage);
+        var status = await WithTransactionAsync(request.TransactionalId, request.ProducerId, request.ProducerEpoch, Stage, cancellationToken);
 
         var topics = new List<TxnOffsetCommitTopicResult>(resolved.Count);
         for (var i = 0; i < resolved.Count; i++)
@@ -556,6 +570,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     {
         if (string.IsNullOrEmpty(request.TransactionalId))
             return new EndTxnResult(TxnErrorStatus.InvalidRequest);
+        var here = OwnershipStatus(request.TransactionalId);
+        if (here != TxnErrorStatus.None)
+            return new EndTxnResult(here);
         if (!_transactionsByTxnId.TryGetValue(request.TransactionalId, out var txn))
             return new EndTxnResult(TxnErrorStatus.InvalidProducerIdMapping);
 
@@ -582,7 +599,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             {
                 PrepareEpochBump(txn);
             }
-            Prepare(txn, request.Committed);
+            // The decision is durable before any marker is written: a coordinator that takes over completes it.
+            var prepared = await PrepareAsync(txn, request.Committed, cancellationToken);
+            if (prepared != TxnErrorStatus.None)
+                return new EndTxnResult(prepared);
         }
         finally
         {
@@ -621,7 +641,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
                         txn.TransactionalId,
                         txn.TransactionTimeoutMs);
                     PrepareEpochBump(txn);
-                    Prepare(txn, commit: false);
+                    var prepared = await PrepareAsync(txn, commit: false, cancellationToken);
+                    if (prepared != TxnErrorStatus.None)
+                    {
+                        // Not durable, so no marker is written; the next pass tries again.
+                        _logger.LogWarning("The timeout abort of {TransactionalId} was not recorded: {Status}", txn.TransactionalId, prepared);
+                        txn.CompletionInProgress = false;
+                        continue;
+                    }
                 }
                 else
                 {
@@ -652,21 +679,33 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     /// from the producer: the transactional id must be known and belong to the producer id, and the epoch must
     /// be the current one.
     /// </summary>
-    private TxnErrorStatus WithTransaction(string? transactionalId, long producerId, short producerEpoch, Func<TransactionMetadata, TxnErrorStatus> action)
+    /// <remarks>
+    /// A change the action reports is written to <c>__transaction_state</c> before the answer, still under the lock,
+    /// so the record is the state that was decided on (#197).
+    /// </remarks>
+    private async Task<TxnErrorStatus> WithTransactionAsync(
+        string? transactionalId, long producerId, short producerEpoch,
+        Func<TransactionMetadata, (TxnErrorStatus Status, bool Changed)> action, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(transactionalId))
             return TxnErrorStatus.InvalidRequest;
+        var here = OwnershipStatus(transactionalId);
+        if (here != TxnErrorStatus.None)
+            return here;
         if (!_transactionsByTxnId.TryGetValue(transactionalId, out var txn))
             return TxnErrorStatus.InvalidProducerIdMapping;
 
-        txn.Lock.Wait();
+        await txn.Lock.WaitAsync(cancellationToken);
         try
         {
             if (producerId != txn.ProducerId)
                 return TxnErrorStatus.InvalidProducerIdMapping;
             if (producerEpoch != txn.ProducerEpoch)
                 return TxnErrorStatus.ProducerFenced;
-            return action(txn);
+            var (status, changed) = action(txn);
+            if (status != TxnErrorStatus.None || !changed)
+                return status;
+            return await PersistAsync(txn, cancellationToken);
         }
         finally
         {
@@ -674,35 +713,84 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         }
     }
 
+    // Whether this broker coordinates the transactional id now.
+    private TxnErrorStatus OwnershipStatus(string transactionalId) => _stateLog.OwnershipOf(transactionalId) switch
+    {
+        CoordinatorOwnership.Owned => TxnErrorStatus.None,
+        CoordinatorOwnership.Loading => TxnErrorStatus.CoordinatorLoadInProgress,
+        _ => TxnErrorStatus.NotCoordinator,
+    };
+
+    // Writes the transaction to __transaction_state; called with its lock held.
+    private async Task<TxnErrorStatus> PersistAsync(TransactionMetadata txn, CancellationToken cancellationToken)
+        => await _stateLog.WriteAsync(txn, cancellationToken) switch
+        {
+            StateWriteStatus.Ok => TxnErrorStatus.None,
+            StateWriteStatus.NotCoordinator => TxnErrorStatus.NotCoordinator,
+            StateWriteStatus.LoadInProgress => TxnErrorStatus.CoordinatorLoadInProgress,
+            _ => TxnErrorStatus.CoordinatorNotAvailable,
+        };
+
+    // Under the state log's lock: a partition of __transaction_state was read, and its transactions are this
+    // broker's — as the previous coordinator left them. An ongoing one stays ongoing (the producer may still end it,
+    // or its timeout aborts it); a prepared one is completed by the next expiry pass, its outcome decided already.
+    private void LoadPartition(int partition, IReadOnlyList<TransactionMetadata> transactions)
+    {
+        foreach (var txn in transactions)
+        {
+            _producerStateManager.RegisterProducerId(txn.ProducerId, txn.ProducerEpoch);
+            if (txn.NextProducerId != -1)
+                _producerStateManager.RegisterProducerId(txn.NextProducerId, 0);
+            if (txn.State is TransactionState.Ongoing or TransactionState.PrepareCommit or TransactionState.PrepareAbort)
+            {
+                _logger.LogInformation(
+                    "Took over transaction {TransactionalId} in {State} with {PartitionCount} partition(s)",
+                    txn.TransactionalId, txn.State, txn.Partitions.Count);
+            }
+            _transactionsByTxnId[txn.TransactionalId] = txn;
+        }
+        _logger.LogInformation("Coordinating {Count} transactional id(s) of __transaction_state-{Partition}", transactions.Count, partition);
+    }
+
+    // Under the state log's lock: another broker leads the partition now, or this one reads it afresh.
+    private void UnloadPartition(int partition)
+    {
+        foreach (var transactionalId in _transactionsByTxnId.Keys)
+        {
+            if (_stateLog.PartitionFor(transactionalId) == partition)
+                _transactionsByTxnId.TryRemove(transactionalId, out _);
+        }
+    }
+
     /// <summary>
     /// Adds a partition or a consumer group to the transaction, starting it when none is ongoing. Called with the
     /// transaction's lock held.
     /// </summary>
-    private TxnErrorStatus AddToTransaction(TransactionMetadata txn, TopicPartition? partition, string? groupId)
+    /// <returns>The outcome, and whether the transaction changed and is to be written.</returns>
+    private static (TxnErrorStatus Status, bool Changed) AddToTransaction(TransactionMetadata txn, TopicPartition? partition, string? groupId)
     {
+        var changed = false;
         switch (txn.State)
         {
             case TransactionState.PrepareCommit or TransactionState.PrepareAbort:
-                return TxnErrorStatus.ConcurrentTransactions;
+                return (TxnErrorStatus.ConcurrentTransactions, false);
             case TransactionState.Dead:
-                return TxnErrorStatus.InvalidTxnState;
+                return (TxnErrorStatus.InvalidTxnState, false);
             case TransactionState.Empty or TransactionState.CompleteCommit or TransactionState.CompleteAbort:
                 ClearTransactionContents(txn);
                 txn.State = TransactionState.Ongoing;
                 txn.TxnStartTime = DateTimeOffset.UtcNow;
+                changed = true;
                 break;
         }
 
-        var changed = false;
         if (partition is not null)
             changed |= txn.Partitions.Add(partition.Value);
         if (groupId is not null)
             changed |= txn.ConsumerGroups.Add(groupId);
 
         txn.LastActivityTime = DateTimeOffset.UtcNow;
-        if (changed)
-            _statePersistence.PersistState(txn);
-        return TxnErrorStatus.None;
+        return (TxnErrorStatus.None, changed);
     }
 
     /// <summary>
@@ -744,12 +832,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
     }
 
     /// <summary>Moves the transaction to PrepareCommit / PrepareAbort and persists it. Called with the lock held.</summary>
-    private void Prepare(TransactionMetadata txn, bool commit)
+    private async Task<TxnErrorStatus> PrepareAsync(TransactionMetadata txn, bool commit, CancellationToken cancellationToken)
     {
         txn.State = commit ? TransactionState.PrepareCommit : TransactionState.PrepareAbort;
         txn.CompletionInProgress = true;
         txn.LastActivityTime = DateTimeOffset.UtcNow;
-        _statePersistence.PersistState(txn);
+        return await PersistAsync(txn, cancellationToken);
     }
 
     /// <summary>
@@ -783,7 +871,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
             {
                 var written = await _offsetStore.CommitOffsetsAsync(group.Key,
                     [.. group.Select(o => new CommittedOffset(o.Topic, o.Partition, o.Offset))], cancellationToken);
-                if (written == OffsetWriteStatus.Ok)
+                if (written == StateWriteStatus.Ok)
                     _logger.LogDebug("Committed {Count} transactional offset(s) for group {GroupId}", group.Count(), group.Key);
                 else
                     _logger.LogWarning("The transactional offsets of group {GroupId} were not committed: {Status}", group.Key, written);
@@ -804,7 +892,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
 
             ApplyEpochBump(txn);
 
-            _statePersistence.PersistState(txn);
+            // The markers are out; a completion that does not reach the log leaves the transaction prepared there,
+            // and the coordinator that takes it over writes the markers again — harmless, as each names its outcome.
+            var completed = await PersistAsync(txn, CancellationToken.None);
+            if (completed != TxnErrorStatus.None)
+                _logger.LogWarning("The completion of {TransactionalId} was not recorded: {Status}", txn.TransactionalId, completed);
             return (txn.ProducerId, txn.ProducerEpoch);
         }
         finally
@@ -964,6 +1056,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable, ITransactionCoord
         var result = new List<TransactionDescription>();
         foreach (var txnId in transactionalIds)
         {
+            var here = OwnershipStatus(txnId);
+            if (here != TxnErrorStatus.None)
+            {
+                // NOT_COORDINATOR (16), COORDINATOR_LOAD_IN_PROGRESS (14): the client asks the id's coordinator.
+                result.Add(new TransactionDescription(txnId, "Unknown", -1, -1, 0, 0, [],
+                    here == TxnErrorStatus.CoordinatorLoadInProgress ? 14 : 16));
+                continue;
+            }
             if (_transactionsByTxnId.TryGetValue(txnId, out var txn))
             {
                 result.Add(new TransactionDescription(

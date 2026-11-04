@@ -26,7 +26,7 @@ public sealed class ProduceByTopicIdTests : IAsyncDisposable
     private readonly string _dataDir;
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _stateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _stateStore;
     private readonly TransactionCoordinator _coordinator;
     private readonly DataApiHandler _handler;
 
@@ -36,7 +36,7 @@ public sealed class ProduceByTopicIdTests : IAsyncDisposable
         Directory.CreateDirectory(_dataDir);
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _offsetStore = OffsetStore.InMemory();
-        _stateStore = new TransactionStateStore(Path.Combine(_dataDir, "txn-state"), NullLogger<TransactionStateStore>.Instance);
+        _stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         _coordinator = new TransactionCoordinator(
             new ProducerStateManager(), _logManager, new TransactionIndex(), _offsetStore, _stateStore,
             NullLogger<TransactionCoordinator>.Instance);
@@ -53,7 +53,6 @@ public sealed class ProduceByTopicIdTests : IAsyncDisposable
     {
         await _coordinator.DisposeAsync();
         _offsetStore.Dispose();
-        _stateStore.Dispose();
         _logManager.Dispose();
         try { Directory.Delete(_dataDir, recursive: true); } catch { /* best-effort */ }
     }

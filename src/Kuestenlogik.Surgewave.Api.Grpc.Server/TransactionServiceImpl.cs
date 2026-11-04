@@ -50,50 +50,55 @@ public record TransactionDescriptionDto(
 /// <summary>
 /// Delegate for InitProducerId operation.
 /// </summary>
-public delegate InitProducerIdResultDto InitProducerIdDelegate(
+public delegate Task<InitProducerIdResultDto> InitProducerIdDelegate(
     string transactionalId,
     int transactionTimeoutMs,
     long producerId,
-    int producerEpoch);
+    int producerEpoch,
+    CancellationToken cancellationToken);
 
 /// <summary>
 /// Delegate for AddPartitionsToTxn operation.
 /// </summary>
-public delegate AddPartitionsToTxnResultDto AddPartitionsToTxnDelegate(
+public delegate Task<AddPartitionsToTxnResultDto> AddPartitionsToTxnDelegate(
     string transactionalId,
     long producerId,
     int producerEpoch,
-    List<(string Topic, int Partition)> partitions);
+    List<(string Topic, int Partition)> partitions,
+    CancellationToken cancellationToken);
 
 /// <summary>
 /// Delegate for AddOffsetsToTxn operation.
 /// </summary>
-public delegate AddOffsetsToTxnResultDto AddOffsetsToTxnDelegate(
+public delegate Task<AddOffsetsToTxnResultDto> AddOffsetsToTxnDelegate(
     string transactionalId,
     long producerId,
     int producerEpoch,
-    string groupId);
+    string groupId,
+    CancellationToken cancellationToken);
 
 /// <summary>
 /// Delegate for TxnOffsetCommit operation.
 /// </summary>
-public delegate TxnOffsetCommitResultDto TxnOffsetCommitDelegate(
+public delegate Task<TxnOffsetCommitResultDto> TxnOffsetCommitDelegate(
     string transactionalId,
     string groupId,
     long producerId,
     int producerEpoch,
     int generationId,
     string memberId,
-    List<(string Topic, int Partition, long Offset, string? Metadata)> offsets);
+    List<(string Topic, int Partition, long Offset, string? Metadata)> offsets,
+    CancellationToken cancellationToken);
 
 /// <summary>
 /// Delegate for EndTxn operation.
 /// </summary>
-public delegate EndTxnResultDto EndTxnDelegate(
+public delegate Task<EndTxnResultDto> EndTxnDelegate(
     string transactionalId,
     long producerId,
     int producerEpoch,
-    bool commit);
+    bool commit,
+    CancellationToken cancellationToken);
 
 /// <summary>
 /// Delegate for ListTransactions operation.
@@ -138,33 +143,35 @@ public class TransactionServiceImpl : TransactionService.TransactionServiceBase
         _describeTransactions = describeTransactions;
     }
 
-    public override Task<InitProducerIdResponse> InitProducerId(InitProducerIdRequest request, ServerCallContext context)
+    public override async Task<InitProducerIdResponse> InitProducerId(InitProducerIdRequest request, ServerCallContext context)
     {
-        var result = _initProducerId(
+        var result = await _initProducerId(
             request.TransactionalId,
             request.TransactionTimeoutMs,
             request.ProducerId,
-            request.ProducerEpoch);
+            request.ProducerEpoch,
+            context.CancellationToken);
 
-        return Task.FromResult(new InitProducerIdResponse
+        return new InitProducerIdResponse
         {
             ProducerId = result.ProducerId,
             ProducerEpoch = result.ProducerEpoch,
             Status = new ResponseStatus { ErrorCode = MapErrorCode(result.ErrorCode) }
-        });
+        };
     }
 
-    public override Task<AddPartitionsToTxnResponse> AddPartitionsToTxn(AddPartitionsToTxnRequest request, ServerCallContext context)
+    public override async Task<AddPartitionsToTxnResponse> AddPartitionsToTxn(AddPartitionsToTxnRequest request, ServerCallContext context)
     {
         var partitions = request.Partitions
             .Select(p => (p.Topic, p.Partition))
             .ToList();
 
-        var result = _addPartitionsToTxn(
+        var result = await _addPartitionsToTxn(
             request.TransactionalId,
             request.ProducerId,
             request.ProducerEpoch,
-            partitions);
+            partitions,
+            context.CancellationToken);
 
         var response = new AddPartitionsToTxnResponse();
         foreach (var (topic, partition, errorCode) in result.Results)
@@ -177,37 +184,39 @@ public class TransactionServiceImpl : TransactionService.TransactionServiceBase
             });
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 
-    public override Task<AddOffsetsToTxnResponse> AddOffsetsToTxn(AddOffsetsToTxnRequest request, ServerCallContext context)
+    public override async Task<AddOffsetsToTxnResponse> AddOffsetsToTxn(AddOffsetsToTxnRequest request, ServerCallContext context)
     {
-        var result = _addOffsetsToTxn(
+        var result = await _addOffsetsToTxn(
             request.TransactionalId,
             request.ProducerId,
             request.ProducerEpoch,
-            request.GroupId);
+            request.GroupId,
+            context.CancellationToken);
 
-        return Task.FromResult(new AddOffsetsToTxnResponse
+        return new AddOffsetsToTxnResponse
         {
             Status = new ResponseStatus { ErrorCode = MapErrorCode(result.ErrorCode) }
-        });
+        };
     }
 
-    public override Task<TxnOffsetCommitResponse> TxnOffsetCommit(TxnOffsetCommitRequest request, ServerCallContext context)
+    public override async Task<TxnOffsetCommitResponse> TxnOffsetCommit(TxnOffsetCommitRequest request, ServerCallContext context)
     {
         var offsets = request.Offsets
             .Select(o => (o.Topic, o.Partition, o.Offset, string.IsNullOrEmpty(o.Metadata) ? (string?)null : o.Metadata))
             .ToList();
 
-        var result = _txnOffsetCommit(
+        var result = await _txnOffsetCommit(
             request.TransactionalId,
             request.GroupId,
             request.ProducerId,
             request.ProducerEpoch,
             request.GenerationId,
             request.MemberId,
-            offsets);
+            offsets,
+            context.CancellationToken);
 
         var response = new TxnOffsetCommitResponse();
         foreach (var (topic, partition, errorCode) in result.Results)
@@ -220,21 +229,22 @@ public class TransactionServiceImpl : TransactionService.TransactionServiceBase
             });
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 
-    public override Task<EndTxnResponse> EndTxn(EndTxnRequest request, ServerCallContext context)
+    public override async Task<EndTxnResponse> EndTxn(EndTxnRequest request, ServerCallContext context)
     {
-        var result = _endTxn(
+        var result = await _endTxn(
             request.TransactionalId,
             request.ProducerId,
             request.ProducerEpoch,
-            request.Commit);
+            request.Commit,
+            context.CancellationToken);
 
-        return Task.FromResult(new EndTxnResponse
+        return new EndTxnResponse
         {
             Status = new ResponseStatus { ErrorCode = MapErrorCode(result.ErrorCode) }
-        });
+        };
     }
 
     public override Task<ListTransactionsResponse> ListTransactions(ListTransactionsRequest request, ServerCallContext context)

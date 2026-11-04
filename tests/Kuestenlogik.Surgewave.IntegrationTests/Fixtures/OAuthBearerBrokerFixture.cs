@@ -35,7 +35,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
     private SurgewaveBroker? _broker;
     private LogManager? _logManager;
     private OffsetStore? _offsetStore;
-    private TransactionStateStore? _transactionStateStore;
+    private Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog? _transactionStateStore;
     private BrokerMetrics? _metrics;
     private QuotaManager? _quotaManager;
     private CancellationTokenSource? _cts;
@@ -258,7 +258,6 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
         var serializerLogger = _loggerFactory.CreateLogger<RecordBatchSerializer>();
         var coordinatorLogger = _loggerFactory.CreateLogger<ConsumerGroupCoordinator>();
         var txnCoordinatorLogger = _loggerFactory.CreateLogger<TransactionCoordinator>();
-        var txnStateStoreLogger = _loggerFactory.CreateLogger<TransactionStateStore>();
         var offsetStoreLogger = _loggerFactory.CreateLogger<OffsetStore>();
         var jwksLogger = _loggerFactory.CreateLogger<JwksTokenValidator>();
 
@@ -277,7 +276,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
         var nativeGroupCoordinator = new Kuestenlogik.Surgewave.Broker.Native.NativeGroupCoordinator(nativeGroupCoordinatorLogger, _offsetStore);
         var producerStateManager = new ProducerStateManager();
         var transactionIndex = new TransactionIndex();
-        _transactionStateStore = new TransactionStateStore(_dataDirectory!, txnStateStoreLogger);
+        _transactionStateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         var transactionCoordinator = new TransactionCoordinator(
             producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
@@ -386,7 +385,6 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
         _oauthHttp?.Dispose();
         _metrics?.Dispose();
         _quotaManager?.Dispose();
-        _transactionStateStore?.Dispose();
         _offsetStore?.Dispose();
         _logManager?.Dispose();
         _loggerFactory.Dispose();

@@ -52,7 +52,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private SurgewaveBroker? _broker;
     private LogManager? _logManager;
     private OffsetStore? _offsetStore;
-    private TransactionStateStore? _transactionStateStore;
+    private Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog? _transactionStateLog;
     private BrokerMetrics? _metrics;
     private QuotaManager? _quotaManager;
     private CancellationTokenSource? _cts;
@@ -245,6 +245,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             ProcessRoles = _options.ProcessRoles,
             ControllerQuorumVoters = _options.ControllerQuorumVoters,
             OffsetsTopicNumPartitions = _options.OffsetsTopicNumPartitions ?? new BrokerConfig().OffsetsTopicNumPartitions,
+            TransactionStateLogNumPartitions = _options.TransactionStateLogNumPartitions ?? new BrokerConfig().TransactionStateLogNumPartitions,
             HeartbeatIntervalMs = _options.HeartbeatIntervalMs,
             HeartbeatTimeoutMs = _options.HeartbeatTimeoutMs,
             // Raft settings
@@ -288,7 +289,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var serializerLogger = _loggerFactory.CreateLogger<RecordBatchSerializer>();
         var coordinatorLogger = _loggerFactory.CreateLogger<ConsumerGroupCoordinator>();
         var txnCoordinatorLogger = _loggerFactory.CreateLogger<TransactionCoordinator>();
-        var txnStateStoreLogger = _loggerFactory.CreateLogger<TransactionStateStore>();
         var offsetStoreLogger = _loggerFactory.CreateLogger<OffsetStore>();
         var nativeGroupCoordinatorLogger = _loggerFactory.CreateLogger<NativeGroupCoordinator>();
         var quotaManagerLogger = _loggerFactory.CreateLogger<QuotaManager>();
@@ -321,9 +321,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.StreamsGroups.StreamsGroupCoordinator>(), _logManager);
         var producerStateManager = new ProducerStateManager(new ProducerIdBlocks(_options.BrokerId, _dataDirectory));
         var transactionIndex = new TransactionIndex();
-        _transactionStateStore = new TransactionStateStore(_dataDirectory, txnStateStoreLogger);
+        // Transaction state lives in __transaction_state (#197), as the group offsets do.
+        _transactionStateLog = new Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog(
+            _logManager, recordBatchSerializer, config.TransactionStateLogNumPartitions,
+            _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog>());
         var transactionCoordinator = new TransactionCoordinator(
-            producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateStore, txnCoordinatorLogger);
+            producerStateManager, _logManager, transactionIndex, _offsetStore, _transactionStateLog, txnCoordinatorLogger);
         _transactionCoordinator = transactionCoordinator;
         _quotaManager = new QuotaManager(config.Quotas, quotaManagerLogger);
 
@@ -399,6 +402,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         else
         {
             await _offsetStore!.StartLocalAsync(cancellationToken);
+            await _transactionStateLog!.StartLocalAsync(cancellationToken);
         }
     }
 
@@ -439,7 +443,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             processRoles: config.ProcessRoles,
             controllerQuorumVoters: config.ControllerQuorumVoters,
             offsetsTopicNumPartitions: config.OffsetsTopicNumPartitions,
-            offsetsTopicReplicationFactor: config.OffsetsTopicReplicationFactor
+            offsetsTopicReplicationFactor: config.OffsetsTopicReplicationFactor,
+            transactionStateLogNumPartitions: config.TransactionStateLogNumPartitions,
+            transactionStateLogReplicationFactor: config.TransactionStateLogReplicationFactor
         );
 
         // #170 — an invalid configuration stops the runtime here rather than surfacing later as a
@@ -543,6 +549,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // after the request handlers.
         _dataApiHandler?.SetCommitGate(new ReplicaCommitGate(_clusterState, _replicaManager));
         _offsetStore?.FollowLeadershipOf(_replicaManager, new ReplicaCommitGate(_clusterState, _replicaManager));
+        _transactionStateLog?.FollowLeadershipOf(_replicaManager, new ReplicaCommitGate(_clusterState, _replicaManager));
 
         // #164 — the produce path refuses a partition another broker leads. Supplied here
         // rather than in the constructor because clustering does not exist yet up there;
@@ -953,7 +960,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _telemetryIngestor?.Dispose();
         _metrics?.Dispose();
         _quotaManager?.Dispose();
-        _transactionStateStore?.Dispose();
         _offsetStore?.Dispose();
         _logManager?.Dispose();
 

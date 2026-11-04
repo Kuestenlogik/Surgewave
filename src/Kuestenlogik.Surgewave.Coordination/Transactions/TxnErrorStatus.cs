@@ -49,4 +49,13 @@ public enum TxnErrorStatus
 
     /// <summary>The request asks for a feature this broker does not implement (KIP-939's KeepPreparedTxn).</summary>
     UnsupportedVersion,
+
+    /// <summary>This broker does not coordinate the transactional id (#197, KAFKA-21181).</summary>
+    NotCoordinator,
+
+    /// <summary>This broker coordinates the transactional id and is still reading its state (#197).</summary>
+    CoordinatorLoadInProgress,
+
+    /// <summary>The transaction's state could not be written durably now; the client retries (#197).</summary>
+    CoordinatorNotAvailable,
 }

@@ -37,7 +37,7 @@ public sealed class KafkaFetchOverMappedSegmentTests : IDisposable
     private readonly string _dataDir;
     private readonly LogManager _logManager;
     private readonly OffsetStore _offsetStore;
-    private readonly TransactionStateStore _transactionStateStore;
+    private readonly Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog _transactionStateStore;
     private readonly QuotaManager _quotaManager;
     private readonly DataApiHandler _handler;
 
@@ -51,7 +51,7 @@ public sealed class KafkaFetchOverMappedSegmentTests : IDisposable
 
         var config = new BrokerConfig();
         _offsetStore = OffsetStore.InMemory();
-        _transactionStateStore = new TransactionStateStore(_dataDir, NullLogger<TransactionStateStore>.Instance);
+        _transactionStateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
         _quotaManager = new QuotaManager(config.Quotas, NullLogger<QuotaManager>.Instance);
 
         _handler = new DataApiHandler(
@@ -75,7 +75,6 @@ public sealed class KafkaFetchOverMappedSegmentTests : IDisposable
         _quotaManager.Dispose();
         _logManager.Dispose();
         _offsetStore.Dispose();
-        _transactionStateStore.Dispose();
         try { Directory.Delete(_dataDir, recursive: true); } catch { /* best-effort */ }
     }
 

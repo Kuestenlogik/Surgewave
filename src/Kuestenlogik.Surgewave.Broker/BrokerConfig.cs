@@ -143,6 +143,21 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public short OffsetsTopicReplicationFactor { get; set; } = 3;
 
     /// <summary>
+    /// Partitions of <c>__transaction_state</c>, the internal topic whose partition leaders coordinate transactional
+    /// ids (#197). Kafka's transaction.state.log.num.partitions. Fixed once the topic exists: an id's partition is a
+    /// hash over it.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int TransactionStateLogNumPartitions { get; set; } = 50;
+
+    /// <summary>
+    /// Replication factor of <c>__transaction_state</c>, capped at the number of brokers the cluster is configured
+    /// with. Kafka's transaction.state.log.replication.factor.
+    /// </summary>
+    [Range(1, short.MaxValue)]
+    public short TransactionStateLogReplicationFactor { get; set; } = 3;
+
+    /// <summary>
     /// The most partitions one CreateTopics request may create, all its topics together; a request over it
     /// fails with POLICY_VIOLATION. Kafka's controller.max.records.per.batch default, which bounds the same.
     /// </summary>

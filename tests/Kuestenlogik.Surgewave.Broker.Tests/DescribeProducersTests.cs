@@ -156,11 +156,11 @@ public sealed class DescribeProducersTests
             var idx = new TransactionIndex();
             var logManager = TestLogManager.CreateInMemory(temp);
             var offsetStore = OffsetStore.InMemory();
-            var stateStore = new TransactionStateStore(temp, Microsoft.Extensions.Logging.Abstractions.NullLogger<TransactionStateStore>.Instance);
+            var stateStore = Kuestenlogik.Surgewave.Broker.Transactions.TransactionStateLog.InMemory();
             var coord = new TransactionCoordinator(psm, logManager, idx, offsetStore, stateStore,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<TransactionCoordinator>.Instance);
 
-            var scope = new TempScope(temp, logManager, offsetStore, stateStore);
+            var scope = new TempScope(temp, logManager, offsetStore);
             return (coord, psm, scope);
         }
 

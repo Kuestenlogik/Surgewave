@@ -101,6 +101,9 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
         TxnErrorStatus.ConcurrentTransactions => apiVersion >= 12 ? ErrorCode.ConcurrentTransactions : ErrorCode.NotEnoughReplicas,
         TxnErrorStatus.InvalidProducerIdMapping => ErrorCode.InvalidProducerIdMapping,
         TxnErrorStatus.InvalidRequest => ErrorCode.InvalidRequest,
+        // The coordinator cannot answer now: retriable, as Kafka's AddPartitionsToTxnManager puts it (#197).
+        TxnErrorStatus.NotCoordinator or TxnErrorStatus.CoordinatorLoadInProgress or TxnErrorStatus.CoordinatorNotAvailable
+            => ErrorCode.NotEnoughReplicas,
         _ => ErrorCode.InvalidTxnState,
     };
 
@@ -475,9 +478,10 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         var verification = string.IsNullOrEmpty(request.TransactionalId)
                             ? ErrorCode.TransactionalIdAuthorizationFailed
                             : ToProduceVerificationError(
-                                _transactionCoordinator.VerifyTransactionalBatch(
+                                await _transactionCoordinator.VerifyTransactionalBatchAsync(
                                     request.TransactionalId, producerId, producerEpoch, topicPartition,
-                                    request.ApiVersion >= 12 ? TransactionVersion.Tv2 : TransactionVersion.Tv0),
+                                    request.ApiVersion >= 12 ? TransactionVersion.Tv2 : TransactionVersion.Tv0,
+                                    cancellationToken),
                                 request.ApiVersion);
                         if (verification != ErrorCode.None)
                         {

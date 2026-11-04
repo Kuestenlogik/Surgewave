@@ -22,11 +22,6 @@ namespace Kuestenlogik.Surgewave.Broker;
 [JsonSerializable(typeof(List<int>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 // Broker Persistence Types
-[JsonSerializable(typeof(PersistedTransactionState))]
-[JsonSerializable(typeof(PersistedPartition))]
-[JsonSerializable(typeof(PendingOffsetEntry))]
-[JsonSerializable(typeof(List<PersistedPartition>))]
-[JsonSerializable(typeof(List<PendingOffsetEntry>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(PersistedQuotaConfig))]
 [JsonSerializable(typeof(Dictionary<string, long>))]

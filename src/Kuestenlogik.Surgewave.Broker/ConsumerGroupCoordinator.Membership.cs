@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Observability;
 
@@ -27,7 +28,7 @@ public sealed partial class ConsumerGroupCoordinator
     public async Task<JoinGroupResult> JoinGroupAsync(JoinGroupCommand request, CancellationToken cancellationToken)
     {
         // A coordinator still reading the group's partition has no group to join yet (#205).
-        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+        if (_offsets.OwnershipOf(request.GroupId) != CoordinatorOwnership.Owned)
             return JoinGroupResult.Failed(ConsumerGroupErrorStatus.CoordinatorLoadInProgress, request.MemberId);
 
         TaskCompletionSource<JoinGroupResult> joined;
@@ -126,7 +127,7 @@ public sealed partial class ConsumerGroupCoordinator
 
     public async Task<SyncGroupResult> SyncGroupAsync(SyncGroupCommand request, CancellationToken cancellationToken)
     {
-        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+        if (_offsets.OwnershipOf(request.GroupId) != CoordinatorOwnership.Owned)
             return new SyncGroupResult(ConsumerGroupErrorStatus.CoordinatorLoadInProgress, []);
 
         TaskCompletionSource<SyncGroupResult> synced;
@@ -186,7 +187,7 @@ public sealed partial class ConsumerGroupCoordinator
 
     public GroupHeartbeatResult Heartbeat(GroupHeartbeatCommand request)
     {
-        if (_offsets.OwnershipOf(request.GroupId) != GroupOwnership.Owned)
+        if (_offsets.OwnershipOf(request.GroupId) != CoordinatorOwnership.Owned)
             return new GroupHeartbeatResult(ConsumerGroupErrorStatus.CoordinatorLoadInProgress);
 
         lock (_groupLock)
@@ -338,7 +339,7 @@ public sealed partial class ConsumerGroupCoordinator
         _offsets.RecordGenerationAsync(groupId, group.ProtocolType, generation, group.ProtocolName, group.LeaderId, CancellationToken.None)
             .ContinueWith(write =>
             {
-                if (write.IsFaulted || write.Result != OffsetWriteStatus.Ok)
+                if (write.IsFaulted || write.Result != StateWriteStatus.Ok)
                     Log.GroupGenerationNotRecorded(logger, groupId, generation, write.Exception?.GetBaseException());
             }, TaskScheduler.Default);
     }
