@@ -39,6 +39,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     private string _controllerQuorumVoters = "";
     private int? _offsetsTopicNumPartitions;
     private int? _transactionStateLogNumPartitions;
+    private int? _shareStateTopicNumPartitions;
     private int _raftElectionTimeoutMinMs = 150;
     private int _raftElectionTimeoutMaxMs = 300;
     private int _raftHeartbeatIntervalMs = 50;
@@ -273,6 +274,16 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
+    /// Sets how many partitions <c>__share_group_state</c> gets — the internal topic whose partition leaders keep the
+    /// share partitions' state (#228).
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithShareStateTopicPartitions(int partitions)
+    {
+        _shareStateTopicNumPartitions = partitions;
+        return this;
+    }
+
+    /// <summary>
     /// Sets how many partitions <c>__transaction_state</c> gets — the internal topic whose partition leaders
     /// coordinate transactional ids (#197).
     /// </summary>
@@ -502,6 +513,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         ControllerQuorumVoters = _controllerQuorumVoters,
         OffsetsTopicNumPartitions = _offsetsTopicNumPartitions,
         TransactionStateLogNumPartitions = _transactionStateLogNumPartitions,
+        ShareStateTopicNumPartitions = _shareStateTopicNumPartitions,
         RaftElectionTimeoutMinMs = _raftElectionTimeoutMinMs,
         RaftElectionTimeoutMaxMs = _raftElectionTimeoutMaxMs,
         RaftHeartbeatIntervalMs = _raftHeartbeatIntervalMs,

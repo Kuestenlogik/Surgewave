@@ -219,6 +219,21 @@ public sealed class ClusteringConfig : IValidatableConfig
     [Range(1, short.MaxValue)]
     public short TransactionStateLogReplicationFactor { get; set; } = 3;
 
+    /// <summary>
+    /// Partitions of <c>__share_group_state</c>, the internal topic whose partition leaders are the share coordinators
+    /// that keep share partitions' state (#228). Kafka's share.coordinator.state.topic.num.partitions. Fixed once the
+    /// topic exists: a share partition's key is hashed onto it.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int ShareStateTopicNumPartitions { get; set; } = 50;
+
+    /// <summary>
+    /// Replication factor of <c>__share_group_state</c>, capped at the number of brokers the cluster is configured
+    /// with. Kafka's share.coordinator.state.topic.replication.factor.
+    /// </summary>
+    [Range(1, short.MaxValue)]
+    public short ShareStateTopicReplicationFactor { get; set; } = 3;
+
     // Auto-rebalancing settings
     public bool AutoRebalanceEnabled { get; set; } = true;
 
@@ -349,7 +364,9 @@ public sealed class ClusteringConfig : IValidatableConfig
         int offsetsTopicNumPartitions = 50,
         short offsetsTopicReplicationFactor = 3,
         int transactionStateLogNumPartitions = 50,
-        short transactionStateLogReplicationFactor = 3)
+        short transactionStateLogReplicationFactor = 3,
+        int shareStateTopicNumPartitions = 50,
+        short shareStateTopicReplicationFactor = 3)
     {
         return new ClusteringConfig
         {
@@ -357,6 +374,8 @@ public sealed class ClusteringConfig : IValidatableConfig
             OffsetsTopicReplicationFactor = offsetsTopicReplicationFactor,
             TransactionStateLogNumPartitions = transactionStateLogNumPartitions,
             TransactionStateLogReplicationFactor = transactionStateLogReplicationFactor,
+            ShareStateTopicNumPartitions = shareStateTopicNumPartitions,
+            ShareStateTopicReplicationFactor = shareStateTopicReplicationFactor,
             BrokerId = brokerId,
             Host = host,
             Port = port,

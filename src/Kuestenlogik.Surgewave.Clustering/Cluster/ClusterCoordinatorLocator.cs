@@ -26,7 +26,12 @@ public sealed class ClusterCoordinatorLocator(ClusterState clusterState) : ICoor
 
     private BrokerNode? LeaderOf(CoordinatorKind kind, string key)
     {
-        var topicName = kind == CoordinatorKind.Transaction ? CoordinatorPartitioner.TransactionTopic : CoordinatorPartitioner.GroupTopic;
+        var topicName = kind switch
+        {
+            CoordinatorKind.Transaction => CoordinatorPartitioner.TransactionTopic,
+            CoordinatorKind.Share => CoordinatorPartitioner.ShareStateTopic,
+            _ => CoordinatorPartitioner.GroupTopic,
+        };
 
         // The topic's actual partition count, not the configured one: a topic created before a config change keeps
         // its partitions, and hashing over a different count would send a key to a partition it never used.

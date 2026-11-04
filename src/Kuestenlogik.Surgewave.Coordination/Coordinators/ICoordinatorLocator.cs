@@ -8,6 +8,9 @@ public enum CoordinatorKind : byte
 
     /// <summary>A transactional producer, keyed by transactional id.</summary>
     Transaction = 1,
+
+    /// <summary>A share partition's state, keyed by <c>group:topicId:partition</c> (KIP-932, #228).</summary>
+    Share = 2,
 }
 
 /// <summary>Whether a coordinator could be named.</summary>

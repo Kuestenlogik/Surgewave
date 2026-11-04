@@ -134,7 +134,12 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     {
         // The coordinator the cluster agrees on, the same from every broker (#204). It used to be the broker asked,
         // so the members of one group could each find a different coordinator.
-        var kind = request.KeyType == 1 ? CoordinatorKind.Transaction : CoordinatorKind.Group;
+        var kind = request.KeyType switch
+        {
+            1 => CoordinatorKind.Transaction,
+            2 => CoordinatorKind.Share,
+            _ => CoordinatorKind.Group,
+        };
 
         // v4+ looks up a batch of keys.
         if (request.ApiVersion >= 4)

@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
 
 /// <summary>
-/// Tracks the state of a single share group: members, epoch, subscriptions, and per-partition start offsets.
+/// Tracks the state of a single share group: members, epoch, subscriptions and configs. The share partitions' state,
+/// their start offsets among it, is the share coordinator's (#228).
 /// Public for JSON-based persistence (KIP-932 9c).
 /// </summary>
 public sealed class ShareGroupState
@@ -19,9 +20,6 @@ public sealed class ShareGroupState
 
     /// <summary>Union of all members' subscribed topic names.</summary>
     public HashSet<string> SubscribedTopics { get; set; } = [];
-
-    /// <summary>Per-partition start offsets keyed by "topic:partition".</summary>
-    public Dictionary<string, long> StartOffsets { get; set; } = [];
 
     /// <summary>
     /// KIP-1240 — max attempts to deliver a record before it's archived.

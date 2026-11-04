@@ -325,23 +325,38 @@ per group and partition, held by the partition's leader, as in KIP-932:
   `NOT_LEADER_OR_FOLLOWER` and names the leader.
 - **Start offsets:** a start offset set with AlterShareGroupOffsets is
   where the group's share partition starts.
+- **Durable state:** a share partition's state is in `__share_group_state`,
+  kept by the share coordinator, which is the leader of the key's partition
+  of that topic (`FindCoordinator` key type 2). The partition's leader reads
+  the state when it first serves the group, and writes it after each
+  acknowledgement and delivery before it answers. A leader that takes the
+  partition over goes on where the last one stopped. A record that a member
+  held at that point is delivered again. Leaders reach another broker's share
+  coordinator over the inter-broker port. The topic's size is set by
+  `ShareStateTopicNumPartitions` and `ShareStateTopicReplicationFactor`.
+- **Offsets with the share coordinator:** AlterShareGroupOffsets starts a
+  share partition afresh under a new state epoch. A leader still holding the
+  old state has its next write refused, and it then reads the new start.
+  DeleteShareGroupOffsets removes the state, and DescribeShareGroupOffsets
+  reads it.
 
 Rejected records are archived, as in Kafka; they are no longer routed to a
 dead-letter topic.
 
+**Breaking:** the start offsets are no longer in the share group's record
+of `__consumer_offsets`. A start offset set before this release is gone.
+
 ### A share group outlives its coordinator (#219)
 
-A share group's members, epochs, start offsets and configs lived only in
-the memory of the broker that served it. They are now in the group's
-partition of `__consumer_offsets`: the members and epochs as Kafka's
-ShareGroup records, the start offsets and the KIP-1240 configs in a
-tagged field of the group's record that Kafka readers skip. A heartbeat,
-AlterShareGroupOffsets, DeleteShareGroupOffsets and a share-group config
-change are answered once their changes are on the in-sync replicas, and a
-broker that takes the partition over reads the group from them. A broker
-that does not coordinate the group answers `NOT_COORDINATOR`. Share
-partition state across brokers, with the partition's leader as in Kafka,
-is #228.
+A share group's members, epochs and configs lived only in the memory of
+the broker that served it. They are now in the group's partition of
+`__consumer_offsets`: the members and epochs as Kafka's ShareGroup
+records, the KIP-1240 configs in a tagged field of the group's record that
+Kafka readers skip. A heartbeat and a share-group config change are
+answered once their changes are on the in-sync replicas, and a broker that
+takes the partition over reads the group from them. A broker that does not
+coordinate the group answers `NOT_COORDINATOR`. The start offsets are kept
+with the share partitions' state in `__share_group_state` (#228).
 
 ### A group taken over by another coordinator can be described (#224)
 

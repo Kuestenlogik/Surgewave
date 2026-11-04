@@ -27,6 +27,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly IControlledShutdownCoordinator? _shutdownCoordinator;
     private readonly IClusterTopicCreator? _topicCreator;
     private readonly ITransactionPartitionVerifier? _transactionVerifier;
+    private readonly Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? _shareState;
     private readonly Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? _commitGate;
 
     public ClusterStateInterBrokerService(
@@ -42,7 +43,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         IControlledShutdownCoordinator? shutdownCoordinator = null,
         IClusterTopicCreator? topicCreator = null,
         ITransactionPartitionVerifier? transactionVerifier = null,
-        Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? commitGate = null)
+        Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? commitGate = null,
+        Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? shareState = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -57,6 +59,33 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _topicCreator = topicCreator;
         _transactionVerifier = transactionVerifier;
         _commitGate = commitGate;
+        _shareState = shareState;
+    }
+
+    public async ValueTask<ShareStateResponsePayload> ShareStateAsync(ShareStatePayload payload, CancellationToken ct = default)
+    {
+        // The persister here is this broker's share coordinator, which answers for the keys it coordinates only.
+        if (_shareState is null)
+            return new ShareStateResponsePayload(Kuestenlogik.Surgewave.Coordination.ShareGroups.ShareStateStatus.NotCoordinator, -1, null);
+        switch (payload.Operation)
+        {
+            case ShareStateOperation.Read:
+            {
+                var (status, state) = await _shareState.ReadAsync(payload.Key, ct).ConfigureAwait(false);
+                return new ShareStateResponsePayload(status, state?.StateEpoch ?? -1, state);
+            }
+            case ShareStateOperation.Write when payload.State is not null:
+                return new ShareStateResponsePayload(await _shareState.WriteAsync(payload.Key, payload.State, ct).ConfigureAwait(false), payload.State.StateEpoch, null);
+            case ShareStateOperation.Initialize:
+            {
+                var (status, stateEpoch) = await _shareState.InitializeAsync(payload.Key, payload.StartOffset, ct).ConfigureAwait(false);
+                return new ShareStateResponsePayload(status, stateEpoch, null);
+            }
+            case ShareStateOperation.Delete:
+                return new ShareStateResponsePayload(await _shareState.DeleteAsync(payload.Key, ct).ConfigureAwait(false), -1, null);
+            default:
+                return new ShareStateResponsePayload(Kuestenlogik.Surgewave.Coordination.ShareGroups.ShareStateStatus.CoordinatorNotAvailable, -1, null);
+        }
     }
 
     public async ValueTask<TxnErrorStatus> VerifyTxnPartitionAsync(VerifyTxnPartitionPayload payload, CancellationToken ct = default)

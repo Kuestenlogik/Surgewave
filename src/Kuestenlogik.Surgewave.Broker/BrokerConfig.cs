@@ -158,6 +158,21 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public short TransactionStateLogReplicationFactor { get; set; } = 3;
 
     /// <summary>
+    /// Partitions of <c>__share_group_state</c>, the internal topic whose partition leaders are the share coordinators
+    /// that keep share partitions' state (#228). Kafka's share.coordinator.state.topic.num.partitions. Fixed once the
+    /// topic exists: a share partition's key is hashed onto it.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int ShareStateTopicNumPartitions { get; set; } = 50;
+
+    /// <summary>
+    /// Replication factor of <c>__share_group_state</c>, capped at the number of brokers the cluster is configured
+    /// with. Kafka's share.coordinator.state.topic.replication.factor.
+    /// </summary>
+    [Range(1, short.MaxValue)]
+    public short ShareStateTopicReplicationFactor { get; set; } = 3;
+
+    /// <summary>
     /// The most partitions one CreateTopics request may create, all its topics together; a request over it
     /// fails with POLICY_VIOLATION. Kafka's controller.max.records.per.batch default, which bounds the same.
     /// </summary>

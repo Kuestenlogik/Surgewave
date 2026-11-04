@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using System.Text.Json;
 using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Raft;
@@ -56,6 +57,7 @@ public sealed class AtomicTopicCreationTests : IAsyncDisposable
             BrokerId = 0, Host = "localhost", Port = 9092, ReplicationPort = 10092,
             RaftElectionTimeoutMinMs = 150, RaftElectionTimeoutMaxMs = 300, RaftHeartbeatIntervalMs = 50,
             RaftDataDirectory = _raftDir, OffsetsTopicNumPartitions = 1, TransactionStateLogNumPartitions = 1,
+            ShareStateTopicNumPartitions = 1,
         };
         var state = new ClusterState();
         _logs = new LogManager(_logDir, new MemoryLogSegmentFactory());
@@ -69,6 +71,12 @@ public sealed class AtomicTopicCreationTests : IAsyncDisposable
         state.AddBroker(new BrokerNode { BrokerId = 0, Host = "localhost", Port = 9092, ReplicationPort = 10092 });
         await controller.StartAsync(ct);
         Assert.True(await TestWaitHelpers.WaitForConditionAsync(() => controller.IsController, timeout: TimeSpan.FromSeconds(10), ct: ct));
+        // The new controller creates the coordinators' topics first; only what follows is the creation under test.
+        string[] internalTopics = [CoordinatorPartitioner.GroupTopic, CoordinatorPartitioner.TransactionTopic, CoordinatorPartitioner.ShareStateTopic];
+        Assert.True(await TestWaitHelpers.WaitForConditionAsync(
+            () => internalTopics.All(t => state.GetTopic(t) is { } topic
+                && state.GetPartitionState(new TopicPartition { Topic = t, Partition = 0 }) is { Replicas.Count: > 0 }),
+            timeout: TimeSpan.FromSeconds(10), ct: ct));
 
         var before = machine.Applied.Count;
         Assert.True(await controller.CreateTopicAsync("orders", 3, 1, null, ct));

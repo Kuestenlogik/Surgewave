@@ -206,6 +206,9 @@ public enum SurgewaveOpCode : ushort
     // #197 — a partition leader asks a transactional id's coordinator about a partition of the transaction.
     InterBrokerVerifyTxnPartition = 0x150A,
 
+    // #228 — a partition leader or group coordinator asks a share partition's share coordinator about its state.
+    InterBrokerShareState = 0x150B,
+
     // #60 — inter-broker Raft/KRaft consensus (0x16xx). The real consensus already rides a
     // hand-rolled framing on the ReplicationPort (Family B); these opcodes are for unifying it
     // onto the SRWV frame later (Inc8, optional).

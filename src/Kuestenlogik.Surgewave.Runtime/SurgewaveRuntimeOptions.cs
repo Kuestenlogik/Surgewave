@@ -148,6 +148,9 @@ public sealed record SurgewaveRuntimeOptions
     /// <summary>Partitions of <c>__transaction_state</c> (#197); null keeps the broker default.</summary>
     public int? TransactionStateLogNumPartitions { get; init; }
 
+    /// <summary>Partitions of <c>__share_group_state</c> (#228); null keeps the broker default.</summary>
+    public int? ShareStateTopicNumPartitions { get; init; }
+
     /// <summary>
     /// Minimum election timeout in milliseconds (Raft).
     /// </summary>

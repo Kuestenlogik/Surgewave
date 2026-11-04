@@ -9,7 +9,7 @@ public sealed partial class ClusterController
 
     /// <summary>
     /// Creates the coordinators' topics once the cluster can carry them: <c>__consumer_offsets</c> (#204) and
-    /// <c>__transaction_state</c> (#197). Called when this broker becomes controller and after every broker
+    /// <c>__transaction_state</c> (#197) and <c>__share_group_state</c> (#228). Called when this broker becomes controller and after every broker
     /// registration, so a topic appears as soon as enough brokers are known for its replication factor; concurrent
     /// calls collapse into one. Compacted, as Kafka's.
     /// </summary>
@@ -31,6 +31,8 @@ public sealed partial class ClusterController
                 _config.OffsetsTopicNumPartitions, _config.OffsetsTopicReplicationFactor, ct).ConfigureAwait(false);
             await EnsureInternalTopicAsync(CoordinatorPartitioner.TransactionTopic,
                 _config.TransactionStateLogNumPartitions, _config.TransactionStateLogReplicationFactor, ct).ConfigureAwait(false);
+            await EnsureInternalTopicAsync(CoordinatorPartitioner.ShareStateTopic,
+                _config.ShareStateTopicNumPartitions, _config.ShareStateTopicReplicationFactor, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

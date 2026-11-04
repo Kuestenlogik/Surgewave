@@ -11,9 +11,9 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
 /// A share group's state lives in its partition of <c>__consumer_offsets</c> (#219): its members and epochs as Kafka's
-/// ShareGroup records, its start offsets and configs in this broker's section of the group's record. A coordinator that
-/// takes the partition over — another broker, or this one after a restart — reads the group from them. It lived in the
-/// coordinator's memory only.
+/// ShareGroup records, its configs in this broker's section of the group's record; its share partitions' start offsets
+/// with their share coordinators in <c>__share_group_state</c> (#228). A coordinator that takes the partitions over —
+/// another broker, or this one after a restart — reads the group from them. It lived in the coordinator's memory only.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class ShareGroupPersistenceTests : IAsyncDisposable
@@ -60,8 +60,8 @@ public sealed class ShareGroupPersistenceTests : IAsyncDisposable
         var group = Assert.Single(next.Describe(["share-g"]));
         Assert.Equal(ShareGroupErrorStatus.None, group.Status);
         Assert.Equal(joined.MemberId, Assert.Single(group.Members).MemberId);
-        var offsets = next.DescribeOffsets(new DescribeShareOffsetsCommand(
-            [new DescribeShareOffsetsGroup { GroupId = "share-g", Topics = [new DescribeShareOffsetsTopic { TopicName = Topic, Partitions = [1] }] }]));
+        var offsets = await next.DescribeOffsetsAsync(new DescribeShareOffsetsCommand(
+            [new DescribeShareOffsetsGroup { GroupId = "share-g", Topics = [new DescribeShareOffsetsTopic { TopicName = Topic, Partitions = [1] }] }]), _ct);
         Assert.Equal(42, offsets.Groups.Single().Topics.Single().Partitions.Single().StartOffset);
     }
 
@@ -86,11 +86,14 @@ public sealed class ShareGroupPersistenceTests : IAsyncDisposable
         SubscribedTopicNames = [Topic],
     };
 
-    // A coordinator over a store that leads every partition of __consumer_offsets in this log, read from it afresh.
+    // A coordinator over stores that lead every partition of __consumer_offsets and __share_group_state in this log,
+    // read from it afresh.
     private async Task<ShareGroupCoordinator> CoordinatorAsync()
     {
         var store = new OffsetStore(_logManager, _serializer, Partitions, NullLogger<OffsetStore>.Instance);
         await store.StartLocalAsync(_ct);
-        return new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager, store);
+        var shareState = new ShareStateStore(_logManager, _serializer, Partitions, NullLogger<ShareStateStore>.Instance);
+        await shareState.StartLocalAsync(_ct);
+        return new ShareGroupCoordinator(NullLogger<ShareGroupCoordinator>.Instance, _logManager, store, shareState: shareState);
     }
 }

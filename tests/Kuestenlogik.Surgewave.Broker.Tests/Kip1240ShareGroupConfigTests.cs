@@ -108,7 +108,7 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         var hb = await _coordinator.HeartbeatAsync(Join("c1", "g-renew-off"), TestContext.Current.CancellationToken);
         FlipRenewEnabled("g-renew-off", false);
 
-        var ack = _coordinator.ShareAcknowledge(RenewAck("g-renew-off"));
+        var ack = await _coordinator.ShareAcknowledgeAsync(RenewAck("g-renew-off"), TestContext.Current.CancellationToken);
 
         var partition = ack.Responses.Single().Partitions.Single();
         Assert.Equal(ShareGroupErrorStatus.InvalidRequest, partition.Status);
@@ -125,20 +125,20 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
         // must not be InvalidRequest — that's what proves the gate is open.
         _ = await _coordinator.HeartbeatAsync(Join("c2", "g-renew-on"), TestContext.Current.CancellationToken);
 
-        var ack = _coordinator.ShareAcknowledge(RenewAck("g-renew-on"));
+        var ack = await _coordinator.ShareAcknowledgeAsync(RenewAck("g-renew-on"), TestContext.Current.CancellationToken);
 
         var partition = ack.Responses.Single().Partitions.Single();
         Assert.NotEqual(ShareGroupErrorStatus.InvalidRequest, partition.Status);
     }
 
     [Fact]
-    public void RenewAck_AgainstUnknownGroup_UsesBrokerDefaultEnabled()
+    public async Task RenewAck_AgainstUnknownGroup_UsesBrokerDefaultEnabled()
     {
         // Edge case: ack comes in before the group exists (clients can race
         // first-heartbeat with first-fetch in some configs). The coordinator
         // must NOT reject with InvalidRequest just because the group hasn't
         // been established — fallback is the broker default (true).
-        var ack = _coordinator.ShareAcknowledge(RenewAck("g-doesnt-exist-yet"));
+        var ack = await _coordinator.ShareAcknowledgeAsync(RenewAck("g-doesnt-exist-yet"), TestContext.Current.CancellationToken);
 
         var partition = ack.Responses.Single().Partitions.Single();
         Assert.NotEqual(ShareGroupErrorStatus.InvalidRequest, partition.Status);

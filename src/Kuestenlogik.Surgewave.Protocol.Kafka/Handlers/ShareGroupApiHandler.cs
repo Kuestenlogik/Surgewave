@@ -45,8 +45,8 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
             ShareGroupHeartbeatRequest r => ToHeartbeatResponse(await _coordinator.HeartbeatAsync(ToHeartbeatCommand(r), cancellationToken), r),
             ShareGroupDescribeRequest r => ToDescribeResponse(_coordinator.Describe(r.GroupIds), r),
             ShareFetchRequest r => ToShareFetchResponse(await _coordinator.ShareFetchAsync(ToShareFetchCommand(r), cancellationToken), r),
-            ShareAcknowledgeRequest r => ToShareAcknowledgeResponse(_coordinator.ShareAcknowledge(ToShareAcknowledgeCommand(r)), r),
-            DescribeShareGroupOffsetsRequest r => ToDescribeOffsetsResponse(_coordinator.DescribeOffsets(ToDescribeOffsetsCommand(r)), r),
+            ShareAcknowledgeRequest r => ToShareAcknowledgeResponse(await _coordinator.ShareAcknowledgeAsync(ToShareAcknowledgeCommand(r), cancellationToken), r),
+            DescribeShareGroupOffsetsRequest r => ToDescribeOffsetsResponse(await _coordinator.DescribeOffsetsAsync(ToDescribeOffsetsCommand(r), cancellationToken), r),
             AlterShareGroupOffsetsRequest r => ToAlterOffsetsResponse(await _coordinator.AlterOffsetsAsync(ToAlterOffsetsCommand(r), cancellationToken), r),
             DeleteShareGroupOffsetsRequest r => ToDeleteOffsetsResponse(await _coordinator.DeleteOffsetsAsync(ToDeleteOffsetsCommand(r), cancellationToken), r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ShareGroupApiHandler")

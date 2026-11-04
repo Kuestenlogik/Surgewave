@@ -16,9 +16,9 @@ public interface IShareGroupCoordinator
 
     Task<ShareFetchResult> ShareFetchAsync(ShareFetchCommand request, CancellationToken cancellationToken);
 
-    ShareAcknowledgeResult ShareAcknowledge(ShareAcknowledgeCommand request);
+    Task<ShareAcknowledgeResult> ShareAcknowledgeAsync(ShareAcknowledgeCommand request, CancellationToken cancellationToken);
 
-    DescribeShareOffsetsResult DescribeOffsets(DescribeShareOffsetsCommand request);
+    Task<DescribeShareOffsetsResult> DescribeOffsetsAsync(DescribeShareOffsetsCommand request, CancellationToken cancellationToken);
 
     Task<AlterShareOffsetsResult> AlterOffsetsAsync(AlterShareOffsetsCommand request, CancellationToken cancellationToken);
 

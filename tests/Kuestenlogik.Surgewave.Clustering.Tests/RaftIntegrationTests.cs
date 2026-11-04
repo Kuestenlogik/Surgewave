@@ -1117,11 +1117,17 @@ public class RaftIntegrationTests : IAsyncLifetime
 
         var response = await raftNode.HandleAppendEntriesAsync(request, CancellationToken.None);
 
-        // Assert - Node should step down to follower
+        // Assert - Node should step down to follower. Leader 99 sends nothing after this one request, so once the
+        // election timeout runs out this lone voter rightly campaigns again; how soon depends on how long persisting
+        // the term took. What holds whenever the state is read: the node accepted the newer term, and it does not lead
+        // that term or an older one.
         Assert.True(response.Success);
-        Assert.Equal(RaftState.Follower, raftNode.State);
-        Assert.Equal(99, raftNode.LeaderId);
-        Assert.Equal(leaderTerm + 10, raftNode.CurrentTerm);
+        Assert.Equal(leaderTerm + 10, response.Term);
+        Assert.True(raftNode.CurrentTerm >= leaderTerm + 10, $"term {raftNode.CurrentTerm}");
+        Assert.False(raftNode.State == RaftState.Leader && raftNode.CurrentTerm <= leaderTerm + 10,
+            $"still leader of term {raftNode.CurrentTerm}");
+        if (raftNode.CurrentTerm == leaderTerm + 10 && raftNode.State == RaftState.Follower)
+            Assert.Equal(99, raftNode.LeaderId);
         _output.WriteLine($"Node stepped down to follower, new leader={raftNode.LeaderId}, term={raftNode.CurrentTerm}");
     }
 

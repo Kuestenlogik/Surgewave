@@ -64,4 +64,10 @@ public interface INativeInterBrokerService
     /// </summary>
     ValueTask<Kuestenlogik.Surgewave.Coordination.Transactions.TxnErrorStatus> VerifyTxnPartitionAsync(
         VerifyTxnPartitionPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Answer a request about a share partition's state this broker is the share coordinator of (#228). NotCoordinator
+    /// when it is not, so the caller asks the real one.
+    /// </summary>
+    ValueTask<ShareStateResponsePayload> ShareStateAsync(ShareStatePayload payload, CancellationToken ct = default);
 }

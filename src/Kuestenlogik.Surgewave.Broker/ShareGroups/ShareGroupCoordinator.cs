@@ -37,11 +37,13 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         LogManager logManager,
         OffsetStore? offsets = null,
         TimeSpan? recordLockDuration = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IShareStatePersister? shareState = null)
     {
         this.logger = logger;
         this.logManager = logManager;
-        _sharePartitions = new SharePartitionManager(recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
+        _sharePartitions = new SharePartitionManager(
+            shareState ?? ShareStateStore.InMemory(), recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
         _offsets = offsets ?? OffsetStore.InMemory();
         _state = new GroupStateLog<ShareGroupState>(
             _offsets, k => ShareGroupRecords.IsShareGroupKey(k), ShareGroupRecords.Read, ShareGroupRecords.Of);
@@ -322,7 +324,22 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                     continue;
                 }
 
-                var share = _sharePartitions.GetOrCreate(request.GroupId, tp, log, () => StartOffsetOf(request.GroupId, tp) ?? log.LogStartOffset);
+                // The share partition's state from the share coordinator; the log's start where it has none yet.
+                var (share, shareStatus) = await _sharePartitions.GetOrCreateAsync(
+                    request.GroupId, tp, fetchTopic.TopicId, log, () => log.LogStartOffset, cancellationToken);
+                if (share is null)
+                {
+                    partitions.Add(new ShareFetchPartitionResult
+                    {
+                        PartitionIndex = fetchPartition.PartitionIndex,
+                        Status = StatusOf(shareStatus),
+                        AcknowledgeStatus = StatusOf(shareStatus),
+                        CurrentLeader = LeaderOf(tp),
+                        AcquiredRecords = []
+                    });
+                    continue;
+                }
+
                 var acknowledgeStatus = fetchPartition.AcknowledgementBatches.Count > 0
                     ? Acknowledge(share, memberId, fetchPartition.AcknowledgementBatches, settings)
                     : ShareGroupErrorStatus.None;
@@ -331,6 +348,22 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                 {
                     var maxRecords = request.MaxRecords > 0 ? request.MaxRecords : 100;
                     var acquired = await share.AcquireAsync(memberId, maxRecords, settings.DeliveryLimit, settings.MaxRecordLocks, cancellationToken);
+
+                    // What changed — acknowledgements, new deliveries — is durable before the answer.
+                    var persisted = await PersistAsync(share, tp, cancellationToken);
+                    if (persisted != ShareGroupErrorStatus.None)
+                    {
+                        partitions.Add(new ShareFetchPartitionResult
+                        {
+                            PartitionIndex = fetchPartition.PartitionIndex,
+                            Status = persisted,
+                            AcknowledgeStatus = acknowledgeStatus == ShareGroupErrorStatus.None ? persisted : acknowledgeStatus,
+                            CurrentLeader = LeaderOf(tp),
+                            AcquiredRecords = []
+                        });
+                        continue;
+                    }
+
                     partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
@@ -365,8 +398,11 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // ShareAcknowledge (API Key 79)
     // ─────────────────────────────────────────────────────────────
 
-    /// <remarks>Served by the partition's leader, as ShareFetch (#228).</remarks>
-    public ShareAcknowledgeResult ShareAcknowledge(ShareAcknowledgeCommand request)
+    /// <remarks>
+    /// Served by the partition's leader, as ShareFetch, and answered once the acknowledgements are durable with the
+    /// share coordinator (#228).
+    /// </remarks>
+    public async Task<ShareAcknowledgeResult> ShareAcknowledgeAsync(ShareAcknowledgeCommand request, CancellationToken cancellationToken)
     {
         var responses = new List<ShareAcknowledgeTopicResult>(request.Topics.Count);
         var settings = SettingsOf(request.GroupId);
@@ -403,13 +439,16 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
                 // Nothing acquired here — no share partition of the group — is nothing a member can acknowledge.
                 var share = string.IsNullOrEmpty(request.GroupId) ? null : _sharePartitions.Get(request.GroupId, tp);
+                // The group's renew gate first (KIP-1240): a Renew it forbids is an invalid request wherever it lands.
+                var status = RenewForbidden(ackPartition.AcknowledgementBatches, settings) ? ShareGroupErrorStatus.InvalidRequest
+                    : share is null ? ShareGroupErrorStatus.InvalidRecordState
+                    : Acknowledge(share, request.MemberId, ackPartition.AcknowledgementBatches, settings);
+                if (status == ShareGroupErrorStatus.None && share is not null)
+                    status = await PersistAsync(share, tp, cancellationToken);
                 partitions.Add(new ShareAcknowledgePartitionResult
                 {
                     PartitionIndex = ackPartition.PartitionIndex,
-                    // The group's renew gate first (KIP-1240): a Renew it forbids is an invalid request wherever it lands.
-                    Status = RenewForbidden(ackPartition.AcknowledgementBatches, settings) ? ShareGroupErrorStatus.InvalidRequest
-                        : share is null ? ShareGroupErrorStatus.InvalidRecordState
-                        : Acknowledge(share, request.MemberId, ackPartition.AcknowledgementBatches, settings),
+                    Status = status,
                     CurrentLeader = LeaderOf(tp)
                 });
             }
@@ -464,17 +503,24 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         }
     }
 
-    // The start offset the group set for the partition (AlterShareGroupOffsets), where this broker holds the group.
-    private long? StartOffsetOf(string groupId, TopicPartition tp)
+    // Writes the share partition's state with the share coordinator; a fenced write leaves it stale, read again next time.
+    private async Task<ShareGroupErrorStatus> PersistAsync(SharePartition share, TopicPartition tp, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
-        {
-            if (_offsets.OwnershipOf(groupId) != CoordinatorOwnership.Owned || _state.Current(groupId) is not { } group)
-                return null;
-            var key = string.Concat(tp.Topic, ":", tp.Partition.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            return group.StartOffsets.TryGetValue(key, out var offset) ? offset : null;
-        }
+        var leaderEpoch = _leadership?.LeaderOf(tp)?.LeaderEpoch ?? 0;
+        var written = await share.PersistAsync(_sharePartitions.Persister, leaderEpoch, cancellationToken);
+        if (written is ShareStateStatus.FencedStateEpoch or ShareStateStatus.FencedLeaderEpoch or ShareStateStatus.NotInitialized)
+            _sharePartitions.Drop(share.Key.GroupId, tp);
+        return StatusOf(written);
     }
+
+    private static ShareGroupErrorStatus StatusOf(ShareStateStatus status) => status switch
+    {
+        ShareStateStatus.Ok => ShareGroupErrorStatus.None,
+        ShareStateStatus.FencedLeaderEpoch => ShareGroupErrorStatus.NotLeaderOrFollower,
+        ShareStateStatus.CoordinatorLoadInProgress => ShareGroupErrorStatus.CoordinatorLoadInProgress,
+        // A state initialized afresh, a coordinator moved or unreachable: the client retries and the state is read again.
+        _ => ShareGroupErrorStatus.CoordinatorNotAvailable,
+    };
 
     private readonly record struct ShareSettings(int DeliveryLimit, int MaxRecordLocks, bool RenewEnabled);
 
@@ -482,276 +528,149 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // DescribeShareGroupOffsets (API Key 90)
     // ─────────────────────────────────────────────────────────────
 
-    public DescribeShareOffsetsResult DescribeOffsets(DescribeShareOffsetsCommand request)
+    /// <remarks>
+    /// The start offsets are the share partitions' own, kept with their share coordinators in __share_group_state
+    /// (#228); a partition whose share partition was never initialized has none (-1).
+    /// </remarks>
+    public async Task<DescribeShareOffsetsResult> DescribeOffsetsAsync(DescribeShareOffsetsCommand request, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        var groups = new List<DescribeShareOffsetsGroupResult>(request.Groups.Count);
+        foreach (var groupReq in request.Groups)
         {
-            var groups = new List<DescribeShareOffsetsGroupResult>(request.Groups.Count);
-
-            foreach (var groupReq in request.Groups)
+            IReadOnlyList<(string Topic, IReadOnlyList<int> Partitions)>? wanted;
+            lock (_groupLock)
             {
                 if (_state.Current(groupReq.GroupId) is not { } group)
                 {
-                    groups.Add(new DescribeShareOffsetsGroupResult
-                    {
-                        GroupId = groupReq.GroupId,
-                        Topics = [],
-                        Status = ShareGroupErrorStatus.InvalidGroupId,
-                        ErrorMessage = "Share group not found"
-                    });
-                    continue;
-                }
-
-                var topics = new List<DescribeShareOffsetsTopicResult>();
-
-                if (groupReq.Topics != null)
-                {
-                    foreach (var topicReq in groupReq.Topics)
-                    {
-                        var topicId = logManager.GetTopicId(topicReq.TopicName);
-                        var partitions = new List<DescribeShareOffsetsPartitionResult>(topicReq.Partitions.Count);
-
-                        foreach (var partitionIndex in topicReq.Partitions)
-                        {
-                            var key = string.Concat(topicReq.TopicName, ":", partitionIndex.ToString());
-                            var startOffset = group.StartOffsets.GetValueOrDefault(key, 0);
-
-                            // Calculate lag
-                            long lag = -1;
-                            var tp = new TopicPartition { Topic = topicReq.TopicName, Partition = partitionIndex };
-                            var log = logManager.GetLog(tp);
-                            if (log != null)
-                            {
-                                lag = log.HighWatermark - startOffset;
-                                if (lag < 0) lag = 0;
-                            }
-
-                            partitions.Add(new DescribeShareOffsetsPartitionResult
-                            {
-                                PartitionIndex = partitionIndex,
-                                StartOffset = startOffset,
-                                LeaderEpoch = 0,
-                                Lag = lag,
-                                Status = ShareGroupErrorStatus.None
-                            });
-                        }
-
-                        topics.Add(new DescribeShareOffsetsTopicResult
-                        {
-                            TopicName = topicReq.TopicName,
-                            TopicId = topicId,
-                            Partitions = partitions
-                        });
-                    }
+                    wanted = null;
                 }
                 else
                 {
-                    // Return offsets for all subscribed topics
-                    foreach (var topicName in group.SubscribedTopics)
-                    {
-                        var topicId = logManager.GetTopicId(topicName);
-                        var metadata = logManager.GetTopicMetadata(topicName);
-                        if (metadata == null) continue;
-
-                        var partitions = new List<DescribeShareOffsetsPartitionResult>(metadata.PartitionCount);
-                        for (int i = 0; i < metadata.PartitionCount; i++)
-                        {
-                            var key = string.Concat(topicName, ":", i.ToString());
-                            var startOffset = group.StartOffsets.GetValueOrDefault(key, 0);
-
-                            long lag = -1;
-                            var tp = new TopicPartition { Topic = topicName, Partition = i };
-                            var log = logManager.GetLog(tp);
-                            if (log != null)
-                            {
-                                lag = log.HighWatermark - startOffset;
-                                if (lag < 0) lag = 0;
-                            }
-
-                            partitions.Add(new DescribeShareOffsetsPartitionResult
-                            {
-                                PartitionIndex = i,
-                                StartOffset = startOffset,
-                                LeaderEpoch = 0,
-                                Lag = lag,
-                                Status = ShareGroupErrorStatus.None
-                            });
-                        }
-
-                        topics.Add(new DescribeShareOffsetsTopicResult
-                        {
-                            TopicName = topicName,
-                            TopicId = topicId,
-                            Partitions = partitions
-                        });
-                    }
+                    wanted = groupReq.Topics is { } topics
+                        ? [.. topics.Select(t => (t.TopicName, t.Partitions))]
+                        : [.. group.SubscribedTopics
+                            .Select(t => (Topic: t, Metadata: logManager.GetTopicMetadata(t)))
+                            .Where(t => t.Metadata is not null)
+                            .Select(t => (t.Topic, (IReadOnlyList<int>)[.. Enumerable.Range(0, t.Metadata!.PartitionCount)]))];
                 }
-
+            }
+            if (wanted is null)
+            {
                 groups.Add(new DescribeShareOffsetsGroupResult
                 {
                     GroupId = groupReq.GroupId,
-                    Topics = topics,
-                    Status = ShareGroupErrorStatus.None
+                    Topics = [],
+                    Status = ShareGroupErrorStatus.InvalidGroupId,
+                    ErrorMessage = "Share group not found"
                 });
+                continue;
             }
 
-            return new DescribeShareOffsetsResult(groups);
+            var topicResults = new List<DescribeShareOffsetsTopicResult>(wanted.Count);
+            foreach (var (topicName, partitionIndexes) in wanted)
+            {
+                var topicId = logManager.GetTopicId(topicName);
+                var partitions = new List<DescribeShareOffsetsPartitionResult>(partitionIndexes.Count);
+                foreach (var partitionIndex in partitionIndexes)
+                {
+                    var (status, state) = await _sharePartitions.Persister.ReadAsync(
+                        new ShareStateKey(groupReq.GroupId, topicId, partitionIndex), cancellationToken);
+                    var startOffset = status == ShareStateStatus.Ok && state is not null ? state.StartOffset : -1;
+                    var log = logManager.GetLog(new TopicPartition { Topic = topicName, Partition = partitionIndex });
+                    var lag = startOffset < 0 || log is null ? -1 : Math.Max(log.HighWatermark - startOffset, 0);
+                    partitions.Add(new DescribeShareOffsetsPartitionResult
+                    {
+                        PartitionIndex = partitionIndex,
+                        StartOffset = startOffset,
+                        LeaderEpoch = state?.LeaderEpoch ?? -1,
+                        Lag = lag,
+                        Status = status is ShareStateStatus.Ok or ShareStateStatus.NotInitialized ? ShareGroupErrorStatus.None : StatusOf(status),
+                    });
+                }
+                topicResults.Add(new DescribeShareOffsetsTopicResult { TopicName = topicName, TopicId = topicId, Partitions = partitions });
+            }
+
+            groups.Add(new DescribeShareOffsetsGroupResult { GroupId = groupReq.GroupId, Topics = topicResults, Status = ShareGroupErrorStatus.None });
         }
+        return new DescribeShareOffsetsResult(groups);
     }
 
     // ─────────────────────────────────────────────────────────────
     // AlterShareGroupOffsets (API Key 91)
     // ─────────────────────────────────────────────────────────────
 
-    /// <remarks>Answered once the start offsets are durable in the group's records (#219).</remarks>
-    public Task<AlterShareOffsetsResult> AlterOffsetsAsync(AlterShareOffsetsCommand request, CancellationToken cancellationToken)
+    /// <remarks>
+    /// Starts each share partition afresh at its new start offset with its share coordinator (#228): under a new state
+    /// epoch, so the partition's leader finds its share partition stale on its next write and reads it again.
+    /// </remarks>
+    public async Task<AlterShareOffsetsResult> AlterOffsetsAsync(AlterShareOffsetsCommand request, CancellationToken cancellationToken)
     {
-        var here = Ownership(request.GroupId);
-        if (here != ShareGroupErrorStatus.None)
-            return Task.FromResult(new AlterShareOffsetsResult { Status = here, Responses = [] });
-        return _state.ChangeAsync(request.GroupId, () => AlterOffsetsLocked(request),
-            written => new AlterShareOffsetsResult { Status = StatusOf(written), Responses = [] }, cancellationToken);
-    }
+        if (EmptyGroupStatus(request.GroupId) is { } refused)
+            return new AlterShareOffsetsResult { Status = refused.Status, ErrorMessage = refused.Message, Responses = [] };
 
-    private AlterShareOffsetsResult AlterOffsetsLocked(AlterShareOffsetsCommand request)
-    {
+        var responses = new List<AlterShareOffsetsTopicResult>(request.Topics.Count);
+        foreach (var topic in request.Topics)
         {
-            if (_state.Current(request.GroupId) is not { } group)
+            var topicId = logManager.GetTopicId(topic.TopicName);
+            var partitions = new List<AlterShareOffsetsPartitionResult>(topic.Partitions.Count);
+            foreach (var partition in topic.Partitions)
             {
-                return new AlterShareOffsetsResult
-                {
-                    Status = ShareGroupErrorStatus.InvalidGroupId,
-                    ErrorMessage = "Share group not found",
-                    Responses = []
-                };
+                var (status, _) = await _sharePartitions.Persister.InitializeAsync(
+                    new ShareStateKey(request.GroupId, topicId, partition.PartitionIndex), partition.StartOffset, cancellationToken);
+                _sharePartitions.Drop(request.GroupId, new TopicPartition { Topic = topic.TopicName, Partition = partition.PartitionIndex });
+                partitions.Add(new AlterShareOffsetsPartitionResult(partition.PartitionIndex, StatusOf(status)));
             }
-
-            // Can only alter offsets when group is empty
-            if (group.Members.Count > 0)
-            {
-                return new AlterShareOffsetsResult
-                {
-                    Status = ShareGroupErrorStatus.NonEmptyGroup,
-                    ErrorMessage = "Cannot alter offsets while group has active members",
-                    Responses = []
-                };
-            }
-
-            var responses = new List<AlterShareOffsetsTopicResult>(request.Topics.Count);
-
-            foreach (var topic in request.Topics)
-            {
-                var topicId = logManager.GetTopicId(topic.TopicName);
-                var partitions = new List<AlterShareOffsetsPartitionResult>(topic.Partitions.Count);
-
-                foreach (var partition in topic.Partitions)
-                {
-                    var key = string.Concat(topic.TopicName, ":", partition.PartitionIndex.ToString());
-                    group.StartOffsets[key] = partition.StartOffset;
-
-                    partitions.Add(new AlterShareOffsetsPartitionResult(partition.PartitionIndex, ShareGroupErrorStatus.None));
-                }
-
-                responses.Add(new AlterShareOffsetsTopicResult
-                {
-                    TopicName = topic.TopicName,
-                    TopicId = topicId,
-                    Partitions = partitions
-                });
-            }
-
-            logger.LogInformation("ShareGroup {GroupId}: altered offsets for {TopicCount} topics",
-                request.GroupId, request.Topics.Count);
-
-            return new AlterShareOffsetsResult
-            {
-                Status = ShareGroupErrorStatus.None,
-                Responses = responses
-            };
+            responses.Add(new AlterShareOffsetsTopicResult { TopicName = topic.TopicName, TopicId = topicId, Partitions = partitions });
         }
+
+        logger.LogInformation("ShareGroup {GroupId}: altered offsets for {TopicCount} topics", request.GroupId, request.Topics.Count);
+        return new AlterShareOffsetsResult { Status = ShareGroupErrorStatus.None, Responses = responses };
     }
 
     // ─────────────────────────────────────────────────────────────
     // DeleteShareGroupOffsets (API Key 92)
     // ─────────────────────────────────────────────────────────────
 
-    /// <remarks>Answered once the removal is durable in the group's records (#219).</remarks>
-    public Task<DeleteShareOffsetsResult> DeleteOffsetsAsync(DeleteShareOffsetsCommand request, CancellationToken cancellationToken)
+    /// <remarks>Removes the share partitions' state with their share coordinators (#228).</remarks>
+    public async Task<DeleteShareOffsetsResult> DeleteOffsetsAsync(DeleteShareOffsetsCommand request, CancellationToken cancellationToken)
     {
-        var here = Ownership(request.GroupId);
-        if (here != ShareGroupErrorStatus.None)
-            return Task.FromResult(new DeleteShareOffsetsResult { Status = here, Responses = [] });
-        return _state.ChangeAsync(request.GroupId, () => DeleteOffsetsLocked(request),
-            written => new DeleteShareOffsetsResult { Status = StatusOf(written), Responses = [] }, cancellationToken);
+        if (EmptyGroupStatus(request.GroupId) is { } refused)
+            return new DeleteShareOffsetsResult { Status = refused.Status, ErrorMessage = refused.Message, Responses = [] };
+
+        var responses = new List<DeleteShareOffsetsTopicResult>(request.Topics.Count);
+        foreach (var topic in request.Topics)
+        {
+            var topicId = logManager.GetTopicId(topic.TopicName);
+            var status = ShareGroupErrorStatus.None;
+            var partitionCount = logManager.GetTopicMetadata(topic.TopicName)?.PartitionCount ?? 0;
+            for (var p = 0; p < partitionCount; p++)
+            {
+                var deleted = await _sharePartitions.Persister.DeleteAsync(new ShareStateKey(request.GroupId, topicId, p), cancellationToken);
+                _sharePartitions.Drop(request.GroupId, new TopicPartition { Topic = topic.TopicName, Partition = p });
+                if (deleted != ShareStateStatus.Ok)
+                    status = StatusOf(deleted);
+            }
+            responses.Add(new DeleteShareOffsetsTopicResult { TopicName = topic.TopicName, TopicId = topicId, Status = status });
+        }
+
+        logger.LogInformation("ShareGroup {GroupId}: deleted offsets for {TopicCount} topics", request.GroupId, request.Topics.Count);
+        return new DeleteShareOffsetsResult { Status = ShareGroupErrorStatus.None, Responses = responses };
     }
 
-    private DeleteShareOffsetsResult DeleteOffsetsLocked(DeleteShareOffsetsCommand request)
+    // Why the group's offsets cannot be changed now: not this broker's, unknown, or with members (Kafka's rule).
+    private (ShareGroupErrorStatus Status, string Message)? EmptyGroupStatus(string groupId)
     {
+        var here = Ownership(groupId);
+        if (here != ShareGroupErrorStatus.None)
+            return (here, $"This broker does not coordinate share group {groupId} now.");
+        lock (_groupLock)
         {
-            if (_state.Current(request.GroupId) is not { } group)
-            {
-                return new DeleteShareOffsetsResult
-                {
-                    Status = ShareGroupErrorStatus.InvalidGroupId,
-                    ErrorMessage = "Share group not found",
-                    Responses = []
-                };
-            }
-
-            // Can only delete offsets when group is empty
+            if (_state.Current(groupId) is not { } group)
+                return (ShareGroupErrorStatus.InvalidGroupId, "Share group not found");
             if (group.Members.Count > 0)
-            {
-                return new DeleteShareOffsetsResult
-                {
-                    Status = ShareGroupErrorStatus.NonEmptyGroup,
-                    ErrorMessage = "Cannot delete offsets while group has active members",
-                    Responses = []
-                };
-            }
-
-            var responses = new List<DeleteShareOffsetsTopicResult>(request.Topics.Count);
-
-            foreach (var topic in request.Topics)
-            {
-                var topicId = logManager.GetTopicId(topic.TopicName);
-
-                // Remove all start offsets for this topic
-                List<string>? keysToRemove = null;
-                var prefix = string.Concat(topic.TopicName, ":");
-                foreach (var key in group.StartOffsets.Keys)
-                {
-                    if (key.StartsWith(prefix, StringComparison.Ordinal))
-                    {
-                        keysToRemove ??= [];
-                        keysToRemove.Add(key);
-                    }
-                }
-
-                if (keysToRemove != null)
-                {
-                    foreach (var key in keysToRemove)
-                    {
-                        group.StartOffsets.Remove(key);
-                    }
-                }
-
-                responses.Add(new DeleteShareOffsetsTopicResult
-                {
-                    TopicName = topic.TopicName,
-                    TopicId = topicId,
-                    Status = ShareGroupErrorStatus.None
-                });
-            }
-
-            logger.LogInformation("ShareGroup {GroupId}: deleted offsets for {TopicCount} topics",
-                request.GroupId, request.Topics.Count);
-
-            return new DeleteShareOffsetsResult
-            {
-                Status = ShareGroupErrorStatus.None,
-                Responses = responses
-            };
+                return (ShareGroupErrorStatus.NonEmptyGroup, "Cannot alter or delete offsets while the group has active members");
         }
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────

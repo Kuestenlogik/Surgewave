@@ -8,9 +8,10 @@ namespace Kuestenlogik.Surgewave.Broker.GroupOffsets;
 /// (<see cref="FlexibleRecordCodec"/>). A record without a value is a tombstone.
 /// </summary>
 /// <remarks>
-/// What Kafka keeps elsewhere — the share-partition start offsets in <c>__share_group_state</c>, the group's configs in
-/// the metadata log — this broker keeps with the group, in a tagged field of the group's metadata record that Kafka
-/// readers skip: the start offsets, the delivery count limit, the record-lock limit and whether a renew is accepted.
+/// The share partitions' state, their start offsets among it, is in <c>__share_group_state</c> as in Kafka (#228). The
+/// group's configs, which Kafka keeps in the metadata log, this broker keeps with the group, in a tagged field of the
+/// group's metadata record that Kafka readers skip: the delivery count limit, the record-lock limit and whether a renew
+/// is accepted.
 /// </remarks>
 internal static class ShareGroupRecords
 {
@@ -30,13 +31,6 @@ internal static class ShareGroupRecords
     public static List<(byte[] Key, byte[] Value)> Of(ShareGroupState group)
     {
         var section = new FlexibleWriter();
-        section.Array(group.StartOffsets.OrderBy(o => o.Key, StringComparer.Ordinal).ToList(), (w, o) =>
-        {
-            var split = o.Key.LastIndexOf(':');
-            w.String(o.Key[..split]);
-            w.Int32(int.Parse(o.Key[(split + 1)..], System.Globalization.CultureInfo.InvariantCulture));
-            w.Int64(o.Value);
-        });
         section.Int32(group.MaxDeliveryCount);
         section.Int32(group.MaxRecordLocks);
         section.Int8(group.RenewAcknowledgeEnabled ? (sbyte)1 : (sbyte)0);
@@ -118,13 +112,6 @@ internal static class ShareGroupRecords
     private static void ReadSection(ShareGroupState group, byte[] section)
     {
         var r = new FlexibleReader(section, at: 0);
-        var offsets = r.ArrayCount();
-        for (var i = 0; i < offsets; i++)
-        {
-            var topic = r.String();
-            var partition = r.Int32();
-            group.StartOffsets[string.Concat(topic, ":", partition.ToString(System.Globalization.CultureInfo.InvariantCulture))] = r.Int64();
-        }
         group.MaxDeliveryCount = r.Int32();
         group.MaxRecordLocks = r.Int32();
         group.RenewAcknowledgeEnabled = r.Int8() != 0;

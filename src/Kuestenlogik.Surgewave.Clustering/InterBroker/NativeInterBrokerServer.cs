@@ -78,6 +78,9 @@ public sealed partial class NativeInterBrokerServer
             case SurgewaveOpCode.InterBrokerVerifyTxnPartition:
                 return await HandleVerifyTxnPartitionAsync(payload, ct).ConfigureAwait(false);
 
+            case SurgewaveOpCode.InterBrokerShareState:
+                return await HandleShareStateAsync(payload, ct).ConfigureAwait(false);
+
             default:
                 LogUnsupportedOpcode(opcode);
                 return ErrorFrame(ClusterRpcStatus.UnsupportedVersion);
@@ -178,6 +181,29 @@ public sealed partial class NativeInterBrokerServer
 
         var status = await _service.ApplyWriteTxnMarkersAsync(request, ct).ConfigureAwait(false);
         return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerWriteTxnMarkers, new WriteTxnMarkersResponsePayload(status));
+    }
+
+    // #228 — the answer is a share-state status and maybe a state: its own response payload.
+    private async ValueTask<byte[]> HandleShareStateAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        if (_service is null)
+            return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerShareState,
+                new ShareStateResponsePayload(Kuestenlogik.Surgewave.Coordination.ShareGroups.ShareStateStatus.NotCoordinator, -1, null));
+
+        ShareStatePayload request;
+        try
+        {
+            var reader = new SurgewavePayloadReader(payload.Span);
+            request = ShareStatePayload.Read(ref reader);
+        }
+        catch (Exception ex)
+        {
+            LogDecodeError(SurgewaveOpCode.InterBrokerShareState, ex);
+            return ErrorFrame(ClusterRpcStatus.Unknown);
+        }
+
+        var response = await _service.ShareStateAsync(request, ct).ConfigureAwait(false);
+        return InterBrokerFrameCodec.EncodeFrame(SurgewaveOpCode.InterBrokerShareState, response);
     }
 
     // #197 — the answer is a transaction status, not a cluster RPC status: its own response payload.

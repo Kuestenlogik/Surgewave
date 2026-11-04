@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using Kuestenlogik.Surgewave.Coordination.ShareGroups;
 using Kuestenlogik.Surgewave.Core;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -14,8 +15,16 @@ namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
 /// start offset moves past the records that are done.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Records are the log's records, one offset each — a batch of several records is several offsets. A record that has
 /// been delivered as often as the group allows is archived instead of being offered again, as is one a member rejects.
+/// </para>
+/// <para>
+/// The state is kept in <c>__share_group_state</c> through the share coordinator: the share partition starts from what
+/// is stored there, and its changes are written there before they are answered, so a leader that takes the partition
+/// over goes on where the last one stopped. A record a member held then is available again; a lock does not outlive
+/// its leader.
+/// </para>
 /// </remarks>
 internal sealed class SharePartition
 {
@@ -25,14 +34,44 @@ internal sealed class SharePartition
     private readonly Lock _lock = new();
     private readonly SortedDictionary<long, InFlightRecord> _records = [];
 
-    public SharePartition(IPartitionLog log, long startOffset, TimeSpan lockDuration, TimeProvider? timeProvider = null)
+    // One write of the state at a time, so the stored state is the last one decided on.
+    private readonly SemaphoreSlim _persistGate = new(1, 1);
+
+    /// <summary>A share partition that starts from <paramref name="state"/>, as stored under <paramref name="key"/>.</summary>
+    public SharePartition(IPartitionLog log, ShareStateKey key, ShareStateSnapshot state, TimeSpan lockDuration, TimeProvider? timeProvider = null)
     {
         _log = log;
+        Key = key;
+        StateEpoch = state.StateEpoch;
         _lockDuration = lockDuration;
         _time = timeProvider ?? TimeProvider.System;
-        StartOffset = Math.Max(startOffset, log.LogStartOffset);
+        StartOffset = Math.Max(state.StartOffset, log.LogStartOffset);
         EndOffset = StartOffset;
+        foreach (var batch in state.Batches)
+        {
+            for (var offset = Math.Max(batch.FirstOffset, StartOffset); offset <= batch.LastOffset; offset++)
+            {
+                _records[offset] = new InFlightRecord
+                {
+                    State = batch.State switch
+                    {
+                        ShareRecordState.Acknowledged => RecordState.Acknowledged,
+                        ShareRecordState.Archived => RecordState.Archived,
+                        _ => RecordState.Available,
+                    },
+                    DeliveryCount = batch.DeliveryCount,
+                };
+                EndOffset = Math.Max(EndOffset, offset + 1);
+            }
+        }
+        AdvanceStart();
     }
+
+    /// <summary>The share group's view of which partition.</summary>
+    public ShareStateKey Key { get; }
+
+    /// <summary>The state epoch the stored state had when this share partition read it.</summary>
+    public int StateEpoch { get; }
 
     /// <summary>The share-partition start offset: every record below it is done.</summary>
     public long StartOffset { get; private set; }
@@ -178,6 +217,46 @@ internal sealed class SharePartition
             AdvanceStart();
             return ShareGroupAckOutcome.Ok;
         }
+    }
+
+    /// <summary>
+    /// Writes the state as it is now through <paramref name="persister"/>, answered once durable. A fenced write means
+    /// the state was initialized afresh, or a newer leader wrote: this share partition is stale.
+    /// </summary>
+    public async Task<ShareStateStatus> PersistAsync(IShareStatePersister persister, int leaderEpoch, CancellationToken cancellationToken)
+    {
+        await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ShareStateSnapshot snapshot;
+            lock (_lock)
+                snapshot = new ShareStateSnapshot(StateEpoch, leaderEpoch, StartOffset, Batches());
+            return await persister.WriteAsync(Key, snapshot, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _persistGate.Release();
+        }
+    }
+
+    // Under the lock: the in-flight records as runs of one state and delivery count; a held record is written available.
+    private List<ShareStateBatch> Batches()
+    {
+        var batches = new List<ShareStateBatch>();
+        foreach (var (offset, record) in _records)
+        {
+            var state = record.State switch
+            {
+                RecordState.Acknowledged => ShareRecordState.Acknowledged,
+                RecordState.Archived => ShareRecordState.Archived,
+                _ => ShareRecordState.Available,
+            };
+            if (batches.Count > 0 && batches[^1] is var last && last.LastOffset == offset - 1 && last.State == state && last.DeliveryCount == record.DeliveryCount)
+                batches[^1] = last with { LastOffset = offset };
+            else
+                batches.Add(new ShareStateBatch(offset, offset, state, record.DeliveryCount));
+        }
+        return batches;
     }
 
     /// <summary>The records a member holds go back to the group — the member left or was fenced.</summary>

@@ -504,7 +504,9 @@ builder.Services.AddSingleton(sp =>
         offsetsTopicNumPartitions: c.OffsetsTopicNumPartitions,
         offsetsTopicReplicationFactor: c.OffsetsTopicReplicationFactor,
         transactionStateLogNumPartitions: c.TransactionStateLogNumPartitions,
-        transactionStateLogReplicationFactor: c.TransactionStateLogReplicationFactor);
+        transactionStateLogReplicationFactor: c.TransactionStateLogReplicationFactor,
+        shareStateTopicNumPartitions: c.ShareStateTopicNumPartitions,
+        shareStateTopicReplicationFactor: c.ShareStateTopicReplicationFactor);
 });
 // Inter-broker transport (TCP by default, QUIC when Surgewave:InterBrokerTransport=quic).
 // Explicitly invoke both registrations so the module initializers run even if no
@@ -695,6 +697,31 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>());
     return store;
 });
+// The share coordinators: share partitions' state in __share_group_state, kept by its partitions' leaders (#228).
+builder.Services.AddSingleton(sp =>
+{
+    var store = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore(
+        sp.GetRequiredService<LogManager>(),
+        sp.GetRequiredService<RecordBatchSerializer>(),
+        sp.GetRequiredService<BrokerConfig>().ShareStateTopicNumPartitions,
+        sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore>>());
+    store.FollowLeadershipOf(
+        sp.GetRequiredService<ReplicaManager>(),
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>());
+    return store;
+});
+// A partition leader asks its own share coordinator, or the broker that coordinates the key.
+builder.Services.AddSingleton(sp =>
+{
+    var persister = new Kuestenlogik.Surgewave.Broker.ShareGroups.RoutingShareStatePersister(
+        sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore>());
+    persister.SetRemote(new NativeShareStatePersister(
+        sp.GetRequiredService<ConnectionPool>(),
+        sp.GetRequiredService<ClusterState>(),
+        sp.GetRequiredService<ClusteringConfig>().BrokerId,
+        sp.GetRequiredService<ILogger<NativeShareStatePersister>>()));
+    return persister;
+});
 // Share group state lives in __consumer_offsets with the group's offsets (#219).
 // A share partition is served by the partition's leader (#228).
 builder.Services.AddSingleton(sp =>
@@ -703,7 +730,8 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
         sp.GetRequiredService<LogManager>(),
         sp.GetRequiredService<OffsetStore>(),
-        TimeSpan.FromMilliseconds(sp.GetRequiredService<BrokerConfig>().ShareRecordLockDurationMs));
+        TimeSpan.FromMilliseconds(sp.GetRequiredService<BrokerConfig>().ShareRecordLockDurationMs),
+        shareState: sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.RoutingShareStatePersister>());
     coordinator.SetPartitionLeadership(sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>());
     return coordinator;
 });
@@ -1016,7 +1044,8 @@ replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
         shutdownCoordinator: clusterController,
         topicCreator: clusterController,
         transactionVerifier: app.Services.GetRequiredService<TransactionCoordinator>(),
-        commitGate: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>())));
+        commitGate: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(),
+        shareState: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore>())));
 
 // #60 Inc6b — the native broker-lifecycle loop: a plugin-free broker registers with the controller
 // over the ReplicationPort and heartbeats, so it JOINS the cluster. No-ops on the controller/seed

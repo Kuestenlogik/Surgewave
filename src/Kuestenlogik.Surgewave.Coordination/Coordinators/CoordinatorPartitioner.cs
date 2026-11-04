@@ -14,6 +14,9 @@ public static class CoordinatorPartitioner
     /// <summary>The internal topic that holds transaction state.</summary>
     public const string TransactionTopic = "__transaction_state";
 
+    /// <summary>The internal topic that holds share-partition state (KIP-932, #228).</summary>
+    public const string ShareStateTopic = "__share_group_state";
+
     /// <summary>The coordinator topic's partition for <paramref name="key"/>.</summary>
     public static int PartitionFor(string key, int partitionCount)
     {

@@ -158,6 +158,13 @@ internal ref struct FlexibleReader(ReadOnlySpan<byte> value, int at = 2)
         return v;
     }
 
+    public short Int16()
+    {
+        var v = BinaryPrimitives.ReadInt16BigEndian(_value[_at..]);
+        _at += 2;
+        return v;
+    }
+
     public long Int64()
     {
         var v = BinaryPrimitives.ReadInt64BigEndian(_value[_at..]);
