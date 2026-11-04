@@ -7,9 +7,9 @@
   "wordmark": { "text": "Surgewave", "outline": "scripts/branding/wordmark.json" },
   "images": "images",
   "roles": {
-    "wave": { "light": "#33bcff", "dark": "#33bcff", "source": ["#33bcff"], "why": "the wave; Surgewave Blue everywhere (BRAND.md), 8.6:1 on #121212" },
+    "wave": { "light": "#33bcff", "dark": "#33bcff", "source": ["#33bcff"], "why": "the wave and the run wave of the wordmark; Surgewave Blue everywhere (BRAND.md), 8.7:1 on #121212; on white 2.2:1, faint as text" },
     "crest": { "light": "#66cfff", "dark": "#66cfff", "source": ["#66cfff"], "why": "the upward arc, the lighter blue; 10.6:1 on #121212, stays" },
-    "ink": { "light": "#003e60", "dark": "#ffffff", "source": ["#003e60"], "why": "the body and the wordmark; navy on #121212 would be 1.7:1 (BRAND.md: white on dark)" }
+    "ink": { "light": "#003e60", "dark": "#ffffff", "source": ["#003e60"], "why": "the body and the wordmark's run Surge; navy on #121212 would be 1.7:1 (BRAND.md: white on dark)" }
   },
   "wordmarkRole": "ink",
   "background": { "stops": ["#F6F8FA", "#E6EBEF", "#D3DCE3"], "why": "Terracle's neutral light glass; behind apple-touch-icon.png and og-image" },

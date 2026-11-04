@@ -1,25 +1,26 @@
 {
   "$comment": "A vendored copy of the shared branding tool (Kuestenlogik/Kuestenlogik, tools/branding) and of the product's brand files (Kuestenlogik/Kuestenlogik, brand/products/<product>; here in the folder above the tool). Do not edit either here: change them in the Kuestenlogik repository and vendor them again (tools/branding/vendor.mjs). check-vendored.mjs compares the files with these hashes (SHA-256, LF line endings).",
   "tool": "Kuestenlogik/Kuestenlogik tools/branding",
-  "version": "1.1.0",
-  "commit": "f69e290e7586b6f2c9ada66019d167be34a74409",
+  "version": "1.2.0",
+  "commit": "e3fbc65b13b60648b4137ea5284de670690b7927",
   "files": {
     "Inter-LICENSE.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
-    "README.md": "1e7fd851d6afaf7fc67a2165c8b8741e9dc602dcf7f462d55139eecf5df8a577",
+    "README.md": "95e55cf36f041cea15f044cbc3ceeb341adc289d1c23d6e2641a44932b5a81a4",
     "check-vendored.mjs": "c521d55a9abb096ee1eac343ed4e1f2c93eb77ba7244cbc5b8b51ed49fc6e5a1",
-    "generate-logos.mjs": "4a44592cae632e6fc150a5f93539fcb84bc326daa3264ebc455f4bbd3b501768",
+    "generate-logos.mjs": "bcdb48aa8d59b3d21ff0f154285fbe9b6eb74acbc93b147729456cb1a738155f",
     "lib/containers.mjs": "59a0764115e7791c1716ae905bfa41807b969d3a7c29f67f0a0dc7474a9418ad",
     "lib/inline.mjs": "81d003728c42bfa67cae4e1a01f836d43589bd2d90cd1fe6afd9766740a11492",
-    "outline-wordmark.py": "56ea51bf3848f60cce120aae49fcb494aab7cfea1fc7c230de91465ed30d19ad",
-    "package-lock.json": "4222f920c5681e25ae109104121298d607672dd61b13c5c05f289d77edb450cb",
-    "package.json": "ab829b1522a862b8215b71666f44f540a4e9bdf20d3aae4a73c410f242308bdd"
+    "lib/lockup.mjs": "18d0e6940f0d9cfef2511d924ea9d0b1855af02908c5fbcfbf12a4f9599a570e",
+    "outline-wordmark.py": "4dc03ae776c28568bd3368f645b49155c686c667fdc8c4ae598309fd7b7f22fb",
+    "package-lock.json": "082baa786448f5ee2cb0688fb667b8bb95cd24e20a7d52301184c769d1106daf",
+    "package.json": "44e0b51bbd0936544577be3cde4f816ec5b9cb9f2e8843642e63a1f4a5aa10fe"
   },
   "brand": {
     "from": "brand/products/surgewave",
     "files": {
-      "brand.json": "188e117e2d1e4bba58c60eaed76ebf6409a9f74eef01c15e44bbf344f84e5116",
+      "brand.json": "0dd5689e34ee55f203eea13fa9e869ab4dafef80ed2585b441d0da3df6811a8b",
       "surgewave_mark_source.svg": "4858b1a7a3badd8ce0c7a96d9e41e98438633a41eba822d92695eda1be4c11d0",
-      "wordmark.json": "2303b31ed7171b42932e493b304a273bba886d10b4d9a2e706d1371e139b6417"
+      "wordmark.json": "80ab1b85718550145c1a9ff216d717f94049a189f574578ae59e6983f6ca38c5"
     }
   }
 }

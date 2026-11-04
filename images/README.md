@@ -18,15 +18,15 @@ single-colour print.
 | `surgewave_mark_white.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Single colour white, for dark backgrounds. |
 | `surgewave_mark_adaptive.svg` | Follows the theme: colours on light, the navy turns white on dark. |
 
-## Lockups (the mark and the wordmark "Surgewave", Inter Bold as outlines)
+## Lockups (the mark and the wordmark "Surgewave", Inter Bold as outlines; on the coloured lockups "wave" in the second colour)
 
 | File | Use |
 |---|---|
-| `surgewave_lockup_h_colored.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Horizontal (1100×200), on light backgrounds: headers, slides. |
+| `surgewave_lockup_h_colored.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Horizontal (769×200), on light backgrounds: headers, slides. |
 | `surgewave_lockup_h_black.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Horizontal, black. |
 | `surgewave_lockup_h_white.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Horizontal, white, for dark backgrounds. |
 | `surgewave_lockup_h_adaptive.svg` | Horizontal, follows the theme. |
-| `surgewave_lockup_v_colored.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Vertical (480×380), on light backgrounds: title pages, avatars. |
+| `surgewave_lockup_v_colored.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Vertical (397×380), on light backgrounds: title pages, avatars. |
 | `surgewave_lockup_v_black.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Vertical, black. |
 | `surgewave_lockup_v_white.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Vertical, white, for dark backgrounds. |
 | `surgewave_lockup_v_adaptive.svg` | Vertical, follows the theme. |
