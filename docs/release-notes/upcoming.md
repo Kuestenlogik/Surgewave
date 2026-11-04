@@ -183,6 +183,13 @@ They now name `Kuestenlogik.Surgewave.AI` from the new default plugin source
 
 ## Also in this release
 
+### .NET 10.0.14 servicing packages
+
+The Microsoft packages move from 10.0.13 to 10.0.14.
+`Microsoft.AspNetCore.Components.WebAssembly.Server` 10.0.13, which the
+Control UI uses, has a remote code execution vulnerability
+(CVE-2026-102870, GHSA-g27p-qf6j-c96c).
+
 ### Everything in English, and a guard that keeps it so (#181)
 
 The remaining German in docs, comments, XML docs, build files, workflows,
