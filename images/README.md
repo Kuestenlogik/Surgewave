@@ -18,7 +18,7 @@ single-colour print.
 | `surgewave_mark_white.svg`, `.png`, `@2x.png`, `.webp`, `@2x.webp` | Single colour white, for dark backgrounds. |
 | `surgewave_mark_adaptive.svg` | Follows the theme: colours on light, the navy turns white on dark. |
 
-## Lockups (the mark and the wordmark "Surgewave", Inter Bold as outlines; on the coloured lockups "wave" in the second colour)
+## Lockups (the mark and the wordmark "Surgewave", Inter Bold as outlines; on the coloured lockups "Surge" in navy and "wave" in Blue Bright)
 
 | File | Use |
 |---|---|

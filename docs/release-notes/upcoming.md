@@ -341,12 +341,17 @@ old docs `logo.svg`, the designed link-preview card and the scripts `generate-lo
 `render-favicons.js`, `build-favicon-ico.js`, `generate-og-image.js` with `og-image-template.html` (and
 the `og-image` npm script) are gone.
 
-### "wave" in the second colour, lockups as wide as their content (Kuestenlogik/Kuestenlogik#10)
+### The Küstenlogik colour language; lockups as wide as their content (Kuestenlogik/Kuestenlogik#10)
 
-On the coloured lockups the wordmark is "Surge" in ink and "wave" in the
-brand's second colour; black and white stay one colour. Every lockup is now
-as wide as its content: the horizontal one is 769×200 instead of 1100×200,
-the vertical one 397×380 instead of 480×380. Branding tool 1.2.0.
+The marks and wordmarks follow the shared Küstenlogik colours: navy
+`#003e60` for the mark body and the first run of the wordmark (white on
+dark), and Surgewave's signature colour Blue Bright `#66cfff` for the wave,
+the crest and "wave" in the wordmark, on light and dark alike. The drawing
+paints wave and crest in one colour, so the adaptive SVGs have one class,
+`.surgewave-wave`; `.surgewave-crest` is gone. Black and white stay one
+colour. Every lockup is now as wide as its content: the horizontal one is
+769×200 instead of 1100×200, the vertical one 397×380 instead of 480×380.
+Branding tool 1.2.0.
 
 ### The drawing is edited in the Kuestenlogik repository (Kuestenlogik/Kuestenlogik#10)
 

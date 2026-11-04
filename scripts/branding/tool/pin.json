@@ -2,7 +2,7 @@
   "$comment": "A vendored copy of the shared branding tool (Kuestenlogik/Kuestenlogik, tools/branding) and of the product's brand files (Kuestenlogik/Kuestenlogik, brand/products/<product>; here in the folder above the tool). Do not edit either here: change them in the Kuestenlogik repository and vendor them again (tools/branding/vendor.mjs). check-vendored.mjs compares the files with these hashes (SHA-256, LF line endings).",
   "tool": "Kuestenlogik/Kuestenlogik tools/branding",
   "version": "1.2.0",
-  "commit": "e3fbc65b13b60648b4137ea5284de670690b7927",
+  "commit": "0268f3c09fd9b3ab4fd7ad9c260af171200eac49",
   "files": {
     "Inter-LICENSE.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
     "README.md": "95e55cf36f041cea15f044cbc3ceeb341adc289d1c23d6e2641a44932b5a81a4",
@@ -18,8 +18,8 @@
   "brand": {
     "from": "brand/products/surgewave",
     "files": {
-      "brand.json": "0dd5689e34ee55f203eea13fa9e869ab4dafef80ed2585b441d0da3df6811a8b",
-      "surgewave_mark_source.svg": "4858b1a7a3badd8ce0c7a96d9e41e98438633a41eba822d92695eda1be4c11d0",
+      "brand.json": "5ddf08206feca639b7eb86ac0a48bd6984f96197b6ad430bde226384808151c6",
+      "surgewave_mark_source.svg": "cb90b10c50beb450e660e2e5a0384c53c83ca648fb6d748b82fe2e824a1d35c7",
       "wordmark.json": "80ab1b85718550145c1a9ff216d717f94049a189f574578ae59e6983f6ca38c5"
     }
   }

@@ -204,15 +204,14 @@ body.has-dark-hero:not(.scrolled-past-hero) .surgewave-search-trigger:hover {
   flex-shrink: 0;
   display: block;
 }
-.surgewave-wave { fill: #33bcff; }
+/* The wave is Blue Bright on light and dark alike; only the ink switches (scripts/branding/brand.json). */
+.surgewave-wave { fill: #66cfff; }
 .surgewave-ink  { fill: #003e60; }
-:root[data-theme-resolved="dark"] .surgewave-wave { fill: #66cfff; }
 :root[data-theme-resolved="dark"] .surgewave-ink  { fill: #ffffff; }
 /* On the dark hero canvas (before the user has scrolled past it) the
  * HEADER mark is forced to the dark palette so it stays legible — but
  * scoped to .site-header only so the page-wide theme toggle still
  * controls everything else (including the marks in the footer / docs). */
-body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-wave { fill: #66cfff; }
 body.has-dark-hero:not(.scrolled-past-hero) .site-header .surgewave-ink  { fill: #ffffff; }
 /* The hero centre lockup always renders on the dark canvas, so it
  * always uses the dark-mode tones regardless of theme state. The
