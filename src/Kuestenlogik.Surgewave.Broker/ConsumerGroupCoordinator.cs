@@ -119,7 +119,13 @@ public sealed partial class ConsumerGroupCoordinator(
                 var v2Status = v2Coordinator?.ValidateMemberForOffsetOperation(
                     request.GroupId, request.MemberId, request.GenerationIdOrMemberEpoch) ?? ConsumerGroupFenceStatus.NotAV2Group;
 
-                if (v2Status != ConsumerGroupFenceStatus.Ok)
+                // A consumer that assigns its partitions itself commits outside any generation (-1) for a group nobody
+                // joined; Kafka takes such commits, and so does this coordinator.
+                if (v2Status == ConsumerGroupFenceStatus.NotAV2Group && request.GenerationIdOrMemberEpoch < 0)
+                {
+                    isV2Group = false;
+                }
+                else if (v2Status != ConsumerGroupFenceStatus.Ok)
                 {
                     // NotAV2Group: not a v2 group either, so the group is unknown. Anything else is the v2 fence.
                     return BuildOffsetCommitErrorResponse(request, v2Status switch
@@ -129,7 +135,10 @@ public sealed partial class ConsumerGroupCoordinator(
                         _ => ConsumerGroupErrorStatus.UnknownMember,
                     });
                 }
-                isV2Group = true;
+                else
+                {
+                    isV2Group = true;
+                }
             }
         }
 

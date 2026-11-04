@@ -143,6 +143,16 @@ and one of them reported itself as leader while naming the other. A vote now
 holds for its whole term. A leader that hears from another leader of its own
 term logs the violation as an error and follows that leader.
 
+### A broker that did not stop cleanly keeps its records (#222)
+
+A file segment reopened after a broker was killed or crashed took its end
+from the offset index, which is written behind the log and flushed in
+batches. A segment whose index had not been flushed came back empty: its
+records could no longer be read, and new appends were given their offsets
+again. On reopen the log now decides. Every complete batch after the last
+indexed one is indexed, a batch cut short by the stop is truncated, and the
+segment ends where its last complete batch ends.
+
 ### A group keeps its offsets when its coordinator changes (#205)
 
 Committed offsets lived in a file on the broker that coordinated the group,
@@ -154,7 +164,9 @@ compacted. A broker that becomes leader of a partition loads its groups from
 the log and answers `COORDINATOR_LOAD_IN_PROGRESS` until it has; one that
 loses the leadership lets them go and answers `NOT_COORDINATOR`. A commit is
 answered once the in-sync replicas of the partition have it. A broker on its
-own keeps `__consumer_offsets` too and leads all of its partitions.
+own keeps `__consumer_offsets` too and leads all of its partitions. A consumer that
+assigns its partitions itself can commit offsets for a group nobody joined,
+outside any generation, as Kafka allows.
 
 ### Consumers of one group share the partitions (#216)
 
