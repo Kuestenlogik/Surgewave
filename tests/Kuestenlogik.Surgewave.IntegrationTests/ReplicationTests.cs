@@ -141,11 +141,11 @@ public class ReplicationTests : IAsyncLifetime
         _output.WriteLine($"Cluster started with bootstrap servers: {_bootstrapServers}");
 
         // Wait for cluster to stabilize (controller election + all brokers ready)
-        var stabilized = await TestWaitHelpers.WaitForClusterStabilizationAsync(_brokers, output: _output);
-        if (!stabilized)
-        {
-            _output.WriteLine("Warning: Cluster did not fully stabilize within timeout");
-        }
+        // A cluster that did not stabilise fails here, not as a symptom in a test.
+        Assert.True(
+            await TestWaitHelpers.WaitForClusterStabilizationAsync(_brokers, output: _output),
+            "the three-broker cluster did not stabilise: " + string.Join("; ", _brokers.Select(b =>
+                $"broker {b.BrokerId}{(b.IsController ? " (controller)" : "")} knows {b.ClusterState?.Brokers.Count ?? 0} broker(s), controller {b.ClusterState?.ControllerId}")));
     }
 
     public async ValueTask DisposeAsync()
@@ -178,7 +178,9 @@ public class ReplicationTests : IAsyncLifetime
                 () => _brokers.All(b => Enumerable.Range(0, 3).All(p =>
                     b.ClusterState!.GetPartitionState(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = p })?.LeaderBrokerId > 0)),
                 timeout: TimeSpan.FromSeconds(60), ct: TestContext.Current.CancellationToken, output: _output),
-            $"{topic} did not get a leader for every partition on every broker");
+            $"{topic} did not get a leader for every partition on every broker: " + string.Join("; ", _brokers.Select(b =>
+                $"broker {b.BrokerId}{(b.IsController ? " (controller)" : "")}: " + string.Join(",", Enumerable.Range(0, 3).Select(p =>
+                    $"{p}->{b.ClusterState!.GetPartitionState(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = p })?.LeaderBrokerId.ToString() ?? "unknown"}")))));
 
         // Verify all 3 brokers are responding
         foreach (var broker in _brokers)
