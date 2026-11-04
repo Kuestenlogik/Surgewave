@@ -1,6 +1,3 @@
-using System.Net;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Kuestenlogik.Surgewave.Runtime;
@@ -32,7 +29,7 @@ public sealed class JavaClientFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        var host = OutboundIPv4Address();
+        var host = ContainerReachableHost.OutboundIPv4Address();
         if (host is null)
         {
             Unavailable = "the host has no IPv4 address a container can reach";
@@ -91,31 +88,6 @@ public sealed class JavaClientFixture : IAsyncLifetime
         if (_broker is not null)
             await _broker.DisposeAsync();
         _loggerFactory.Dispose();
-    }
-
-    /// <summary>
-    /// The address of the interface the host routes outbound traffic through. Connecting a UDP socket sends
-    /// nothing; it only selects the route. Without a route, the first up IPv4 interface that is not loopback.
-    /// </summary>
-    private static IPAddress? OutboundIPv4Address()
-    {
-        try
-        {
-            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            socket.Connect(new IPEndPoint(IPAddress.Parse("192.0.2.1"), 9));
-            if (socket.LocalEndPoint is IPEndPoint { Address: var address } && !IPAddress.IsLoopback(address))
-                return address;
-        }
-        catch (SocketException)
-        {
-            // No route: fall back to the interfaces.
-        }
-
-        return NetworkInterface.GetAllNetworkInterfaces()
-            .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-            .Select(a => a.Address)
-            .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
     }
 }
 

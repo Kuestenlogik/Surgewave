@@ -20,10 +20,12 @@ public sealed class CoordinatorCluster : IAsyncDisposable
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
     private readonly HashSet<SurgewaveRuntime> _stopped = [];
+    private readonly string _host;
 
-    private CoordinatorCluster(ITestOutputHelper output)
+    private CoordinatorCluster(ITestOutputHelper output, string host)
     {
         _output = output;
+        _host = host;
         _loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.AddProvider(new XunitLoggerProvider(output));
@@ -37,9 +39,13 @@ public sealed class CoordinatorCluster : IAsyncDisposable
     /// <summary>The brokers still running.</summary>
     public IEnumerable<SurgewaveRuntime> Running => Brokers.Where(b => !_stopped.Contains(b));
 
-    public static async Task<CoordinatorCluster> StartAsync(ITestOutputHelper output)
+    /// <param name="host">
+    /// The address every broker binds and advertises: loopback by default, the host's outbound address for a client in
+    /// a container (<see cref="ContainerReachableHost"/>).
+    /// </param>
+    public static async Task<CoordinatorCluster> StartAsync(ITestOutputHelper output, string host = "127.0.0.1")
     {
-        var cluster = new CoordinatorCluster(output);
+        var cluster = new CoordinatorCluster(output, host);
         try
         {
             await cluster.StartBrokersAsync();
@@ -79,15 +85,16 @@ public sealed class CoordinatorCluster : IAsyncDisposable
     private async Task StartBrokersAsync()
     {
         // A declared quorum needs every address before any broker starts, so the ports are reserved up front.
-        var ports = ReservePorts(6);
-        var quorum = string.Join(",", Enumerable.Range(0, 3).Select(i => $"{i + 1}@127.0.0.1:{ports[3 + i]}"));
-        var nodes = Enumerable.Range(0, 3).Select(i => $"{i + 1}:127.0.0.1:{ports[i]}:{ports[3 + i]}").ToArray();
+        var ports = ReservePorts(6, System.Net.IPAddress.Parse(_host));
+        var quorum = string.Join(",", Enumerable.Range(0, 3).Select(i => $"{i + 1}@{_host}:{ports[3 + i]}"));
+        var nodes = Enumerable.Range(0, 3).Select(i => $"{i + 1}:{_host}:{ports[i]}:{ports[3 + i]}").ToArray();
 
         for (var i = 0; i < 3; i++)
         {
             var self = i;
             Brokers.Add(await SurgewaveRuntime.CreateBuilder()
                 .WithBrokerId(i + 1)
+                .WithHost(_host)
                 .WithPort(ports[i])
                 .WithReplicationPort(ports[3 + i])
                 .WithCluster([.. nodes.Where((_, n) => n != self)])
@@ -140,14 +147,14 @@ public sealed class CoordinatorCluster : IAsyncDisposable
             Partition = partition,
         })?.LeaderBrokerId;
 
-    private static int[] ReservePorts(int count)
+    private static int[] ReservePorts(int count, System.Net.IPAddress address)
     {
         var listeners = new List<System.Net.Sockets.TcpListener>(count);
         try
         {
             for (var i = 0; i < count; i++)
             {
-                var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+                var listener = new System.Net.Sockets.TcpListener(address, 0);
                 listener.Start();
                 listeners.Add(listener);
             }
