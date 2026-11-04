@@ -34,6 +34,16 @@ public sealed partial class RaftNode : IAsyncDisposable
     private readonly ConcurrentDictionary<int, long> _matchIndex = new();
     private readonly ConcurrentDictionary<int, DateTimeOffset> _lastPeerContact = new();
 
+    // The AppendEntries send each peer has under way. A peer gets its next one only when the last one landed, so a
+    // slow or dead peer never holds up the rounds to the others (#204).
+    private readonly ConcurrentDictionary<int, Task> _replicationInFlight = new();
+
+    // Released by a proposal, so it goes out now rather than on the next heartbeat tick.
+    private readonly SemaphoreSlim _replicateNow = new(0, 1);
+
+    // Completed and replaced, under _lock, each time the commit index moves: what WaitForCommitAsync waits on.
+    private TaskCompletionSource _commitAdvanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     // Timing
     private DateTimeOffset _lastHeartbeat = DateTimeOffset.UtcNow;
     private int _electionTimeoutMs;
@@ -226,8 +236,14 @@ public sealed partial class RaftNode : IAsyncDisposable
             try { await _heartbeatTask; } catch (OperationCanceledException) { }
         }
 
+        foreach (var send in _replicationInFlight.Values)
+        {
+            try { await send.ConfigureAwait(false); } catch (OperationCanceledException) { }
+        }
+
         _cts.Dispose();
         _cts = null;
+        _replicateNow.Dispose();
     }
 
     /// <summary>
@@ -457,6 +473,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             {
                 _commitIndex = Math.Min(request.LeaderCommit, LastLogIndex);
                 ApplyCommittedEntries();
+                SignalCommitAdvanced();
             }
 
             response = new AppendEntriesResponse(_currentTerm, true, LastLogIndex);
@@ -526,23 +543,45 @@ public sealed partial class RaftNode : IAsyncDisposable
         // window; for a multi-voter quorum this finds nothing new and costs a lock.
         TryAdvanceCommitIndex(PeerIds);
 
-        // Replicated via the heartbeat loop
+        // Replicated by the heartbeat loop, woken for it now rather than on its next tick: a caller that waits for
+        // the commit would otherwise wait a heartbeat interval per entry (#204).
+        WakeReplication();
         return resultIndex;
     }
 
     /// <summary>
     /// Wait for a log entry to be committed.
     /// </summary>
+    /// <remarks>
+    /// Woken by the commit index moving, not by polling it; the timeout is only the bound for an entry that never
+    /// commits, such as one a leader that lost its office proposed.
+    /// </remarks>
     public async Task<bool> WaitForCommitAsync(long index, TimeSpan timeout, CancellationToken ct)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
 
-        while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
-            if (_commitIndex >= index)
-                return true;
+            Task advanced;
+            lock (_lock)
+            {
+                if (_commitIndex >= index)
+                    return true;
+                advanced = _commitAdvanced.Task;
+            }
 
-            await Task.Delay(10, ct);
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+                break;
+
+            try
+            {
+                await advanced.WaitAsync(remaining, ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                break;
+            }
         }
 
         return _commitIndex >= index;
@@ -874,10 +913,14 @@ public sealed partial class RaftNode : IAsyncDisposable
         _nextIndex.Clear();
         _matchIndex.Clear();
 
+        var tookOffice = DateTimeOffset.UtcNow;
         foreach (var peerId in PeerIds)
         {
             _nextIndex[peerId] = LastLogIndex + 1;
             _matchIndex[peerId] = 0;
+            // The isolation check counts from here: the heartbeat loop no longer waits for the first round's answers
+            // before it looks, so a peer gets one isolation timeout from the election to answer (#204).
+            _lastPeerContact[peerId] = tookOffice;
         }
 
         // Observers are replicated to on the same terms as voters — they just do not count
@@ -914,7 +957,8 @@ public sealed partial class RaftNode : IAsyncDisposable
                     break;
                 }
 
-                await Task.Delay(_config.RaftHeartbeatIntervalMs, ct);
+                // The heartbeat interval, or less when a proposal has something to send.
+                await _replicateNow.WaitAsync(_config.RaftHeartbeatIntervalMs, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -1018,7 +1062,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         return false;
     }
 
-    private async Task SendHeartbeatsAsync(CancellationToken ct)
+    private Task SendHeartbeatsAsync(CancellationToken ct)
     {
         var peers = PeerIds;
         var observers = ObserverIds;
@@ -1029,23 +1073,60 @@ public sealed partial class RaftNode : IAsyncDisposable
         EnsureReplicationState(peers);
         EnsureReplicationState(observers);
 
-        var tasks = peers.Concat(observers)
-            .Select(peerId => SendAppendEntriesAsync(peerId, ct))
-            .ToArray();
-
-        // As each send lands, not after ALL of them. A majority is what commits an entry, and
-        // waiting for the rest hands a single unreachable peer the power to hold up the commit:
-        // its send burns three attempts with a 3 s connect and a 5 s RPC bound, so one dead node
-        // stalled every commit for the better part of ten seconds — and a topic created through a
-        // freshly promoted controller timed out waiting for it (#176).
-        // Once before waiting on anyone: a lone voter is its own majority and has no peer whose
-        // completion could ever trigger the check below.
+        // Once before any send: a lone voter is its own majority and has no peer whose
+        // completion could ever trigger the check after one.
         TryAdvanceCommitIndex(peers);
 
-        await foreach (var completed in Task.WhenEach(tasks).WithCancellation(ct))
+        // Each peer on its own: the round does not wait for the sends, and a peer whose last send is still under way
+        // is skipped. A majority is what commits an entry, and waiting for the rest hands a single unreachable peer
+        // the power to hold up the commit: its send burns three attempts with a 3 s connect and a 5 s RPC bound
+        // (#176). Committing as each send landed was not enough while the next round still waited for all of them —
+        // with a broker dead, the leader sent a round every ten seconds or so, and a controller handling the failure
+        // one partition at a time took minutes (#204).
+        foreach (var peerId in peers.Concat(observers))
         {
-            await completed.ConfigureAwait(false);
-            TryAdvanceCommitIndex(peers);
+            if (_replicationInFlight.TryGetValue(peerId, out var underWay) && !underWay.IsCompleted)
+                continue;
+            _replicationInFlight[peerId] = ReplicateToAsync(peerId, ct);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ReplicateToAsync(int peerId, CancellationToken ct)
+    {
+        try
+        {
+            await SendAppendEntriesAsync(peerId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            LogHeartbeatLoopError(ex);
+            return;
+        }
+
+        TryAdvanceCommitIndex(PeerIds);
+    }
+
+    // Lets the heartbeat loop run its next round now; at most one wake-up is pending.
+    private void WakeReplication()
+    {
+        try
+        {
+            if (_replicateNow.CurrentCount == 0)
+                _replicateNow.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // Another proposal woke it first.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Disposed; nothing left to replicate.
         }
     }
 
@@ -1087,7 +1168,16 @@ public sealed partial class RaftNode : IAsyncDisposable
             _commitIndex = newCommitIndex;
             LogCommitIndexAdvanced(_commitIndex);
             ApplyCommittedEntries();
+            SignalCommitAdvanced();
         }
+    }
+
+    // Wakes every WaitForCommitAsync; called under _lock right after the commit index moved.
+    private void SignalCommitAdvanced()
+    {
+        var advanced = _commitAdvanced;
+        _commitAdvanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        advanced.TrySetResult();
     }
 
     /// <summary>

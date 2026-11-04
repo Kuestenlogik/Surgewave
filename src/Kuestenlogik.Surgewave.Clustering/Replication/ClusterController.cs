@@ -661,10 +661,15 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     }
 
     /// <summary>
-    /// Proposes the replica assignment of each partition and, once it commits, takes this broker's part in it. False
-    /// when an assignment does not commit — the controller lost its leadership on the way, say — so the caller never
-    /// reports a topic as created while some of its partitions have no replicas anywhere but here.
+    /// Proposes the replica assignment of each partition and, once they commit, takes this broker's part in them.
+    /// False when an assignment does not commit — the controller lost its leadership on the way, say — so the caller
+    /// never reports a topic as created while some of its partitions have no replicas anywhere but here.
     /// </summary>
+    /// <remarks>
+    /// All assignments are proposed before the one wait for the last of them: the log commits in order, so the last
+    /// committing means all did. Waiting for each in turn cost a replication round per partition, and the 50
+    /// partitions of <c>__consumer_offsets</c> kept the controller busy for seconds (#204).
+    /// </remarks>
     private async Task<bool> AssignPartitionsViaRaftAsync(
         string topic, Guid topicId, IEnumerable<int> partitions, short replicationFactor, CancellationToken ct)
     {
@@ -675,36 +680,41 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         }
 
+        var assigned = new List<(int Partition, List<int> Replicas)>();
+        long lastIndex = -1;
         foreach (var partition in partitions)
         {
             var replicas = _replicaAssignment.AssignReplicas(brokerIds, partition, replicationFactor);
             var assignCmd = new PartitionAssignedCommand(topic, partition, replicas, _config.MinInSyncReplicas);
             var assignData = JsonSerializer.SerializeToUtf8Bytes(assignCmd, ClusteringJsonContext.Default.PartitionAssignedCommand);
 
-            var assignIndex = await _raftNode!.ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
-            if (assignIndex < 0 || !await _raftNode.WaitForCommitAsync(assignIndex, TimeSpan.FromSeconds(5), ct))
+            lastIndex = await _raftNode!.ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
+            if (lastIndex < 0)
             {
-                LogRaftCommitTimeout("PartitionAssigned", assignIndex);
+                LogNotController("CreateTopic (Raft propose failed)");
                 return false;
             }
+            assigned.Add((partition, replicas));
+        }
 
-            // Apply local replica manager state
+        if (assigned.Count == 0)
+            return true;
+        if (!await _raftNode!.WaitForCommitAsync(lastIndex, TimeSpan.FromSeconds(5), ct))
+        {
+            LogRaftCommitTimeout("PartitionAssigned", lastIndex);
+            return false;
+        }
+
+        // Apply local replica manager state
+        foreach (var (partition, replicas) in assigned)
+        {
+            if (!replicas.Contains(_config.BrokerId))
+                continue;
             var tp = new TopicPartition { Topic = topic, Partition = partition };
-            foreach (var brokerId in replicas)
-            {
-                if (brokerId == _config.BrokerId)
-                {
-                    var isLeader = replicas[0] == brokerId;
-                    if (isLeader)
-                    {
-                        await _replicaManager.BecomeLeaderAsync(tp, 1, ct, topicId);
-                    }
-                    else
-                    {
-                        await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct, topicId);
-                    }
-                }
-            }
+            if (replicas[0] == _config.BrokerId)
+                await _replicaManager.BecomeLeaderAsync(tp, 1, ct, topicId);
+            else
+                await _replicaManager.BecomeFollowerAsync(tp, replicas[0], 1, ct, topicId);
         }
 
         return true;
