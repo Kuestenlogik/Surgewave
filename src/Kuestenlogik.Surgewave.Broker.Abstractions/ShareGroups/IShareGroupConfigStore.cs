@@ -9,8 +9,8 @@ namespace Kuestenlogik.Surgewave.Broker.ShareGroups;
 public interface IShareGroupConfigStore
 {
     /// <summary>
-    /// Set a share-group config value. Returns an error message when the group,
-    /// config name, or value is rejected; <c>null</c> on success.
+    /// Set a share-group config value, answered once it is durable with the group's state (#219). Returns an error
+    /// message when the group, config name, or value is rejected; <c>null</c> on success.
     /// </summary>
-    string? SetShareGroupConfig(string groupId, string name, string? value);
+    Task<string?> SetShareGroupConfigAsync(string groupId, string name, string? value, CancellationToken cancellationToken);
 }

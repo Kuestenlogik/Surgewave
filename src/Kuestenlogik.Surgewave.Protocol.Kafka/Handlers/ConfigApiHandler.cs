@@ -37,15 +37,15 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
         _shareGroupCoordinator = shareGroupCoordinator;
     }
 
-    public Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
+    public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
-        return Task.FromResult<KafkaResponse>(request switch
+        return request switch
         {
             DescribeConfigsRequest describeConfigsRequest => HandleDescribeConfigs(describeConfigsRequest),
             AlterConfigsRequest alterConfigsRequest => HandleAlterConfigs(alterConfigsRequest),
-            IncrementalAlterConfigsRequest incrementalRequest => HandleIncrementalAlterConfigs(incrementalRequest),
+            IncrementalAlterConfigsRequest incrementalRequest => await HandleIncrementalAlterConfigsAsync(incrementalRequest, cancellationToken),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConfigApiHandler")
-        });
+        };
     }
 
     private DescribeConfigsResponse HandleDescribeConfigs(DescribeConfigsRequest request)
@@ -358,7 +358,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
         }).ToList();
     }
 
-    private IncrementalAlterConfigsResponse HandleIncrementalAlterConfigs(IncrementalAlterConfigsRequest request)
+    private async Task<IncrementalAlterConfigsResponse> HandleIncrementalAlterConfigsAsync(IncrementalAlterConfigsRequest request, CancellationToken cancellationToken)
     {
         var responses = new List<IncrementalAlterConfigsResponse.AlterConfigsResourceResponse>();
 
@@ -550,7 +550,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                         {
                             case 0: // SET
                             {
-                                var error = _shareGroupCoordinator.SetShareGroupConfig(resource.ResourceName, config.Name, config.Value);
+                                var error = await _shareGroupCoordinator.SetShareGroupConfigAsync(resource.ResourceName, config.Name, config.Value, cancellationToken);
                                 if (error != null) errors.Add(error);
                                 break;
                             }
@@ -569,7 +569,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                                 }
                                 else
                                 {
-                                    var error = _shareGroupCoordinator.SetShareGroupConfig(resource.ResourceName, config.Name, defaultValue);
+                                    var error = await _shareGroupCoordinator.SetShareGroupConfigAsync(resource.ResourceName, config.Name, defaultValue, cancellationToken);
                                     if (error != null) errors.Add(error);
                                 }
                                 break;

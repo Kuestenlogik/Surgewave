@@ -1,4 +1,5 @@
-using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
+using Kuestenlogik.Surgewave.Broker.Coordination;
+using Kuestenlogik.Surgewave.Broker.GroupOffsets;
 using Kuestenlogik.Surgewave.Coordination.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Models;
 using Kuestenlogik.Surgewave.Core.Queue;
@@ -20,9 +21,11 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private readonly ILogger<ShareGroupCoordinator> logger;
     private readonly LogManager logManager;
     private readonly IQueueViewManager queueViewManager;
+    // The groups' records live in their partitions of __consumer_offsets (#219).
+    private readonly OffsetStore _offsets;
+    private readonly GroupStateLog<ShareGroupState> _state;
     private readonly Dictionary<string, ShareGroupState> _shareGroups;
-    private readonly Lock _groupLock = new();
-    private readonly IGroupStateStore<ShareGroupState>? _persistence;
+    private readonly Lock _groupLock;
 
     private const int DefaultHeartbeatIntervalMs = 5000;
     private static readonly TimeSpan StaleHeartbeatTimeout = TimeSpan.FromSeconds(30);
@@ -31,29 +34,59 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         ILogger<ShareGroupCoordinator> logger,
         LogManager logManager,
         IQueueViewManager queueViewManager,
-        IGroupStateStore<ShareGroupState>? persistence = null)
+        OffsetStore? offsets = null)
     {
         this.logger = logger;
         this.logManager = logManager;
         this.queueViewManager = queueViewManager;
-        _persistence = persistence;
-        _shareGroups = persistence is null
-            ? []
-            : persistence.LoadAll().ToDictionary(kv => kv.Key, kv => kv.Value);
-
-        if (_shareGroups.Count > 0)
-        {
-            logger.LogInformation("ShareGroupCoordinator: recovered {Count} share group(s) from persistence", _shareGroups.Count);
-        }
+        _offsets = offsets ?? OffsetStore.InMemory();
+        _state = new GroupStateLog<ShareGroupState>(
+            _offsets, k => ShareGroupRecords.IsShareGroupKey(k), ShareGroupRecords.Read, ShareGroupRecords.Of);
+        _shareGroups = _state.Groups;
+        _groupLock = _state.SyncRoot;
     }
+
+    // Whether this broker serves the group's partition of __consumer_offsets now (#219).
+    private ShareGroupErrorStatus Ownership(string groupId) => _offsets.OwnershipOf(groupId) switch
+    {
+        CoordinatorOwnership.Owned => ShareGroupErrorStatus.None,
+        CoordinatorOwnership.Loading => ShareGroupErrorStatus.CoordinatorLoadInProgress,
+        _ => ShareGroupErrorStatus.NotCoordinator,
+    };
+
+    private static ShareGroupErrorStatus StatusOf(StateWriteStatus written) => written switch
+    {
+        StateWriteStatus.NotCoordinator => ShareGroupErrorStatus.NotCoordinator,
+        StateWriteStatus.LoadInProgress => ShareGroupErrorStatus.CoordinatorLoadInProgress,
+        _ => ShareGroupErrorStatus.CoordinatorNotAvailable,
+    };
 
     // ─────────────────────────────────────────────────────────────
     // ShareGroupHeartbeat (API Key 76)
     // ─────────────────────────────────────────────────────────────
 
-    public ShareGroupHeartbeatResult Heartbeat(ShareGroupHeartbeatCommand request)
+    /// <remarks>
+    /// Served by the broker that leads the group's partition of <c>__consumer_offsets</c>, and answered once the group's
+    /// changed records are durable there (#219).
+    /// </remarks>
+    public Task<ShareGroupHeartbeatResult> HeartbeatAsync(ShareGroupHeartbeatCommand request, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        var here = Ownership(request.GroupId);
+        if (here != ShareGroupErrorStatus.None)
+            return Task.FromResult(Refused(request, here));
+        return _state.ChangeAsync(request.GroupId, () => HeartbeatLocked(request), written => Refused(request, StatusOf(written)), cancellationToken);
+    }
+
+    private static ShareGroupHeartbeatResult Refused(ShareGroupHeartbeatCommand request, ShareGroupErrorStatus status) => new()
+    {
+        Status = status,
+        MemberId = request.MemberId,
+        MemberEpoch = request.MemberEpoch,
+        HeartbeatIntervalMs = DefaultHeartbeatIntervalMs,
+    };
+
+    private ShareGroupHeartbeatResult HeartbeatLocked(ShareGroupHeartbeatCommand request)
+    {
         {
             logger.LogDebug("ShareGroupHeartbeat: GroupId={GroupId}, MemberId={MemberId}, MemberEpoch={MemberEpoch}",
                 request.GroupId, request.MemberId, request.MemberEpoch);
@@ -64,10 +97,11 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                 return HandleShareGroupLeave(request);
             }
 
-            if (!_shareGroups.TryGetValue(request.GroupId, out var group))
+            var group = _state.Current(request.GroupId);
+            if (group is null)
             {
                 group = new ShareGroupState { GroupId = request.GroupId };
-                _shareGroups[request.GroupId] = group;
+                _state.Add(request.GroupId, group);
                 logger.LogInformation("ShareGroup created: {GroupId}", request.GroupId);
             }
 
@@ -123,8 +157,6 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
             // Build assignment: all partitions of all subscribed topics for this member
             var assignment = BuildAssignment(group, member);
 
-            _persistence?.Save(group.GroupId, group);
-
             return new ShareGroupHeartbeatResult
             {
                 MemberId = memberId,
@@ -137,7 +169,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
     private ShareGroupHeartbeatResult HandleShareGroupLeave(ShareGroupHeartbeatCommand request)
     {
-        if (_shareGroups.TryGetValue(request.GroupId, out var group))
+        if (_state.Current(request.GroupId) is { } group)
         {
             if (group.Members.Remove(request.MemberId))
             {
@@ -145,15 +177,6 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                 group.GroupEpoch++;
                 logger.LogInformation("ShareGroup {GroupId}: member {MemberId} left (epoch={Epoch})",
                     request.GroupId, request.MemberId, group.GroupEpoch);
-
-                if (group.Members.Count == 0 && group.StartOffsets.Count == 0)
-                {
-                    _persistence?.Delete(group.GroupId);
-                }
-                else
-                {
-                    _persistence?.Save(group.GroupId, group);
-                }
             }
         }
 
@@ -177,7 +200,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
             foreach (var groupId in groupIds)
             {
-                if (!_shareGroups.TryGetValue(groupId, out var group))
+                if (_state.Current(groupId) is not { } group)
                 {
                     groups.Add(new ShareGroupDescription
                     {
@@ -430,7 +453,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
             foreach (var groupReq in request.Groups)
             {
-                if (!_shareGroups.TryGetValue(groupReq.GroupId, out var group))
+                if (_state.Current(groupReq.GroupId) is not { } group)
                 {
                     groups.Add(new DescribeShareOffsetsGroupResult
                     {
@@ -543,11 +566,20 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // AlterShareGroupOffsets (API Key 91)
     // ─────────────────────────────────────────────────────────────
 
-    public AlterShareOffsetsResult AlterOffsets(AlterShareOffsetsCommand request)
+    /// <remarks>Answered once the start offsets are durable in the group's records (#219).</remarks>
+    public Task<AlterShareOffsetsResult> AlterOffsetsAsync(AlterShareOffsetsCommand request, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        var here = Ownership(request.GroupId);
+        if (here != ShareGroupErrorStatus.None)
+            return Task.FromResult(new AlterShareOffsetsResult { Status = here, Responses = [] });
+        return _state.ChangeAsync(request.GroupId, () => AlterOffsetsLocked(request),
+            written => new AlterShareOffsetsResult { Status = StatusOf(written), Responses = [] }, cancellationToken);
+    }
+
+    private AlterShareOffsetsResult AlterOffsetsLocked(AlterShareOffsetsCommand request)
+    {
         {
-            if (!_shareGroups.TryGetValue(request.GroupId, out var group))
+            if (_state.Current(request.GroupId) is not { } group)
             {
                 return new AlterShareOffsetsResult
                 {
@@ -594,8 +626,6 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
             logger.LogInformation("ShareGroup {GroupId}: altered offsets for {TopicCount} topics",
                 request.GroupId, request.Topics.Count);
 
-            _persistence?.Save(group.GroupId, group);
-
             return new AlterShareOffsetsResult
             {
                 Status = ShareGroupErrorStatus.None,
@@ -608,11 +638,20 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // DeleteShareGroupOffsets (API Key 92)
     // ─────────────────────────────────────────────────────────────
 
-    public DeleteShareOffsetsResult DeleteOffsets(DeleteShareOffsetsCommand request)
+    /// <remarks>Answered once the removal is durable in the group's records (#219).</remarks>
+    public Task<DeleteShareOffsetsResult> DeleteOffsetsAsync(DeleteShareOffsetsCommand request, CancellationToken cancellationToken)
     {
-        lock (_groupLock)
+        var here = Ownership(request.GroupId);
+        if (here != ShareGroupErrorStatus.None)
+            return Task.FromResult(new DeleteShareOffsetsResult { Status = here, Responses = [] });
+        return _state.ChangeAsync(request.GroupId, () => DeleteOffsetsLocked(request),
+            written => new DeleteShareOffsetsResult { Status = StatusOf(written), Responses = [] }, cancellationToken);
+    }
+
+    private DeleteShareOffsetsResult DeleteOffsetsLocked(DeleteShareOffsetsCommand request)
+    {
         {
-            if (!_shareGroups.TryGetValue(request.GroupId, out var group))
+            if (_state.Current(request.GroupId) is not { } group)
             {
                 return new DeleteShareOffsetsResult
                 {
@@ -669,15 +708,6 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
             logger.LogInformation("ShareGroup {GroupId}: deleted offsets for {TopicCount} topics",
                 request.GroupId, request.Topics.Count);
-
-            if (group.Members.Count == 0 && group.StartOffsets.Count == 0)
-            {
-                _persistence?.Delete(group.GroupId);
-            }
-            else
-            {
-                _persistence?.Save(group.GroupId, group);
-            }
 
             return new DeleteShareOffsetsResult
             {
@@ -778,7 +808,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         if (string.IsNullOrEmpty(groupId)) return true;
         lock (_groupLock)
         {
-            return _shareGroups.TryGetValue(groupId, out var group)
+            return _state.Current(groupId) is { } group
                 ? group.RenewAcknowledgeEnabled
                 : true;
         }
@@ -797,16 +827,25 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     ///   <item><c>share.renew.acknowledge.enable</c> — bool</item>
     /// </list>
     /// </summary>
-    public string? SetShareGroupConfig(string groupId, string name, string? value)
+    /// <remarks>Answered once the config is durable in the group's records (#219).</remarks>
+    public Task<string?> SetShareGroupConfigAsync(string groupId, string name, string? value, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(groupId)) return "Group name must not be empty.";
+        if (string.IsNullOrEmpty(groupId)) return Task.FromResult<string?>("Group name must not be empty.");
+        var here = Ownership(groupId);
+        if (here != ShareGroupErrorStatus.None)
+            return Task.FromResult<string?>($"This broker does not coordinate share group {groupId} now ({here}).");
+        return _state.ChangeAsync(groupId, () => SetShareGroupConfigLocked(groupId, name, value),
+            written => (string?)$"The config of share group {groupId} could not be made durable now ({StatusOf(written)}).", cancellationToken);
+    }
 
-        lock (_groupLock)
+    private string? SetShareGroupConfigLocked(string groupId, string name, string? value)
+    {
         {
-            if (!_shareGroups.TryGetValue(groupId, out var group))
+            var group = _state.Current(groupId);
+            if (group is null)
             {
                 group = new ShareGroupState { GroupId = groupId };
-                _shareGroups[groupId] = group;
+                _state.Add(groupId, group);
             }
 
             switch (name)
@@ -842,26 +881,21 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     /// <summary>
     /// Removes members whose last heartbeat exceeds the stale timeout.
     /// </summary>
-    public void SweepStaleMembers()
+    /// <remarks>An eviction is written to the group's records like any other change (#219).</remarks>
+    public async Task SweepStaleMembersAsync(CancellationToken cancellationToken)
     {
+        List<string> groupIds;
         lock (_groupLock)
+            groupIds = [.. _shareGroups.Keys];
+
+        foreach (var groupId in groupIds)
         {
-            foreach (var group in _shareGroups.Values)
+            await _state.ChangeAsync(groupId, () =>
             {
-                var beforeCount = group.Members.Count;
-                CleanStaleMembers(group);
-                if (group.Members.Count != beforeCount)
-                {
-                    if (group.Members.Count == 0 && group.StartOffsets.Count == 0)
-                    {
-                        _persistence?.Delete(group.GroupId);
-                    }
-                    else
-                    {
-                        _persistence?.Save(group.GroupId, group);
-                    }
-                }
-            }
+                if (_state.Current(groupId) is { } group)
+                    CleanStaleMembers(group);
+                return true;
+            }, _ => false, cancellationToken).ConfigureAwait(false);
         }
     }
 

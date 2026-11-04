@@ -24,6 +24,9 @@ public sealed record ShareAssignment(IReadOnlyList<ShareTopicPartitions> TopicPa
 /// <summary>Neutral ShareGroupHeartbeat result. The classic path has no error branch (join/leave both succeed).</summary>
 public sealed record ShareGroupHeartbeatResult
 {
+    /// <summary>Why the heartbeat was not served; <see cref="ShareGroupErrorStatus.None"/> when it was (#219).</summary>
+    public ShareGroupErrorStatus Status { get; init; }
+
     public required string MemberId { get; init; }
     public required int MemberEpoch { get; init; }
     public required int HeartbeatIntervalMs { get; init; }

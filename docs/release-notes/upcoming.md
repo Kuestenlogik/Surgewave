@@ -305,6 +305,20 @@ reads the group from them, and every member gets a session from then on.
 A broker that does not coordinate the group answers `NOT_COORDINATOR`, and
 one still reading the partition answers `COORDINATOR_LOAD_IN_PROGRESS`.
 
+### A share group outlives its coordinator (#219)
+
+A share group's members, epochs, start offsets and configs lived only in
+the memory of the broker that served it. They are now in the group's
+partition of `__consumer_offsets`: the members and epochs as Kafka's
+ShareGroup records, the start offsets and the KIP-1240 configs in a
+tagged field of the group's record that Kafka readers skip. A heartbeat,
+AlterShareGroupOffsets, DeleteShareGroupOffsets and a share-group config
+change are answered once their changes are on the in-sync replicas, and a
+broker that takes the partition over reads the group from them. A broker
+that does not coordinate the group answers `NOT_COORDINATOR`. Share
+partition state across brokers, with the partition's leader as in Kafka,
+is #228.
+
 ### A group taken over by another coordinator can be described (#224)
 
 A broker that took a group's partition of `__consumer_offsets` over read
@@ -430,6 +444,13 @@ installer's icon use `images/icon.png`; the web manifest's 512 px icon is `icon-
 files differ from the drawing.
 
 ## Breaking changes
+
+### The JSON group-state files are gone (#219)
+
+`JsonFileGroupStateStore` and its `.metadata/<subfolder>/<group>.json`
+files are removed. KIP-848 and share groups keep their state in
+`__consumer_offsets`. Neither host had wired the files, so nothing is
+carried over.
 
 ### Transaction markers are Kafka's control records (#226)
 

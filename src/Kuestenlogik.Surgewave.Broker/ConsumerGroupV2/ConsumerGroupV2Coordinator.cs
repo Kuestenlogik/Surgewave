@@ -1,6 +1,5 @@
 using Kuestenlogik.Surgewave.Broker.Coordination;
 using Kuestenlogik.Surgewave.Broker.GroupOffsets;
-using Kuestenlogik.Surgewave.Broker.GroupStatePersistence;
 using Kuestenlogik.Surgewave.Broker.Native.Assignors;
 using Kuestenlogik.Surgewave.Coordination.Consumer;
 using Kuestenlogik.Surgewave.Core.Storage;
@@ -23,19 +22,13 @@ namespace Kuestenlogik.Surgewave.Broker.ConsumerGroupV2;
 public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
 {
     private readonly ILogger<ConsumerGroupV2Coordinator> _logger;
-    private readonly Dictionary<string, ConsumerGroupV2State> _groups;
-    private readonly Lock _groupLock = new();
     private readonly TargetAssignmentComputer _assignmentComputer;
 
-    // The group's records live in its partition of __consumer_offsets (#219). What this coordinator wrote or read of
-    // each group, by record key, with the load epoch of the partition it was read in: a moved epoch means the
-    // partition was taken over or let go since, and the group is read afresh.
+    // The groups' records live in their partitions of __consumer_offsets (#219).
     private readonly OffsetStore _offsets;
-    private readonly Dictionary<string, Held> _held = new(StringComparer.Ordinal);
-
-    // One heartbeat of a group at a time, from its change to the answer, so the group's records reach the log in the
-    // order its state changed.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
+    private readonly GroupStateLog<ConsumerGroupV2State> _state;
+    private readonly Dictionary<string, ConsumerGroupV2State> _groups;
+    private readonly Lock _groupLock;
 
     private const int DefaultHeartbeatIntervalMs = 5000;
     private static readonly TimeSpan StaleHeartbeatTimeout = TimeSpan.FromSeconds(45);
@@ -52,100 +45,16 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
         _logger = logger;
         _assignmentComputer = new TargetAssignmentComputer(logManager);
         _offsets = offsets ?? OffsetStore.InMemory();
-        _groups = new Dictionary<string, ConsumerGroupV2State>(StringComparer.Ordinal);
+        _state = new GroupStateLog<ConsumerGroupV2State>(
+            _offsets, k => ConsumerGroupRecords.IsConsumerGroupKey(k), ConsumerGroupRecords.Read, ConsumerGroupRecords.Of);
+        _groups = _state.Groups;
+        _groupLock = _state.SyncRoot;
     }
 
-    /// <summary>
-    /// The group as this broker holds it now, under <see cref="_groupLock"/>: read from its records when its partition
-    /// was taken over since, dropped when another broker serves it. Null when the group does not exist here.
-    /// </summary>
-    private ConsumerGroupV2State? Current(string groupId)
-    {
-        var snapshot = _offsets.GroupStateOf(groupId);
-        if (snapshot is not { } held)
-        {
-            _groups.Remove(groupId);
-            _held.Remove(groupId);
-            return null;
-        }
-        if (_held.TryGetValue(groupId, out var known) && known.LoadEpoch == held.LoadEpoch)
-            return _groups.GetValueOrDefault(groupId);
+    private ConsumerGroupV2State? Current(string groupId) => _state.Current(groupId);
 
-        var records = held.Records.Where(r => ConsumerGroupRecords.IsConsumerGroupKey(r.Key)).ToList();
-        _held[groupId] = new Held(held.LoadEpoch, records.ToDictionary(r => Convert.ToBase64String(r.Key), r => r.Value, StringComparer.Ordinal));
-        var group = ConsumerGroupRecords.Read(groupId, records);
-        if (group is null)
-            _groups.Remove(groupId);
-        else
-            _groups[groupId] = group;
-        return group;
-    }
-
-    // Under _groupLock: the records that differ from what the log has of the group — changed ones, and tombstones for
-    // members gone.
-    private List<(byte[] Key, byte[] Value)> ChangesOf(string groupId)
-    {
-        if (!_groups.TryGetValue(groupId, out var group) || !_held.TryGetValue(groupId, out var held))
-            return [];
-        var now = ConsumerGroupRecords.Of(group);
-        var changes = new List<(byte[] Key, byte[] Value)>();
-        var present = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (key, value) in now)
-        {
-            var id = Convert.ToBase64String(key);
-            present.Add(id);
-            if (!held.Written.TryGetValue(id, out var written) || !written.AsSpan().SequenceEqual(value))
-                changes.Add((key, value));
-        }
-        foreach (var id in held.Written.Keys.Where(id => !present.Contains(id)))
-            changes.Add((Convert.FromBase64String(id), []));
-        return changes;
-    }
-
-    // Under _groupLock: the changes are in the log.
-    private void Remember(string groupId, List<(byte[] Key, byte[] Value)> changes)
-    {
-        if (!_held.TryGetValue(groupId, out var held))
-            return;
-        foreach (var (key, value) in changes)
-        {
-            var id = Convert.ToBase64String(key);
-            if (value.Length == 0)
-                held.Written.Remove(id);
-            else
-                held.Written[id] = value;
-        }
-    }
-
-    // Changes the group under its gate and writes what changed; the answer is given once the records are durable.
-    private async Task<T> ChangeAsync<T>(string groupId, Func<T> change, Func<ConsumerGroupFenceStatus, T> refused, CancellationToken cancellationToken)
-    {
-        var gate = _gates.GetOrAdd(groupId, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            T result;
-            List<(byte[] Key, byte[] Value)> changes;
-            lock (_groupLock)
-            {
-                result = change();
-                changes = ChangesOf(groupId);
-            }
-            if (changes.Count == 0)
-                return result;
-
-            var written = await _offsets.WriteGroupStateAsync(groupId, changes, cancellationToken).ConfigureAwait(false);
-            if (written != StateWriteStatus.Ok)
-                return refused(StatusOf(written));
-            lock (_groupLock)
-                Remember(groupId, changes);
-            return result;
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
+    private Task<T> ChangeAsync<T>(string groupId, Func<T> change, Func<ConsumerGroupFenceStatus, T> refused, CancellationToken cancellationToken) =>
+        _state.ChangeAsync(groupId, change, written => refused(StatusOf(written)), cancellationToken);
 
     private static ConsumerGroupFenceStatus StatusOf(StateWriteStatus written) => written switch
     {
@@ -154,20 +63,11 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
         _ => ConsumerGroupFenceStatus.CoordinatorNotAvailable,
     };
 
-    private sealed record Held(int LoadEpoch, Dictionary<string, byte[]> Written);
-
     /// <summary>
     /// Puts a group in place as this broker holds it now, for a test that stages a group's state without the heartbeats
     /// that would lead to it. Nothing is written: the log has none of it.
     /// </summary>
-    internal void Seed(ConsumerGroupV2State group)
-    {
-        lock (_groupLock)
-        {
-            _groups[group.GroupId] = group;
-            _held[group.GroupId] = new Held(_offsets.LoadEpochOf(group.GroupId), new Dictionary<string, byte[]>(StringComparer.Ordinal));
-        }
-    }
+    internal void Seed(ConsumerGroupV2State group) => _state.Seed(group.GroupId, group);
 
     // ─────────────────────────────────────────────────────────────
     // ConsumerGroupHeartbeat (API Key 68)
@@ -205,7 +105,7 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
             if (group is null)
             {
                 group = new ConsumerGroupV2State { GroupId = command.GroupId };
-                _groups[command.GroupId] = group;
+                _state.Add(command.GroupId, group);
                 _logger.LogInformation("ConsumerGroupV2 created: {GroupId}", command.GroupId);
             }
 
@@ -393,10 +293,9 @@ public sealed class ConsumerGroupV2Coordinator : IConsumerGroupV2Coordinator
         lock (_groupLock)
         {
             var groups = new List<GroupListing>(_groups.Count);
-            foreach (var groupId in _offsets.GroupStateIds().Concat(_groups.Keys).Distinct(StringComparer.Ordinal).ToList())
+            foreach (var group in _state.All())
             {
-                if (Current(groupId) is not { } group)
-                    continue;
+                var groupId = group.GroupId;
                 var state = GetGroupPhase(group) switch
                 {
                     ConsumerGroupPhase.Empty => "Empty",

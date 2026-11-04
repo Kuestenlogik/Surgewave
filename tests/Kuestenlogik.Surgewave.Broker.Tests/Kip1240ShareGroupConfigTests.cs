@@ -100,12 +100,12 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
     }
 
     [Fact]
-    public void RenewAck_AgainstGroupWithRenewDisabled_ReturnsInvalidRequest()
+    public async Task RenewAck_AgainstGroupWithRenewDisabled_ReturnsInvalidRequest()
     {
         // Set up: establish the group via a heartbeat, then flip
         // RenewAcknowledgeEnabled to false (the IncrementalAlterConfigs path
         // for share groups isn't wired yet — see kips.md follow-up).
-        var hb = _coordinator.Heartbeat(Join("c1", "g-renew-off"));
+        var hb = await _coordinator.HeartbeatAsync(Join("c1", "g-renew-off"), TestContext.Current.CancellationToken);
         FlipRenewEnabled("g-renew-off", false);
 
         var ack = _coordinator.ShareAcknowledge(RenewAck("g-renew-off"));
@@ -116,14 +116,14 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
     }
 
     [Fact]
-    public void RenewAck_AgainstGroupWithRenewEnabled_DoesNotReturnInvalidRequest()
+    public async Task RenewAck_AgainstGroupWithRenewEnabled_DoesNotReturnInvalidRequest()
     {
         // Default group has RenewAcknowledgeEnabled=true (upstream default),
         // so a RENEW ack must NOT fail with InvalidRequest. The ack itself
         // may still error (UnknownTopicOrPartition because the QueueView
         // doesn't have the message ID), but the per-partition status
         // must not be InvalidRequest — that's what proves the gate is open.
-        _ = _coordinator.Heartbeat(Join("c2", "g-renew-on"));
+        _ = await _coordinator.HeartbeatAsync(Join("c2", "g-renew-on"), TestContext.Current.CancellationToken);
 
         var ack = _coordinator.ShareAcknowledge(RenewAck("g-renew-on"));
 

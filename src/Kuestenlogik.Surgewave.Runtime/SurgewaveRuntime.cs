@@ -308,7 +308,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         var queueViewManager = new Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager(queueViewConfig, _loggerFactory, _logManager);
         _queueViewManager = queueViewManager;
         var shareGroupCoordinatorLogger = _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>();
-        var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(shareGroupCoordinatorLogger, _logManager, queueViewManager);
+        var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(shareGroupCoordinatorLogger, _logManager, queueViewManager, _offsetStore);
         var consumerGroupV2Coordinator = new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(
             _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator>(), _logManager, _offsetStore);
         // Classic coordinator gets the v2 reference so OffsetCommit/Fetch from a

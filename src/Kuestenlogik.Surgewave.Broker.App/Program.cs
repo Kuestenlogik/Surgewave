@@ -695,10 +695,12 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>());
     return store;
 });
+// Share group state lives in __consumer_offsets with the group's offsets (#219).
 builder.Services.AddSingleton(sp => new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
     sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
     sp.GetRequiredService<LogManager>(),
-    sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Queue.IQueueViewManager>()));
+    sp.GetRequiredService<Kuestenlogik.Surgewave.Core.Queue.IQueueViewManager>(),
+    sp.GetRequiredService<OffsetStore>()));
 // Neutral contract (#59) resolves to the same singleton so the Kafka adapter (ShareGroupApiHandler)
 // depends only on Coordination, not the broker-internal coordinator type.
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareGroupCoordinator>(

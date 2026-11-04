@@ -68,7 +68,7 @@ public sealed class GroupCoordinatorSweepService : IHostedService, IAsyncDisposa
         {
             // A KIP-848 eviction is written to __consumer_offsets, answered once durable (#219).
             await _consumerGroupV2.SweepStaleMembersAsync(cancellationToken).ConfigureAwait(false);
-            _shareGroup.SweepStaleMembers();
+            await _shareGroup.SweepStaleMembersAsync(cancellationToken).ConfigureAwait(false);
             _streamsGroup.SweepStaleMembers();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

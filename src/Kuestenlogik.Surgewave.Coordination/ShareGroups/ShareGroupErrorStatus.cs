@@ -26,4 +26,13 @@ public enum ShareGroupErrorStatus
 
     /// <summary>An unexpected error occurred while serving the request.</summary>
     Unknown,
+
+    /// <summary>Another broker coordinates the group (wire NotCoordinator) — #219.</summary>
+    NotCoordinator,
+
+    /// <summary>This broker is still reading the group's partition (wire CoordinatorLoadInProgress) — #219.</summary>
+    CoordinatorLoadInProgress,
+
+    /// <summary>The group's change could not be made durable now (wire CoordinatorNotAvailable) — #219.</summary>
+    CoordinatorNotAvailable,
 }

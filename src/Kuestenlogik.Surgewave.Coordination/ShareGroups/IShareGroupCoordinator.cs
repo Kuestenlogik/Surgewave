@@ -10,7 +10,7 @@ namespace Kuestenlogik.Surgewave.Coordination.ShareGroups;
 /// </summary>
 public interface IShareGroupCoordinator
 {
-    ShareGroupHeartbeatResult Heartbeat(ShareGroupHeartbeatCommand request);
+    Task<ShareGroupHeartbeatResult> HeartbeatAsync(ShareGroupHeartbeatCommand request, CancellationToken cancellationToken);
 
     IReadOnlyList<ShareGroupDescription> Describe(IReadOnlyList<string> groupIds);
 
@@ -20,7 +20,7 @@ public interface IShareGroupCoordinator
 
     DescribeShareOffsetsResult DescribeOffsets(DescribeShareOffsetsCommand request);
 
-    AlterShareOffsetsResult AlterOffsets(AlterShareOffsetsCommand request);
+    Task<AlterShareOffsetsResult> AlterOffsetsAsync(AlterShareOffsetsCommand request, CancellationToken cancellationToken);
 
-    DeleteShareOffsetsResult DeleteOffsets(DeleteShareOffsetsCommand request);
+    Task<DeleteShareOffsetsResult> DeleteOffsetsAsync(DeleteShareOffsetsCommand request, CancellationToken cancellationToken);
 }

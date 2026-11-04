@@ -42,13 +42,13 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
     {
         return request switch
         {
-            ShareGroupHeartbeatRequest r => ToHeartbeatResponse(_coordinator.Heartbeat(ToHeartbeatCommand(r)), r),
+            ShareGroupHeartbeatRequest r => ToHeartbeatResponse(await _coordinator.HeartbeatAsync(ToHeartbeatCommand(r), cancellationToken), r),
             ShareGroupDescribeRequest r => ToDescribeResponse(_coordinator.Describe(r.GroupIds), r),
             ShareFetchRequest r => ToShareFetchResponse(await _coordinator.ShareFetchAsync(ToShareFetchCommand(r), cancellationToken), r),
             ShareAcknowledgeRequest r => ToShareAcknowledgeResponse(_coordinator.ShareAcknowledge(ToShareAcknowledgeCommand(r)), r),
             DescribeShareGroupOffsetsRequest r => ToDescribeOffsetsResponse(_coordinator.DescribeOffsets(ToDescribeOffsetsCommand(r)), r),
-            AlterShareGroupOffsetsRequest r => ToAlterOffsetsResponse(_coordinator.AlterOffsets(ToAlterOffsetsCommand(r)), r),
-            DeleteShareGroupOffsetsRequest r => ToDeleteOffsetsResponse(_coordinator.DeleteOffsets(ToDeleteOffsetsCommand(r)), r),
+            AlterShareGroupOffsetsRequest r => ToAlterOffsetsResponse(await _coordinator.AlterOffsetsAsync(ToAlterOffsetsCommand(r), cancellationToken), r),
+            DeleteShareGroupOffsetsRequest r => ToDeleteOffsetsResponse(await _coordinator.DeleteOffsetsAsync(ToDeleteOffsetsCommand(r), cancellationToken), r),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ShareGroupApiHandler")
         };
     }
@@ -62,6 +62,9 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
         ShareGroupErrorStatus.NonEmptyGroup => ErrorCode.NonEmptyGroup,
         ShareGroupErrorStatus.InvalidRequest => ErrorCode.InvalidRequest,
         ShareGroupErrorStatus.Unknown => ErrorCode.Unknown,
+        ShareGroupErrorStatus.NotCoordinator => ErrorCode.NotCoordinator,
+        ShareGroupErrorStatus.CoordinatorLoadInProgress => ErrorCode.CoordinatorLoadInProgress,
+        ShareGroupErrorStatus.CoordinatorNotAvailable => ErrorCode.CoordinatorNotAvailable,
         _ => ErrorCode.Unknown,
     };
 
