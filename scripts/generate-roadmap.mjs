@@ -167,8 +167,8 @@ function classify(items) {
 // indistinguishable from genuinely unscheduled work — and silently, because
 // nothing warned about an unlisted milestone.
 function compareMilestoneVersions(a, b) {
-    // Ordered work sections `M<n>` (since 2026-09-19) sort by their number and
-    // before any version-shaped title that may still exist.
+    // The ordered sections `M<n>` (2026-09-19 to 2026-11-04) sort by their number
+    // and before any version-shaped title.
     const section = (v) => { const m = /^M(\d+)$/.exec(String(v)); return m ? Number(m[1]) : null; };
     const sa = section(a), sb = section(b);
     if (sa !== null || sb !== null) {
@@ -200,10 +200,10 @@ function compareMilestoneVersions(a, b) {
 // section heading.
 const MILESTONE_THEMES = new Map();
 
-// Split a milestone title into `{ version, theme }`. Convention since
-// 2026-09-19: ordered work sections `M<n> — <theme>` (docs/contributing/
-// project-board.md, "Milestones and releases"); the former
-// `vX.Y[.Z][-rc.N] — <theme>` form is still parsed for old milestones.
+// Split a milestone title into `{ version, theme }`. Convention: a release
+// `vX.Y[.Z][-rc.N] — <theme>` (docs/contributing/project-board.md,
+// "Milestones and releases"); the ordered sections `M<n> — <theme>` used from
+// 2026-09-19 to 2026-11-04 are still parsed.
 // Falls back to `{ version: title }` for anything else so legacy titles
 // still bucket cleanly.
 function parseMilestoneTitle(title) {

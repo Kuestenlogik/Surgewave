@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // Which milestone(s) a release ships — and therefore its theme (docs/contributing/project-board.md,
-// "Milestones and releases"). Milestones are ordered work sections `M<n> — <theme>`; a release
-// gets its version number only when it is cut, so the number cannot find the milestone. The
-// release names it instead, and this script reads that in three places, in order:
+// "Milestones and releases"). A milestone is a release, titled `vX.Y — <theme>`. The script looks
+// in three places, in order:
 //
-//   1. The annotated tag's message (`git tag -a v2.8.0 -m "Bowire v2.8.0 — M1 — …"`): every
-//      `M<n>` token in it is a shipped milestone.
-//   2. A milestone whose title starts with the version (`v2.8 — …`), for tags cut under the
-//      old convention.
+//   1. The annotated tag's message: every `M<n>` token in it names a milestone of the ordered
+//      sections used until 2026-11-04 (`git tag -a v2.8.0 -m "Bowire v2.8.0 — M1 — …"`).
+//   2. A milestone whose title starts with the version (`v0.6.0 — …` or `v0.6 — …`) — the
+//      convention.
 //   3. The frontmost open milestone with no open ticket — "a finished milestone is the release".
 //
 // Usage: node scripts/resolve-milestone.mjs <tag-or-version>
@@ -26,7 +25,13 @@ const majMin = base.split('.').slice(0, 2).join('.');
 const gh = (...a) => execFileSync('gh', a, { encoding: 'utf8' });
 const repo = process.env.GITHUB_REPOSITORY ?? gh('repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner').trim();
 const all = JSON.parse(gh('api', `repos/${repo}/milestones?state=all&per_page=100`));
-const order = t => { const m = /^M(\d+)/.exec(t); return m ? Number(m[1]) : Number.POSITIVE_INFINITY; };
+// A milestone's place: its M-number for the old sections, its version for a release title.
+const order = t => {
+  const section = /^M(\d+)/.exec(t);
+  if (section) return Number(section[1]);
+  const version = /^v(\d+)\.(\d+)(?:\.(\d+))?/.exec(t);
+  return version ? Number(version[1]) * 1e6 + Number(version[2]) * 1e3 + Number(version[3] ?? 0) : Number.POSITIVE_INFINITY;
+};
 const theme = t => t.replace(/^(?:M\d+|v[\w.-]+)\s*(?:[—-]\s*)?/, '').trim();
 
 let chosen = [];
@@ -49,7 +54,7 @@ if (chosen.length === 0) {
   }
 }
 
-// 3. the finished frontmost section
+// 3. the finished frontmost milestone
 if (chosen.length === 0) {
   const open = all.filter(m => m.state === 'open' && Number.isFinite(order(m.title))).sort((a, b) => order(a.title) - order(b.title));
   const front = open[0];

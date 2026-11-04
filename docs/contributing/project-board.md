@@ -12,7 +12,7 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | Field | Values | Used for |
 |---|---|---|
 | **Status** | `Backlog` · `Next up` · `In progress` · `In review` · `Done` | Kanban swim-lane |
-| **Milestone** *(built-in)* | the repo's open work sections `M<n> — <theme>` (`M1` … `M6`) | The ordered section the ticket belongs to — see [Milestones and releases](#milestones-and-releases). Every ticket has one; a ticket outside a section's themes goes to the next section. Unset is rendered as "Later" in `ROADMAP.md`. |
+| **Milestone** *(built-in)* | the repo's open releases `vX.Y — <theme>` (`v0.6` … `v1.0`) | The release the ticket ships in — see [Milestones and releases](#milestones-and-releases). Every ticket has one; a ticket outside a release's themes goes to the next one. Unset is rendered as "Later" in `ROADMAP.md`. |
 | **Area** | `broker` · `clustering` · `protocol` · `storage` · `security` · `streams` · `connect` · `schema` · `ai` · `cli` · `control` · `observability` · `plugin-sdk` · `docs` · `site` · `multi` | Component filter |
 | **Track** | `kafka-compat` · `performance` · `ai-pipelines` · `cluster-correctness` · `transport` · `plugin-distribution` | Multi-phase initiatives that span releases |
 | **Project Effort** | `Low` · `Medium` · `High` | Sizing |
@@ -38,11 +38,21 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 
 ## Milestones and releases
 
-Since 2026-09-19 (the convention was rolled out from Bowire) milestones and release versions are decoupled:
+A milestone is a release: its title is the version and the theme, `vX.Y — <theme>`, as in the other Küstenlogik
+products (`v0.6 — Correctness & durability`, `v0.7 — Hygiene: CI, dependencies, licences`, … `v1.0 — First stable`).
+Until 2026-11-04 the open milestones were ordered sections `M<n> — <theme>` that got their version only at the release
+cut; they were renamed to the versions they ship in.
 
-- A **milestone is an ordered work section** — `M1 — Hygiene: CI, dependencies, licences`, `M2 — Multi-tenancy & data mesh`, … Its description is one short statement of the themes it contains and ends with the scope rule: *"Scope fixed on <date>: a ticket belongs here if it falls under one of these themes — otherwise into the next section. The section gets its version number only at the release cut."* A section does not grow: a ticket outside its themes goes to the next section, or a new section is opened behind the last. Every ticket gets a milestone when it is created.
-- A **release gets its version number when it is cut**, by content (SemVer). A finished section *is* the release as a rule; a second section that finished at the same time may ride along. The tag names the sections it ships in its message — `git tag -a v0.6.0 -m "Surgewave v0.6.0 — M1 — Hygiene …"` — and [`scripts/resolve-milestone.mjs`](../../scripts/resolve-milestone.mjs) reads them for the release title and the drafted notes (falling back to a `v<base> — …` milestone for old tags, then to the frontmost complete section). After the cut the milestone is closed with *"Shipped in v0.6.0"*.
-- **Release due** = the frontmost open milestone has no open ticket, CI is green, no pull request is open. `node scripts/resolve-milestone.mjs v<next>` says which section that is.
+- A milestone's description is one short statement of the themes it contains. A ticket outside them goes to the next
+  release, or a new milestone is opened behind the last. Every ticket gets a milestone when it is created.
+- The order of the milestones is the order of their versions; `ROADMAP.md` sorts them so, and the frontmost open one is
+  the release in progress.
+- A release is tagged with the milestone's version — `git tag -a v0.6.0 -m "Surgewave v0.6.0 — Correctness & durability"`
+  — and [`scripts/resolve-milestone.mjs`](../../scripts/resolve-milestone.mjs) finds the milestone whose title starts
+  with `v0.6.0` or `v0.6` for the release title and the drafted notes. After the release the milestone is closed with
+  *"Shipped in v0.6.0"*. A patch release (`v0.6.1`) gets a milestone of its own when it carries tickets.
+- **Release due** = the frontmost open milestone has no open ticket, the build and the test suites are green, no pull
+  request is open.
 
 ## Recommended views
 
