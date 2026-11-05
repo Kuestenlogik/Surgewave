@@ -32,7 +32,21 @@ public sealed record ShareFetchCommand
     public required string? GroupId { get; init; }
     public required string? MemberId { get; init; }
     public required int MaxRecords { get; init; }
+
+    /// <summary>
+    /// The topics to fetch — with a share session, those that join it; without one, all of them — and the
+    /// acknowledgements to apply.
+    /// </summary>
     public required IReadOnlyList<ShareFetchTopic> Topics { get; init; }
+
+    /// <summary>
+    /// The member's share session epoch (KIP-932): 0 opens a session, -1 closes it, any other continues it; null for a
+    /// request without a session, which fetches the topics it names (#228).
+    /// </summary>
+    public int? ShareSessionEpoch { get; init; }
+
+    /// <summary>The partitions that leave the share session.</summary>
+    public IReadOnlyList<ShareFetchTopic> ForgottenTopics { get; init; } = [];
 }
 
 /// <summary>A contiguous run of acquired records (same delivery count) delivered to the member.</summary>
@@ -51,7 +65,11 @@ public sealed record ShareFetchPartitionResult
 
 public sealed record ShareFetchTopicResult(Guid TopicId, IReadOnlyList<ShareFetchPartitionResult> Partitions);
 
-public sealed record ShareFetchResult(IReadOnlyList<ShareFetchTopicResult> Responses);
+public sealed record ShareFetchResult(IReadOnlyList<ShareFetchTopicResult> Responses)
+{
+    /// <summary>Why the whole request was refused — its share session — or None.</summary>
+    public ShareGroupErrorStatus Status { get; init; }
+}
 
 // ── ShareAcknowledge ────────────────────────────────────────────────────────
 
@@ -74,6 +92,9 @@ public sealed record ShareAcknowledgeCommand
     /// <summary>The member acknowledging: only the records it holds can be acknowledged (#228).</summary>
     public string? MemberId { get; init; }
     public required IReadOnlyList<ShareAcknowledgeTopic> Topics { get; init; }
+
+    /// <summary>The member's share session epoch: -1 closes the session, any other but 0 continues it; null for none.</summary>
+    public int? ShareSessionEpoch { get; init; }
 }
 
 public sealed record ShareAcknowledgePartitionResult
@@ -85,4 +106,8 @@ public sealed record ShareAcknowledgePartitionResult
 
 public sealed record ShareAcknowledgeTopicResult(Guid TopicId, IReadOnlyList<ShareAcknowledgePartitionResult> Partitions);
 
-public sealed record ShareAcknowledgeResult(IReadOnlyList<ShareAcknowledgeTopicResult> Responses);
+public sealed record ShareAcknowledgeResult(IReadOnlyList<ShareAcknowledgeTopicResult> Responses)
+{
+    /// <summary>Why the whole request was refused — its share session — or None.</summary>
+    public ShareGroupErrorStatus Status { get; init; }
+}

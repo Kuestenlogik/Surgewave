@@ -67,6 +67,8 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
         ShareGroupErrorStatus.CoordinatorNotAvailable => ErrorCode.CoordinatorNotAvailable,
         ShareGroupErrorStatus.NotLeaderOrFollower => ErrorCode.NotLeaderForPartition,
         ShareGroupErrorStatus.InvalidRecordState => ErrorCode.InvalidRecordState,
+        ShareGroupErrorStatus.ShareSessionNotFound => ErrorCode.ShareSessionNotFound,
+        ShareGroupErrorStatus.InvalidShareSessionEpoch => ErrorCode.InvalidShareSessionEpoch,
         _ => ErrorCode.Unknown,
     };
 
@@ -199,6 +201,12 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
             MemberId = r.MemberId,
             MaxRecords = r.MaxRecords,
             Topics = topics,
+            ShareSessionEpoch = r.ShareSessionEpoch,
+            ForgottenTopics = [.. r.ForgottenTopicsData.Select(f => new ShareFetchTopic
+            {
+                TopicId = f.TopicId,
+                Partitions = [.. f.Partitions.Select(p => new ShareFetchPartition { PartitionIndex = p, AcknowledgementBatches = [] })],
+            })],
         };
     }
 
@@ -247,7 +255,7 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
         {
             CorrelationId = r.CorrelationId,
             ApiVersion = r.ApiVersion,
-            ErrorCode = ErrorCode.None,
+            ErrorCode = ToErrorCode(result.Status),
             Responses = responses,
             NodeEndpoints = [],
         };
@@ -271,7 +279,7 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
             }
             topics.Add(new ShareAcknowledgeTopic { TopicId = t.TopicId, Partitions = partitions });
         }
-        return new ShareAcknowledgeCommand { GroupId = r.GroupId, MemberId = r.MemberId, Topics = topics };
+        return new ShareAcknowledgeCommand { GroupId = r.GroupId, MemberId = r.MemberId, Topics = topics, ShareSessionEpoch = r.ShareSessionEpoch };
     }
 
     private static IReadOnlyList<ShareAcknowledgementBatch> ToAckBatches(List<ShareAcknowledgeRequest.AcknowledgementBatch> batches)
@@ -306,7 +314,7 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
         {
             CorrelationId = r.CorrelationId,
             ApiVersion = r.ApiVersion,
-            ErrorCode = ErrorCode.None,
+            ErrorCode = ToErrorCode(result.Status),
             Responses = responses,
             NodeEndpoints = [],
         };

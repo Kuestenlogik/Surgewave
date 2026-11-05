@@ -166,4 +166,10 @@ public enum ErrorCode : short
 
     /// <summary>A share-group acknowledgement names a record the member does not hold (KIP-932, #228).</summary>
     InvalidRecordState = 121,
+
+    /// <summary>The share session a ShareFetch or ShareAcknowledge continues is not known to the broker (KIP-932, #228).</summary>
+    ShareSessionNotFound = 122,
+
+    /// <summary>The share session epoch is not the one the broker expects next (KIP-932, #228).</summary>
+    InvalidShareSessionEpoch = 123,
 }

@@ -41,4 +41,10 @@ public enum ShareGroupErrorStatus
 
     /// <summary>A record acknowledged is not one the member holds (wire InvalidRecordState) — #228.</summary>
     InvalidRecordState,
+
+    /// <summary>The share session the request continues is not known here (wire ShareSessionNotFound) — #228.</summary>
+    ShareSessionNotFound,
+
+    /// <summary>The share session epoch is not the next one (wire InvalidShareSessionEpoch) — #228.</summary>
+    InvalidShareSessionEpoch,
 }

@@ -943,7 +943,8 @@ public sealed class ShareFetchResponse : KafkaResponse
                 writer.WriteInt32(partition.CurrentLeader.LeaderEpoch);
                 writer.WriteVarInt(0); // LeaderIdAndEpoch tagged fields
 
-                writer.WriteCompactBytes(partition.Records);
+                // Nullable in v0 only: from v1 a partition without records carries an empty set, not null (Java 4.x refuses null).
+                writer.WriteCompactBytes(partition.Records ?? []);
 
                 writer.WriteVarInt(partition.AcquiredRecords.Count + 1);
                 foreach (var acquired in partition.AcquiredRecords)

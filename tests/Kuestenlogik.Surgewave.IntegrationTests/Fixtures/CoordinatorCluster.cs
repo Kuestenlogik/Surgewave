@@ -101,6 +101,7 @@ public sealed class CoordinatorCluster : IAsyncDisposable
                 .WithControllerQuorum(quorum)
                 .WithOffsetsTopicPartitions(CoordinatorPartitions)
                 .WithTransactionStateLogPartitions(CoordinatorPartitions)
+                .WithShareStateTopicPartitions(CoordinatorPartitions)
                 .WithStorageEngine(StorageEngines.Memory)
                 .WithLogging(_loggerFactory)
                 .WithShutdownTimeout(10)
@@ -126,8 +127,8 @@ public sealed class CoordinatorCluster : IAsyncDisposable
             await TestWaitHelpers.WaitForClusterStabilizationAsync(Brokers, output: _output),
             "the three-broker cluster did not stabilise");
 
-        // Every broker has to know both coordinator topics and a leader for each partition.
-        foreach (var topic in new[] { CoordinatorPartitioner.GroupTopic, CoordinatorPartitioner.TransactionTopic })
+        // Every broker has to know the coordinator topics and a leader for each partition.
+        foreach (var topic in new[] { CoordinatorPartitioner.GroupTopic, CoordinatorPartitioner.TransactionTopic, CoordinatorPartitioner.ShareStateTopic })
         {
             Assert.True(
                 await TestWaitHelpers.WaitForConditionAsync(

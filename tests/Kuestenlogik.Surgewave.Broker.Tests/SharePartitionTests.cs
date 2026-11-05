@@ -188,6 +188,56 @@ public sealed class SharePartitionTests : IDisposable
     }
 
     [Fact]
+    public async Task AShareSessionServesItsPartitionsToRequestsThatNoLongerNameThem()
+    {
+        await ProduceAsync(2);
+        var coordinator = Coordinator();
+
+        // Epoch 0 opens the session with the partition; later fetches name only what joins, leaves or is acknowledged.
+        var opened = await SessionFetchAsync(coordinator, epoch: 0, partition: true, maxRecords: 1);
+        Assert.Equal(ShareGroupErrorStatus.None, opened.Status);
+        Assert.Equal((0L, 0L, (short)1), Single(opened.Responses.Single().Partitions.Single()));
+
+        var next = await SessionFetchAsync(coordinator, epoch: 1, partition: false, maxRecords: 1);
+        Assert.Equal((1L, 1L, (short)1), Single(next.Responses.Single().Partitions.Single()));
+    }
+
+    [Fact]
+    public async Task AShareSessionTakesEachEpochOnceAndInOrder()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator();
+
+        Assert.Equal(ShareGroupErrorStatus.ShareSessionNotFound, (await SessionFetchAsync(coordinator, epoch: 1, partition: true)).Status);
+        await SessionFetchAsync(coordinator, epoch: 0, partition: true);
+        Assert.Equal(ShareGroupErrorStatus.InvalidShareSessionEpoch, (await SessionFetchAsync(coordinator, epoch: 2, partition: false)).Status);
+
+        // An acknowledgement takes epoch 1, so the next fetch is epoch 2; the final epoch closes the session.
+        var acked = await coordinator.ShareAcknowledgeAsync(new ShareAcknowledgeCommand
+        {
+            GroupId = "g1", MemberId = "m1", ShareSessionEpoch = 1,
+            Topics = [new ShareAcknowledgeTopic { TopicId = _topicId, Partitions = [new ShareAcknowledgePartition { PartitionIndex = 0, AcknowledgementBatches = [new ShareAcknowledgementBatch(0, 0, [(sbyte)1])] }] }],
+        }, _ct);
+        Assert.Equal(ShareGroupErrorStatus.None, acked.Status);
+        Assert.Equal(ShareGroupErrorStatus.None, (await SessionFetchAsync(coordinator, epoch: 2, partition: false)).Status);
+        Assert.Equal(ShareGroupErrorStatus.None, (await SessionFetchAsync(coordinator, epoch: -1, partition: false)).Status);
+        Assert.Equal(ShareGroupErrorStatus.ShareSessionNotFound, (await SessionFetchAsync(coordinator, epoch: 3, partition: false)).Status);
+    }
+
+    [Fact]
+    public async Task AShareCoordinatorThatCannotBeReachedIsNoErrorOfTheFetch()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator(new Unreachable());
+
+        // Nothing this time, and no error: the member fetches again. A coordinator error here stopped Java's consumer.
+        var fetched = await FetchAsync(coordinator, "g1", "m1");
+
+        Assert.Equal(ShareGroupErrorStatus.None, fetched.Status);
+        Assert.Empty(fetched.AcquiredRecords);
+    }
+
+    [Fact]
     public async Task AWriteOfAnOlderStateOrLeaderEpochIsFenced()
     {
         var store = ShareStateStore.InMemory();
@@ -223,6 +273,19 @@ public sealed class SharePartitionTests : IDisposable
         Assert.Equal(ShareStateStatus.Ok, status);
         Assert.Equal(7, state!.StartOffset);
     }
+
+    // A fetch of member m1 of g1 in its share session, naming the topic's partition or not.
+    private Task<ShareFetchResult> SessionFetchAsync(ShareGroupCoordinator coordinator, int epoch, bool partition, int maxRecords = 100) =>
+        coordinator.ShareFetchAsync(new ShareFetchCommand
+        {
+            GroupId = "g1",
+            MemberId = "m1",
+            MaxRecords = maxRecords,
+            ShareSessionEpoch = epoch,
+            Topics = partition
+                ? [new ShareFetchTopic { TopicId = _topicId, Partitions = [new ShareFetchPartition { PartitionIndex = 0, AcknowledgementBatches = [] }] }]
+                : [],
+        }, _ct);
 
     private ShareGroupCoordinator Coordinator(IShareStatePersister? shareState = null, IGroupConfigStore? groupConfigs = null) =>
         new(NullLogger<ShareGroupCoordinator>.Instance, _logManager, recordLockDuration: LockDuration, timeProvider: _time,
@@ -282,6 +345,22 @@ public sealed class SharePartitionTests : IDisposable
         Assert.Equal(ShareGroupErrorStatus.None, fetched.Status);
         var range = Assert.Single(fetched.AcquiredRecords);
         return (range.FirstOffset, range.LastOffset, range.DeliveryCount);
+    }
+
+    // A share coordinator that is moving: every request finds none.
+    private sealed class Unreachable : IShareStatePersister
+    {
+        public Task<(ShareStateStatus Status, ShareStateSnapshot? State)> ReadAsync(ShareStateKey key, CancellationToken cancellationToken) =>
+            Task.FromResult<(ShareStateStatus, ShareStateSnapshot?)>((ShareStateStatus.CoordinatorNotAvailable, null));
+
+        public Task<ShareStateStatus> WriteAsync(ShareStateKey key, ShareStateSnapshot state, CancellationToken cancellationToken) =>
+            Task.FromResult(ShareStateStatus.CoordinatorNotAvailable);
+
+        public Task<(ShareStateStatus Status, int StateEpoch)> InitializeAsync(ShareStateKey key, long startOffset, CancellationToken cancellationToken) =>
+            Task.FromResult((ShareStateStatus.CoordinatorNotAvailable, -1));
+
+        public Task<ShareStateStatus> DeleteAsync(ShareStateKey key, CancellationToken cancellationToken) =>
+            Task.FromResult(ShareStateStatus.CoordinatorNotAvailable);
     }
 
     private sealed class LedBy(PartitionLeader leader) : IPartitionLeadership

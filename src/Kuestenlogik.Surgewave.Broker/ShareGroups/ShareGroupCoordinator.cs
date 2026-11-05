@@ -22,6 +22,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private readonly ILogger<ShareGroupCoordinator> logger;
     private readonly LogManager logManager;
     private readonly SharePartitionManager _sharePartitions;
+    private readonly ShareSessions _sessions;
     private IPartitionLeadership? _leadership;
     // The groups' configs, as every broker knows them (#228).
     private IGroupConfigStore _groupConfigs;
@@ -46,6 +47,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         this.logger = logger;
         this.logManager = logManager;
         _groupConfigs = groupConfigs ?? new InMemoryGroupConfigStore();
+        _sessions = new ShareSessions(StaleHeartbeatTimeout, timeProvider);
         _sharePartitions = new SharePartitionManager(
             shareState ?? ShareStateStore.InMemory(), recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
         _offsets = offsets ?? OffsetStore.InMemory();
@@ -281,17 +283,43 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     /// </remarks>
     public async Task<ShareFetchResult> ShareFetchAsync(ShareFetchCommand request, CancellationToken cancellationToken)
     {
-        var responses = new List<ShareFetchTopicResult>(request.Topics.Count);
         var settings = SettingsOf(request.GroupId);
         var memberId = request.MemberId ?? string.Empty;
 
-        foreach (var fetchTopic in request.Topics)
+        // The partitions to serve: the member's share session's (KIP-932), or those the request names. The final epoch
+        // only applies the acknowledgements and closes the session.
+        var acks = request.Topics
+            .SelectMany(t => t.Partitions.Select(p => (Key: (t.TopicId, p.PartitionIndex), p.AcknowledgementBatches)))
+            .GroupBy(a => a.Key)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<ShareAcknowledgementBatch>)[.. g.SelectMany(a => a.AcknowledgementBatches)]);
+        IReadOnlyCollection<(Guid TopicId, int Partition)> served = [.. acks.Keys];
+        var acquire = true;
+        if (request.ShareSessionEpoch is { } epoch)
         {
-            var topicName = logManager.ResolveTopicId(fetchTopic.TopicId);
-            var partitions = new List<ShareFetchPartitionResult>(fetchTopic.Partitions.Count);
+            var (sessionStatus, sessionPartitions) = _sessions.Fetch(request.GroupId ?? string.Empty, memberId, epoch,
+                acks.Keys, request.ForgottenTopics.SelectMany(t => t.Partitions.Select(p => (t.TopicId, p.PartitionIndex))));
+            if (sessionStatus != ShareGroupErrorStatus.None)
+                return new ShareFetchResult([]) { Status = sessionStatus };
+            if (epoch == ShareSessions.FinalEpoch)
+                acquire = false;
+            else
+                served = sessionPartitions;
+        }
 
-            foreach (var fetchPartition in fetchTopic.Partitions)
+        var responses = new List<ShareFetchTopicResult>();
+        foreach (var fetchTopic in served.GroupBy(p => p.TopicId))
+        {
+            var topicId = fetchTopic.Key;
+            var topicName = logManager.ResolveTopicId(topicId);
+            var partitions = new List<ShareFetchPartitionResult>();
+
+            foreach (var (_, partitionIndex) in fetchTopic.OrderBy(p => p.Partition))
             {
+                var fetchPartition = new ShareFetchPartition
+                {
+                    PartitionIndex = partitionIndex,
+                    AcknowledgementBatches = acks.GetValueOrDefault((topicId, partitionIndex)) ?? [],
+                };
                 // KAFKA-20533: a topic deleted during ShareFetch is UnknownTopicId for the partition.
                 if (topicName == null)
                 {
@@ -336,13 +364,13 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
 
                 // The share partition's state from the share coordinator; the log's start where it has none yet.
                 var (share, shareStatus) = await _sharePartitions.GetOrCreateAsync(
-                    request.GroupId, tp, fetchTopic.TopicId, log, () => log.LogStartOffset, cancellationToken);
+                    request.GroupId, tp, topicId, log, () => log.LogStartOffset, cancellationToken);
                 if (share is null)
                 {
                     partitions.Add(new ShareFetchPartitionResult
                     {
                         PartitionIndex = fetchPartition.PartitionIndex,
-                        Status = StatusOf(shareStatus),
+                        Status = FetchStatusOf(StatusOf(shareStatus)),
                         AcknowledgeStatus = StatusOf(shareStatus),
                         CurrentLeader = LeaderOf(tp),
                         AcquiredRecords = []
@@ -357,7 +385,9 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                 try
                 {
                     var maxRecords = request.MaxRecords > 0 ? request.MaxRecords : 100;
-                    var acquired = await share.AcquireAsync(memberId, maxRecords, settings.DeliveryLimit, settings.MaxRecordLocks, cancellationToken);
+                    var acquired = acquire
+                        ? await share.AcquireAsync(memberId, maxRecords, settings.DeliveryLimit, settings.MaxRecordLocks, cancellationToken)
+                        : new ShareAcquisition([], null);
 
                     // What changed — acknowledgements, new deliveries — is durable before the answer.
                     var persisted = await PersistAsync(share, tp, cancellationToken);
@@ -366,7 +396,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                         partitions.Add(new ShareFetchPartitionResult
                         {
                             PartitionIndex = fetchPartition.PartitionIndex,
-                            Status = persisted,
+                            Status = FetchStatusOf(persisted),
                             AcknowledgeStatus = acknowledgeStatus == ShareGroupErrorStatus.None ? persisted : acknowledgeStatus,
                             CurrentLeader = LeaderOf(tp),
                             AcquiredRecords = []
@@ -398,7 +428,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                 }
             }
 
-            responses.Add(new ShareFetchTopicResult(fetchTopic.TopicId, partitions));
+            responses.Add(new ShareFetchTopicResult(topicId, partitions));
         }
 
         return new ShareFetchResult(responses);
@@ -414,6 +444,12 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     /// </remarks>
     public async Task<ShareAcknowledgeResult> ShareAcknowledgeAsync(ShareAcknowledgeCommand request, CancellationToken cancellationToken)
     {
+        // The acknowledgement moves the member's share session on, or closes it (KIP-932).
+        if (request.ShareSessionEpoch is { } epoch
+            && _sessions.Acknowledge(request.GroupId ?? string.Empty, request.MemberId ?? string.Empty, epoch) is var sessionStatus
+            && sessionStatus != ShareGroupErrorStatus.None)
+            return new ShareAcknowledgeResult([]) { Status = sessionStatus };
+
         var responses = new List<ShareAcknowledgeTopicResult>(request.Topics.Count);
         var settings = SettingsOf(request.GroupId);
 
@@ -516,6 +552,13 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
             _sharePartitions.Drop(share.Key.GroupId, tp);
         return StatusOf(written);
     }
+
+    // A share coordinator that is moving or loading is no error of the partition's fetch: the member gets nothing this
+    // time and fetches again, as from Kafka's brokers. Java's share consumer stops on a coordinator error in a fetch.
+    private static ShareGroupErrorStatus FetchStatusOf(ShareGroupErrorStatus status) => status
+        is ShareGroupErrorStatus.CoordinatorNotAvailable or ShareGroupErrorStatus.CoordinatorLoadInProgress or ShareGroupErrorStatus.NotCoordinator
+        ? ShareGroupErrorStatus.None
+        : status;
 
     private static ShareGroupErrorStatus StatusOf(ShareStateStatus status) => status switch
     {
@@ -718,6 +761,9 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     /// <remarks>An eviction is written to the group's records like any other change (#219).</remarks>
     public async Task SweepStaleMembersAsync(CancellationToken cancellationToken)
     {
+        // The share sessions of members that went away go with them.
+        _sessions.DropIdle();
+
         List<string> groupIds;
         lock (_groupLock)
             groupIds = [.. _shareGroups.Keys];

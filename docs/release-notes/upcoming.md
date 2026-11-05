@@ -360,6 +360,23 @@ per group and partition, held by the partition's leader, as in KIP-932:
   creates the group, and a DELETE removes the config so the group runs with
   the default again.
 
+- **Java share consumers:** a Java 4.x share consumer works across three
+  brokers. Two defects kept it from receiving anything at all:
+  - **Empty records:** a ShareFetch answer carried null records for a
+    partition with nothing to deliver. That is allowed in v0 only, and the
+    client failed every fetch.
+  - **Share sessions:** the broker had no share sessions (KIP-932). A member
+    opens one with epoch 0. Later ShareFetch and ShareAcknowledge requests
+    carry the next epoch and name only the partitions that join or leave,
+    and epoch -1 closes the session. The broker served only the partitions a
+    request named, so after its first fetch a client got nothing. A wrong
+    epoch is `INVALID_SHARE_SESSION_EPOCH`, an unknown session
+    `SHARE_SESSION_NOT_FOUND`.
+  - **Moving share coordinator:** while a share coordinator moves or loads,
+    a fetch of its partitions now gets no records and no error, and the
+    member fetches again, as from Kafka's brokers. A
+    `COORDINATOR_NOT_AVAILABLE` there stopped Java's share consumer.
+
 Rejected records are archived, as in Kafka; they are no longer routed to a
 dead-letter topic.
 
