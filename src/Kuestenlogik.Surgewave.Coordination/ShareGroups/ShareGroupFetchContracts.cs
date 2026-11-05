@@ -40,6 +40,12 @@ public sealed record ShareFetchCommand
     public int MaxWaitMs { get; init; }
 
     /// <summary>
+    /// How many bytes of batches a fetch waits for, up to <see cref="MaxWaitMs"/> (#232): 1 waits for the first record, 0
+    /// answers at once. At the deadline the member gets what is there.
+    /// </summary>
+    public int MinBytes { get; init; } = 1;
+
+    /// <summary>
     /// The topics to fetch — with a share session, those that join it; without one, all of them — and the
     /// acknowledgements to apply.
     /// </summary>

@@ -380,8 +380,12 @@ per group and partition, held by the partition's leader, as in KIP-932:
   deliver was answered at once, so an idle share consumer fetched in a
   tight loop. It now waits up to the request's `MaxWaitMs`. The wait ends
   when a record is appended to a partition of the session, a member
-  releases or acknowledges records, or a member's lock runs out. A
-  request's `MinBytes` is not yet honoured beyond the first record.
+  releases or acknowledges records, or a member's lock runs out.
+- **MinBytes (#232):** a fetch whose `MinBytes` is above one waits until
+  the batches it would get reach that size. It measures before it takes
+  any record, so while it waits the records stay with the group and other
+  members can get them. At `MaxWaitMs` it gets what is there. A
+  `MinBytes` of 0 is answered at once.
 
 Rejected records are archived, as in Kafka; they are no longer routed to a
 dead-letter topic.

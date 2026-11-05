@@ -196,6 +196,53 @@ internal sealed class SharePartition
     }
 
     /// <summary>
+    /// How many bytes of batches an acquisition of up to <paramref name="maxRecords"/> records would deliver now, with
+    /// nothing acquired (#232): a fetch with a <c>MinBytes</c> measures before it takes records, so records stay with the
+    /// group while it waits for more.
+    /// </summary>
+    public async Task<int> AcquirableBytesAsync(int maxRecords, int maxRecordLocks, CancellationToken cancellationToken)
+    {
+        var offsets = new List<(long Offset, short DeliveryCount)>();
+        long readFrom;
+        int budget;
+        lock (_lock)
+        {
+            var now = _time.GetUtcNow();
+            foreach (var (offset, record) in _records)
+            {
+                if (offsets.Count >= maxRecords)
+                    break;
+                // A lock that ran out is released by the next acquisition.
+                if (record.State == RecordState.Available || (record.State == RecordState.Acquired && record.LockedUntil <= now))
+                    offsets.Add((offset, record.DeliveryCount));
+            }
+            readFrom = EndOffset;
+            budget = Math.Min(maxRecords - offsets.Count, maxRecordLocks - LockedCount());
+        }
+
+        var highWatermark = _log.HighWatermark;
+        if (budget > 0 && readFrom < highWatermark)
+        {
+            var batches = await _log.ReadBatchesAsync(readFrom, maxBytes: 1_048_576, cancellationToken).ConfigureAwait(false);
+            foreach (var batch in batches)
+            {
+                if (budget <= 0)
+                    break;
+                if (CompressionCodec.IsControlBatch(batch))
+                    continue;
+                var (baseOffset, lastOffset) = Range(batch);
+                for (var offset = Math.Max(baseOffset, readFrom); offset <= lastOffset && offset < highWatermark && budget > 0; offset++, budget--)
+                    offsets.Add((offset, 0));
+            }
+        }
+
+        if (offsets.Count == 0)
+            return 0;
+        offsets.Sort((a, b) => a.Offset.CompareTo(b.Offset));
+        return (await HoldingBatchesAsync(offsets, cancellationToken).ConfigureAwait(false)).Sum(b => b.Length);
+    }
+
+    /// <summary>
     /// Applies a member's acknowledgements, by offset range, each range with one type per offset or one for all — 0 gap,
     /// 1 accept, 2 release, 3 reject, 4 renew. Only records the member holds can be acknowledged; nothing is applied
     /// when one of them is not.
@@ -395,6 +442,20 @@ internal sealed class SharePartition
     // The log's batches that hold the acquired offsets, in order; the client takes the acquired records out of them.
     private async Task<byte[]> BatchesHoldingAsync(List<(long Offset, short DeliveryCount)> acquired, CancellationToken cancellationToken)
     {
+        var holding = await HoldingBatchesAsync(acquired, cancellationToken).ConfigureAwait(false);
+        var bytes = new byte[holding.Sum(b => b.Length)];
+        var at = 0;
+        foreach (var batch in holding)
+        {
+            Buffer.BlockCopy(batch, 0, bytes, at, batch.Length);
+            at += batch.Length;
+        }
+        return bytes;
+    }
+
+    // The log's batches that hold the offsets, given in order.
+    private async Task<List<byte[]>> HoldingBatchesAsync(List<(long Offset, short DeliveryCount)> acquired, CancellationToken cancellationToken)
+    {
         var wanted = new HashSet<long>(acquired.Select(a => a.Offset));
         var last = acquired[^1].Offset;
         var position = acquired[0].Offset;
@@ -425,15 +486,7 @@ internal sealed class SharePartition
             if (position <= before)
                 break;
         }
-
-        var bytes = new byte[holding.Sum(b => b.Length)];
-        var at = 0;
-        foreach (var batch in holding)
-        {
-            Buffer.BlockCopy(batch, 0, bytes, at, batch.Length);
-            at += batch.Length;
-        }
-        return bytes;
+        return holding;
     }
 
     private enum RecordState

@@ -153,6 +153,64 @@ public sealed class SharePartitionTests : IDisposable
     }
 
     [Fact]
+    public async Task AFetchWaitsUntilTheBytesItAsksForAreThere()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator();
+        var batchBytes = await BatchBytesAsync(coordinator);
+
+        // One batch is there, the fetch asks for more than one (#232): it waits for the next and gets both.
+        var fetching = FetchAsync(coordinator, "g1", "m1", maxWaitMs: 500, minBytes: batchBytes + 1);
+        Assert.False(fetching.IsCompleted);
+        await ProduceAsync(1);
+
+        Assert.Equal((0L, 1L, (short)1), Single(await fetching));
+    }
+
+    [Fact]
+    public async Task AFetchThatWaitsForItsBytesLeavesTheRecordsToOtherMembers()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator();
+        var batchBytes = await BatchBytesAsync(coordinator);
+
+        var fetching = FetchAsync(coordinator, "g1", "m1", maxWaitMs: 500, minBytes: batchBytes + 1);
+        Assert.False(fetching.IsCompleted);
+
+        // The waiting fetch holds no record: another member gets it, and the fetch has nothing at its deadline.
+        Assert.Equal((0L, 0L, (short)1), Single(await FetchAsync(coordinator, "g1", "m2")));
+        _time.Advance(TimeSpan.FromMilliseconds(500));
+        var fetched = await fetching;
+        Assert.Equal(ShareGroupErrorStatus.None, fetched.Status);
+        Assert.Empty(fetched.AcquiredRecords);
+    }
+
+    [Fact]
+    public async Task AFetchGetsWhatIsThereAtItsMaxWaitThoughLessThanItsBytes()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator();
+        var batchBytes = await BatchBytesAsync(coordinator);
+
+        var fetching = FetchAsync(coordinator, "g1", "m1", maxWaitMs: 500, minBytes: batchBytes + 1);
+        Assert.False(fetching.IsCompleted);
+        _time.Advance(TimeSpan.FromMilliseconds(500));
+
+        Assert.Equal((0L, 0L, (short)1), Single(await fetching));
+    }
+
+    [Fact]
+    public async Task AFetchForNoBytesIsAnsweredAtOnce()
+    {
+        var coordinator = Coordinator();
+
+        var fetching = FetchAsync(coordinator, "g1", "m1", maxWaitMs: 500, minBytes: 0);
+
+        Assert.True(fetching.IsCompleted);
+        Assert.Empty((await fetching).AcquiredRecords);
+    }
+
+    [Fact]
     public async Task OnlyTheMemberHoldingARecordAcknowledgesIt()
     {
         await ProduceAsync(1);
@@ -368,7 +426,12 @@ public sealed class SharePartitionTests : IDisposable
         await _logManager.AppendBatchAsync(_partition, _serializer.SerializeMessages(messages), _ct);
     }
 
-    private async Task<ShareFetchPartitionResult> FetchAsync(ShareGroupCoordinator coordinator, string group, string member, int maxWaitMs = 0)
+    // The bytes of the first batch of the partition, as a group of its own gets it.
+    private async Task<int> BatchBytesAsync(ShareGroupCoordinator coordinator) =>
+        (await FetchAsync(coordinator, "probe", "p1")).Records!.Length;
+
+    private async Task<ShareFetchPartitionResult> FetchAsync(
+        ShareGroupCoordinator coordinator, string group, string member, int maxWaitMs = 0, int minBytes = 1)
     {
         var result = await coordinator.ShareFetchAsync(new ShareFetchCommand
         {
@@ -376,6 +439,7 @@ public sealed class SharePartitionTests : IDisposable
             MemberId = member,
             MaxRecords = 100,
             MaxWaitMs = maxWaitMs,
+            MinBytes = minBytes,
             Topics = [new ShareFetchTopic { TopicId = _topicId, Partitions = [new ShareFetchPartition { PartitionIndex = 0, AcknowledgementBatches = [] }] }],
         }, _ct);
         return result.Responses.Single().Partitions.Single();
