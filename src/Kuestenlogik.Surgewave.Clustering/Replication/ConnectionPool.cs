@@ -44,6 +44,13 @@ public sealed partial class ConnectionPool : IDisposable
     /// Get a connection to the specified broker endpoint.
     /// Returns a pooled connection if available, or creates a new one.
     /// </summary>
+    /// <remarks>
+    /// The semaphore counts the connections leased out, at most <c>maxConnectionsPerBroker</c> at once; an idle
+    /// connection in the queue holds no permit. A caller takes a permit first and then an idle connection or a new
+    /// one, and a returned connection gives its permit back, so a caller waiting for one wakes up and finds it in the
+    /// queue (#234). The permit counted live connections before: a caller past the empty queue waited for a permit a
+    /// returned connection never released, until its own timeout, with the connection idle in the queue.
+    /// </remarks>
     public async Task<PooledConnection> GetConnectionAsync(string host, int port, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -56,36 +63,32 @@ public sealed partial class ConnectionPool : IDisposable
         var queue = _pools.GetOrAdd(endpoint, _ => new ConcurrentQueue<PooledConnection>());
         var semaphore = _semaphores.GetOrAdd(endpoint, _ => new SemaphoreSlim(_maxConnectionsPerBroker, _maxConnectionsPerBroker));
 
-        // Try to get an existing connection
-        while (queue.TryDequeue(out var connection))
-        {
-            if (connection.IsAlive && !connection.IsExpired(_idleTimeout))
-            {
-                // Re-arm the lease: without resetting the returned flag, the SECOND Return()/
-                // Discard() of a reused connection would silently no-op — the connection would
-                // neither re-pool nor release its permit (one leaked permit + socket per reuse
-                // cycle until the endpoint's semaphore is exhausted).
-                connection.PrepareForReuse();
-                LogConnectionReused(endpoint);
-                return connection;
-            }
-
-            // Connection is dead or expired: dispose it AND release its creation permit — the
-            // semaphore counts live connections, so skipping the release here would leak one permit
-            // per dead pooled connection (e.g. after a peer restart) until every GetConnectionAsync
-            // for the endpoint blocks on an exhausted semaphore.
-            connection.Dispose();
-            ReleaseSemaphore(endpoint);
-        }
-
-        // Need to create a new connection
-        await semaphore.WaitAsync(cancellationToken);
+        // The lease's permit first: it is given back when the connection is returned or discarded.
+        await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // An idle connection, if there is one.
+            while (queue.TryDequeue(out var connection))
+            {
+                if (connection.IsAlive && !connection.IsExpired(_idleTimeout))
+                {
+                    // Re-arm the lease: without resetting the returned flag, the SECOND Return()/
+                    // Discard() of a reused connection would silently no-op — the connection would
+                    // neither re-pool nor release its permit (one leaked permit + socket per reuse
+                    // cycle until the endpoint's semaphore is exhausted).
+                    connection.PrepareForReuse();
+                    LogConnectionReused(endpoint);
+                    return connection;
+                }
+
+                // Dead or expired: an idle connection holds no permit, so closing it is all.
+                connection.Dispose();
+            }
+
             using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             connectCts.CancelAfter(_connectionTimeout);
 
-            var peerConnection = await _peerTransport.ConnectAsync(host, port, connectCts.Token);
+            var peerConnection = await _peerTransport.ConnectAsync(host, port, connectCts.Token).ConfigureAwait(false);
 
             var pooledConnection = new PooledConnection(peerConnection, endpoint, this);
             LogConnectionCreated(endpoint);
@@ -99,19 +102,14 @@ public sealed partial class ConnectionPool : IDisposable
     }
 
     /// <summary>
-    /// Return a connection to the pool for reuse.
+    /// Return a connection to the pool for reuse, or close it when it is dead; either way its lease's permit is
+    /// given back.
     /// </summary>
     internal void ReturnConnection(PooledConnection connection)
     {
-        if (_disposed || !connection.IsAlive)
+        if (!_disposed && connection.IsAlive && _pools.TryGetValue(connection.Endpoint, out var queue))
         {
-            connection.Dispose();
-            ReleaseSemaphore(connection.Endpoint);
-            return;
-        }
-
-        if (_pools.TryGetValue(connection.Endpoint, out var queue))
-        {
+            // Into the queue before the permit is released, so the caller the permit wakes finds it there.
             connection.MarkUsed();
             queue.Enqueue(connection);
             LogConnectionReturned(connection.Endpoint);
@@ -119,8 +117,8 @@ public sealed partial class ConnectionPool : IDisposable
         else
         {
             connection.Dispose();
-            ReleaseSemaphore(connection.Endpoint);
         }
+        ReleaseSemaphore(connection.Endpoint);
     }
 
     private void ReleaseSemaphore(string endpoint)
@@ -161,8 +159,8 @@ public sealed partial class ConnectionPool : IDisposable
                     }
                     else
                     {
+                        // An idle connection holds no permit (#234).
                         connection.Dispose();
-                        ReleaseSemaphore(endpoint);
                         LogConnectionExpired(endpoint);
                     }
                 }

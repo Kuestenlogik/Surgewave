@@ -149,6 +149,7 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
         var timeoutToken = timeoutCts.Token;
 
         var connection = await _connectionPool.GetConnectionAsync(host, port, timeoutToken);
+        var exchangeComplete = false;
         try
         {
             var stream = connection.Stream;
@@ -172,6 +173,8 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
             var responseBuffer = new byte[responseSize];
             await ReadExactlyAsync(stream, responseBuffer, timeoutToken);
 
+            exchangeComplete = true;
+
             // Parse response
             var reader = new KafkaProtocolReader(responseBuffer);
             var correlationId = reader.ReadInt32();
@@ -180,7 +183,9 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
         }
         finally
         {
-            connection.Return();
+            // A request that timed out mid-exchange leaves its late response in the stream; pooled again, the next
+            // request would read that response as its own (#234). The native client discards such a connection too.
+            if (exchangeComplete) connection.Return(); else connection.Discard();
         }
     }
 

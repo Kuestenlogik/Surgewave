@@ -1207,28 +1207,43 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // where it led, elect a successor from what remains. Both through the metadata log (#124): the ISR
         // removal used to be a write to this controller's own ClusterState only, so every other broker kept
         // reporting the dead one in-sync, and a controller elected later rebuilt the ISR with it from the log.
+        //
+        // For as long as this controller runs (#234): each decision waits for its commit, which a controller that
+        // lost its quorum never gets, and the failure of a broker with a hundred partitions held a stopping broker
+        // for minutes — the heartbeat monitor awaits this handler, and the broker's shutdown awaits the monitor.
+        var ct = _cts?.Token ?? CancellationToken.None;
         var affectedPartitions = new List<TopicPartition>();
 
-        foreach (var (tp, state) in _clusterState.PartitionStates)
+        try
         {
-            var remainingIsr = state.Isr.Where(b => b != failedBrokerId).ToList();
-            if (remainingIsr.Count != state.Isr.Count)
+            foreach (var (tp, state) in _clusterState.PartitionStates)
             {
-                if (await UpdateIsrViaRaftAsync(tp, remainingIsr, CancellationToken.None).ConfigureAwait(false))
+                ct.ThrowIfCancellationRequested();
+
+                var remainingIsr = state.Isr.Where(b => b != failedBrokerId).ToList();
+                if (remainingIsr.Count != state.Isr.Count)
                 {
-                    affectedPartitions.Add(tp);
-                    LogRemovedFromIsr(tp.Topic, tp.Partition, failedBrokerId);
+                    if (await UpdateIsrViaRaftAsync(tp, remainingIsr, ct).ConfigureAwait(false))
+                    {
+                        affectedPartitions.Add(tp);
+                        LogRemovedFromIsr(tp.Topic, tp.Partition, failedBrokerId);
+                    }
+                }
+
+                if (state.LeaderBrokerId == failedBrokerId)
+                {
+                    LogLeaderFailedForPartition(tp.Topic, tp.Partition, failedBrokerId);
+                    // The successor named from the ISR just computed, not read back: the committed ISR change
+                    // may not be applied here yet, and the read would still offer the dead broker.
+                    await ElectLeaderAsync(tp, remainingIsr.Count > 0 ? remainingIsr[0] : null, ct)
+                        .ConfigureAwait(false);
                 }
             }
-
-            if (state.LeaderBrokerId == failedBrokerId)
-            {
-                LogLeaderFailedForPartition(tp.Topic, tp.Partition, failedBrokerId);
-                // The successor named from the ISR just computed, not read back: the committed ISR change
-                // may not be applied here yet, and the read would still offer the dead broker.
-                await ElectLeaderAsync(tp, remainingIsr.Count > 0 ? remainingIsr[0] : null, CancellationToken.None)
-                    .ConfigureAwait(false);
-            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // This controller stops; the next one handles the failure from the metadata log.
+            return;
         }
 
         LogBrokerFailureHandled(failedBrokerId, affectedPartitions.Count);

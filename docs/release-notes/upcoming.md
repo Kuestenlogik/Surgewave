@@ -294,6 +294,21 @@ Kafka's CreateTopics and auto-creation now go the same way and wait for
 the topic to arrive. Before, auto-creation answered `LEADER_NOT_AVAILABLE`
 until the topic arrived.
 
+### ISR reports reach the controller, and a stopping controller stops (#234)
+
+- **ISR reports:** a partition leader's ISR reports to the controller timed out in bursts of ten seconds. The
+  inter-broker connection pool counted live connections, not leased ones. A caller that found no idle connection
+  waited for a permit, and a returned connection never gave one back, so the caller waited until its own timeout
+  while the connection sat idle in the pool. Right after a cluster started, dozens of reports were lost that way.
+  The ISRs of the internal topics then stayed at the leader alone, and stopping a broker found no in-sync
+  successor for its partitions. The pool now counts leases, and a caller waiting for a connection gets the one
+  returned meanwhile. A Kafka-wire report that timed out mid-exchange also closes its connection, instead of
+  pooling it with the late response still in it.
+- **Stopping a controller:** a controller handled a broker's failure partition by partition, waiting for each
+  decision's commit, without regard to its own shutdown. A controller that had lost its quorum waited five seconds
+  per partition, and a stopping broker hung for minutes in its heartbeat monitor. The handling now ends when the
+  controller stops; the next controller handles the failure from the metadata log.
+
 ### A broker without topic auto-creation starts with Connect (#215)
 
 With `AutoCreateTopics=false` and Connect enabled, which is the default,

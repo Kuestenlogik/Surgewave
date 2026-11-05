@@ -49,6 +49,27 @@ public class ConnectionPoolLeaseTests
     }
 
     [Fact]
+    public async Task ACallerWaitingForAConnectionGetsTheOneReturnedMeanwhile()
+    {
+        var transport = new FakeTransport();
+        using var pool = new ConnectionPool(NullLogger<ConnectionPool>.Instance, transport, maxConnectionsPerBroker: 1);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var leased = await pool.GetConnectionAsync("h", 1, cts.Token);
+        var waiting = pool.GetConnectionAsync("h", 1, cts.Token);
+        Assert.False(waiting.IsCompleted);
+
+        // Returned while the other caller waits (#234): the waiter gets it. The pool counted live
+        // connections, not leased ones, so a waiter past the idle queue waited for a permit that a
+        // returned connection never gave back, until its own timeout, with the connection idle in the
+        // queue. Leaders' ISR reports to the controller timed out that way in bursts.
+        leased.Return();
+
+        Assert.Same(leased, await waiting);
+        Assert.Equal(1, transport.Connects);
+    }
+
+    [Fact]
     public async Task ReusedConnection_SecondReturn_RepoolsInsteadOfLeaking()
     {
         var transport = new FakeTransport();
