@@ -44,6 +44,26 @@ public sealed class ConnectWorkerConfig : IValidatableConfig
     public string StatusTopic { get; set; } = "surgewave-connect-status";
 
     /// <summary>
+    /// Partitions of the offsets topic when the worker creates it (#215); Kafka Connect's <c>offset.storage.partitions</c>.
+    /// The config topic always has one, so connector configs keep their order.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int OffsetsTopicPartitions { get; set; } = 25;
+
+    /// <summary>
+    /// Partitions of the status topic when the worker creates it (#215); Kafka Connect's <c>status.storage.partitions</c>.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int StatusTopicPartitions { get; set; } = 5;
+
+    /// <summary>
+    /// Replication factor of the internal topics when the worker creates them (#215); Kafka Connect's
+    /// <c>*.storage.replication.factor</c>.
+    /// </summary>
+    [Range(1, short.MaxValue)]
+    public short InternalTopicReplicationFactor { get; set; } = 1;
+
+    /// <summary>
     /// REST API port for managing connectors.
     /// </summary>
     [Range(1, 65535)]

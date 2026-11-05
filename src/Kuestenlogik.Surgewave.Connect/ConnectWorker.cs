@@ -119,10 +119,60 @@ public sealed class ConnectWorker : IAsyncDisposable
         _logger.LogInformation("Starting Surgewave Connect worker");
         _logger.LogInformation("Bootstrap servers: {Servers}", _config.BootstrapServers);
 
+        // The internal topics first, independent of the broker's topic auto-creation (#215): the config loader below
+        // waited for a config topic nobody created, and the broker's start hung with it.
+        await EnsureInternalTopicsAsync(cancellationToken);
+
         // Load persisted connector configs from config topic
         await LoadPersistedConnectorsAsync(cancellationToken);
 
         _logger.LogInformation("Surgewave Connect worker started");
+    }
+
+    /// <summary>
+    /// Creates the config, offsets and status topics that are missing, compacted, as Kafka Connect does (#215). A
+    /// worker whose client cannot create topics — one on the Kafka protocol — needs them to exist and says which do
+    /// not.
+    /// </summary>
+    private async Task EnsureInternalTopicsAsync(CancellationToken cancellationToken)
+    {
+        (string Name, int Partitions)[] internalTopics =
+        [
+            (_config.ConfigTopic, 1),
+            (_config.OffsetsTopic, _config.OffsetsTopicPartitions),
+            (_config.StatusTopic, _config.StatusTopicPartitions),
+        ];
+
+        if (_surgewaveClient.NativeClient?.Topics is not { } topics)
+        {
+            _logger.LogWarning(
+                "Connect worker cannot create its internal topics over the {Protocol} protocol; {Topics} must exist",
+                _surgewaveClient.Protocol, string.Join(", ", internalTopics.Select(t => t.Name)));
+            return;
+        }
+
+        var existing = (await topics.ListAsync(cancellationToken).ConfigureAwait(false))
+            .Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var (name, partitions) in internalTopics)
+        {
+            if (existing.Contains(name))
+                continue;
+            try
+            {
+                await topics.Create(name)
+                    .WithPartitions(partitions)
+                    .WithReplicationFactor(_config.InternalTopicReplicationFactor)
+                    .WithCompaction()
+                    .ExecuteAsync(cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Created Connect topic {Topic} with {Partitions} partition(s)", name, partitions);
+            }
+            catch (ProtocolException)
+            {
+                // Another worker created it meanwhile; anything else fails the start, naming the topic.
+                if (!(await topics.ListAsync(cancellationToken).ConfigureAwait(false)).Any(t => t.Name == name))
+                    throw;
+            }
+        }
     }
 
     /// <summary>
@@ -171,6 +221,9 @@ public sealed class ConnectWorker : IAsyncDisposable
             opts.GroupId = $"{_config.GroupId}-config-loader-{Guid.NewGuid():N}";
             opts.AutoOffsetReset = Client.Consumer.AutoOffsetReset.Earliest;
             opts.EnableAutoCommit = false;
+            // The config topic exists once the worker started (#215); a missing one is an error naming it, never a
+            // wait for a topic nobody creates, which hung the broker's start.
+            opts.TopicDiscoveryTimeoutMs = 0;
         });
 
         consumer.Subscribe(_config.ConfigTopic);

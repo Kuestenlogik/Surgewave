@@ -242,6 +242,9 @@ Section: `Surgewave`
 | `ConfigTopic` | string | `surgewave-connect-configs` | Connector configuration topic |
 | `OffsetsTopic` | string | `surgewave-connect-offsets` | Connector offsets topic |
 | `StatusTopic` | string | `surgewave-connect-status` | Connector status topic |
+| `OffsetsTopicPartitions` | int | `25` | Partitions of the offsets topic when the worker creates it |
+| `StatusTopicPartitions` | int | `5` | Partitions of the status topic when the worker creates it |
+| `InternalTopicReplicationFactor` | short | `1` | Replication factor of the config, offsets and status topics when the worker creates them |
 | `PluginsDirectory` | string | `plugins` | Directory to scan for connector DLLs |
 
 ---

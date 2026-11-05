@@ -102,6 +102,7 @@ public sealed class SurgewaveClient : ISurgewaveClient
             consumerOpts.MaxPollIntervalMs = options.MaxPollIntervalMs;
             consumerOpts.SessionTimeoutMs = options.SessionTimeoutMs;
             consumerOpts.IsolationLevel = options.IsolationLevel;
+            consumerOpts.TopicDiscoveryTimeoutMs = options.TopicDiscoveryTimeoutMs;
 
             if (options.KeyDeserializer != null)
                 consumerOpts.KeyDeserializer = options.KeyDeserializer;

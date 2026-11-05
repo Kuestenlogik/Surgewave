@@ -61,6 +61,12 @@ public sealed class ConsumerOptions<TKey, TValue>
     public int SessionTimeoutMs { get; set; } = 30000;
 
     /// <summary>
+    /// How long to wait for subscribed topics to exist (milliseconds): -1 waits for them, 0 fails at once with an
+    /// error naming the missing topics.
+    /// </summary>
+    public int TopicDiscoveryTimeoutMs { get; set; } = -1;
+
+    /// <summary>
     /// Transaction isolation level for consuming messages.
     /// ReadCommitted: Only return messages that have been committed (for exactly-once semantics).
     /// ReadUncommitted: Return all messages including uncommitted transactional messages.

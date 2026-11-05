@@ -294,6 +294,18 @@ Kafka's CreateTopics and auto-creation now go the same way and wait for
 the topic to arrive. Before, auto-creation answered `LEADER_NOT_AVAILABLE`
 until the topic arrived.
 
+### A broker without topic auto-creation starts with Connect (#215)
+
+With `AutoCreateTopics=false` and Connect enabled, which is the default,
+the broker's start hung in the Connect worker without an error. The worker
+waited for a config topic that nobody created. Like Kafka Connect, the
+worker now creates its config, offsets and status topics itself, compacted.
+`OffsetsTopicPartitions` (25), `StatusTopicPartitions` (5) and
+`InternalTopicReplicationFactor` (1) set them up. A config topic that is
+still missing is an error naming it. The client's `ConsumerOptions` gained
+`TopicDiscoveryTimeoutMs` for that: 0 fails at once and names the missing
+topics, -1 waits for them.
+
 ### A topic's config change reaches every broker hosting it (#119)
 
 A topic's config could be changed through Kafka's AlterConfigs and
