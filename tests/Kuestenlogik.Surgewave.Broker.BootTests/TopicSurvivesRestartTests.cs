@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
 using Xunit;
@@ -40,6 +41,50 @@ public sealed class TopicSurvivesRestartTests
             BrokerProcess.TryDelete(dataDir);
         }
     }
+
+    [Fact(Timeout = 240_000)]
+    public async Task ATopicCreatedOverRestIsThereWithItsConfigAfterARestart()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var dataDir = Path.Combine(Path.GetTempPath(), "surgewave-boottest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataDir);
+        var topic = $"invoices-{Guid.NewGuid():N}";
+
+        try
+        {
+            // The transcoded gRPC TopicService created the topic in the log manager alone, past the metadata log, and
+            // it was gone after a restart (#214); its config never reached the log manager from the metadata log.
+            await using (var first = await BrokerProcess.StartAsync(dataDir, cancellationToken, "--Surgewave:Connect:Enabled=false"))
+            {
+                using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{first.RestPort}") };
+                using var created = await http.PostAsJsonAsync("/v3/topics", new
+                {
+                    topic,
+                    numPartitions = 2,
+                    replicationFactor = 1,
+                    config = new Dictionary<string, string> { ["retention.ms"] = "123456789" },
+                }, cancellationToken);
+                var body = await created.Content.ReadAsStringAsync(cancellationToken);
+                Assert.True(created.IsSuccessStatusCode && ErrorOf(body) is null or "NONE",
+                    $"POST /v3/topics answered {(int)created.StatusCode}: {body}\n{first.Dump()}");
+            }
+
+            await using var second = await BrokerProcess.StartAsync(dataDir, cancellationToken, "--Surgewave:Connect:Enabled=false");
+            using var admin = Admin(second);
+            Assert.True(PartitionsOf(admin, topic) == 2, $"topic {topic} did not survive the restart\n{second.Dump()}");
+            var described = await admin.DescribeConfigsAsync([new ConfigResource { Type = ResourceType.Topic, Name = topic }]);
+            Assert.Equal("123456789", described.Single().Entries["retention.ms"].Value);
+        }
+        finally
+        {
+            BrokerProcess.TryDelete(dataDir);
+        }
+    }
+
+    // The response's error code, null when it has none (proto3 JSON leaves NONE out).
+    private static string? ErrorOf(string body) =>
+        System.Text.Json.JsonDocument.Parse(body).RootElement.TryGetProperty("status", out var status)
+        && status.TryGetProperty("errorCode", out var code) ? code.ToString() : null;
 
     private static IAdminClient Admin(BrokerProcess broker) =>
         new AdminClientBuilder(new AdminClientConfig { BootstrapServers = broker.BootstrapServers }).Build();

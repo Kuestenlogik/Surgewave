@@ -213,11 +213,12 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             state.LeaderEpoch = leaderEpoch;
         });
 
+        // The topic first, so its log is opened with the topic's configuration (#214).
+        RegisterAssignedTopic(tp, topicId);
+
         // Get current log end offset
         var log = _logManager.GetOrCreateLog(tp);
         replica.LogEndOffset = log.HighWatermark;
-
-        RegisterAssignedTopic(tp, topicId);
 
         // Start fetching from leader
         _replicaFetcher?.StartFetching(tp, leaderId);
@@ -270,11 +271,14 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         if (highestPartition < tp.Partition)
             highestPartition = tp.Partition;
 
+        // With the topic's configuration from the metadata log (#214): a topic created through the controller has it
+        // there only, and its replicas would otherwise run with the broker's defaults — retention, cleanup policy.
         _logManager.EnsureTopicMetadata(
             tp.Topic,
             topicId,
             highestPartition + 1,
-            (short)Math.Max(replicaCount, 1));
+            (short)Math.Max(replicaCount, 1),
+            _clusterState.GetTopic(tp.Topic)?.Config);
 
         // Seed the cluster state too, so this broker can still name the topic's id after it becomes
         // controller itself: the id it sends out on LeaderAndIsr is sourced from there, and a broker

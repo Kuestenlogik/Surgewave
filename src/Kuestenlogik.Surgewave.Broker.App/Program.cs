@@ -639,11 +639,19 @@ builder.Services.AddSingleton(sp => new BrokerRegistrationCoordinator(
     sp.GetRequiredService<ClusteringConfig>().BrokerId,
     sp.GetRequiredService<ILogger<BrokerRegistrationCoordinator>>()));
 
-builder.Services.AddSingleton(sp => new ClusterController(
-    sp.GetRequiredService<ILogger<ClusterController>>(),
-    sp.GetRequiredService<ClusterState>(),
-    sp.GetRequiredService<ReplicaManager>(),
-    sp.GetRequiredService<ClusteringConfig>()));
+builder.Services.AddSingleton(sp =>
+{
+    var controller = new ClusterController(
+        sp.GetRequiredService<ILogger<ClusterController>>(),
+        sp.GetRequiredService<ClusterState>(),
+        sp.GetRequiredService<ReplicaManager>(),
+        sp.GetRequiredService<ClusteringConfig>());
+    // Every topic goes through the controller into the metadata log, whatever the entry point (#214).
+    var logManager = sp.GetRequiredService<LogManager>();
+    logManager.RouteTopicCreation(new MetadataLogTopicCreator(
+        controller, sp.GetRequiredService<ClusterState>(), logManager, sp.GetRequiredService<ClusteringConfig>().BrokerId));
+    return controller;
+});
 builder.Services.AddSingleton(sp => new ReplicationServer(
     sp.GetRequiredService<ILogger<ReplicationServer>>(),
     sp.GetRequiredService<ClusterState>(),

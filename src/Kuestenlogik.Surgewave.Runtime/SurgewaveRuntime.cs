@@ -550,6 +550,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _clusterState,
             _replicaManager,
             clusteringConfig);
+        // Every topic goes through the controller into the metadata log, whatever the entry point (#214).
+        _logManager!.RouteTopicCreation(new MetadataLogTopicCreator(_clusterController, _clusterState, _logManager, clusteringConfig.BrokerId));
 
         // #72 Inc4 — controller-epoch high-water: prime from the node-local persisted floor and
         // persist every strict advance, so a restarted broker elects strictly above every reign it

@@ -26,6 +26,8 @@ public sealed class LogManager : IDisposable
     private readonly ConcurrentDictionary<TopicPartition, IPartitionLog> _logs = new();
     private readonly ConcurrentDictionary<TopicPartition, object> _logCreationLocks = new();
     private readonly ConcurrentDictionary<string, TopicMetadata> _topics = new();
+    private readonly ChangeSignal _topicsChanged = new();
+    private volatile ITopicCreator? _topicCreator;
     private readonly ConcurrentDictionary<Guid, string> _topicIdToName = new(); // TopicId → TopicName mapping
 
     // Channel-based write pipeline
@@ -110,9 +112,19 @@ public sealed class LogManager : IDisposable
     }
 
     /// <summary>
-    /// Create a new topic with the specified number of partitions
+    /// Hands every topic creation to the cluster from now on (#214): through the controller into the metadata log. A
+    /// broker in a cluster sets it at its start; without it, topics are created here.
     /// </summary>
-    public async Task<TopicMetadata> CreateTopicAsync(
+    public void RouteTopicCreation(ITopicCreator creator) => _topicCreator = creator;
+
+    /// <summary>
+    /// Creates a topic — the one way to, whatever the entry point (#214). In a cluster it goes through the controller
+    /// into the metadata log (<see cref="RouteTopicCreation"/>) and completes once this broker knows the topic; a
+    /// topic created on one broker alone was gone after a restart. Without a cluster it is created here.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The topic exists already.</exception>
+    /// <exception cref="TopicNotCreatedException">In a cluster: no controller took the topic now; asking again may.</exception>
+    public Task<TopicMetadata> CreateTopicAsync(
         string topicName,
         int partitionCount,
         short replicationFactor = 1,
@@ -120,6 +132,18 @@ public sealed class LogManager : IDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        return _topicCreator is { } creator
+            ? creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken)
+            : CreateLocalTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken);
+    }
+
+    private async Task<TopicMetadata> CreateLocalTopicAsync(
+        string topicName,
+        int partitionCount,
+        short replicationFactor,
+        Dictionary<string, string>? config,
+        CancellationToken cancellationToken)
+    {
 
         if (_topics.ContainsKey(topicName))
         {
@@ -162,11 +186,18 @@ public sealed class LogManager : IDisposable
         }
 
         _metadataPersistence.Save(_topics);
+        _topicsChanged.Notify();
 
         await FireTopicCreatedAsync(metadata, cancellationToken).ConfigureAwait(false);
 
         return metadata;
     }
+
+    /// <summary>
+    /// Completes at the next change of the topics this broker knows — one created, one learned from the metadata log,
+    /// one deleted (#214). Take it before looking at the topics, then await it.
+    /// </summary>
+    public Task TopicsChanged => _topicsChanged.Next;
 
     /// <summary>
     /// Get or create a partition log
@@ -418,7 +449,12 @@ public sealed class LogManager : IDisposable
     /// non-empty id is entered into the id→name map: a fabricated one would answer id lookups with
     /// a topic the rest of the cluster does not recognise under that id.
     /// </param>
-    public void EnsureTopicMetadata(string topicName, Guid topicId, int partitionCount, short replicationFactor)
+    /// <param name="config">
+    /// The topic's configuration from the metadata log (#214), or null when the caller has none. It is taken when the
+    /// topic is new here, or this broker knew it without one; a known configuration is not replaced.
+    /// </param>
+    public void EnsureTopicMetadata(
+        string topicName, Guid topicId, int partitionCount, short replicationFactor, IReadOnlyDictionary<string, string>? config = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -435,7 +471,7 @@ public sealed class LogManager : IDisposable
                 TopicId = topicId,
                 PartitionCount = partitionCount,
                 ReplicationFactor = replicationFactor,
-                Config = new Dictionary<string, string>(),
+                Config = config is null ? new Dictionary<string, string>() : new Dictionary<string, string>(config),
                 CreatedAt = DateTime.UtcNow
             },
             (_, known) =>
@@ -443,6 +479,11 @@ public sealed class LogManager : IDisposable
                 if (partitionCount > known.PartitionCount)
                 {
                     known.PartitionCount = partitionCount;
+                }
+
+                if (known.Config.Count == 0 && config is { Count: > 0 })
+                {
+                    known = known with { Config = new Dictionary<string, string>(config) };
                 }
 
                 // Late-bind the id. A broker can learn that it hosts a replica before it learns the
@@ -462,6 +503,8 @@ public sealed class LogManager : IDisposable
         {
             _topicIdToName[topicId] = topicName;
         }
+
+        _topicsChanged.Notify();
     }
 
     /// <summary>
@@ -603,6 +646,7 @@ public sealed class LogManager : IDisposable
 
         // Remove from TopicId mapping
         _topicIdToName.TryRemove(metadata.TopicId, out _);
+        _topicsChanged.Notify();
 
         // Remove all partition logs
         var partitionsToRemove = _logs.Keys.Where(tp => tp.Topic == topicName).ToList();

@@ -15,6 +15,12 @@ public sealed class ClusterState
     private readonly ConcurrentDictionary<string, System.Collections.Immutable.ImmutableDictionary<string, string>> _groupConfigs =
         new(StringComparer.Ordinal);
     private readonly object _stateLock = new();
+    private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _topicsChanged = new();
+
+    /// <summary>
+    /// Completes at the next change of the topics or their replicas (#214). Take it before looking, then await it.
+    /// </summary>
+    public Task TopicsChanged => _topicsChanged.Next;
 
     // #60 Inc6a — serializes all writes to _brokers so a read-modify-write (registration merge,
     // level convergence) cannot lose a concurrent update. A dedicated lock (not _stateLock) so broker
@@ -237,6 +243,7 @@ public sealed class ClusterState
     public void AddTopic(TopicMetadata topic)
     {
         _topics[topic.Name] = topic;
+        _topicsChanged.Notify();
     }
 
     public void RemoveTopic(string topicName)
@@ -252,6 +259,7 @@ public sealed class ClusterState
         {
             _partitionStates.TryRemove(tp, out _);
         }
+        _topicsChanged.Notify();
     }
 
     public TopicMetadata? GetTopic(string topicName)
@@ -369,6 +377,7 @@ public sealed class ClusterState
                 ElectLeader(tp, replicas[0]);
             }
         }
+        _topicsChanged.Notify();
     }
 
     /// <summary>

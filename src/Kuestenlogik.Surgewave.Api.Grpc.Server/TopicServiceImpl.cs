@@ -48,6 +48,18 @@ public class TopicServiceImpl : TopicService.TopicServiceBase
                 }
             };
         }
+        catch (TopicNotCreatedException ex)
+        {
+            // Retriable: the controller was changing hands or not reachable (#214).
+            return new CreateTopicResponse
+            {
+                Status = new ResponseStatus
+                {
+                    ErrorCode = ErrorCode.LeaderNotAvailable,
+                    ErrorMessage = ex.Message
+                }
+            };
+        }
         catch (Exception ex)
         {
             return new CreateTopicResponse

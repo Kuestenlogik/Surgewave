@@ -274,6 +274,22 @@ for Metadata. Metadata also takes a topic's partitions from the cluster's
 view. A broker hosting one partition of two used to report a topic of one
 partition, and a group leader that asked it assigned only that one.
 
+### A topic created through any entry point survives a restart (#214)
+
+Only Kafka's CreateTopics and auto-creation went through the controller.
+Topics created over gRPC (and REST, MCP and the CLI on top of it), the
+native protocol, GraphQL and the intent API, and the internal topics of
+DLQs, audit, telemetry, CDC, KV buckets, queues and mirror topics, were
+created in the local log manager only. They were missing from the metadata
+log and gone after a restart. Every creation now goes through the
+controller into the metadata log, whatever the entry point, and completes
+once the topic has reached the broker. A topic that no controller takes now
+is a retriable error (`LEADER_NOT_AVAILABLE` over gRPC). A topic's
+configuration from the metadata log now reaches the brokers that host its
+replicas, at creation and on every restart. A topic created through the
+controller used to run there with the broker's defaults for retention,
+cleanup policy and segment size.
+
 ### A commit after an abort is visible to read-committed consumers
 
 An aborted transaction hid every later batch of its producer from

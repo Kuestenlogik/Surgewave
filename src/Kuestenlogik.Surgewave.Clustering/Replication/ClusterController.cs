@@ -668,6 +668,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         Dictionary<string, string>? config,
         CancellationToken ct)
     {
+        // A topic the metadata log has already is not created again under a new id: two brokers creating the same
+        // internal topic at once both find it there (#214).
+        if (_clusterState.GetTopic(topic) is not null)
+            return true;
+
         var brokerIds = _clusterState.Brokers.Keys.OrderBy(id => id).ToList();
         if (brokerIds.Count == 0)
         {
