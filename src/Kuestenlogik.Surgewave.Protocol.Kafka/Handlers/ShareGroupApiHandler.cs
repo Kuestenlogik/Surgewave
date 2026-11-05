@@ -200,6 +200,7 @@ public sealed class ShareGroupApiHandler : IKafkaRequestHandler
             GroupId = r.GroupId,
             MemberId = r.MemberId,
             MaxRecords = r.MaxRecords,
+            MaxWaitMs = r.MaxWaitMs,
             Topics = topics,
             ShareSessionEpoch = r.ShareSessionEpoch,
             ForgottenTopics = [.. r.ForgottenTopicsData.Select(f => new ShareFetchTopic

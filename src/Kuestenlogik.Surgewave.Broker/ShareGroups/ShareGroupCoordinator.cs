@@ -23,6 +23,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private readonly LogManager logManager;
     private readonly SharePartitionManager _sharePartitions;
     private readonly ShareSessions _sessions;
+    private readonly TimeProvider _time;
     private IPartitionLeadership? _leadership;
     // The groups' configs, as every broker knows them (#228).
     private IGroupConfigStore _groupConfigs;
@@ -47,6 +48,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         this.logger = logger;
         this.logManager = logManager;
         _groupConfigs = groupConfigs ?? new InMemoryGroupConfigStore();
+        _time = timeProvider ?? TimeProvider.System;
         _sessions = new ShareSessions(StaleHeartbeatTimeout, timeProvider);
         _sharePartitions = new SharePartitionManager(
             shareState ?? ShareStateStore.InMemory(), recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
@@ -280,6 +282,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     /// Served by the partition's leader, which holds the group's share partition (#228): a broker that does not lead the
     /// partition answers NOT_LEADER_OR_FOLLOWER and names the leader. Acknowledgements carried by the fetch are applied
     /// first, then the member gets records — those waiting for a member, then new ones — as the group's limits allow.
+    /// A fetch that finds none waits up to its <see cref="ShareFetchCommand.MaxWaitMs"/> for some (#231).
     /// </remarks>
     public async Task<ShareFetchResult> ShareFetchAsync(ShareFetchCommand request, CancellationToken cancellationToken)
     {
@@ -306,6 +309,8 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                 served = sessionPartitions;
         }
 
+        var maxRecords = request.MaxRecords > 0 ? request.MaxRecords : 100;
+        var waiting = new List<WaitingPartition>();
         var responses = new List<ShareFetchTopicResult>();
         foreach (var fetchTopic in served.GroupBy(p => p.TopicId))
         {
@@ -382,56 +387,148 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
                     ? Acknowledge(share, memberId, fetchPartition.AcknowledgementBatches, settings)
                     : ShareGroupErrorStatus.None;
 
-                try
+                if (!acquire)
                 {
-                    var maxRecords = request.MaxRecords > 0 ? request.MaxRecords : 100;
-                    var acquired = acquire
-                        ? await share.AcquireAsync(memberId, maxRecords, settings.DeliveryLimit, settings.MaxRecordLocks, cancellationToken)
-                        : new ShareAcquisition([], null);
-
-                    // What changed — acknowledgements, new deliveries — is durable before the answer.
-                    var persisted = await PersistAsync(share, tp, cancellationToken);
-                    if (persisted != ShareGroupErrorStatus.None)
-                    {
-                        partitions.Add(new ShareFetchPartitionResult
-                        {
-                            PartitionIndex = fetchPartition.PartitionIndex,
-                            Status = FetchStatusOf(persisted),
-                            AcknowledgeStatus = acknowledgeStatus == ShareGroupErrorStatus.None ? persisted : acknowledgeStatus,
-                            CurrentLeader = LeaderOf(tp),
-                            AcquiredRecords = []
-                        });
-                        continue;
-                    }
-
-                    partitions.Add(new ShareFetchPartitionResult
-                    {
-                        PartitionIndex = fetchPartition.PartitionIndex,
-                        Status = ShareGroupErrorStatus.None,
-                        AcknowledgeStatus = acknowledgeStatus,
-                        CurrentLeader = LeaderOf(tp),
-                        Records = acquired.Batches,
-                        AcquiredRecords = [.. acquired.Ranges.Select(r => new ShareAcquiredRecords(r.FirstOffset, r.LastOffset, r.DeliveryCount))],
-                    });
+                    partitions.Add((await DeliverAsync(share, tp, memberId, 0, settings, acknowledgeStatus, cancellationToken)).Result);
+                    continue;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogError(ex, "ShareFetch error for {Topic}-{Partition}", topicName, fetchPartition.PartitionIndex);
-                    partitions.Add(new ShareFetchPartitionResult
-                    {
-                        PartitionIndex = fetchPartition.PartitionIndex,
-                        Status = ShareGroupErrorStatus.Unknown,
-                        AcknowledgeStatus = acknowledgeStatus,
-                        CurrentLeader = NoLeader,
-                        AcquiredRecords = []
-                    });
-                }
+                // Taken before the acquisition, so records freed after it wake a fetch that found nothing.
+                var freed = share.RecordsFreed;
+                var (delivered, written) = await DeliverAsync(share, tp, memberId, maxRecords, settings, acknowledgeStatus, cancellationToken);
+                // A state the share coordinator did not take is answered at once, with nothing: the member fetches again.
+                if (written && delivered.AcquiredRecords.Count == 0)
+                    waiting.Add(new WaitingPartition(partitions, partitions.Count, share, tp, log, acknowledgeStatus) { Freed = freed });
+                partitions.Add(delivered);
             }
 
             responses.Add(new ShareFetchTopicResult(topicId, partitions));
         }
 
+        // Nothing for the member anywhere, and nothing to tell it at once: the fetch waits for records (#231).
+        if (acquire && request.MaxWaitMs > 0 && waiting.Count > 0
+            && responses.All(t => t.Partitions.All(p => p.Status == ShareGroupErrorStatus.None && p.AcquiredRecords.Count == 0)))
+        {
+            await WaitForRecordsAsync(waiting, memberId, maxRecords, settings,
+                _time.GetUtcNow() + TimeSpan.FromMilliseconds(request.MaxWaitMs), cancellationToken);
+        }
+
         return new ShareFetchResult(responses);
+    }
+
+    // A share partition a fetch found nothing in, where the fetch's answer for it is, and what wakes the fetch when
+    // records are freed there.
+    private sealed record WaitingPartition(
+        List<ShareFetchPartitionResult> Results, int Index, SharePartition Share, TopicPartition Partition, IPartitionLog Log,
+        ShareGroupErrorStatus AcknowledgeStatus)
+    {
+        public required Task Freed { get; set; }
+    }
+
+    // Waits until records come for the member in one of the share partitions, or the deadline: a record appended to a
+    // partition's log, records freed by a member, or a member's lock that runs out — each a signal, nothing polled. The
+    // answers of the partitions are replaced by what the member got.
+    private async Task WaitForRecordsAsync(
+        List<WaitingPartition> waiting, string memberId, int maxRecords, ShareSettings settings, DateTimeOffset deadline,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var now = _time.GetUtcNow();
+            if (now >= deadline)
+                return;
+
+            using var wake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var signals = new List<Task>(waiting.Count * 2 + 1);
+            var until = deadline;
+            foreach (var w in waiting)
+            {
+                signals.Add(w.Freed);
+                // New records only while the group may hold more of them; until then, freed records are the signal.
+                if (w.Share.InFlightCount < settings.MaxRecordLocks)
+                    signals.Add(w.Log.WaitForDataAsync(w.Share.EndOffset, Timeout.InfiniteTimeSpan, wake.Token));
+                if (w.Share.NextLockExpiry is { } expiry && expiry < until)
+                    until = expiry;
+            }
+            signals.Add(Task.Delay(until > now ? until - now : TimeSpan.Zero, _time, wake.Token));
+
+            await Task.WhenAny(signals).ConfigureAwait(false);
+            await wake.CancelAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var got = false;
+            for (var i = waiting.Count - 1; i >= 0; i--)
+            {
+                var w = waiting[i];
+                if (NotLeaderHere(w.Partition) is { } leader)
+                {
+                    // Led elsewhere now: the member hears so with this answer.
+                    w.Results[w.Index] = w.Results[w.Index] with
+                    {
+                        Status = ShareGroupErrorStatus.NotLeaderOrFollower,
+                        CurrentLeader = leader,
+                    };
+                    waiting.RemoveAt(i);
+                    got = true;
+                    continue;
+                }
+                w.Freed = w.Share.RecordsFreed;
+                var (delivered, written) = await DeliverAsync(w.Share, w.Partition, memberId, maxRecords, settings, w.AcknowledgeStatus, cancellationToken);
+                w.Results[w.Index] = delivered;
+                if (!written || delivered.AcquiredRecords.Count > 0)
+                    got = true;
+            }
+            if (got)
+                return;
+        }
+    }
+
+    // Acquires up to maxRecords records of the share partition for the member and writes what changed — acknowledgements,
+    // new deliveries — before the answer for the partition; whether the share coordinator took the state.
+    private async Task<(ShareFetchPartitionResult Result, bool Written)> DeliverAsync(
+        SharePartition share, TopicPartition tp, string memberId, int maxRecords, ShareSettings settings,
+        ShareGroupErrorStatus acknowledgeStatus, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var acquired = maxRecords > 0
+                ? await share.AcquireAsync(memberId, maxRecords, settings.DeliveryLimit, settings.MaxRecordLocks, cancellationToken)
+                : ShareAcquisition.Empty;
+
+            var persisted = await PersistAsync(share, tp, cancellationToken);
+            if (persisted != ShareGroupErrorStatus.None)
+            {
+                return (new ShareFetchPartitionResult
+                {
+                    PartitionIndex = tp.Partition,
+                    Status = FetchStatusOf(persisted),
+                    AcknowledgeStatus = acknowledgeStatus == ShareGroupErrorStatus.None ? persisted : acknowledgeStatus,
+                    CurrentLeader = LeaderOf(tp),
+                    AcquiredRecords = []
+                }, false);
+            }
+
+            return (new ShareFetchPartitionResult
+            {
+                PartitionIndex = tp.Partition,
+                Status = ShareGroupErrorStatus.None,
+                AcknowledgeStatus = acknowledgeStatus,
+                CurrentLeader = LeaderOf(tp),
+                Records = acquired.Batches,
+                AcquiredRecords = [.. acquired.Ranges.Select(r => new ShareAcquiredRecords(r.FirstOffset, r.LastOffset, r.DeliveryCount))],
+            }, true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "ShareFetch error for {Topic}-{Partition}", tp.Topic, tp.Partition);
+            return (new ShareFetchPartitionResult
+            {
+                PartitionIndex = tp.Partition,
+                Status = ShareGroupErrorStatus.Unknown,
+                AcknowledgeStatus = acknowledgeStatus,
+                CurrentLeader = NoLeader,
+                AcquiredRecords = []
+            }, false);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -376,6 +376,12 @@ per group and partition, held by the partition's leader, as in KIP-932:
     a fetch of its partitions now gets no records and no error, and the
     member fetches again, as from Kafka's brokers. A
     `COORDINATOR_NOT_AVAILABLE` there stopped Java's share consumer.
+- **A fetch waits for records (#231):** a ShareFetch with nothing to
+  deliver was answered at once, so an idle share consumer fetched in a
+  tight loop. It now waits up to the request's `MaxWaitMs`. The wait ends
+  when a record is appended to a partition of the session, a member
+  releases or acknowledges records, or a member's lock runs out. A
+  request's `MinBytes` is not yet honoured beyond the first record.
 
 Rejected records are archived, as in Kafka; they are no longer routed to a
 dead-letter topic.

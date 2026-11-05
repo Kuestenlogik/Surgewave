@@ -34,6 +34,12 @@ public sealed record ShareFetchCommand
     public required int MaxRecords { get; init; }
 
     /// <summary>
+    /// How long a fetch with nothing to deliver waits for records, in milliseconds (#231): until a record arrives in a
+    /// partition it serves, one goes back to the group, or a member's lock runs out. 0 answers at once.
+    /// </summary>
+    public int MaxWaitMs { get; init; }
+
+    /// <summary>
     /// The topics to fetch — with a share session, those that join it; without one, all of them — and the
     /// acknowledgements to apply.
     /// </summary>

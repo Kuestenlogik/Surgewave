@@ -98,6 +98,61 @@ public sealed class SharePartitionTests : IDisposable
     }
 
     [Fact]
+    public async Task AFetchWithNothingToDeliverWaitsForTheNextRecord()
+    {
+        var coordinator = Coordinator();
+
+        // The fetch waits (#231): it was answered at once, and an idle Java share consumer fetched in a tight loop.
+        var fetching = FetchAsync(coordinator, "g1", "m1", maxWaitMs: 500);
+        Assert.False(fetching.IsCompleted);
+        await ProduceAsync(1);
+
+        Assert.Equal((0L, 0L, (short)1), Single(await fetching));
+    }
+
+    [Fact]
+    public async Task AFetchWithNothingToDeliverIsAnsweredEmptyAtItsMaxWait()
+    {
+        var coordinator = Coordinator();
+
+        var fetching = FetchAsync(coordinator, "g1", "m1", maxWaitMs: 500);
+        Assert.False(fetching.IsCompleted);
+        _time.Advance(TimeSpan.FromMilliseconds(500));
+
+        var fetched = await fetching;
+        Assert.Equal(ShareGroupErrorStatus.None, fetched.Status);
+        Assert.Empty(fetched.AcquiredRecords);
+    }
+
+    [Fact]
+    public async Task AWaitingFetchGetsARecordWhoseLockRunsOut()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator();
+        Single(await FetchAsync(coordinator, "g1", "m1"));
+
+        var fetching = FetchAsync(coordinator, "g1", "m2", maxWaitMs: (int)(LockDuration * 2).TotalMilliseconds);
+        Assert.False(fetching.IsCompleted);
+        _time.Advance(LockDuration);
+
+        Assert.Equal((0L, 0L, (short)2), Single(await fetching));
+    }
+
+    [Fact]
+    public async Task AWaitingFetchGetsARecordAnotherMemberReleases()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator();
+        Single(await FetchAsync(coordinator, "g1", "m1"));
+
+        var fetching = FetchAsync(coordinator, "g1", "m2", maxWaitMs: 500);
+        Assert.False(fetching.IsCompleted);
+        Assert.Equal(ShareGroupErrorStatus.None, await AckAsync(coordinator, "g1", "m1", 0, release: true));
+
+        Assert.Equal((0L, 0L, (short)2), Single(await fetching));
+    }
+
+    [Fact]
     public async Task OnlyTheMemberHoldingARecordAcknowledgesIt()
     {
         await ProduceAsync(1);
@@ -313,13 +368,14 @@ public sealed class SharePartitionTests : IDisposable
         await _logManager.AppendBatchAsync(_partition, _serializer.SerializeMessages(messages), _ct);
     }
 
-    private async Task<ShareFetchPartitionResult> FetchAsync(ShareGroupCoordinator coordinator, string group, string member)
+    private async Task<ShareFetchPartitionResult> FetchAsync(ShareGroupCoordinator coordinator, string group, string member, int maxWaitMs = 0)
     {
         var result = await coordinator.ShareFetchAsync(new ShareFetchCommand
         {
             GroupId = group,
             MemberId = member,
             MaxRecords = 100,
+            MaxWaitMs = maxWaitMs,
             Topics = [new ShareFetchTopic { TopicId = _topicId, Partitions = [new ShareFetchPartition { PartitionIndex = 0, AcknowledgementBatches = [] }] }],
         }, _ct);
         return result.Responses.Single().Partitions.Single();

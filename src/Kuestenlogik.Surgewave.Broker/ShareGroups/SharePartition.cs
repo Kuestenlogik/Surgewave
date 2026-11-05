@@ -37,6 +37,9 @@ internal sealed class SharePartition
     // One write of the state at a time, so the stored state is the last one decided on.
     private readonly SemaphoreSlim _persistGate = new(1, 1);
 
+    // Completed, and replaced, whenever records go back to the group or its locks become fewer (#231).
+    private TaskCompletionSource _freed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     /// <summary>A share partition that starts from <paramref name="state"/>, as stored under <paramref name="key"/>.</summary>
     public SharePartition(IPartitionLog log, ShareStateKey key, ShareStateSnapshot state, TimeSpan lockDuration, TimeProvider? timeProvider = null)
     {
@@ -86,6 +89,37 @@ internal sealed class SharePartition
         {
             lock (_lock)
                 return _records.Values.Count(r => r.State is RecordState.Acquired or RecordState.Available);
+        }
+    }
+
+    /// <summary>
+    /// Completes once records go back to the group or the group holds fewer of them — a member acknowledged, released
+    /// or left (#231). Taken before an acquisition, it tells a fetch that found nothing that trying again may find some.
+    /// </summary>
+    public Task RecordsFreed
+    {
+        get
+        {
+            lock (_lock)
+                return _freed.Task;
+        }
+    }
+
+    /// <summary>When the first lock a member holds runs out; null while no member holds a record (#231).</summary>
+    public DateTimeOffset? NextLockExpiry
+    {
+        get
+        {
+            lock (_lock)
+            {
+                DateTimeOffset? next = null;
+                foreach (var record in _records.Values)
+                {
+                    if (record.State == RecordState.Acquired && (next is null || record.LockedUntil < next))
+                        next = record.LockedUntil;
+                }
+                return next;
+            }
         }
     }
 
@@ -215,6 +249,7 @@ internal sealed class SharePartition
                 }
             }
             AdvanceStart();
+            SignalFreed();
             return ShareGroupAckOutcome.Ok;
         }
     }
@@ -267,6 +302,7 @@ internal sealed class SharePartition
             foreach (var record in _records.Values.Where(r => r.State == RecordState.Acquired && r.MemberId == memberId))
                 Release(record, deliveryLimit);
             AdvanceStart();
+            SignalFreed();
         }
     }
 
@@ -290,12 +326,25 @@ internal sealed class SharePartition
     private void ExpireLocks(int deliveryLimit)
     {
         var now = _time.GetUtcNow();
+        var released = false;
         foreach (var record in _records.Values)
         {
             if (record.State == RecordState.Acquired && record.LockedUntil <= now)
+            {
                 Release(record, deliveryLimit);
+                released = true;
+            }
         }
         AdvanceStart();
+        if (released)
+            SignalFreed();
+    }
+
+    // Under the lock: fetches waiting for records try again.
+    private void SignalFreed()
+    {
+        _freed.TrySetResult();
+        _freed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private int LockedCount() => _records.Values.Count(r => r.State is RecordState.Acquired or RecordState.Available);
