@@ -28,6 +28,7 @@ public sealed class LogManager : IDisposable
     private readonly ConcurrentDictionary<string, TopicMetadata> _topics = new();
     private readonly ChangeSignal _topicsChanged = new();
     private volatile ITopicCreator? _topicCreator;
+    private volatile ITopicConfigWriter? _topicConfigWriter;
     private readonly ConcurrentDictionary<Guid, string> _topicIdToName = new(); // TopicId → TopicName mapping
 
     // Channel-based write pipeline
@@ -116,6 +117,13 @@ public sealed class LogManager : IDisposable
     /// broker in a cluster sets it at its start; without it, topics are created here.
     /// </summary>
     public void RouteTopicCreation(ITopicCreator creator) => _topicCreator = creator;
+
+    /// <summary>
+    /// Hands every topic config change to the cluster from now on (#119): through the controller into the metadata log,
+    /// from which every broker hosting the topic applies it. A broker in a cluster sets it at its start; without it,
+    /// configs are changed here.
+    /// </summary>
+    public void RouteTopicConfigChanges(ITopicConfigWriter writer) => _topicConfigWriter = writer;
 
     /// <summary>
     /// Creates a topic — the one way to, whatever the entry point (#214). In a cluster it goes through the controller
@@ -577,14 +585,49 @@ public sealed class LogManager : IDisposable
     }
 
     /// <summary>
-    /// Update topic configuration.
-    /// Supports both Kafka-compatible keys (segment.bytes) and human-readable keys (segment).
+    /// Changes a topic's configuration — the one way to, whatever the entry point. In a cluster it goes through the
+    /// controller into the metadata log (<see cref="RouteTopicConfigChanges"/>), so every broker hosting the topic has
+    /// it, and completes once this broker has it (#119); without a cluster it is changed here. Supports both
+    /// Kafka-compatible keys (segment.bytes) and human-readable keys (segment); an empty value removes the config.
     /// </summary>
     /// <param name="topicName">Name of the topic to update</param>
     /// <param name="configUpdates">Configuration key-value pairs to update/add</param>
     /// <param name="deleteKeys">Configuration keys to remove (optional)</param>
+    /// <param name="cancellationToken">Cancels the wait for the change.</param>
     /// <returns>True if topic was found and updated, false if topic doesn't exist</returns>
-    public bool UpdateTopicConfig(string topicName, Dictionary<string, string> configUpdates, IEnumerable<string>? deleteKeys = null)
+    /// <exception cref="TopicConfigNotChangedException">In a cluster: no controller took the change now; asking again may.</exception>
+    public async Task<bool> UpdateTopicConfigAsync(
+        string topicName, Dictionary<string, string> configUpdates, IEnumerable<string>? deleteKeys = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Normalize the incoming config (converts human-readable to Kafka format)
+        var normalized = ConfigParser.NormalizeConfig(configUpdates);
+        var removed = (deleteKeys ?? []).Concat(normalized.Where(kv => kv.Value.Length == 0).Select(kv => kv.Key)).Distinct().ToList();
+        var set = normalized.Where(kv => kv.Value.Length > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        return _topicConfigWriter is { } writer
+            ? await writer.ChangeTopicConfigAsync(topicName, set, removed, cancellationToken).ConfigureAwait(false)
+            : ChangeLocalTopicConfig(topicName, set, removed);
+    }
+
+    /// <summary>
+    /// Gives the topic exactly the configuration the metadata log has for it (#119); called as this broker applies the
+    /// log. False when this broker does not know the topic.
+    /// </summary>
+    public bool ApplyTopicConfig(string topicName, IReadOnlyDictionary<string, string> config)
+    {
+        if (!_topics.TryGetValue(topicName, out var metadata))
+        {
+            return false;
+        }
+
+        var set = config.Where(kv => !metadata.Config.TryGetValue(kv.Key, out var value) || value != kv.Value)
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+        var removed = metadata.Config.Keys.Where(k => !config.ContainsKey(k)).ToList();
+        return set.Count == 0 && removed.Count == 0 || ChangeLocalTopicConfig(topicName, set, removed);
+    }
+
+    private bool ChangeLocalTopicConfig(string topicName, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed)
     {
         if (!_topics.TryGetValue(topicName, out var metadata))
         {
@@ -594,25 +637,18 @@ public sealed class LogManager : IDisposable
         // Snapshot the previous config so hooks see the delta.
         var previous = new Dictionary<string, string>(metadata.Config);
 
-        // Normalize the incoming config (converts human-readable to Kafka format)
-        var normalizedUpdates = ConfigParser.NormalizeConfig(configUpdates);
-
-        // Apply updates
-        foreach (var (key, value) in normalizedUpdates)
+        foreach (var (key, value) in set)
         {
             metadata.Config[key] = value;
         }
 
-        // Apply deletions
-        if (deleteKeys != null)
+        foreach (var key in removed)
         {
-            foreach (var key in deleteKeys)
-            {
-                metadata.Config.Remove(key);
-            }
+            metadata.Config.Remove(key);
         }
 
         _metadataPersistence.Save(_topics);
+        _topicsChanged.Notify();
 
         FireTopicConfigChanged(metadata, previous);
 

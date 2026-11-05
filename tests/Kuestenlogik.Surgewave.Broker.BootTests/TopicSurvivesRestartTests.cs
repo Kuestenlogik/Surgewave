@@ -81,6 +81,42 @@ public sealed class TopicSurvivesRestartTests
         }
     }
 
+    [Fact(Timeout = 240_000)]
+    public async Task AConfigChangedOverKafkaIsThereAfterARestart()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var dataDir = Path.Combine(Path.GetTempPath(), "surgewave-boottest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataDir);
+        var topic = $"payments-{Guid.NewGuid():N}";
+        var resource = new ConfigResource { Type = ResourceType.Topic, Name = topic };
+
+        try
+        {
+            // A config change was made in the log manager of the broker asked alone, past the metadata log, and was
+            // gone after a restart (#119); the topic's other replicas never had it.
+            await using (var first = await BrokerProcess.StartAsync(dataDir, cancellationToken, "--Surgewave:Connect:Enabled=false"))
+            {
+                using var admin = Admin(first);
+                await admin.CreateTopicsAsync([new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 1 }]);
+                await admin.IncrementalAlterConfigsAsync(new Dictionary<ConfigResource, List<ConfigEntry>>
+                {
+                    [resource] = [new ConfigEntry { Name = "retention.ms", Value = "987654321", IncrementalOperation = AlterConfigOpType.Set }],
+                });
+                Assert.Equal("987654321", (await admin.DescribeConfigsAsync([resource])).Single().Entries["retention.ms"].Value);
+            }
+
+            await using var second = await BrokerProcess.StartAsync(dataDir, cancellationToken, "--Surgewave:Connect:Enabled=false");
+            using var again = Admin(second);
+            var described = await again.DescribeConfigsAsync([resource]);
+            Assert.True(described.Single().Entries["retention.ms"].Value == "987654321",
+                $"retention.ms of {topic} did not survive the restart\n{second.Dump()}");
+        }
+        finally
+        {
+            BrokerProcess.TryDelete(dataDir);
+        }
+    }
+
     // The response's error code, null when it has none (proto3 JSON leaves NONE out).
     private static string? ErrorOf(string body) =>
         System.Text.Json.JsonDocument.Parse(body).RootElement.TryGetProperty("status", out var status)

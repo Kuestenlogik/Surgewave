@@ -185,7 +185,7 @@ public sealed class AlterConfigOperation : IVoidOperationHandler<AlterConfigRequ
             throw new SurgewaveOperationException(SurgewaveErrorCode.InvalidRequest, "Topic name required");
     }
 
-    public Task ExecuteAsync(AlterConfigRequestPayload request, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(AlterConfigRequestPayload request, CancellationToken cancellationToken)
     {
         var configUpdates = new Dictionary<string, string>();
         if (request.Configs != null)
@@ -197,11 +197,9 @@ public sealed class AlterConfigOperation : IVoidOperationHandler<AlterConfigRequ
             }
         }
 
-        var success = _logManager.UpdateTopicConfig(request.TopicName, configUpdates);
+        var success = await _logManager.UpdateTopicConfigAsync(request.TopicName, configUpdates, cancellationToken: cancellationToken);
         if (!success)
             throw new SurgewaveOperationException(SurgewaveErrorCode.TopicNotFound, $"Topic '{request.TopicName}' not found");
-
-        return Task.CompletedTask;
     }
 }
 

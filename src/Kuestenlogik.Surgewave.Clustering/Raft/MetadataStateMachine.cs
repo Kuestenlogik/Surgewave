@@ -278,12 +278,13 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         var cmd = JsonSerializer.Deserialize(data, ClusteringJsonContext.Default.ConfigChangedCommand);
         if (cmd == null) return;
 
-        if (_clusterState.Topics.TryGetValue(cmd.Topic, out var topic))
-        {
-            topic.Config[cmd.Key] = cmd.Value;
-        }
+        // The cluster's view, and the broker's own log manager in log order with the replicas it hosts (#119): a
+        // replica's broker ran the topic with its own defaults.
+        if (!_clusterState.ChangeTopicConfig(cmd.Topic, cmd.Set, cmd.Removed))
+            return;
+        _transitions?.EnqueueTopicConfigChange(cmd.Topic);
 
-        LogConfigChanged(cmd.Topic, cmd.Key, cmd.Value);
+        LogConfigChanged(cmd.Topic, cmd.Set.Count, cmd.Removed.Count);
     }
 
     private void ApplyGroupConfigChanged(byte[] data)
@@ -328,8 +329,8 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
     [LoggerMessage(Level = LogLevel.Information, Message = "Leader changed for {Topic}-{Partition}: leader={Leader}, epoch={Epoch}")]
     private partial void LogLeaderChanged(string topic, int partition, int leader, int epoch);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Config changed for {Topic}: {Key}={Value}")]
-    private partial void LogConfigChanged(string topic, string key, string value);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Config changed for {Topic}: {Set} set, {Removed} removed")]
+    private partial void LogConfigChanged(string topic, int set, int removed);
 }
 
 #region Metadata Commands
@@ -405,12 +406,12 @@ public sealed record LeaderChangedCommand(
 );
 
 /// <summary>
-/// Command to change topic configuration.
+/// Command to change a topic's configuration (#119): the configs it sets and those it removes, applied as one.
 /// </summary>
 public sealed record ConfigChangedCommand(
     string Topic,
-    string Key,
-    string Value
+    Dictionary<string, string> Set,
+    List<string> Removed
 );
 
 /// <summary>

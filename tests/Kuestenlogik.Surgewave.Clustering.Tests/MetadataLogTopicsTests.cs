@@ -13,7 +13,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Tests;
 /// whatever the entry point, and the creation completes when the topic has reached this broker.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
-public sealed class MetadataLogTopicCreatorTests : IDisposable
+public sealed class MetadataLogTopicsTests : IDisposable
 {
     private const int BrokerId = 1;
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "surgewave-topiccreator-" + Guid.NewGuid().ToString("N"));
@@ -22,10 +22,12 @@ public sealed class MetadataLogTopicCreatorTests : IDisposable
     private readonly FakeController _controller = new();
     private readonly CancellationToken _ct = TestContext.Current.CancellationToken;
 
-    public MetadataLogTopicCreatorTests()
+    public MetadataLogTopicsTests()
     {
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
-        _logManager.RouteTopicCreation(new MetadataLogTopicCreator(_controller, _clusterState, _logManager, BrokerId));
+        var topics = new MetadataLogTopics(_controller, _controller, _clusterState, _logManager, BrokerId);
+        _logManager.RouteTopicCreation(topics);
+        _logManager.RouteTopicConfigChanges(topics);
     }
 
     public void Dispose()
@@ -98,6 +100,60 @@ public sealed class MetadataLogTopicCreatorTests : IDisposable
         Assert.Equal("orders", refused.TopicName);
     }
 
+    [Fact]
+    public async Task AConfigChangeGoesToTheControllerAndCompletesOnceThisBrokerHasIt()
+    {
+        Apply("orders", 1, replicas: [BrokerId]);
+
+        var changing = _logManager.UpdateTopicConfigAsync(
+            "orders", new() { ["retention.ms"] = "5000", ["segment.bytes"] = "" }, cancellationToken: _ct);
+
+        // Not changed here alone (#119): the controller has it, and this broker's copy waits for the metadata log.
+        var changed = Assert.Single(_controller.Changed);
+        Assert.Equal("5000", changed.Set["retention.ms"]);
+        Assert.Equal(["segment.bytes"], changed.Removed);
+        Assert.False(_logManager.GetTopicMetadata("orders")!.Config.ContainsKey("retention.ms"));
+        Assert.False(changing.IsCompleted);
+
+        _clusterState.ChangeTopicConfig("orders", changed.Set, changed.Removed);
+        Assert.False(changing.IsCompleted);
+        _logManager.ApplyTopicConfig("orders", _clusterState.GetTopic("orders")!.Config);
+
+        Assert.True(await changing);
+        Assert.Equal("5000", _logManager.GetTopicMetadata("orders")!.Config["retention.ms"]);
+    }
+
+    [Fact]
+    public async Task AConfigChangeOfATopicTheMetadataLogDoesNotHaveIsRefused()
+    {
+        Assert.False(await _logManager.UpdateTopicConfigAsync("unknown", new() { ["retention.ms"] = "5000" }, cancellationToken: _ct));
+        Assert.Empty(_controller.Changed);
+    }
+
+    [Fact]
+    public async Task AConfigChangeNoControllerTookIsRetriable()
+    {
+        Apply("orders", 1, replicas: [BrokerId]);
+        _controller.Takes = false;
+
+        var refused = await Assert.ThrowsAsync<TopicConfigNotChangedException>(
+            () => _logManager.UpdateTopicConfigAsync("orders", new() { ["retention.ms"] = "5000" }, cancellationToken: _ct));
+        Assert.Equal("orders", refused.TopicName);
+    }
+
+    [Fact]
+    public void TheMetadataLogsConfigReplacesWhatThisBrokerHad()
+    {
+        Apply("orders", 1, replicas: [BrokerId]);
+        _clusterState.ChangeTopicConfig("orders", new Dictionary<string, string> { ["retention.ms"] = "5000" }, []);
+
+        Assert.True(_logManager.ApplyTopicConfig("orders", _clusterState.GetTopic("orders")!.Config));
+        _clusterState.ChangeTopicConfig("orders", new Dictionary<string, string>(), ["retention.ms"]);
+        Assert.True(_logManager.ApplyTopicConfig("orders", _clusterState.GetTopic("orders")!.Config));
+
+        Assert.False(_logManager.GetTopicMetadata("orders")!.Config.ContainsKey("retention.ms"));
+    }
+
     // The metadata log's TopicCreated, as this broker applies it.
     private void Apply(string topic, int partitions, List<int> replicas)
     {
@@ -120,8 +176,17 @@ public sealed class MetadataLogTopicCreatorTests : IDisposable
 
     private static TopicPartition Partition(string topic, int partition) => new() { Topic = topic, Partition = partition };
 
-    private sealed class FakeController : IClusterTopicCreator
+    private sealed class FakeController : IClusterTopicCreator, IClusterTopicConfigWriter
     {
+        public List<(string Topic, IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Removed)> Changed { get; } = [];
+
+        public Task<bool> ChangeTopicConfigAsync(
+            string topic, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed, CancellationToken ct)
+        {
+            Changed.Add((topic, set, removed));
+            return Task.FromResult(Takes);
+        }
+
         public List<(string Topic, int Partitions, short ReplicationFactor, Dictionary<string, string>? Config)> Asked { get; } = [];
 
         public bool Takes { get; set; } = true;

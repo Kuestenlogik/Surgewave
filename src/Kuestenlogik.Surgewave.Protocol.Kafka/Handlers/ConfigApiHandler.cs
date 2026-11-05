@@ -42,10 +42,27 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
         return request switch
         {
             DescribeConfigsRequest describeConfigsRequest => HandleDescribeConfigs(describeConfigsRequest),
-            AlterConfigsRequest alterConfigsRequest => HandleAlterConfigs(alterConfigsRequest),
+            AlterConfigsRequest alterConfigsRequest => await HandleAlterConfigsAsync(alterConfigsRequest, cancellationToken),
             IncrementalAlterConfigsRequest incrementalRequest => await HandleIncrementalAlterConfigsAsync(incrementalRequest, cancellationToken),
             _ => throw new NotSupportedException($"Request type {request.ApiKey} not supported by ConfigApiHandler")
         };
+    }
+
+    // Changes a topic's config, in a cluster through the controller into the metadata log (#119); the error to answer
+    // when it was not changed, null when it was.
+    private async Task<ErrorCode?> ChangeTopicConfigAsync(string topic, Dictionary<string, string> configUpdates, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _logManager.UpdateTopicConfigAsync(topic, configUpdates, cancellationToken: cancellationToken)
+                ? null
+                : ErrorCode.UnknownTopicOrPartition;
+        }
+        catch (TopicConfigNotChangedException)
+        {
+            // Retriable: the controller was changing hands or not reachable; the admin client asks again.
+            return ErrorCode.NotController;
+        }
     }
 
     private DescribeConfigsResponse HandleDescribeConfigs(DescribeConfigsRequest request)
@@ -82,7 +99,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
         return new DescribeConfigsResponse { CorrelationId = request.CorrelationId, ApiVersion = request.ApiVersion, Results = results };
     }
 
-    private AlterConfigsResponse HandleAlterConfigs(AlterConfigsRequest request)
+    private async Task<AlterConfigsResponse> HandleAlterConfigsAsync(AlterConfigsRequest request, CancellationToken cancellationToken)
     {
         var results = new List<AlterConfigsResponse.AlterConfigsResult>();
 
@@ -105,8 +122,11 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                         if (config.Value != null && ValidTopicConfigs.Contains(config.Name))
                             configUpdates[config.Name] = config.Value;
                     }
-                    if (configUpdates.Count > 0)
-                        _logManager.UpdateTopicConfig(resource.ResourceName, configUpdates);
+                    if (configUpdates.Count > 0 && await ChangeTopicConfigAsync(resource.ResourceName, configUpdates, cancellationToken) is { } failed)
+                    {
+                        results.Add(new AlterConfigsResponse.AlterConfigsResult { ErrorCode = failed, ErrorMessage = $"The config of topic '{resource.ResourceName}' was not changed", ResourceType = resource.ResourceType, ResourceName = resource.ResourceName });
+                        continue;
+                    }
                 }
 
                 results.Add(new AlterConfigsResponse.AlterConfigsResult { ErrorCode = ErrorCode.None, ResourceType = resource.ResourceType, ResourceName = resource.ResourceName });
@@ -442,8 +462,17 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
                         continue;
                     }
 
-                    if (configUpdates.Count > 0)
-                        _logManager.UpdateTopicConfig(resource.ResourceName, configUpdates);
+                    if (configUpdates.Count > 0 && await ChangeTopicConfigAsync(resource.ResourceName, configUpdates, cancellationToken) is { } failed)
+                    {
+                        responses.Add(new IncrementalAlterConfigsResponse.AlterConfigsResourceResponse
+                        {
+                            ErrorCode = failed,
+                            ErrorMessage = $"The config of topic '{resource.ResourceName}' was not changed",
+                            ResourceType = resource.ResourceType,
+                            ResourceName = resource.ResourceName
+                        });
+                        continue;
+                    }
                 }
 
                 responses.Add(new IncrementalAlterConfigsResponse.AlterConfigsResourceResponse

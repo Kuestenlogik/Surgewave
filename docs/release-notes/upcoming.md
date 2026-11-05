@@ -288,7 +288,29 @@ is a retriable error (`LEADER_NOT_AVAILABLE` over gRPC). A topic's
 configuration from the metadata log now reaches the brokers that host its
 replicas, at creation and on every restart. A topic created through the
 controller used to run there with the broker's defaults for retention,
-cleanup policy and segment size.
+cleanup policy and segment size. A broker that has not yet applied a topic
+the cluster already has no longer creates it again under a new topic id.
+Kafka's CreateTopics and auto-creation now go the same way and wait for
+the topic to arrive. Before, auto-creation answered `LEADER_NOT_AVAILABLE`
+until the topic arrived.
+
+### A topic's config change reaches every broker hosting it (#119)
+
+A topic's config could be changed through Kafka's AlterConfigs and
+IncrementalAlterConfigs, gRPC (and REST on it), the native protocol and
+adaptive compression. The change was made only in the log manager of the
+broker that got the request. The topic's other replicas never had it, a
+broker that took a partition over ran it with its old config, and the
+change was gone after a restart. A change now goes through the controller
+into the metadata log as one `ConfigChanged` entry: the configs it sets and
+those it removes. A broker that is not the controller hands it on over the
+inter-broker channel. Every broker hosting the topic applies the change in
+log order with its leadership changes, and again when it replays the log
+at its start. The request completes once the receiving broker has the
+change. A change that no controller takes now is a retriable error
+(`NOT_CONTROLLER` over Kafka, `LEADER_NOT_AVAILABLE` over gRPC). An empty
+value in IncrementalAlterConfigs' DELETE now removes the config. Before, it
+set the config to an empty string.
 
 ### A commit after an abort is visible to read-committed consumers
 

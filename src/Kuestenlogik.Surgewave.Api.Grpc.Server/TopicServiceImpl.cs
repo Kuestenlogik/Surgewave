@@ -173,7 +173,7 @@ public class TopicServiceImpl : TopicService.TopicServiceBase
         return Task.FromResult(response);
     }
 
-    public override Task<AlterConfigResponse> AlterConfig(AlterConfigRequest request, ServerCallContext context)
+    public override async Task<AlterConfigResponse> AlterConfig(AlterConfigRequest request, ServerCallContext context)
     {
         var response = new AlterConfigResponse
         {
@@ -188,7 +188,7 @@ public class TopicServiceImpl : TopicService.TopicServiceBase
                 ErrorCode = ErrorCode.InvalidConfig,
                 ErrorMessage = "Resource is required"
             };
-            return Task.FromResult(response);
+            return response;
         }
 
         if (resource.Type == ConfigResourceType.Topic)
@@ -202,10 +202,21 @@ public class TopicServiceImpl : TopicService.TopicServiceBase
                 .Select(c => c.Key)
                 .ToList();
 
-            var success = _logManager.UpdateTopicConfig(
-                resource.Name,
-                configUpdates,
-                deleteKeys.Count > 0 ? deleteKeys : null);
+            bool success;
+            try
+            {
+                success = await _logManager.UpdateTopicConfigAsync(
+                    resource.Name,
+                    configUpdates,
+                    deleteKeys.Count > 0 ? deleteKeys : null,
+                    context.CancellationToken);
+            }
+            catch (TopicConfigNotChangedException ex)
+            {
+                // Retriable: the controller was changing hands or not reachable (#119).
+                response.Status = new ResponseStatus { ErrorCode = ErrorCode.LeaderNotAvailable, ErrorMessage = ex.Message };
+                return response;
+            }
 
             if (!success)
             {
@@ -226,7 +237,7 @@ public class TopicServiceImpl : TopicService.TopicServiceBase
             };
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 
     public override Task<DescribeConfigResponse> DescribeConfig(DescribeConfigRequest request, ServerCallContext context)

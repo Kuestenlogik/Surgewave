@@ -14,9 +14,9 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
 /// A broker in a cluster that is not the controller never creates a topic for itself alone (#207): CreateTopics and a
-/// Metadata request that auto-creates hand the creation to the cluster's topic creator — which asks the controller —
-/// and the client is answered with a retriable error until the topic reaches this broker through the metadata log.
-/// They used to create the topic on this broker only and answer success.
+/// Metadata request that auto-creates go through the log manager, which hands the creation to the controller, and
+/// complete once the topic has reached this broker through the metadata log (#214); a controller that does not take it
+/// is a retriable error. They used to create the topic on this broker only and answer success.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
 public sealed class NonControllerTopicCreationTests : IDisposable
@@ -25,13 +25,17 @@ public sealed class NonControllerTopicCreationTests : IDisposable
     private readonly LogManager _logManager;
     private readonly QuotaManager _quotaManager;
     private readonly BrokerConfig _config = new() { BrokerId = 2, AutoCreateTopics = true, DefaultNumPartitions = 2 };
-    private readonly RecordingCreator _controller = new();
+    private readonly ClusterState _clusterState = new();
+    private readonly RecordingCreator _controller;
 
     public NonControllerTopicCreationTests()
     {
         Directory.CreateDirectory(_dataDir);
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _quotaManager = new QuotaManager(_config.Quotas, NullLogger<QuotaManager>.Instance);
+        _controller = new RecordingCreator(_clusterState);
+        var topics = new MetadataLogTopics(_controller, _controller, _clusterState, _logManager, _config.BrokerId);
+        _logManager.RouteTopicCreation(topics);
     }
 
     public void Dispose()
@@ -45,7 +49,6 @@ public sealed class NonControllerTopicCreationTests : IDisposable
     public async Task CreateTopicsAsksTheControllerAndCreatesNothingHere()
     {
         var handler = new TopicAdminHandler(_config, _logManager, _quotaManager, auditLogger: null, NullLogger<TopicAdminHandler>.Instance);
-        handler.SetClusterTopicCreator(_controller);
 
         var response = await CreateAsync(handler, "orders");
 
@@ -59,7 +62,6 @@ public sealed class NonControllerTopicCreationTests : IDisposable
     {
         _controller.Succeeds = false;
         var handler = new TopicAdminHandler(_config, _logManager, _quotaManager, auditLogger: null, NullLogger<TopicAdminHandler>.Instance);
-        handler.SetClusterTopicCreator(_controller);
 
         var response = await CreateAsync(handler, "orders");
 
@@ -68,25 +70,42 @@ public sealed class NonControllerTopicCreationTests : IDisposable
     }
 
     [Fact]
-    public async Task AutoCreationAsksTheControllerAndAnswersLeaderNotAvailableUntilTheTopicArrives()
+    public async Task AutoCreationAsksTheControllerAndAnswersWithTheTopicOnceItArrived()
+    {
+        var response = await AutoCreateAsync("orders");
+
+        // The topic as the cluster has it; its replicas are on another broker, so nothing was created here.
+        var topic = Assert.Single(response.Topics);
+        Assert.Equal(ErrorCode.None, topic.ErrorCode);
+        Assert.Equal(2, topic.Partitions.Count);
+        Assert.Equal("orders", Assert.Single(_controller.Asked));
+        Assert.Null(_logManager.GetTopicMetadata("orders"));
+    }
+
+    [Fact]
+    public async Task AnAutoCreationTheControllerDidNotDoAnswersLeaderNotAvailable()
+    {
+        _controller.Succeeds = false;
+
+        var response = await AutoCreateAsync("orders");
+
+        Assert.Equal(ErrorCode.LeaderNotAvailable, Assert.Single(response.Topics).ErrorCode);
+        Assert.Null(_logManager.GetTopicMetadata("orders"));
+    }
+
+    private async Task<MetadataResponse> AutoCreateAsync(string topic)
     {
         var handler = new MetadataApiHandler(_config, _logManager, NullLogger<MetadataApiHandler>.Instance);
-        handler.SetClusterState(new ClusterState());
-        handler.SetClusterTopicCreator(_controller);
-
-        var response = Assert.IsType<MetadataResponse>(await handler.HandleAsync(new MetadataRequest
+        handler.SetClusterState(_clusterState);
+        return Assert.IsType<MetadataResponse>(await handler.HandleAsync(new MetadataRequest
         {
             ApiKey = ApiKey.Metadata,
             ApiVersion = 9,
             CorrelationId = 1,
             ClientId = "producer",
-            Topics = [new MetadataRequest.MetadataRequestTopic { Name = "orders" }],
+            Topics = [new MetadataRequest.MetadataRequestTopic { Name = topic }],
             AllowAutoTopicCreation = true,
         }, Context(), CancellationToken.None));
-
-        Assert.Equal(ErrorCode.LeaderNotAvailable, Assert.Single(response.Topics).ErrorCode);
-        Assert.Equal("orders", Assert.Single(_controller.Asked));
-        Assert.Null(_logManager.GetTopicMetadata("orders"));
     }
 
     private static async Task<CreateTopicsResponse> CreateAsync(TopicAdminHandler handler, string topic) =>
@@ -102,8 +121,9 @@ public sealed class NonControllerTopicCreationTests : IDisposable
 
     private static RequestContext Context() => new() { ConnectionState = new ConnectionState("test-host"), ClientId = "test" };
 
-    // The cluster's topic creator on a broker that is not the controller: it asks the controller.
-    private sealed class RecordingCreator : IClusterTopicCreator
+    // The cluster's topic creator on a broker that is not the controller: it asks the controller, whose metadata log
+    // then has the topic, its replicas on broker 1 and not this one.
+    private sealed class RecordingCreator(ClusterState clusterState) : IClusterTopicCreator, IClusterTopicConfigWriter
     {
         public bool Succeeds { get; set; } = true;
 
@@ -114,7 +134,21 @@ public sealed class NonControllerTopicCreationTests : IDisposable
         public Task<bool> CreateTopicAsync(string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config, CancellationToken ct)
         {
             Asked.Add(topic);
+            if (Succeeds)
+            {
+                clusterState.AddTopic(new Kuestenlogik.Surgewave.Core.Models.TopicMetadata
+                {
+                    Name = topic, TopicId = Guid.NewGuid(), PartitionCount = partitionCount, ReplicationFactor = replicationFactor,
+                    Config = config ?? [], CreatedAt = DateTime.UtcNow,
+                });
+                for (var p = 0; p < partitionCount; p++)
+                    clusterState.AssignReplicas(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = p }, [1]);
+            }
             return Task.FromResult(Succeeds);
         }
+
+        public Task<bool> ChangeTopicConfigAsync(
+            string topic, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed, CancellationToken ct) =>
+            Task.FromResult(false);
     }
 }

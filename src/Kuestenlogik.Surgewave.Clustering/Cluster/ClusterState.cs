@@ -246,6 +246,27 @@ public sealed class ClusterState
         _topicsChanged.Notify();
     }
 
+    /// <summary>
+    /// Sets and removes configs of a topic, as the metadata log's ConfigChanged says (#119). False when the topic is
+    /// unknown.
+    /// </summary>
+    public bool ChangeTopicConfig(string topicName, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed)
+    {
+        lock (_stateLock)
+        {
+            if (!_topics.TryGetValue(topicName, out var topic))
+                return false;
+            var config = new Dictionary<string, string>(topic.Config);
+            foreach (var (key, value) in set)
+                config[key] = value;
+            foreach (var key in removed)
+                config.Remove(key);
+            _topics[topicName] = topic with { Config = config };
+        }
+        _topicsChanged.Notify();
+        return true;
+    }
+
     public void RemoveTopic(string topicName)
     {
         _topics.TryRemove(topicName, out _);
@@ -362,6 +383,16 @@ public sealed class ClusterState
     /// <summary>
     /// Assign replicas to a partition.
     /// </summary>
+    /// <summary>
+    /// A partition's replicas as one consistent copy, read under the lock its assignment is written under; empty while
+    /// the partition has none assigned yet.
+    /// </summary>
+    public IReadOnlyList<int> ReplicasOf(TopicPartition tp)
+    {
+        lock (_stateLock)
+            return _partitionStates.TryGetValue(tp, out var state) ? [.. state.Replicas] : [];
+    }
+
     public void AssignReplicas(TopicPartition tp, List<int> replicas, int minIsr = 1)
     {
         lock (_stateLock)

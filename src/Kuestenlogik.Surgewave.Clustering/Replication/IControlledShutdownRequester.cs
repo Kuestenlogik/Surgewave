@@ -37,6 +37,20 @@ public interface IGroupConfigRequester
 }
 
 /// <summary>
+/// How a broker that is not the controller has a topic's config changed (#119): it asks the controller, which writes the
+/// change to the metadata log.
+/// </summary>
+public interface ITopicConfigRequester
+{
+    /// <summary>
+    /// Asks the controller to set and remove configs of a topic. True once the controller committed it; false when it
+    /// refused or could not be reached — the client retries.
+    /// </summary>
+    Task<bool> RequestChangeTopicConfigAsync(
+        string topic, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed, CancellationToken ct = default);
+}
+
+/// <summary>
 /// How a broker that is not the controller has a topic created (#207): it asks the controller, which writes the topic
 /// to the metadata log. A broker never creates a cluster topic for itself alone.
 /// </summary>

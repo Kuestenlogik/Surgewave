@@ -28,6 +28,7 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
     private readonly IClusterTopicCreator? _topicCreator;
     private readonly ITransactionPartitionVerifier? _transactionVerifier;
     private readonly Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? _shareState;
+    private readonly IClusterTopicConfigWriter? _topicConfigs;
     private readonly IClusterGroupConfigWriter? _groupConfigs;
     private readonly Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? _commitGate;
 
@@ -46,7 +47,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         ITransactionPartitionVerifier? transactionVerifier = null,
         Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate? commitGate = null,
         Kuestenlogik.Surgewave.Coordination.ShareGroups.IShareStatePersister? shareState = null,
-        IClusterGroupConfigWriter? groupConfigs = null)
+        IClusterGroupConfigWriter? groupConfigs = null,
+        IClusterTopicConfigWriter? topicConfigs = null)
     {
         _logger = logger;
         _clusterState = clusterState;
@@ -63,6 +65,17 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
         _commitGate = commitGate;
         _shareState = shareState;
         _groupConfigs = groupConfigs;
+        _topicConfigs = topicConfigs;
+    }
+
+    public async ValueTask<ClusterRpcStatus> ApplyTopicConfigAsync(TopicConfigChangePayload payload, CancellationToken ct = default)
+    {
+        // Only the controller writes to the metadata log; one that lost the role since the caller looked says so.
+        if (_topicConfigs is null || !_topicConfigs.IsController)
+            return ClusterRpcStatus.NotController;
+        return await _topicConfigs.ChangeTopicConfigAsync(payload.Topic, payload.Set, payload.Removed, ct).ConfigureAwait(false)
+            ? ClusterRpcStatus.None
+            : ClusterRpcStatus.Unknown;
     }
 
     public async ValueTask<ClusterRpcStatus> ApplyGroupConfigAsync(GroupConfigPayload payload, CancellationToken ct = default)

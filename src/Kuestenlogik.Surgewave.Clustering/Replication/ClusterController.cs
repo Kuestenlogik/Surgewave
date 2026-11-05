@@ -50,11 +50,27 @@ public interface IClusterGroupConfigWriter
 }
 
 /// <summary>
+/// Changes a topic's configs in the metadata log (#119): directly on the controller, through it from any other broker.
+/// </summary>
+public interface IClusterTopicConfigWriter
+{
+    /// <summary>Whether this broker is the controller now.</summary>
+    bool IsController { get; }
+
+    /// <summary>
+    /// Sets and removes configs of a topic as one change. True once committed; false when no controller could take it
+    /// now.
+    /// </summary>
+    Task<bool> ChangeTopicConfigAsync(
+        string topic, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed, CancellationToken ct);
+}
+
+/// <summary>
 /// Manages cluster coordination including leader election and partition assignment.
 /// In a multi-broker setup, one broker becomes the controller.
 /// Supports both simple "lowest broker ID" strategy and Raft consensus.
 /// </summary>
-public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IClusterGroupConfigWriter, IIsrUpdateApplier, IBrokerRegistrar, IControlledShutdownCoordinator
+public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicCreator, IClusterGroupConfigWriter, IClusterTopicConfigWriter, IIsrUpdateApplier, IBrokerRegistrar, IControlledShutdownCoordinator
 {
     private readonly ILogger<ClusterController> _logger;
     private readonly ClusterState _clusterState;
@@ -68,6 +84,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private IControlledShutdownRequester? _shutdownRequester;
     private ITopicCreationRequester? _topicCreationRequester;
     private IGroupConfigRequester? _groupConfigRequester;
+    private ITopicConfigRequester? _topicConfigRequester;
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
@@ -153,6 +170,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>How this broker has a group config changed while another broker is the controller (#228).</summary>
     public void SetGroupConfigRequester(IGroupConfigRequester requester)
         => _groupConfigRequester = requester;
+
+    /// <summary>How this broker has a topic's config changed while another broker is the controller (#119).</summary>
+    public void SetTopicConfigRequester(ITopicConfigRequester requester)
+        => _topicConfigRequester = requester;
 
     /// <summary>
     /// Set the cluster balancer for automatic partition rebalancing.
@@ -944,23 +965,30 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Update topic configuration via Raft consensus.
-    /// </summary>
-    public async Task<bool> UpdateConfigViaRaftAsync(string topic, string key, string value, CancellationToken ct)
+    /// <inheritdoc />
+    public async Task<bool> ChangeTopicConfigAsync(
+        string topic, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed, CancellationToken ct)
     {
-        if (_raftNode == null || !_raftNode.IsLeader)
+        if (!_isController)
         {
-            return false;
+            // Only the controller writes to the metadata log; any other broker asks it to (#119). A broker changed its
+            // own copy alone, and the topic's other replicas and every later leader ran it with the old config.
+            if (_topicConfigRequester is null)
+            {
+                LogNotController("ChangeTopicConfig");
+                return false;
+            }
+            return await _topicConfigRequester.RequestChangeTopicConfigAsync(topic, set, removed, ct).ConfigureAwait(false);
         }
 
-        var command = new ConfigChangedCommand(topic, key, value);
-        var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.ConfigChangedCommand);
-
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.ConfigChanged, data, ct);
+        if (_raftNode == null || !_raftNode.IsLeader)
+            return false;
+        var data = JsonSerializer.SerializeToUtf8Bytes(
+            new ConfigChangedCommand(topic, new Dictionary<string, string>(set), [.. removed]),
+            ClusteringJsonContext.Default.ConfigChangedCommand);
+        var index = await _raftNode.ProposeAsync(MetadataCommandType.ConfigChanged, data, ct).ConfigureAwait(false);
         if (index < 0) return false;
-
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }
 
     #endregion

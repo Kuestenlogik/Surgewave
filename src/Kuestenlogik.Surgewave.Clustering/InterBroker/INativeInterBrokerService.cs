@@ -76,4 +76,10 @@ public interface INativeInterBrokerService
     /// is not it, so the caller asks the real one.
     /// </summary>
     ValueTask<ClusterRpcStatus> ApplyGroupConfigAsync(GroupConfigPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// Change a topic's config in the metadata log (#119); only the controller can. NotController when this broker is
+    /// not it, so the caller asks the real one.
+    /// </summary>
+    ValueTask<ClusterRpcStatus> ApplyTopicConfigAsync(TopicConfigChangePayload payload, CancellationToken ct = default);
 }

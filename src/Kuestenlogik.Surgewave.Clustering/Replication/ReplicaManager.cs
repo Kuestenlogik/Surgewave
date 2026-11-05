@@ -273,12 +273,17 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
         // With the topic's configuration from the metadata log (#214): a topic created through the controller has it
         // there only, and its replicas would otherwise run with the broker's defaults — retention, cleanup policy.
+        var config = _clusterState.GetTopic(tp.Topic)?.Config;
         _logManager.EnsureTopicMetadata(
             tp.Topic,
             topicId,
             highestPartition + 1,
             (short)Math.Max(replicaCount, 1),
-            _clusterState.GetTopic(tp.Topic)?.Config);
+            config);
+        // A topic this broker knew before is given the metadata log's config too (#119): it is the topic's, and a
+        // broker that took no part in a change has missed it.
+        if (config is not null)
+            _logManager.ApplyTopicConfig(tp.Topic, config);
 
         // Seed the cluster state too, so this broker can still name the topic's id after it becomes
         // controller itself: the id it sends out on LeaderAndIsr is sourced from there, and a broker
@@ -295,6 +300,16 @@ public sealed partial class ReplicaManager : IAsyncDisposable
                 CreatedAt = DateTime.UtcNow
             });
         }
+    }
+
+    /// <summary>
+    /// Gives this broker's log manager the topic's config as the metadata log has it (#119); a topic this broker hosts
+    /// no replica of is none of its business.
+    /// </summary>
+    public void ApplyTopicConfig(string topic)
+    {
+        if (_clusterState.GetTopic(topic)?.Config is { } config)
+            _logManager.ApplyTopicConfig(topic, config);
     }
 
     /// <summary>

@@ -117,7 +117,6 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             metadataApiHandler.SetClusterState(sp.GetRequiredService<ClusterState>());
             metadataApiHandler.SetCoordinatorLocator(sp.GetRequiredService<ICoordinatorLocator>());
             metadataApiHandler.SetBrokerFencing(sp.GetRequiredService<ClusterMembershipService>().IsKnownFenced);
-            metadataApiHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
             return metadataApiHandler;
         });
 
@@ -129,9 +128,10 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
                 sp.GetRequiredService<IQuotaManager>(),
                 sp.GetService<IAuditLogger>(),
                 sp.GetRequiredService<ILogger<TopicAdminHandler>>());
-            // CreateTopics goes through the controller into the metadata log, the only store of topics (#163);
-            // without it the topic lived in the local log manager only and was gone after a restart (#212).
-            topicAdminHandler.SetClusterTopicCreator(sp.GetRequiredService<ClusterController>());
+            // CreateTopics goes through the controller into the metadata log, the only store of topics (#163), as
+            // every creation does once the cluster controller routes the log manager's (#214); resolving the
+            // controller here makes sure it does before the first request.
+            _ = sp.GetRequiredService<ClusterController>();
             return topicAdminHandler;
         });
 

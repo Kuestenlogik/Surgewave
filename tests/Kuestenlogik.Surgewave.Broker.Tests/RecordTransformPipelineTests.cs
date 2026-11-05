@@ -85,8 +85,8 @@ public sealed class RecordTransformPipelineTests : IDisposable
 
         Assert.False(pipeline.HasBinding("rt-flip")); // primes the cache → "no binding"
 
-        // Add the binding via UpdateTopicConfig; the lifecycle hook flips the cache.
-        Assert.True(_logManager.UpdateTopicConfig("rt-flip", new() { ["wasm.transform.plugin.id"] = "anything" }));
+        // Add the binding via UpdateTopicConfigAsync; the lifecycle hook flips the cache.
+        Assert.True(await _logManager.UpdateTopicConfigAsync("rt-flip", new() { ["wasm.transform.plugin.id"] = "anything" }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.True(pipeline.HasBinding("rt-flip"));
     }

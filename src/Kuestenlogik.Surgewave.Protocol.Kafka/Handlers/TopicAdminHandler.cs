@@ -20,7 +20,6 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
     private readonly IQuotaManager _quotaManager;
     private readonly IAuditLogger? _auditLogger;
     private readonly ILogger<TopicAdminHandler> _logger;
-    private IClusterTopicCreator? _clusterTopicCreator;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
     [
@@ -31,15 +30,6 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
         ApiKey.DescribeLogDirs,
         ApiKey.AlterReplicaLogDirs,
     ];
-
-    /// <summary>
-    /// Sets the cluster topic creator for creating topics in cluster mode.
-    /// This is called after cluster initialization.
-    /// </summary>
-    public void SetClusterTopicCreator(IClusterTopicCreator clusterTopicCreator)
-    {
-        _clusterTopicCreator = clusterTopicCreator;
-    }
 
     public TopicAdminHandler(
         IBrokerConfigView config,
@@ -125,31 +115,33 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
                 var numPartitions = topic.NumPartitions > 0 ? topic.NumPartitions : _config.DefaultNumPartitions;
                 var replicationFactor = topic.ReplicationFactor > 0 ? topic.ReplicationFactor : _config.DefaultReplicationFactor;
 
-                _logger.LogInformation("CreateTopic request for {Topic}: ClusterCreator={HasCreator}, IsController={IsController}",
-                    topic.Name, _clusterTopicCreator != null, _clusterTopicCreator?.IsController ?? false);
-
-                // In a cluster the controller creates every topic, asked by this broker when it is another one (#207);
-                // a topic is never created on one broker alone. Only a broker on its own creates it locally.
-                if (_clusterTopicCreator != null)
-                {
-                    var success = await _clusterTopicCreator.CreateTopicAsync(
-                        topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
-
-                    if (!success)
-                    {
-                        // Retriable: the controller was changing hands or not reachable; the admin client asks again.
-                        results.Add(new CreateTopicsResponse.TopicResult
-                        {
-                            Name = topic.Name,
-                            ErrorCode = ErrorCode.NotController,
-                            ErrorMessage = "The controller did not create the topic; retry"
-                        });
-                        continue;
-                    }
-                }
-                else
+                // In a cluster the controller creates every topic, asked by this broker when it is another one (#207),
+                // and the creation completes once the topic has reached this broker (#214); a topic is never created on
+                // one broker alone. Only a broker on its own creates it locally.
+                try
                 {
                     await _logManager.CreateTopicAsync(topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
+                }
+                catch (TopicNotCreatedException)
+                {
+                    // Retriable: the controller was changing hands or not reachable; the admin client asks again.
+                    results.Add(new CreateTopicsResponse.TopicResult
+                    {
+                        Name = topic.Name,
+                        ErrorCode = ErrorCode.NotController,
+                        ErrorMessage = "The controller did not create the topic; retry"
+                    });
+                    continue;
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("already exists", StringComparison.Ordinal))
+                {
+                    results.Add(new CreateTopicsResponse.TopicResult
+                    {
+                        Name = topic.Name,
+                        ErrorCode = ErrorCode.TopicAlreadyExists,
+                        ErrorMessage = ex.Message
+                    });
+                    continue;
                 }
 
                 Log.TopicCreated(_logger, topic.Name, numPartitions);

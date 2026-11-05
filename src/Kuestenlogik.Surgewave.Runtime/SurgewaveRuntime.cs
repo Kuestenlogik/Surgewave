@@ -550,8 +550,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _clusterState,
             _replicaManager,
             clusteringConfig);
-        // Every topic goes through the controller into the metadata log, whatever the entry point (#214).
-        _logManager!.RouteTopicCreation(new MetadataLogTopicCreator(_clusterController, _clusterState, _logManager, clusteringConfig.BrokerId));
+        // Every topic and every topic config change goes through the controller into the metadata log, whatever the
+        // entry point (#214, #119).
+        var topics = new MetadataLogTopics(_clusterController, _clusterController, _clusterState, _logManager!, clusteringConfig.BrokerId);
+        _logManager!.RouteTopicCreation(topics);
+        _logManager.RouteTopicConfigChanges(topics);
 
         // #72 Inc4 — controller-epoch high-water: prime from the node-local persisted floor and
         // persist every strict advance, so a restarted broker elects strictly above every reign it
@@ -623,6 +626,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _clusterController.SetTopicCreationRequester(nativeControllerClient);
         // #228 — a group's configs are in the metadata log, changed through the controller and read by every broker.
         _clusterController.SetGroupConfigRequester(nativeControllerClient);
+        _clusterController.SetTopicConfigRequester(nativeControllerClient);
         _shareGroupCoordinator?.SetGroupConfigStore(new ClusterGroupConfigStore(_clusterState, _clusterController));
 
         // #60 Inc4/Inc5/Inc6b — wire the native SRWV inter-broker receive server onto the
@@ -650,6 +654,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 shutdownCoordinator: _clusterController,
                 topicCreator: _clusterController,
                 groupConfigs: _clusterController,
+                topicConfigs: _clusterController,
                 transactionVerifier: _transactionCoordinator,
                 commitGate: new ReplicaCommitGate(_clusterState, _replicaManager),
                 shareState: _shareStateStore)));
@@ -705,7 +710,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         }
 
         // Wire up topic admin handler to use cluster controller for topic creation
-        _topicAdminHandler?.SetClusterTopicCreator(_clusterController);
 
         // Wire up metadata handler to use cluster state for accurate replica info
         _metadataApiHandler?.SetClusterState(_clusterState);
@@ -718,7 +722,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _consumerGroupV2ApiHandler?.SetCoordinatorLocator(coordinators);
         _nativeGroupCoordinator?.SetCoordinatorLocator(coordinators);
         _metadataApiHandler?.SetBrokerFencing(membershipService.IsKnownFenced);
-        _metadataApiHandler?.SetClusterTopicCreator(_clusterController);
 
         // Initialize Raft components — every broker has a metadata log (#163 step 3).
         {

@@ -71,6 +71,13 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
     }
 
     /// <summary>
+    /// Queues giving this broker's log manager the topic's config from the metadata log (#119), in log order with the
+    /// leadership changes, so a partition this broker takes over later runs with it.
+    /// </summary>
+    public void EnqueueTopicConfigChange(string topic) =>
+        _channel.Writer.TryWrite(new PendingTransition(new TopicPartition { Topic = topic, Partition = -1 }, -1, 0, ConfigOnly: true));
+
+    /// <summary>
     /// Decides which transition a leadership change implies for a given broker, or none.
     /// </summary>
     /// <remarks>
@@ -99,7 +106,11 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
             {
                 try
                 {
-                    if (pending.LeaderBrokerId < 0)
+                    if (pending.ConfigOnly)
+                    {
+                        _replicaManager.ApplyTopicConfig(pending.Partition.Topic);
+                    }
+                    else if (pending.LeaderBrokerId < 0)
                     {
                         await _replicaManager.BecomeLeaderAsync(pending.Partition, pending.LeaderEpoch, ct)
                             .ConfigureAwait(false);
@@ -143,5 +154,5 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
     }
 
     /// <param name="LeaderBrokerId">-1 means "we are the leader"; otherwise the leader to follow.</param>
-    internal readonly record struct PendingTransition(TopicPartition Partition, int LeaderBrokerId, int LeaderEpoch);
+    internal readonly record struct PendingTransition(TopicPartition Partition, int LeaderBrokerId, int LeaderEpoch, bool ConfigOnly = false);
 }

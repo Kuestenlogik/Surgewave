@@ -21,7 +21,6 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     private ClusterState? _clusterState;
     private Func<int, bool> _isKnownFenced = _ => false;
     private ICoordinatorLocator? _coordinators;
-    private IClusterTopicCreator? _clusterTopicCreator;
 
     /// <summary>
     /// Sets the cluster state for returning accurate replica info in cluster mode.
@@ -48,15 +47,6 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     public void SetCoordinatorLocator(ICoordinatorLocator coordinators)
     {
         _coordinators = coordinators;
-    }
-
-    /// <summary>
-    /// Sets the cluster topic creator for auto-creating topics in cluster mode.
-    /// This is called after cluster initialization.
-    /// </summary>
-    public void SetClusterTopicCreator(IClusterTopicCreator clusterTopicCreator)
-    {
-        _clusterTopicCreator = clusterTopicCreator;
     }
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
@@ -260,10 +250,12 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                 // Auto-create topic
                 Log.AutoCreatingTopic(_logger, topic);
 
-                // In a cluster the controller creates the topic, asked by this broker when it is another one (#207).
-                if (_clusterTopicCreator != null)
+                // In a cluster the controller creates the topic, asked by this broker when it is another one (#207), and the
+                // creation completes once the topic has reached this broker through the metadata log (#214). A broker
+                // that has not applied a topic the cluster already has learns it the same way.
+                try
                 {
-                    var success = await _clusterTopicCreator.CreateTopicAsync(
+                    metadata = await _logManager.CreateTopicAsync(
                         topic,
                         _config.DefaultNumPartitions,
                         _config.DefaultReplicationFactor,
@@ -271,39 +263,30 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                         // nothing to carry here — unlike CreateTopics, which does (#118 follow-up).
                         config: null,
                         cancellationToken);
-
-                    if (!success)
-                    {
-                        _logger.LogWarning("Failed to auto-create topic {Topic} through cluster controller", topic);
-                    }
-
-                    // The topic reaches this broker through the metadata log; until it has, the client is told to
-                    // ask again (LEADER_NOT_AVAILABLE, as Kafka answers a topic it is creating). It used to be created
-                    // here, on this broker alone.
+                }
+                catch (InvalidOperationException)
+                {
+                    // Created meanwhile — by another client, or it reached this broker on the way.
                     metadata = TopicOf(topic);
-                    if (metadata == null)
-                    {
-                        topicMetadata.Add(new MetadataResponse.MetadataResponseTopic
-                        {
-                            ErrorCode = ErrorCode.LeaderNotAvailable,
-                            Name = topic,
-                            TopicId = Guid.Empty,
-                            IsInternal = false,
-                            Partitions = [],
-                        });
-                        continue;
-                    }
+                }
+                catch (TopicNotCreatedException)
+                {
+                    _logger.LogWarning("Failed to auto-create topic {Topic} through cluster controller", topic);
                 }
 
-                // A broker on its own creates the topic itself.
+                // Until the topic is here the client is told to ask again (LEADER_NOT_AVAILABLE, as Kafka answers a
+                // topic it is creating).
                 if (metadata == null)
                 {
-                    metadata = await _logManager.CreateTopicAsync(
-                        topic,
-                        _config.DefaultNumPartitions,
-                        _config.DefaultReplicationFactor,
-                        config: null,
-                        cancellationToken);
+                    topicMetadata.Add(new MetadataResponse.MetadataResponseTopic
+                    {
+                        ErrorCode = ErrorCode.LeaderNotAvailable,
+                        Name = topic,
+                        TopicId = Guid.Empty,
+                        IsInternal = false,
+                        Partitions = [],
+                    });
+                    continue;
                 }
 
                 Log.TopicCreated(_logger, topic, metadata.PartitionCount);

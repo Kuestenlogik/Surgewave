@@ -646,10 +646,13 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<ClusterState>(),
         sp.GetRequiredService<ReplicaManager>(),
         sp.GetRequiredService<ClusteringConfig>());
-    // Every topic goes through the controller into the metadata log, whatever the entry point (#214).
     var logManager = sp.GetRequiredService<LogManager>();
-    logManager.RouteTopicCreation(new MetadataLogTopicCreator(
-        controller, sp.GetRequiredService<ClusterState>(), logManager, sp.GetRequiredService<ClusteringConfig>().BrokerId));
+    // Every topic and every topic config change goes through the controller into the metadata log, whatever the entry
+    // point (#214, #119).
+    var topics = new MetadataLogTopics(
+        controller, controller, sp.GetRequiredService<ClusterState>(), logManager, sp.GetRequiredService<ClusteringConfig>().BrokerId);
+    logManager.RouteTopicCreation(topics);
+    logManager.RouteTopicConfigChanges(topics);
     return controller;
 });
 builder.Services.AddSingleton(sp => new ReplicationServer(
@@ -1042,6 +1045,7 @@ clusterController.SetControlledShutdownRequester(nativeControllerClient);
 clusterController.SetTopicCreationRequester(nativeControllerClient);
 // #228 — a group's configs are in the metadata log, changed through the controller and read by every broker.
 clusterController.SetGroupConfigRequester(nativeControllerClient);
+clusterController.SetTopicConfigRequester(nativeControllerClient);
 app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>()
     .SetGroupConfigStore(new ClusterGroupConfigStore(clusterState, clusterController));
 
@@ -1056,6 +1060,7 @@ replicationServer.SetNativeInterBrokerServer(new NativeInterBrokerServer(
         shutdownCoordinator: clusterController,
         topicCreator: clusterController,
         groupConfigs: clusterController,
+        topicConfigs: clusterController,
         transactionVerifier: app.Services.GetRequiredService<TransactionCoordinator>(),
         commitGate: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Core.Replication.IPartitionCommitGate>(),
         shareState: app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore>())));

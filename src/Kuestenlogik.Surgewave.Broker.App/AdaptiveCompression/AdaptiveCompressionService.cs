@@ -21,7 +21,7 @@ namespace Kuestenlogik.Surgewave.Broker.AdaptiveCompression;
 /// <see cref="AdaptiveCompressionSampler"/>. Once a sampler has accumulated
 /// enough samples for a decision, the service writes the recommended codec name
 /// back to the topic config via
-/// <see cref="LogManager.UpdateTopicConfig(string, Dictionary{string,string}, IEnumerable{string})"/>
+/// <see cref="LogManager.UpdateTopicConfigAsync"/>
 /// and evicts the sampler — the topic is now "decided" and never re-sampled
 /// unless an operator manually flips it back to <c>auto</c>.
 /// </para>
@@ -112,7 +112,7 @@ public sealed class AdaptiveCompressionService : BackgroundService
 
             if (sampler.TryDecide() is { } decision)
             {
-                ApplyDecision(topic, decision);
+                await ApplyDecisionAsync(topic, decision, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -201,7 +201,7 @@ public sealed class AdaptiveCompressionService : BackgroundService
         sampler.Observe(decompressed);
     }
 
-    private void ApplyDecision(TopicMetadata topic, CompressionDecision decision)
+    private async Task ApplyDecisionAsync(TopicMetadata topic, CompressionDecision decision, CancellationToken cancellationToken)
     {
         var codecName = CompressionCodec.GetCompressionName(decision.Codec).ToLowerInvariant();
 
@@ -212,7 +212,7 @@ public sealed class AdaptiveCompressionService : BackgroundService
 
         try
         {
-            _logManager.UpdateTopicConfig(topic.Name, updates);
+            await _logManager.UpdateTopicConfigAsync(topic.Name, updates, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

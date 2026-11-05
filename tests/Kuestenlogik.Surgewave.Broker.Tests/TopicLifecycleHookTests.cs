@@ -51,7 +51,7 @@ public sealed class TopicLifecycleHookTests : IDisposable
         await _logManager.CreateTopicAsync("hook-cfg", partitionCount: 1, config: new() { ["retention.ms"] = "60000" });
         _logManager.RegisterTopicHook(hook);
 
-        var ok = _logManager.UpdateTopicConfig("hook-cfg", new() { ["retention.ms"] = "120000" });
+        var ok = await _logManager.UpdateTopicConfigAsync("hook-cfg", new() { ["retention.ms"] = "120000" }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(ok);
         var ev = Assert.Single(hook.Events);

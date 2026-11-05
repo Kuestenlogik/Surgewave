@@ -22,6 +22,30 @@ public interface ITopicCreator
         CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Where a broker in a cluster changes its topics' configs (#119): through the controller into the metadata log, from
+/// which every broker hosting the topic's replicas applies it. <see cref="LogManager.UpdateTopicConfigAsync"/> hands
+/// every change to it once it is set.
+/// </summary>
+public interface ITopicConfigWriter
+{
+    /// <summary>
+    /// Sets and removes configs of the topic and completes once this broker has the change. False when the topic is
+    /// unknown.
+    /// </summary>
+    /// <exception cref="TopicConfigNotChangedException">No controller took the change now; asking again may.</exception>
+    Task<bool> ChangeTopicConfigAsync(
+        string topicName, IReadOnlyDictionary<string, string> set, IReadOnlyList<string> removed, CancellationToken cancellationToken);
+}
+
+/// <summary>No controller took the config change now — it was changing hands or not reachable; asking again may.</summary>
+public sealed class TopicConfigNotChangedException(string topicName)
+    : Exception($"The controller did not change the config of topic '{topicName}' now; retry")
+{
+    /// <summary>The topic whose config was not changed.</summary>
+    public string TopicName { get; } = topicName;
+}
+
 /// <summary>No controller took the topic now — it was changing hands or not reachable; asking again may.</summary>
 public sealed class TopicNotCreatedException(string topicName)
     : Exception($"The controller did not create topic '{topicName}' now; retry")
