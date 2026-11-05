@@ -85,6 +85,57 @@ public sealed class SharePartitionTests : IDisposable
     }
 
     [Fact]
+    public async Task AGroupWithoutALimitOfItsOwnRunsWithTheBrokersDefault()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator(defaults: new ShareGroupDefaults { RecordLockDuration = LockDuration, DeliveryCountLimit = 2 });
+
+        // The broker's default delivery count limit (#229), as the group set none.
+        Assert.Equal((0L, 0L, (short)1), Single(await FetchAsync(coordinator, "g1", "m1")));
+        Assert.Equal(ShareGroupErrorStatus.None, await AckAsync(coordinator, "g1", "m1", 0, release: true));
+        Assert.Equal((0L, 0L, (short)2), Single(await FetchAsync(coordinator, "g1", "m1")));
+        Assert.Equal(ShareGroupErrorStatus.None, await AckAsync(coordinator, "g1", "m1", 0, release: true));
+
+        Assert.Empty((await FetchAsync(coordinator, "g1", "m1")).AcquiredRecords);
+    }
+
+    [Fact]
+    public async Task AGroupsOwnLimitGoesBeforeTheBrokersDefault()
+    {
+        await ProduceAsync(1);
+        var coordinator = Coordinator(defaults: new ShareGroupDefaults { RecordLockDuration = LockDuration, DeliveryCountLimit = 2 });
+        Assert.Null(await coordinator.SetShareGroupConfigAsync("g1", "share.delivery.count.limit", "3", _ct));
+
+        for (short delivery = 1; delivery <= 2; delivery++)
+        {
+            Assert.Equal((0L, 0L, delivery), Single(await FetchAsync(coordinator, "g1", "m1")));
+            Assert.Equal(ShareGroupErrorStatus.None, await AckAsync(coordinator, "g1", "m1", 0, release: true));
+        }
+
+        Assert.Equal((0L, 0L, (short)3), Single(await FetchAsync(coordinator, "g1", "m1")));
+    }
+
+    [Fact]
+    public void TheBrokersConfigurationGivesTheShareGroupDefaults()
+    {
+        var defaults = ShareGroupDefaults.From(new BrokerConfig
+        {
+            ShareDeliveryCountLimit = 3,
+            SharePartitionMaxRecordLocks = 500,
+            ShareRenewAcknowledgeEnable = false,
+            ShareRecordLockDurationMs = 15_000,
+        });
+
+        Assert.Equal(new ShareGroupDefaults
+        {
+            DeliveryCountLimit = 3,
+            MaxRecordLocks = 500,
+            RenewAcknowledgeEnable = false,
+            RecordLockDuration = TimeSpan.FromSeconds(15),
+        }, defaults);
+    }
+
+    [Fact]
     public async Task ARecordWhoseLockRanOutGoesToTheNextMember()
     {
         await ProduceAsync(1);
@@ -400,8 +451,9 @@ public sealed class SharePartitionTests : IDisposable
                 : [],
         }, _ct);
 
-    private ShareGroupCoordinator Coordinator(IShareStatePersister? shareState = null, IGroupConfigStore? groupConfigs = null) =>
-        new(NullLogger<ShareGroupCoordinator>.Instance, _logManager, recordLockDuration: LockDuration, timeProvider: _time,
+    private ShareGroupCoordinator Coordinator(
+        IShareStatePersister? shareState = null, IGroupConfigStore? groupConfigs = null, ShareGroupDefaults? defaults = null) =>
+        new(NullLogger<ShareGroupCoordinator>.Instance, _logManager, defaults: defaults ?? new ShareGroupDefaults { RecordLockDuration = LockDuration }, timeProvider: _time,
             shareState: shareState, groupConfigs: groupConfigs);
 
     // A share coordinator that leads every partition of __share_group_state in this log, read from it afresh.

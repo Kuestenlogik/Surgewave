@@ -730,7 +730,7 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<ILogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>>(),
         sp.GetRequiredService<LogManager>(),
         sp.GetRequiredService<OffsetStore>(),
-        TimeSpan.FromMilliseconds(sp.GetRequiredService<BrokerConfig>().ShareRecordLockDurationMs),
+        Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupDefaults.From(sp.GetRequiredService<BrokerConfig>()),
         shareState: sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.RoutingShareStatePersister>());
     coordinator.SetPartitionLeadership(sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>());
     return coordinator;

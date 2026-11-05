@@ -29,6 +29,10 @@ Section: `Surgewave`
 | `TransactionStateLogReplicationFactor` | short | `3` | Replication factor of `__transaction_state`, capped at the configured cluster size |
 | `ShareStateTopicNumPartitions` | int | `50` | Partitions of `__share_group_state`, whose leaders keep the share partitions' state; fixed once the topic exists |
 | `ShareStateTopicReplicationFactor` | short | `3` | Replication factor of `__share_group_state`, capped at the configured cluster size |
+| `ShareRecordLockDurationMs` | int | `30000` | How long a share-group member holds a record it fetched before it goes back to the group (`group.share.record.lock.duration.ms`) |
+| `ShareDeliveryCountLimit` | int | `5` | How often a share group's record is delivered before it is archived, for a group without its own `share.delivery.count.limit`; 2–10 (`group.share.delivery.count.limit`) |
+| `SharePartitionMaxRecordLocks` | int | `2000` | How many records of a share partition may be locked at once, for a group without its own `share.partition.max.record.locks`; 100–10000 (`group.share.partition.max.record.locks`) |
+| `ShareRenewAcknowledgeEnable` | bool | `true` | Whether a share-group member may renew a record's lock, for a group without its own `share.renew.acknowledge.enable` |
 | `LogRetentionHours` | int | `168` | Retention period (hours) |
 | `LogRetentionBytes` | long | `-1` | Retention size per partition (-1 = unlimited) |
 | `LogSegmentBytes` | long | `1073741824` | Max segment size (1 GB) |

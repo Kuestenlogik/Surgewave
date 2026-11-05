@@ -62,9 +62,10 @@ public sealed class Kip1240ShareGroupConfigTests : IDisposable
     }
 
     [Fact]
-    public void AGroupWithoutConfigs_RunsWithUpstreamKafkaKip1240Defaults()
+    public void AGroupWithoutConfigs_RunsWithTheBrokersDefaults_WhichAreUpstreamKafkaKip1240Defaults()
     {
-        var (deliveryLimit, maxRecordLocks, renewEnabled) = ShareGroupConfigs.Of(new Dictionary<string, string>());
+        var (deliveryLimit, maxRecordLocks, renewEnabled) = ShareGroupConfigs.Of(
+            new Dictionary<string, string>(), ShareGroupDefaults.From(new BrokerConfig()));
         Assert.Equal(5, deliveryLimit);      // upstream: SHARE_GROUP_DELIVERY_COUNT_LIMIT_DEFAULT
         Assert.Equal(2000, maxRecordLocks);  // upstream: SHARE_GROUP_PARTITION_MAX_RECORD_LOCKS_DEFAULT
         Assert.True(renewEnabled);           // upstream: SHARE_RENEW_ACKNOWLEDGE_ENABLE_DEFAULT

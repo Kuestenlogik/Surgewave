@@ -319,7 +319,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareStateStore>());
         _shareStatePersister = new Kuestenlogik.Surgewave.Broker.ShareGroups.RoutingShareStatePersister(_shareStateStore);
         var shareGroupCoordinator = new Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator(
-            shareGroupCoordinatorLogger, _logManager, _offsetStore, TimeSpan.FromMilliseconds(config.ShareRecordLockDurationMs),
+            shareGroupCoordinatorLogger, _logManager, _offsetStore, Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupDefaults.From(config),
             shareState: _shareStatePersister);
         _shareGroupCoordinator = shareGroupCoordinator;
         var consumerGroupV2Coordinator = new Kuestenlogik.Surgewave.Broker.ConsumerGroupV2.ConsumerGroupV2Coordinator(

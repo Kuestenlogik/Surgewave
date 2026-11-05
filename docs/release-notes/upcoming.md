@@ -386,6 +386,11 @@ per group and partition, held by the partition's leader, as in KIP-932:
   any record, so while it waits the records stay with the group and other
   members can get them. At `MaxWaitMs` it gets what is there. A
   `MinBytes` of 0 is answered at once.
+- **Broker defaults (#229):** a group that set no `share.delivery.count.limit`,
+  `share.partition.max.record.locks` or `share.renew.acknowledge.enable` of
+  its own runs with the broker's `ShareDeliveryCountLimit`,
+  `SharePartitionMaxRecordLocks` and `ShareRenewAcknowledgeEnable`; they
+  were Kafka's defaults, fixed in code.
 
 Rejected records are archived, as in Kafka; they are no longer routed to a
 dead-letter topic.

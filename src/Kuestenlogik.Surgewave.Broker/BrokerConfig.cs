@@ -624,10 +624,32 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
 
     /// <summary>
     /// How long a share-group member holds a record it fetched before the record goes back to the group (#228). Maps
-    /// to <c>share.record.lock.duration.ms</c> upstream. Default 30 s.
+    /// to <c>group.share.record.lock.duration.ms</c> upstream. Default 30 s.
     /// </summary>
     [Range(1000, int.MaxValue)]
     public int ShareRecordLockDurationMs { get; set; } = 30_000;
+
+    /// <summary>
+    /// How often a record of a share group is delivered before it is archived, for a group that set no
+    /// <c>share.delivery.count.limit</c> of its own (#229). Maps to <c>group.share.delivery.count.limit</c> upstream.
+    /// Default 5, between 2 and 10.
+    /// </summary>
+    [Range(2, 10)]
+    public int ShareDeliveryCountLimit { get; set; } = 5;
+
+    /// <summary>
+    /// How many records of a share partition may be locked at once, for a group that set no
+    /// <c>share.partition.max.record.locks</c> of its own (#229). Maps to <c>group.share.partition.max.record.locks</c>
+    /// upstream. Default 2000, between 100 and 10000.
+    /// </summary>
+    [Range(100, 10_000)]
+    public int SharePartitionMaxRecordLocks { get; set; } = 2000;
+
+    /// <summary>
+    /// Whether a share-group member may renew the lock on a record it holds, for a group that set no
+    /// <c>share.renew.acknowledge.enable</c> of its own (#229). Default true.
+    /// </summary>
+    public bool ShareRenewAcknowledgeEnable { get; set; } = true;
 
     /// <summary>
     /// KIP-1263 — same as <see cref="ConsumerGroupAssignmentIntervalMs"/>

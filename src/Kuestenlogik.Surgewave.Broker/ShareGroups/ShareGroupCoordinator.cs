@@ -24,6 +24,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private readonly SharePartitionManager _sharePartitions;
     private readonly ShareSessions _sessions;
     private readonly TimeProvider _time;
+    private readonly ShareGroupDefaults _defaults;
     private IPartitionLeadership? _leadership;
     // The groups' configs, as every broker knows them (#228).
     private IGroupConfigStore _groupConfigs;
@@ -40,7 +41,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         ILogger<ShareGroupCoordinator> logger,
         LogManager logManager,
         OffsetStore? offsets = null,
-        TimeSpan? recordLockDuration = null,
+        ShareGroupDefaults? defaults = null,
         TimeProvider? timeProvider = null,
         IShareStatePersister? shareState = null,
         IGroupConfigStore? groupConfigs = null)
@@ -49,9 +50,10 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
         this.logManager = logManager;
         _groupConfigs = groupConfigs ?? new InMemoryGroupConfigStore();
         _time = timeProvider ?? TimeProvider.System;
+        _defaults = defaults ?? new ShareGroupDefaults();
         _sessions = new ShareSessions(StaleHeartbeatTimeout, timeProvider);
         _sharePartitions = new SharePartitionManager(
-            shareState ?? ShareStateStore.InMemory(), recordLockDuration ?? TimeSpan.FromSeconds(30), timeProvider);
+            shareState ?? ShareStateStore.InMemory(), _defaults.RecordLockDuration, timeProvider);
         _offsets = offsets ?? OffsetStore.InMemory();
         _state = new GroupStateLog<ShareGroupState>(
             _offsets, k => ShareGroupRecords.IsShareGroupKey(k), ShareGroupRecords.Read, ShareGroupRecords.Of);
@@ -672,11 +674,11 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     private ShareLeader LeaderOf(TopicPartition tp) =>
         _leadership?.LeaderOf(tp) is { } leader ? new ShareLeader(leader.BrokerId, leader.LeaderEpoch) : NoLeader;
 
-    // The group's limits from its configs, which every broker knows (#228); Kafka's defaults where it set none.
+    // The group's limits from its configs, which every broker knows (#228); the broker's defaults where it set none (#229).
     private ShareSettings SettingsOf(string? groupId)
     {
         var (deliveryLimit, maxRecordLocks, renewEnabled) = ShareGroupConfigs.Of(
-            string.IsNullOrEmpty(groupId) ? new Dictionary<string, string>() : _groupConfigs.ConfigsOf(groupId));
+            string.IsNullOrEmpty(groupId) ? new Dictionary<string, string>() : _groupConfigs.ConfigsOf(groupId), _defaults);
         return new ShareSettings(deliveryLimit, maxRecordLocks, renewEnabled);
     }
 
