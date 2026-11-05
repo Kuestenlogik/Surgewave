@@ -67,7 +67,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
     /// mutated it directly), so this only re-broadcasts LeaderAndIsr to the other replicas — no
     /// self-RPC. Otherwise it sends a native AlterPartition frame to the controller's ReplicationPort.
     /// </summary>
-    public async Task NotifyIsrChangedAsync(
+    public async Task<bool> NotifyIsrChangedAsync(
         TopicPartition tp,
         int leaderId,
         int leaderEpoch,
@@ -76,7 +76,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
     {
         var controllerId = _clusterState.ControllerId;
         if (controllerId < 0)
-            return;
+            return false; // no controller yet: the leader reports again
 
         if (controllerId == _config.BrokerId)
         {
@@ -86,15 +86,11 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
             // This used to re-broadcast LeaderAndIsr instead, which was the push model's answer.
             // With the pushes gone (#163 step 3) that made a controller which is ALSO a partition
             // leader the one node whose ISR changes reached nothing at all (#176).
-            if (_isrApplier is not null)
-            {
-                await _isrApplier.ApplyIsrUpdateAsync(tp, leaderId, leaderEpoch, isr, ct).ConfigureAwait(false);
-            }
-
-            return;
+            return _isrApplier is not null
+                && await _isrApplier.ApplyIsrUpdateAsync(tp, leaderId, leaderEpoch, isr, ct).ConfigureAwait(false) is not null;
         }
 
-        await SendFrameAsync(
+        return await SendFrameAsync(
             controllerId,
             SurgewaveOpCode.InterBrokerAlterPartition,
             new AlterPartitionPayload(leaderId, leaderEpoch, tp, isr),
@@ -303,9 +299,10 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
 
     /// <summary>
     /// Frame, send and await the status ack of one native inter-broker request to one broker.
-    /// Best-effort: resolution/transport failures are logged and swallowed, never thrown.
+    /// Best-effort: resolution/transport failures are logged and swallowed, never thrown. True when
+    /// the broker acknowledged the request.
     /// </summary>
-    private async Task SendFrameAsync<TPayload>(
+    private async Task<bool> SendFrameAsync<TPayload>(
         int brokerId, SurgewaveOpCode opcode, TPayload payload, CancellationToken ct)
         where TPayload : ISerializablePayload<TPayload>
     {
@@ -313,7 +310,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
         if (broker is null)
         {
             LogBrokerNotFound(brokerId);
-            return;
+            return false;
         }
 
         try
@@ -342,7 +339,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
                 if (response.Opcode != opcode && response.Opcode != SurgewaveOpCode.Error)
                 {
                     LogResponseMismatch(opcode, response.Opcode, brokerId);
-                    return;
+                    return false;
                 }
 
                 exchangeComplete = true;
@@ -352,11 +349,10 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
                 if (response.Opcode == SurgewaveOpCode.Error || status != ClusterRpcStatus.None)
                 {
                     LogRejected(opcode, brokerId, status);
+                    return false;
                 }
-                else
-                {
-                    LogSent(opcode, brokerId);
-                }
+                LogSent(opcode, brokerId);
+                return true;
             }
             finally
             {
@@ -373,6 +369,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
         catch (Exception ex)
         {
             LogSendFailed(opcode, brokerId, ex);
+            return false;
         }
     }
 

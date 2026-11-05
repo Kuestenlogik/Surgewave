@@ -44,7 +44,7 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
     /// exactly like the forward LeaderAndIsr send. Best-effort: a failure just
     /// means the ISR reconciles on the next fetch report.
     /// </summary>
-    public async Task NotifyIsrChangedAsync(
+    public async Task<bool> NotifyIsrChangedAsync(
         TopicPartition tp,
         int leaderId,
         int leaderEpoch,
@@ -53,7 +53,7 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
     {
         var controllerId = _clusterState.ControllerId;
         if (controllerId < 0)
-            return;
+            return false;
 
         if (controllerId == _config.BrokerId)
         {
@@ -61,14 +61,14 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
             // LeaderAndIsr, which was the push model's answer; the native client routes the same
             // case into the metadata log through IIsrUpdateApplier (#176), and this wire client
             // has no applier — the caller on this broker is the native path.
-            return;
+            return false;
         }
 
         var controller = _clusterState.GetBroker(controllerId);
         if (controller == null)
         {
             LogBrokerNotFound(controllerId);
-            return;
+            return false;
         }
 
         try
@@ -114,10 +114,12 @@ public sealed partial class ControllerClient : IDisposable, IIsrChangeNotifier
                 ct).ConfigureAwait(false);
 
             LogAlterPartitionSent(controllerId, tp.Topic, tp.Partition, response?.ErrorCode ?? ErrorCode.Unknown);
+            return response?.ErrorCode == ErrorCode.None;
         }
         catch (Exception ex)
         {
             LogAlterPartitionFailed(controllerId, tp.Topic, tp.Partition, ex);
+            return false;
         }
     }
 

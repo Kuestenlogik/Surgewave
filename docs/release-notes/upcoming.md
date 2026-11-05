@@ -134,6 +134,17 @@ controller handling a failure is done in seconds rather than minutes. A
 pre-vote whose answers arrive after a leader was elected no longer starts an
 election that deposes that leader.
 
+### A partition leader reports an ISR change until the controller has it (#230)
+
+A leader added a caught-up follower to its own view of the ISR first. It
+then reported the change to the controller once, without waiting for an
+answer. A lost report was never sent again: right after a cluster formed,
+when no controller was known yet, or with the controller unreachable. The
+controller then kept the leader alone in the ISR, and a controlled shutdown
+of that leader found no in-sync successor and elected uncleanly. Seen on the
+coordinators' internal topics. A leader now reports again on the next fetch
+report or ISR check until the controller has taken the change.
+
 ### At most one controller per Raft term (#213)
 
 A Raft node that became follower within its term, either a candidate hearing

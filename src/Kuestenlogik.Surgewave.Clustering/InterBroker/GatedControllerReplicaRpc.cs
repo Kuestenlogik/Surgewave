@@ -46,13 +46,13 @@ public sealed partial class GatedControllerReplicaRpc : IIsrChangeNotifier
         _logger = logger;
     }
 
-    public Task NotifyIsrChangedAsync(
+    public Task<bool> NotifyIsrChangedAsync(
         TopicPartition tp,
         int leaderId,
         int leaderEpoch,
         IReadOnlyList<int> isr,
         CancellationToken ct = default)
-        => Select()?.NotifyIsrChangedAsync(tp, leaderId, leaderEpoch, isr, ct) ?? Task.CompletedTask;
+        => Select()?.NotifyIsrChangedAsync(tp, leaderId, leaderEpoch, isr, ct) ?? Task.FromResult(false);
 
     private IIsrChangeNotifier? Select()
     {

@@ -86,6 +86,14 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     // setups and in tests that don't exercise clustering.
     private readonly IIsrChangeNotifier? _isrChangeNotifier;
 
+    // Partitions whose last ISR change the controller has not taken yet, and those with a report on its way (#230):
+    // the leader's own view already has the change, so only these keep it reporting until the controller has it.
+    private readonly ConcurrentDictionary<TopicPartition, byte> _isrUnreported = new();
+    private readonly ConcurrentDictionary<TopicPartition, Task> _isrReporting = new();
+
+    /// <summary>The partition's ISR report on its way, done once it is answered; a completed task when none is.</summary>
+    internal Task IsrReportOf(TopicPartition tp) => _isrReporting.TryGetValue(tp, out var report) ? report : Task.CompletedTask;
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -467,6 +475,11 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         {
             NotifyIsrChanged(tp, partitionState.LeaderEpoch);
         }
+        else if (_isrUnreported.ContainsKey(tp))
+        {
+            // A change the controller did not take — none was known, or it was unreachable: report it again.
+            ReportIsr(tp, partitionState.LeaderEpoch);
+        }
 
         // Update high watermark using ISR minimum LEO
         UpdateHighWatermark(tp);
@@ -480,20 +493,41 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// </summary>
     private void NotifyIsrChanged(TopicPartition tp, int leaderEpoch)
     {
-        var notifier = _isrChangeNotifier;
-        if (notifier is null)
+        if (_isrChangeNotifier is null)
             return;
+        _isrUnreported[tp] = 0;
+        ReportIsr(tp, leaderEpoch);
+    }
+
+    // Reports the partition's ISR as it is now, one report at a time; one the controller does not take leaves the
+    // partition unreported, and the next fetch report or ISR check sends it again (#230). The leader's view had the
+    // change before the report, so without this a lost report left the controller's ISR behind for good — and a
+    // controlled shutdown found no in-sync successor and elected uncleanly.
+    private void ReportIsr(TopicPartition tp, int leaderEpoch)
+    {
+        var notifier = _isrChangeNotifier;
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (notifier is null || !_isrReporting.TryAdd(tp, done.Task))
+            return;
+        _isrUnreported.TryRemove(tp, out _);
 
         var isrSnapshot = _clusterState.GetIsrSnapshot(tp);
         _ = Task.Run(async () =>
         {
             try
             {
-                await notifier.NotifyIsrChangedAsync(tp, _config.BrokerId, leaderEpoch, isrSnapshot).ConfigureAwait(false);
+                if (!await notifier.NotifyIsrChangedAsync(tp, _config.BrokerId, leaderEpoch, isrSnapshot).ConfigureAwait(false))
+                    _isrUnreported.TryAdd(tp, 0);
             }
             catch (Exception ex)
             {
+                _isrUnreported.TryAdd(tp, 0);
                 LogIsrNotifyFailed(tp.Topic, tp.Partition, ex);
+            }
+            finally
+            {
+                _isrReporting.TryRemove(tp, out _);
+                done.SetResult();
             }
         });
     }
@@ -704,6 +738,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
                     (long)(now - state.LastUpdate).TotalMilliseconds);
             }
         }
+
+        if (!shrank && _isrUnreported.ContainsKey(tp))
+            ReportIsr(tp, partitionState.LeaderEpoch);
 
         if (shrank)
         {

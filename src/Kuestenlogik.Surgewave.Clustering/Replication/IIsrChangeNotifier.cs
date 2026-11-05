@@ -19,9 +19,10 @@ public interface IIsrChangeNotifier
     /// <summary>
     /// Report that partition <paramref name="tp"/>, led by
     /// <paramref name="leaderId"/> at <paramref name="leaderEpoch"/>, now has
-    /// the given in-sync replica set.
+    /// the given in-sync replica set. True once the controller took it; false when
+    /// no controller was known, reachable or willing — the leader reports again.
     /// </summary>
-    Task NotifyIsrChangedAsync(
+    Task<bool> NotifyIsrChangedAsync(
         TopicPartition tp,
         int leaderId,
         int leaderEpoch,

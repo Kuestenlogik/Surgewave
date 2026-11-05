@@ -19,8 +19,8 @@ public class GatedControllerReplicaRpcTests
     {
         public int IsrChangeCalls;
 
-        public Task NotifyIsrChangedAsync(TopicPartition tp, int leaderId, int leaderEpoch, IReadOnlyList<int> isr, CancellationToken ct = default)
-        { IsrChangeCalls++; return Task.CompletedTask; }
+        public Task<bool> NotifyIsrChangedAsync(TopicPartition tp, int leaderId, int leaderEpoch, IReadOnlyList<int> isr, CancellationToken ct = default)
+        { IsrChangeCalls++; return Task.FromResult(true); }
     }
 
     private static ClusterState ClusterWith(params short[] brokerLevels)
