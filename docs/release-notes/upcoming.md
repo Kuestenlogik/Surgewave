@@ -294,6 +294,16 @@ Kafka's CreateTopics and auto-creation now go the same way and wait for
 the topic to arrive. Before, auto-creation answered `LEADER_NOT_AVAILABLE`
 until the topic arrived.
 
+### A broker just started takes topic creations before its first election (#235)
+
+A topic creation asked of a broker before its first election, or before it had registered itself, found no
+controller and failed at once. The Connect worker creating its topics at the broker's start failed that way on a
+slower machine, and the start hung. A creation or config change now waits until a controller is known and the
+broker is one of the cluster's. A Kafka Metadata request now names this broker as controller while none is elected,
+as Kafka's brokers name any live broker: told -1, an admin client waited for a controller until its request timed
+out. A topic that Metadata would auto-create is not created before the election; the client is told to ask again
+(`LEADER_NOT_AVAILABLE`).
+
 ### ISR reports reach the controller, and a stopping controller stops (#234)
 
 - **ISR reports:** a partition leader's ISR reports to the controller timed out in bursts of ten seconds. The

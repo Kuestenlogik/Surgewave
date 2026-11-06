@@ -25,6 +25,10 @@ public sealed class MetadataLogTopics(
         if (clusterState.GetTopic(topicName) is not null || logManager.GetTopicMetadata(topicName) is not null)
             throw new InvalidOperationException($"Topic '{topicName}' already exists");
 
+        await WaitForTheClusterAsync(cancellationToken).ConfigureAwait(false);
+        if (clusterState.GetTopic(topicName) is not null)
+            throw new InvalidOperationException($"Topic '{topicName}' already exists");
+
         if (!await creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken).ConfigureAwait(false))
             throw new TopicNotCreatedException(topicName);
 
@@ -47,6 +51,8 @@ public sealed class MetadataLogTopics(
         if (clusterState.GetTopic(topicName) is null)
             return false;
 
+        await WaitForTheClusterAsync(cancellationToken).ConfigureAwait(false);
+
         if (!await configWriter.ChangeTopicConfigAsync(topicName, set, removed, cancellationToken).ConfigureAwait(false))
             throw new TopicConfigNotChangedException(topicName);
 
@@ -60,6 +66,20 @@ public sealed class MetadataLogTopics(
             if (Holds(known.Config, set, removed) && (local is null || Holds(local.Config, set, removed)))
                 return true;
             await Task.WhenAny(clusterChanged, localChanged).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // Until a controller is known and this broker is one of the cluster's (#235): a broker that has just started asks
+    // before its first election is over, or before it registered itself, and the controller could take nothing. The
+    // Connect worker creating its topics at the broker's start failed that way, and the start hung.
+    private async Task WaitForTheClusterAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var changed = clusterState.MembershipChanged;
+            if (clusterState.ControllerId >= 0 && clusterState.GetBroker(brokerId) is not null)
+                return;
+            await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

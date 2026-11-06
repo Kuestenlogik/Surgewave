@@ -34,6 +34,9 @@ public sealed class NonControllerTopicCreationTests : IDisposable
         _logManager = new LogManager(_dataDir, new MemoryLogSegmentFactory(), persistTopicsToFile: false);
         _quotaManager = new QuotaManager(_config.Quotas, NullLogger<QuotaManager>.Instance);
         _controller = new RecordingCreator(_clusterState);
+        // A cluster whose controller is broker 1 and has this broker registered.
+        _clusterState.AddBroker(new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerNode { BrokerId = _config.BrokerId, Host = "localhost", Port = 9092 });
+        _clusterState.ControllerId = 1;
         var topics = new MetadataLogTopics(_controller, _controller, _clusterState, _logManager, _config.BrokerId);
         _logManager.RouteTopicCreation(topics);
     }
@@ -91,6 +94,21 @@ public sealed class NonControllerTopicCreationTests : IDisposable
 
         Assert.Equal(ErrorCode.LeaderNotAvailable, Assert.Single(response.Topics).ErrorCode);
         Assert.Null(_logManager.GetTopicMetadata("orders"));
+    }
+
+    [Fact]
+    public async Task MetadataNamesThisBrokerAsControllerWhileNoneIsElected()
+    {
+        // A broker that has just started, before its first election (#235): told -1, an admin client waited for a
+        // controller until its CreateTopics timed out. This broker takes the request and hands it on once there is one;
+        // a topic to auto-create is not created before then, and the client is told to ask again.
+        _clusterState.ControllerId = -1;
+
+        var response = await AutoCreateAsync("orders");
+
+        Assert.Equal(_config.BrokerId, response.ControllerId);
+        Assert.Equal(ErrorCode.LeaderNotAvailable, Assert.Single(response.Topics).ErrorCode);
+        Assert.Empty(_controller.Asked);
     }
 
     private async Task<MetadataResponse> AutoCreateAsync(string topic)

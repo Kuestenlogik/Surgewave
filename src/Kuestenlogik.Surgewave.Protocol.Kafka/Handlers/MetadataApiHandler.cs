@@ -189,6 +189,12 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
     private Kuestenlogik.Surgewave.Core.Models.TopicMetadata? TopicOf(string topic)
         => _clusterState?.GetTopic(topic) ?? _logManager.GetTopicMetadata(topic);
 
+    // The controller a client is told, or this broker while none is elected (#235): a client sends its admin requests
+    // to the broker it is told, and this one hands them to the controller once there is one, as Kafka's brokers name
+    // any live broker. Told -1, the admin client waited for a controller until its request timed out, on a broker that
+    // had just started.
+    private int ControllerToName(int controllerId) => controllerId >= 0 ? controllerId : _config.BrokerId;
+
     // Every topic the cluster knows, and in a cluster those this broker has only locally too.
     private List<string> AllTopicNames()
     {
@@ -252,9 +258,14 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
 
                 // In a cluster the controller creates the topic, asked by this broker when it is another one (#207), and the
                 // creation completes once the topic has reached this broker through the metadata log (#214). A broker
-                // that has not applied a topic the cluster already has learns it the same way.
+                // that has not applied a topic the cluster already has learns it the same way. Before the first
+                // election there is no controller to ask, and a Metadata request is not held until there is one (#235):
+                // the client is told to ask again, as Kafka answers it.
                 try
                 {
+                    if (_clusterState is { ControllerId: < 0 })
+                        throw new TopicNotCreatedException(topic);
+
                     metadata = await _logManager.CreateTopicAsync(
                         topic,
                         _config.DefaultNumPartitions,
@@ -361,7 +372,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                 Port = b.Port,
                 Rack = b.Rack
             }).ToList();
-            controllerId = _clusterState.ControllerId;
+            controllerId = ControllerToName(_clusterState.ControllerId);
         }
         else
         {
@@ -543,7 +554,7 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                     Rack = b.Rack,
                     IsFenced = _isKnownFenced(b.BrokerId),
                 })];
-            controllerId = cluster.ControllerId;
+            controllerId = ControllerToName(cluster.ControllerId);
         }
         else
         {

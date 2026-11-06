@@ -30,8 +30,33 @@ public sealed class MetadataLogTopicsTests : IDisposable
         _logManager.RouteTopicConfigChanges(topics);
     }
 
+    // A cluster with a controller that has this broker registered.
+    private void JoinTheCluster()
+    {
+        _clusterState.AddBroker(new BrokerNode { BrokerId = BrokerId, Host = "localhost", Port = 9092 });
+        _clusterState.ControllerId = 2;
+    }
+
+    [Fact]
+    public async Task ACreationBeforeTheFirstElectionWaitsForTheControllerAndThisBrokersRegistration()
+    {
+        var creating = _logManager.CreateTopicAsync("orders", 1, 1, cancellationToken: _ct);
+
+        // A broker that has just started (#235): no controller elected yet, then one that has not registered it.
+        Assert.False(_controller.FirstAsk.Task.IsCompleted);
+        _clusterState.ControllerId = 2;
+        Assert.False(_controller.FirstAsk.Task.IsCompleted);
+        _clusterState.AddBroker(new BrokerNode { BrokerId = BrokerId, Host = "localhost", Port = 9092 });
+
+        await _controller.FirstAsk.Task.WaitAsync(TimeSpan.FromSeconds(10), _ct);
+        Apply("orders", 1, replicas: [2]);
+        Assert.Equal("orders", (await creating).Name);
+    }
+
+
     public void Dispose()
     {
+        JoinTheCluster();
         _logManager.Dispose();
         try { Directory.Delete(_dataDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
@@ -39,6 +64,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task ATopicIsCreatedByTheControllerNotInTheLogManagerAlone()
     {
+        JoinTheCluster();
         var creating = _logManager.CreateTopicAsync("orders", 1, 1, new() { ["retention.ms"] = "1000" }, _ct);
 
         var asked = Assert.Single(_controller.Asked);
@@ -54,6 +80,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task ACreationCompletesOnceThisBrokersReplicasAreLocal()
     {
+        JoinTheCluster();
         var creating = _logManager.CreateTopicAsync("orders", 2, 1, cancellationToken: _ct);
 
         // The metadata log has the topic, but this broker's replica is not in its log manager yet.
@@ -69,6 +96,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task ATopicOnlyOtherBrokersHostIsThereOnceItsPartitionsAreAssigned()
     {
+        JoinTheCluster();
         var creating = _logManager.CreateTopicAsync("orders", 1, 1, cancellationToken: _ct);
 
         _clusterState.AddTopic(Topic("orders", 1));
@@ -82,6 +110,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task ATopicTheMetadataLogHasExistsAlready()
     {
+        JoinTheCluster();
         Apply("orders", 1, replicas: [2]);
 
         var refused = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -93,6 +122,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task ATopicNoControllerTookIsRetriable()
     {
+        JoinTheCluster();
         _controller.Takes = false;
 
         var refused = await Assert.ThrowsAsync<TopicNotCreatedException>(
@@ -103,6 +133,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task AConfigChangeGoesToTheControllerAndCompletesOnceThisBrokerHasIt()
     {
+        JoinTheCluster();
         Apply("orders", 1, replicas: [BrokerId]);
 
         var changing = _logManager.UpdateTopicConfigAsync(
@@ -126,6 +157,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task AConfigChangeOfATopicTheMetadataLogDoesNotHaveIsRefused()
     {
+        JoinTheCluster();
         Assert.False(await _logManager.UpdateTopicConfigAsync("unknown", new() { ["retention.ms"] = "5000" }, cancellationToken: _ct));
         Assert.Empty(_controller.Changed);
     }
@@ -133,6 +165,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public async Task AConfigChangeNoControllerTookIsRetriable()
     {
+        JoinTheCluster();
         Apply("orders", 1, replicas: [BrokerId]);
         _controller.Takes = false;
 
@@ -144,6 +177,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
     [Fact]
     public void TheMetadataLogsConfigReplacesWhatThisBrokerHad()
     {
+        JoinTheCluster();
         Apply("orders", 1, replicas: [BrokerId]);
         _clusterState.ChangeTopicConfig("orders", new Dictionary<string, string> { ["retention.ms"] = "5000" }, []);
 
@@ -191,12 +225,16 @@ public sealed class MetadataLogTopicsTests : IDisposable
 
         public bool Takes { get; set; } = true;
 
+        /// <summary>Completes at the first creation the controller is asked for.</summary>
+        public TaskCompletionSource FirstAsk { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public bool IsController => true;
 
         public Task<bool> CreateTopicAsync(
             string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config, CancellationToken ct)
         {
             Asked.Add((topic, partitionCount, replicationFactor, config));
+            FirstAsk.TrySetResult();
             return Task.FromResult(Takes);
         }
     }

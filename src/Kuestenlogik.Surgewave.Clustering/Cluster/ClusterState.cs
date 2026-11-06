@@ -28,10 +28,27 @@ public sealed class ClusterState
     // ConcurrentDictionary. Control-plane only — never taken on the produce/fetch hot path.
     private readonly object _brokerLock = new();
 
+    private int _controllerId = -1;
+    private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _membershipChanged = new();
+
     /// <summary>
     /// Current controller broker ID.
     /// </summary>
-    public int ControllerId { get; set; } = -1;
+    public int ControllerId
+    {
+        get => Volatile.Read(ref _controllerId);
+        set
+        {
+            if (Interlocked.Exchange(ref _controllerId, value) != value)
+                _membershipChanged.Notify();
+        }
+    }
+
+    /// <summary>
+    /// Completes at the next change of the controller or of the registered brokers. Take it before looking, then
+    /// await it.
+    /// </summary>
+    public Task MembershipChanged => _membershipChanged.Next;
 
     /// <summary>
     /// Controller epoch (increments on controller election).
@@ -179,6 +196,7 @@ public sealed class ClusterState
     {
         lock (_brokerLock)
             _brokers[broker.BrokerId] = broker;
+        _membershipChanged.Notify();
     }
 
     /// <summary>
@@ -210,6 +228,8 @@ public sealed class ClusterState
             inserted = !present;
             var next = present ? mutate(current!) : ifAbsent;
             _brokers[brokerId] = next;
+            if (!present)
+                _membershipChanged.Notify();
             return next;
         }
     }
@@ -227,6 +247,7 @@ public sealed class ClusterState
                 Port = port,
                 Rack = rack
             };
+        _membershipChanged.Notify();
     }
 
     public void RemoveBroker(int brokerId)
