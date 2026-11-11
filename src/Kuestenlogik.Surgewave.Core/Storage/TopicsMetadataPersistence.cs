@@ -15,15 +15,18 @@ internal sealed class TopicsMetadataPersistence
     private readonly string _metadataPath;
     private readonly string _dataDirectory;
     private readonly ILogSegmentFactory _segmentFactory;
+    private readonly LogDirectory _logDirectory;
     private readonly bool _enabled;
 
     public TopicsMetadataPersistence(
         string dataDirectory,
         ILogSegmentFactory segmentFactory,
+        LogDirectory logDirectory,
         bool enabled)
     {
         _dataDirectory = dataDirectory;
         _segmentFactory = segmentFactory;
+        _logDirectory = logDirectory;
         _enabled = enabled && segmentFactory.IsPersistent;
 
         var metadataDir = Path.Combine(dataDirectory, ".metadata");
@@ -84,7 +87,7 @@ internal sealed class TopicsMetadataPersistence
                     else
                     {
                         var segmentBytes = GetSegmentBytesFromConfig(finalMetadata.Config);
-                        log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes);
+                        log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes, _logDirectory);
                     }
                     logs[topicPartition] = log;
                 }

@@ -77,6 +77,39 @@ public sealed partial class ReplicaManager : IAsyncDisposable
             _config,
             _peerTransport,
             _metrics);
+
+        _logManager.LogDirectory.WentOffline += OnLogDirectoryOffline;
+    }
+
+    /// <summary>
+    /// This broker's log directory has failed (#162): stop replicating into it. Kafka's broker does the same with the
+    /// partitions of an offline directory — it stops their fetchers and serves them no more; the controller learns of
+    /// the directory from the heartbeat and moves their leaderships to in-sync replicas elsewhere.
+    /// </summary>
+    private void OnLogDirectoryOffline(LogDirectory directory)
+    {
+        foreach (var tp in _localReplicas.Keys)
+        {
+            if (!_logManager.IsLogDirOffline(tp))
+                continue;
+
+            _replicaFetcher?.StopFetching(tp);
+            _followerLeos.TryRemove(tp, out _);
+        }
+
+        LogStoppedReplicatingOfflineDirectory(directory.Path, directory.Id);
+    }
+
+    // A transition for a partition in an offline log directory is not carried out: the replica can neither lead nor
+    // follow without its log, and taking the leadership in cluster state would advertise a leader that serves nothing.
+    private bool RefuseTransitionForOfflineLog(TopicPartition tp)
+    {
+        if (!_logManager.IsLogDirOffline(tp))
+            return false;
+
+        _replicaFetcher?.StopFetching(tp);
+        LogTransitionIgnoredOffline(tp.Topic, tp.Partition);
+        return true;
     }
 
     private readonly Kuestenlogik.Surgewave.Transport.IPeerTransport _peerTransport;
@@ -111,6 +144,7 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _logManager.LogDirectory.WentOffline -= OnLogDirectoryOffline;
         _cts?.Cancel();
 
         if (_replicaFetcher != null)
@@ -154,6 +188,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// </param>
     public async Task BecomeLeaderAsync(TopicPartition tp, int leaderEpoch, CancellationToken ct, Guid topicId = default)
     {
+        if (RefuseTransitionForOfflineLog(tp))
+            return;
+
         var replica = GetOrCreateLocalReplica(tp);
 
         lock (replica)
@@ -197,6 +234,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     /// <inheritdoc cref="BecomeLeaderAsync" path="/param[@name='topicId']"/>
     public async Task BecomeFollowerAsync(TopicPartition tp, int leaderId, int leaderEpoch, CancellationToken ct, Guid topicId = default)
     {
+        if (RefuseTransitionForOfflineLog(tp))
+            return;
+
         var replica = GetOrCreateLocalReplica(tp);
 
         lock (replica)
@@ -722,6 +762,12 @@ public sealed partial class ReplicaManager : IAsyncDisposable
         if (partitionState == null)
             return;
 
+        // A leader whose log directory has failed serves its followers nothing, so their silence is its own failure,
+        // not theirs (#162). Shrinking the ISR to itself would leave the controller no in-sync successor to move the
+        // leadership to.
+        if (_logManager.IsLogDirOffline(tp))
+            return;
+
         // For now, just ensure leader is always in ISR
         if (!partitionState.Isr.Contains(_config.BrokerId))
         {
@@ -773,6 +819,12 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Removed silent follower {BrokerId} from ISR for {Topic}-{Partition} (no fetch for {ElapsedMs}ms)")]
     private partial void LogFollowerExpiredFromIsr(string topic, int partition, int brokerId, long elapsedMs);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Stopped replicating into offline log directory {Path} ({DirectoryId})")]
+    private partial void LogStoppedReplicatingOfflineDirectory(string path, Guid directoryId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Not taking up {Topic}-{Partition}: its log directory is offline")]
+    private partial void LogTransitionIgnoredOffline(string topic, int partition);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "ReplicaManager started for broker {BrokerId}")]
     private partial void LogReplicaManagerStarted(int brokerId);

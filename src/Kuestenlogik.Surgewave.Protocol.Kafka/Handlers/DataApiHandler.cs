@@ -448,6 +448,20 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         continue;
                     }
 
+                    // A partition whose log directory has failed is not served (#162). Before the idempotence validation
+                    // below, which would advance the producer's sequence for a write that cannot happen.
+                    if (_logManager.IsLogDirOffline(topicPartition))
+                    {
+                        partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                        {
+                            Index = partitionData.Index,
+                            ErrorCode = ErrorCode.KafkaStorageError,
+                            BaseOffset = -1,
+                            LogAppendTimeMs = -1
+                        });
+                        continue;
+                    }
+
                     // Durability admission, BEFORE the idempotence validation below — that call
                     // advances the producer's sequence, and advancing it for a batch we then refuse
                     // to write poisons the producer: its retry carries the same sequence and comes
@@ -746,6 +760,21 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             Timestamp: DateTimeOffset.UtcNow));
                     }
                 }
+                catch (LogDirOfflineException sex)
+                {
+                    // The partition's log directory has failed (#162). Kafka answers KAFKA_STORAGE_ERROR, which a client
+                    // retries after refreshing its metadata — by then the controller has moved the leadership away.
+                    ProduceError(sex, topic, partitionData.Index);
+                    _metrics?.RecordProduceError(topic, partitionData.Index, ErrorCode.KafkaStorageError.ToString());
+
+                    partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
+                    {
+                        Index = partitionData.Index,
+                        ErrorCode = ErrorCode.KafkaStorageError,
+                        BaseOffset = -1,
+                        LogAppendTimeMs = -1
+                    });
+                }
                 catch (Exception ex)
                 {
                     ProduceError(ex, topic, partitionData.Index);
@@ -1019,6 +1048,20 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                         Partition = partitionData.Partition
                     };
 
+                    // A partition whose log directory has failed is not served (#162): without this a fetch at the
+                    // high watermark reads nothing, waits, and the consumer stays on this broker for good.
+                    if (_logManager.IsLogDirOffline(topicPartition))
+                    {
+                        partitionResponses.Add(new FetchResponse.PartitionResponse
+                        {
+                            Partition = partitionData.Partition,
+                            ErrorCode = ErrorCode.KafkaStorageError,
+                            HighWatermark = 0,
+                            RecordSet = ReadOnlyMemory<byte>.Empty
+                        });
+                        continue;
+                    }
+
                     // Get log once for all operations
                     var log = _logManager.GetLog(topicPartition);
 
@@ -1180,6 +1223,20 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             Key: null, Value: null,
                             Timestamp: DateTimeOffset.UtcNow));
                     }
+                }
+                catch (LogDirOfflineException sex)
+                {
+                    // As for produce (#162): the client refreshes its metadata and fetches from the new leader.
+                    FetchError(sex, topic, partitionData.Partition);
+                    _metrics?.RecordError(ErrorCode.KafkaStorageError.ToString());
+
+                    partitionResponses.Add(new FetchResponse.PartitionResponse
+                    {
+                        Partition = partitionData.Partition,
+                        ErrorCode = ErrorCode.KafkaStorageError,
+                        HighWatermark = 0,
+                        RecordSet = ReadOnlyMemory<byte>.Empty
+                    });
                 }
                 catch (Exception ex)
                 {

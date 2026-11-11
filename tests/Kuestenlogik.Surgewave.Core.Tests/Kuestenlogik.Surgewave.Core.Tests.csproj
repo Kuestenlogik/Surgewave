@@ -17,6 +17,7 @@
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.FileSystem\Kuestenlogik.Surgewave.Storage.Engine.FileSystem.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Storage.Engine.Memory\Kuestenlogik.Surgewave.Storage.Engine.Memory.csproj" />
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing\Kuestenlogik.Surgewave.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Testing.Chaos\Kuestenlogik.Surgewave.Testing.Chaos.csproj" />
   </ItemGroup>
 
 </Project>

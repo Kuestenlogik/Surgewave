@@ -22,6 +22,16 @@ public sealed class LogManager : IDisposable
     /// without each caller threading the value separately.
     /// </summary>
     public string DataDirectory { get; }
+
+    /// <summary>
+    /// The log directory every partition log of this manager lives in, with its stable id and whether it is still
+    /// online (#162). One per broker: Surgewave keeps all of a broker's partition logs in its one data directory, so a
+    /// failure of that directory is a failure of every replica the broker hosts.
+    /// </summary>
+    public LogDirectory LogDirectory { get; }
+
+    /// <summary>The ids of this broker's log directories that are offline — what its heartbeat reports (#162).</summary>
+    public IReadOnlyList<Guid> OfflineLogDirectoryIds => LogDirectory.IsOffline ? [LogDirectory.Id] : [];
     private readonly ILogSegmentFactory _segmentFactory;
     private readonly ConcurrentDictionary<TopicPartition, IPartitionLog> _logs = new();
     private readonly ConcurrentDictionary<TopicPartition, object> _logCreationLocks = new();
@@ -94,8 +104,10 @@ public sealed class LogManager : IDisposable
             Directory.CreateDirectory(dataDirectory);
         }
 
+        LogDirectory = LogDirectory.Open(dataDirectory, _segmentFactory.IsPersistent, logger);
+
         // Initialize metadata persistence and load existing topics
-        _metadataPersistence = new TopicsMetadataPersistence(dataDirectory, _segmentFactory, persistTopicsToFile);
+        _metadataPersistence = new TopicsMetadataPersistence(dataDirectory, _segmentFactory, LogDirectory, persistTopicsToFile);
         _metadataPersistence.Load(_topics, _topicIdToName, _logs);
 
         // Auto-detect write workers: 2x processor count with minimum of 8 for good parallelism
@@ -272,12 +284,19 @@ public sealed class LogManager : IDisposable
                 {
                     segmentBytes = GetSegmentBytesFromConfig(metadata.Config);
                 }
-                log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes);
+                log = new PartitionLog(_dataDirectory, topicPartition, _segmentFactory, segmentBytes, LogDirectory);
             }
             _logs[topicPartition] = log;
             return log;
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="topicPartition"/> cannot be served because its log directory is offline (#162). An
+    /// ephemeral partition keeps nothing on disk and is not affected.
+    /// </summary>
+    public bool IsLogDirOffline(TopicPartition topicPartition)
+        => LogDirectory.IsOffline && GetLog(topicPartition) is not EphemeralPartitionLog;
 
     /// <summary>
     /// Get a partition log if it exists

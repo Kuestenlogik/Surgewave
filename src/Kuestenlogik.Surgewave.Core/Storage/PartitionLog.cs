@@ -17,6 +17,7 @@ public sealed class PartitionLog : IPartitionLog
     private readonly TopicPartition _topicPartition;
     private readonly long _maxSegmentBytes;
     private readonly ILogSegmentFactory _segmentFactory;
+    private readonly LogDirectory? _logDirectory;
     private readonly List<ILogSegment> _segments = new();
     private readonly PartitionLogReader _reader = new();
     private readonly PendingSegmentDeletions _pendingDeletions = new();
@@ -79,13 +80,37 @@ public sealed class PartitionLog : IPartitionLog
         _corruptionHandler = handler;
     }
 
-    public PartitionLog(string dataDirectory, TopicPartition topicPartition, ILogSegmentFactory segmentFactory, long maxSegmentBytes = ILogSegment.DefaultMaxSegmentSize)
+    /// <param name="logDirectory">
+    /// The log directory this log lives in (#162). An I/O failure of this log takes it offline, and once it is offline
+    /// every append and read answers <see cref="LogDirOfflineException"/>. Null for a log outside any broker's log
+    /// directory, whose failures are its caller's.
+    /// </param>
+    public PartitionLog(
+        string dataDirectory,
+        TopicPartition topicPartition,
+        ILogSegmentFactory segmentFactory,
+        long maxSegmentBytes = ILogSegment.DefaultMaxSegmentSize,
+        LogDirectory? logDirectory = null)
     {
         _topicPartition = topicPartition;
         _maxSegmentBytes = maxSegmentBytes;
         _segmentFactory = segmentFactory;
+        _logDirectory = logDirectory;
         _baseDirectory = Path.Combine(dataDirectory, topicPartition.Topic, $"partition-{topicPartition.Partition}");
+        _logDirectory?.ThrowIfOffline(topicPartition);
 
+        try
+        {
+            Open();
+        }
+        catch (Exception ex) when (_logDirectory is not null && LogDirectory.IsStorageFailure(ex))
+        {
+            throw _logDirectory.Fail("open", topicPartition, ex);
+        }
+    }
+
+    private void Open()
+    {
         // Only create directory for persistent storage
         if (_segmentFactory.IsPersistent)
         {
@@ -155,7 +180,13 @@ public sealed class PartitionLog : IPartitionLog
     /// <see cref="BatchCrcMode.Trusted"/> skips the pass for serializer-fresh bytes;
     /// <see cref="BatchCrcMode.Recompute"/> keeps the legacy overwrite.
     /// </param>
-    public async ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
+    public ValueTask<long> AppendBatchAsync(byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
+    {
+        _logDirectory?.ThrowIfOffline(_topicPartition);
+        return Guarded(AppendBatchCoreAsync(buffer, offset, length, crcMode, cancellationToken), "append to");
+    }
+
+    private async ValueTask<long> AppendBatchCoreAsync(byte[] buffer, int offset, int length, BatchCrcMode crcMode, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -242,8 +273,15 @@ public sealed class PartitionLog : IPartitionLog
     /// per-batch <see cref="BatchCrcMode.Validate"/> finally works: the CRC pass covers this batch's
     /// bytes 21.. and compares against this batch's own stored CRC (#92).
     /// </summary>
-    public async ValueTask<long> AppendBatchAtOffsetAsync(
+    public ValueTask<long> AppendBatchAtOffsetAsync(
         byte[] buffer, int offset, int length, long targetOffset, BatchCrcMode crcMode, CancellationToken cancellationToken = default)
+    {
+        _logDirectory?.ThrowIfOffline(_topicPartition);
+        return Guarded(AppendBatchAtOffsetCoreAsync(buffer, offset, length, targetOffset, crcMode, cancellationToken), "append to");
+    }
+
+    private async ValueTask<long> AppendBatchAtOffsetCoreAsync(
+        byte[] buffer, int offset, int length, long targetOffset, BatchCrcMode crcMode, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -469,7 +507,13 @@ public sealed class PartitionLog : IPartitionLog
     /// Read raw RecordBatch bytes from the log starting at the given offset.
     /// Uses memory-mapped I/O for high-performance reads when available.
     /// </summary>
-    public async ValueTask<List<byte[]>> ReadBatchesAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    public ValueTask<List<byte[]>> ReadBatchesAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    {
+        _logDirectory?.ThrowIfOffline(_topicPartition);
+        return Guarded(ReadBatchesCoreAsync(startOffset, maxBytes, cancellationToken), "read from");
+    }
+
+    private async ValueTask<List<byte[]>> ReadBatchesCoreAsync(long startOffset, int maxBytes, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -579,7 +623,13 @@ public sealed class PartitionLog : IPartitionLog
     /// This is optimized for high-throughput fetch operations.
     /// Returns the data and batch offsets within it for processing.
     /// </summary>
-    public async ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadBatchesContiguousAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    public ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadBatchesContiguousAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    {
+        _logDirectory?.ThrowIfOffline(_topicPartition);
+        return Guarded(ReadBatchesContiguousCoreAsync(startOffset, maxBytes, cancellationToken), "read from");
+    }
+
+    private async ValueTask<(ReadOnlyMemory<byte> Data, List<int> BatchOffsets)> ReadBatchesContiguousCoreAsync(long startOffset, int maxBytes, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -651,7 +701,13 @@ public sealed class PartitionLog : IPartitionLog
     /// memory, so they take the copying path and return a lease-free read.
     /// </para>
     /// </summary>
-    public async ValueTask<ContiguousBatchRead> ReadContiguousAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    public ValueTask<ContiguousBatchRead> ReadContiguousAsync(long startOffset, int maxBytes = 1024 * 1024, CancellationToken cancellationToken = default)
+    {
+        _logDirectory?.ThrowIfOffline(_topicPartition);
+        return Guarded(ReadContiguousCoreAsync(startOffset, maxBytes, cancellationToken), "read from");
+    }
+
+    private async ValueTask<ContiguousBatchRead> ReadContiguousCoreAsync(long startOffset, int maxBytes, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -763,6 +819,19 @@ public sealed class PartitionLog : IPartitionLog
     /// </summary>
     public void TruncateTo(long offset)
     {
+        _logDirectory?.ThrowIfOffline(_topicPartition);
+        try
+        {
+            TruncateToCore(offset);
+        }
+        catch (Exception ex) when (_logDirectory is not null && LogDirectory.IsStorageFailure(ex))
+        {
+            throw _logDirectory.Fail("truncate", _topicPartition, ex);
+        }
+    }
+
+    private void TruncateToCore(long offset)
+    {
         _appendLock.EnterWriteLock();
         try
         {
@@ -791,6 +860,26 @@ public sealed class PartitionLog : IPartitionLog
         finally
         {
             _appendLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="operation"/>, with an I/O failure taking this log's directory offline (#162): what Kafka's
+    /// <c>maybeHandleIOException</c> does around every log operation. A completed operation is returned as it is, so
+    /// the guard costs nothing on the path that did not fail.
+    /// </summary>
+    private ValueTask<T> Guarded<T>(ValueTask<T> operation, string what)
+        => _logDirectory is null || operation.IsCompletedSuccessfully ? operation : AwaitGuardedAsync(operation, what);
+
+    private async ValueTask<T> AwaitGuardedAsync<T>(ValueTask<T> operation, string what)
+    {
+        try
+        {
+            return await operation.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (LogDirectory.IsStorageFailure(ex))
+        {
+            throw _logDirectory!.Fail(what, _topicPartition, ex);
         }
     }
 

@@ -141,7 +141,10 @@ public sealed class NativeDataHandler : INativeRequestHandler
         // work: a batch we are going to refuse should not be serialised first. The native
         // path is this product's default, so leaving it unchecked while the Kafka path
         // refuses would protect the compatibility surface and not our own.
-        if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true)
+        // A partition whose log directory has failed is not served either (#162). The native protocol has no storage
+        // error; NotLeader is the answer its clients already retry with fresh metadata, which by then names the
+        // successor the controller moved the leadership to.
+        if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true || _logManager.IsLogDirOffline(topicPartition))
         {
             await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.ProduceAck,
                 SurgewaveErrorCode.NotLeader, ReadOnlyMemory<byte>.Empty, cancellationToken);
@@ -283,7 +286,8 @@ public sealed class NativeDataHandler : INativeRequestHandler
                     // carries several partitions, so this skips the ones we do not lead
                     // rather than failing the whole request — GetOrCreateLog below would
                     // otherwise MATERIALISE a log for a partition led elsewhere.
-                    if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true)
+                    if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true
+                        || _logManager.IsLogDirOffline(topicPartition))
                         continue;
 
                     var log = _logManager.GetOrCreateLog(topicPartition);
@@ -468,6 +472,16 @@ public sealed class NativeDataHandler : INativeRequestHandler
         }
 
         var topicPartition = new TopicPartition { Topic = topic, Partition = partition };
+
+        // As for produce (#162): a fetch at the high watermark of an offline partition would otherwise wait and answer
+        // nothing, and the consumer would stay on this broker.
+        if (_logManager.IsLogDirOffline(topicPartition))
+        {
+            await context.SendErrorAsync(context.Header.RequestId, context.Header.OpCode,
+                SurgewaveErrorCode.NotLeader, $"The log directory of {topicPartition} is offline", cancellationToken);
+            return;
+        }
+
         var log = _logManager.GetOrCreateLog(topicPartition);
 
         // The read borrows the storage lease instead of copying the payload into a fresh array
