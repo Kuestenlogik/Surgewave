@@ -82,8 +82,8 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Information, Message = "Lost Raft leadership, new leader is {LeaderId}")]
     private partial void LogLostRaftLeadership(int leaderId);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error in Raft leader watch loop")]
-    private partial void LogRaftWatchError(Exception ex);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error following the Raft leadership")]
+    private partial void LogRaftLeadershipError(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Raft commit timeout for {CommandType} at index {Index}")]
     private partial void LogRaftCommitTimeout(string commandType, long index);

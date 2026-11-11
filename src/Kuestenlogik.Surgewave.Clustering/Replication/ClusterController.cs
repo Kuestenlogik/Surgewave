@@ -96,8 +96,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
     private CancellationTokenSource? _cts;
     private Task? _controllerTask;
-    private Task? _raftLeaderWatchTask;
-    private bool _isController;
+    private volatile bool _isController;
+
+    // The Raft leadership this controller acted on last, and the lock under which it follows the node (#180).
+    private readonly object _leadershipLock = new();
+    private RaftLeadership _followedLeadership;
+    private CancellationToken _lifetime;
 
     // #72 Inc5 — process-stable incarnation for THIS broker's Raft self-registration; a restart gets
     // a fresh incarnation and thus a fresh (higher) committed-index epoch on re-registration.
@@ -156,11 +160,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
     private void HandleRaftQuorumLost(object? sender, EventArgs e)
     {
+        // The node has stepped down and said so through LeadershipChanged, which is where the controller role ends
+        // (#180). Ending it here as well could end the reign of an election this node won in the meantime.
         LogControllerIsolationDetected();
-
-        // The RaftNode has already stepped down, the watch loop will update controller state.
-        // This handler is for any additional cleanup or notifications needed.
-        _isController = false;
     }
 
     /// <summary>
@@ -264,31 +266,52 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                 + "controller role is Raft leadership. Call SetRaftNode before StartAsync.");
         }
 
+        // The controller role follows the node's leadership as the node announces it (#180), and from what it knows
+        // already: a leader may have been heard from before this controller started.
+        _lifetime = _cts.Token;
+        _raftNode.LeadershipChanged += HandleRaftLeadershipChanged;
+        FollowRaftLeadership();
+
         await _raftNode.StartAsync(cancellationToken);
-        _raftLeaderWatchTask = Task.Run(() => RaftLeaderWatchLoopAsync(_cts.Token), _cts.Token);
         LogRaftModeEnabled();
     }
 
-    /// <summary>
-    /// Watches for Raft leadership changes and updates controller state.
-    /// </summary>
-    private async Task RaftLeaderWatchLoopAsync(CancellationToken ct)
-    {
-        var wasLeader = false;
+    private void HandleRaftLeadershipChanged(RaftLeadership leadership) => FollowRaftLeadership();
 
-        while (!ct.IsCancellationRequested)
+    /// <summary>
+    /// Brings the controller role and the controller id this broker reports in line with the Raft node's leadership
+    /// (#180): this broker is the controller from the moment its node leads a term, and names the leader its node
+    /// knows from the moment the node knows it.
+    /// </summary>
+    /// <remarks>
+    /// Run on the node's <see cref="RaftNode.LeadershipChanged"/>, on the thread that made the change. A loop used to
+    /// look every 100 ms instead: for that long a follower that had heard from the leader still reported no
+    /// controller — and Metadata then names the broker itself (#235), or named none before that, on which an admin
+    /// client waits for a controller until its request times out — a new leader was not yet controller, and a
+    /// leadership lost and won again between two looks was never seen. The node is read here, under this
+    /// controller's lock, and not taken from the event, so that the start and two changes running into each other
+    /// cannot apply an older leadership after a newer one.
+    /// </remarks>
+    private void FollowRaftLeadership()
+    {
+        if (_raftNode is null)
+            return;
+
+        lock (_leadershipLock)
         {
+            var now = _raftNode.Leadership;
+            var was = _followedLeadership;
+            if (now == was)
+                return;
+
+            _followedLeadership = now;
+
             try
             {
-                await Task.Delay(100, ct); // Check every 100ms
-
-                if (_raftNode == null) continue;
-
-                var isLeader = _raftNode.IsLeader;
-
-                if (isLeader && !wasLeader)
+                if (now.IsLeader)
                 {
                     // Became Raft leader = became controller (locked bump, shares the push fence).
+                    var ct = _lifetime;
                     _isController = true;
                     var epoch = _clusterState.BecomeController(_config.BrokerId);
                     LogBecameRaftLeader(_config.BrokerId, epoch);
@@ -296,40 +319,31 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     // The cluster's id, unless an earlier controller wrote it (#203), then this broker's
                     // registration via Raft (carry incarnation + level + replication port so the committed
                     // entry rebuilds the membership store faithfully; #72 Inc5).
-                    _ = TakeOfficeAsync(ct);
+                    // Off this thread, as the controller loop: it is the node's, in the middle of its election.
+                    _ = Task.Run(() => TakeOfficeAsync(ct), ct);
 
                     // Start controller loop
                     _controllerTask = Task.Run(() => ControllerLoopAsync(ct), ct);
 
                     // The group coordinator topic, once the cluster can carry it (#204).
-                    _ = EnsureInternalTopicsAsync(ct);
+                    _ = Task.Run(() => EnsureInternalTopicsAsync(ct), ct);
+                    return;
                 }
-                else if (!isLeader && wasLeader)
+
+                if (was.IsLeader)
                 {
                     // Lost Raft leadership = lost controller role
                     _isController = false;
-                    var leaderId = _raftNode.LeaderId;
-                    if (leaderId.HasValue)
-                    {
-                        _clusterState.ControllerId = leaderId.Value;
-                    }
-                    LogLostRaftLeadership(_raftNode.LeaderId ?? -1);
-                }
-                else if (!isLeader && _raftNode.LeaderId.HasValue)
-                {
-                    // Update controller ID if we know who the leader is
-                    _clusterState.ControllerId = _raftNode.LeaderId.Value;
+                    LogLostRaftLeadership(now.LeaderId ?? -1);
                 }
 
-                wasLeader = isLeader;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
+                // The controller is the leader the node knows. While it knows none, the last one stays named.
+                if (now.LeaderId is { } leaderId)
+                    _clusterState.ControllerId = leaderId;
             }
             catch (Exception ex)
             {
-                LogRaftWatchError(ex);
+                LogRaftLeadershipError(ex);
             }
         }
     }
@@ -514,11 +528,6 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             try { await _controllerTask; } catch (OperationCanceledException) { }
         }
 
-        if (_raftLeaderWatchTask != null)
-        {
-            try { await _raftLeaderWatchTask; } catch (OperationCanceledException) { }
-        }
-
         if (_raftNode != null)
         {
             // Detach what this controller attached, and nothing else. The node is the HOST's:
@@ -532,6 +541,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             // and in Broker.App — where the node is a DI singleton outliving everything — a
             // quorum loss would still be handled by a controller that had already shut down.
             _raftNode.OnQuorumLost -= HandleRaftQuorumLost;
+            _raftNode.LeadershipChanged -= HandleRaftLeadershipChanged;
         }
 
         _cts?.Dispose();

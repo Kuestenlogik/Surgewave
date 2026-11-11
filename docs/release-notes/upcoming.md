@@ -363,6 +363,18 @@ as Kafka's brokers name any live broker: told -1, an admin client waited for a c
 out. A topic that Metadata would auto-create is not created before the election; the client is told to ask again
 (`LEADER_NOT_AVAILABLE`).
 
+### A broker names its controller the moment its Raft node knows the leader (#180)
+
+The controller a broker reports was carried over from its Raft node by a loop that looked every 100 ms. Until the
+next look a broker that had already heard from the leader still reported none: a Metadata request answered -1 (and
+since #235 names the asked broker itself), on which an admin client waits for a controller until its request times
+out — `Failed while waiting for controller: Local: Timed out` on a cluster that had elected its controller. A new
+leader was the controller only up to 100 ms after its election and answered `NOT_CONTROLLER` until then, and a
+leadership lost and won again between two looks was not noticed, so the new term got no controller epoch. The Raft
+node now announces every change of its leadership (`RaftNode.LeadershipChanged`), and the controller role and the
+reported controller id follow it on that announcement: a follower answers the leader's first AppendEntries only
+after it names that leader.
+
 ### ISR reports reach the controller, and a stopping controller stops (#234)
 
 - **ISR reports:** a partition leader's ISR reports to the controller timed out in bursts of ten seconds. The

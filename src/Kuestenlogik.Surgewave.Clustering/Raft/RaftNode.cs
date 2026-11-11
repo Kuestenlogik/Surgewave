@@ -57,6 +57,54 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public event EventHandler? OnQuorumLost;
 
+    // Serialises the announcements, so that they reach the listeners in the order the changes happened. Taken before
+    // _lock and never while holding it.
+    private readonly object _announceLock = new();
+    private RaftLeadership _announced;
+
+    /// <summary>
+    /// Raised when <see cref="Leadership"/> changed: this node won or lost the leadership, heard from a leader, or
+    /// moved to another term (#180). Raised on the thread that made the change, after it released the node's lock and
+    /// before it goes on — an AppendEntries from a new leader is answered only once the listeners know that leader —
+    /// and in the order of the changes. A listener is told the moment the node knows, where it used to look every
+    /// 100 ms.
+    /// </summary>
+    public event Action<RaftLeadership>? LeadershipChanged;
+
+    /// <summary>Who leads, as this node knows it now: term, leader and whether it is this node, read as one.</summary>
+    public RaftLeadership Leadership
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return new RaftLeadership(_currentTerm, _leaderId, _state == RaftState.Leader);
+            }
+        }
+    }
+
+    // Tells the listeners what Leadership is now, if it is not what they were told last. Called after every change of
+    // term, state or leader, outside _lock.
+    private void AnnounceLeadership()
+    {
+        lock (_announceLock)
+        {
+            var now = Leadership;
+            if (now == _announced)
+                return;
+
+            _announced = now;
+            try
+            {
+                LeadershipChanged?.Invoke(now);
+            }
+            catch (Exception ex)
+            {
+                LogLeadershipChangedHandlerError(ex);
+            }
+        }
+    }
+
     private CancellationTokenSource? _cts;
     private Task? _electionTask;
     private Task? _heartbeatTask;
@@ -380,6 +428,8 @@ public sealed partial class RaftNode : IAsyncDisposable
             response = new RequestVoteResponse(_currentTerm, canVote);
         }
 
+        AnnounceLeadership();
+
         // Persist state before responding (Raft correctness requirement)
         if (stateChanged)
         {
@@ -490,6 +540,8 @@ public sealed partial class RaftNode : IAsyncDisposable
         }
 
     PersistAndReturn:
+        AnnounceLeadership();
+
         // Persist state before responding (Raft correctness requirement)
         if (stateChanged)
         {
@@ -710,6 +762,19 @@ public sealed partial class RaftNode : IAsyncDisposable
         || (_leaderId.HasValue && _leaderId != NodeId && _lastHeartbeat > started);
 
     private async Task StartElectionAsync(CancellationToken ct)
+    {
+        try
+        {
+            await CampaignAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            // However the campaign ended: as leader, as follower of a newer term, or as a candidate nobody answered.
+            AnnounceLeadership();
+        }
+    }
+
+    private async Task CampaignAsync(CancellationToken ct)
     {
         // ========================================
         // Phase 1: Pre-Vote (Raft extension)
@@ -1018,6 +1083,10 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     private async Task HeartbeatLoopAsync(CancellationToken ct)
     {
+        // The listeners learn that this node leads before any peer does: its broker is the controller by the time a
+        // follower hears from it and names it (#180).
+        AnnounceLeadership();
+
         while (!ct.IsCancellationRequested && _state == RaftState.Leader)
         {
             try
@@ -1060,6 +1129,8 @@ public sealed partial class RaftNode : IAsyncDisposable
             LogSteppingDown(_currentTerm);
             BecomeFollower(_currentTerm);
         }
+
+        AnnounceLeadership();
 
         // Notify listeners (e.g., ClusterController)
         try
@@ -1310,15 +1381,15 @@ public sealed partial class RaftNode : IAsyncDisposable
             // Record successful contact with this peer
             _lastPeerContact[peerId] = DateTimeOffset.UtcNow;
 
+            var deposed = false;
             lock (_lock)
             {
                 if (response.Term > _currentTerm)
                 {
                     BecomeFollower(response.Term);
-                    return;
+                    deposed = true;
                 }
-
-                if (response.Success)
+                else if (response.Success)
                 {
                     _nextIndex[peerId] = response.MatchIndex + 1;
                     _matchIndex[peerId] = response.MatchIndex;
@@ -1329,6 +1400,9 @@ public sealed partial class RaftNode : IAsyncDisposable
                     _nextIndex[peerId] = Math.Max(1, _nextIndex[peerId] - 1);
                 }
             }
+
+            if (deposed)
+                AnnounceLeadership();
         }
         catch (Exception ex)
         {
@@ -1548,6 +1622,9 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error in quorum lost handler")]
     private partial void LogQuorumLostHandlerError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error in a leadership change handler")]
+    private partial void LogLeadershipChangedHandlerError(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Graceful shutdown: not leader, proceeding immediately")]
     private partial void LogGracefulShutdownNotLeader();
