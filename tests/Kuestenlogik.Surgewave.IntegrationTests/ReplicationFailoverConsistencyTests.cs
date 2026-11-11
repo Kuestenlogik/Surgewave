@@ -51,8 +51,15 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
 
-    // What the fetcher published, collected the way a monitoring system would collect it.
-    private readonly ConcurrentQueue<(string Topic, int Partition, long Offsets)> _fetchSpans = new();
+    /// <summary>
+    /// How long the product gets to send a signal the test waits for. A deadline on a handshake, not
+    /// a pacing device: each wait ends the moment its signal arrives.
+    /// </summary>
+    private static readonly TimeSpan SignalDeadline = TimeSpan.FromSeconds(60);
+
+    // What the fetcher published, collected the way a monitoring system would collect it, per
+    // partition a test has asked about.
+    private readonly ConcurrentDictionary<(string Topic, int Partition), ReplicationFetchWatch> _fetchWatches = new();
     private readonly MeterListener _fetchMeter = new();
 
     private SurgewaveRuntime? _leader;
@@ -88,8 +95,8 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
                 else if (tag.Key == "partition" && tag.Value is int index) partition = index;
             }
 
-            if (topic is not null)
-                _fetchSpans.Enqueue((topic, partition, offsets));
+            if (topic is not null && _fetchWatches.TryGetValue((topic, partition), out var watch))
+                watch.Record(offsets);
         });
         _fetchMeter.Start();
     }
@@ -150,18 +157,34 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
         // at a dead port. Nothing kept that write in place: a broker registration replayed through
         // the metadata log puts the real port back (ApplyBrokerRegistered), so whether the stall
         // held was a race the test lost on a loaded machine (#179).
+        //
+        // Nothing is engineered here, so nothing is assumed either: the test waits for the
+        // fetcher to REPORT a fetch that carried several batches, and fails if none comes. The
+        // watch is in place before the topic exists, so no fetch of it goes unseen.
+        var fetches = WatchReplicationFetches(topic, partition: 0, expectedOffsets: MessageCount);
+
         await CreateReplicatedTopicAsync(leader, topic);
         await ProduceAsync(leader, topic, MessageCount, cancellationToken);
 
         Assert.Equal(MessageCount, leader.LogManager.GetLog(tp)!.NextOffset);
         _output.WriteLine($"leader holds {MessageCount} records; waiting for the follower to catch up");
 
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => follower.LogManager.GetLog(tp)?.NextOffset == MessageCount,
-                timeout: TimeSpan.FromSeconds(60), pollInterval: TimeSpan.FromMilliseconds(100),
-                ct: cancellationToken, output: _output),
-            $"follower never caught up (LEO {follower.LogManager.GetLog(tp)?.NextOffset} of {MessageCount})");
+        // Both waits are on what the fetcher publishes after it has appended a fetch to the
+        // follower's log. The first answers as soon as it is decided: true at the first fetch that
+        // ingested two or more offsets, false once the follower reached the leader's log end
+        // without one — no later fetch can carry anything, so waiting on would only time out.
+        var multiBatchFetch = await AwaitSignalAsync(fetches.MultiBatchFetch, fetches,
+            () => "the follower neither caught up nor reported a multi-batch fetch", cancellationToken);
+        Assert.True(multiBatchFetch,
+            "no replication fetch carried more than one batch — the concatenated-section path from " +
+            $"#92 was never exercised, so this test would prove nothing; fetches seen: {fetches.Describe()}");
+
+        await AwaitSignalAsync(fetches.CaughtUp, fetches,
+            () => $"follower never caught up (LEO {follower.LogManager.GetLog(tp)?.NextOffset} of {MessageCount})",
+            cancellationToken);
+
+        _output.WriteLine($"replication fetches: {fetches.Describe()}");
+        Assert.Equal(MessageCount, follower.LogManager.GetLog(tp)!.NextOffset);
 
         // Oracle 2: the follower stored N separate, individually CRC-valid batches at the leader's
         // own offsets. This is the assertion #92 would fail: a whole-blob append writes one CRC
@@ -175,13 +198,13 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             Assert.Equal(i, RecordBatchValidator.GetBaseOffset(stored[i]));
         }
 
-        // Oracle 3: at least one fetch really did carry several batches — the span the fetcher
-        // reports for a single round trip, one message per batch here.
-        var batchesInLargestFetch = LargestFetchSpan(topic, partition: 0);
-        _output.WriteLine($"largest replication fetch carried {batchesInLargestFetch} batches");
-        Assert.True(batchesInLargestFetch >= 2,
-            $"no replication fetch carried more than one batch — the concatenated-section path from " +
-            $"#92 was never exercised, so this test would prove nothing (largest span {batchesInLargestFetch})");
+        // Oracle 3: the fetch that carried several offsets carried several BATCHES. The fetcher
+        // reports offsets, not batches; the two only coincide because every batch holds exactly one
+        // record, and the loop above has just proved that — 200 batches at base offsets 0..199.
+        var largestFetch = fetches.LargestSpan;
+        _output.WriteLine($"largest replication fetch carried {largestFetch} batches");
+        Assert.True(largestFetch >= 2,
+            $"the multi-batch signal fired, but the largest fetch carried {largestFetch} batch(es)");
 
         // ── Fail the leader over ──────────────────────────────────────────────────────────────
         // The follower has to be in the ISR first: graceful shutdown hands leadership to an ISR
@@ -558,8 +581,9 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// How many offsets the largest single replication fetch ingested, read from the
-    /// <c>surgewave_replication_fetch_offsets</c> metric the fetcher publishes.
+    /// Starts collecting what the fetcher reports for one partition through the
+    /// <c>surgewave_replication_fetch_offsets</c> metric. Call it before the partition exists, so
+    /// that no fetch of it is missed.
     /// </summary>
     /// <remarks>
     /// This used to be reconstructed from the fetcher's Debug log line, which made the verdict of
@@ -567,21 +591,91 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
     /// lower it and it starts reporting. Logs are for people to read. A test asks the same
     /// instrument an operator would (#177 follow-up).
     /// </remarks>
-    private long LargestFetchSpan(string topic, int partition)
+    private ReplicationFetchWatch WatchReplicationFetches(string topic, int partition, long expectedOffsets)
     {
-        var spans = _fetchSpans
-            .Where(f => f.Topic == topic && f.Partition == partition)
-            .Select(f => f.Offsets)
-            .ToList();
+        var watch = new ReplicationFetchWatch(expectedOffsets);
+        Assert.True(_fetchWatches.TryAdd((topic, partition), watch), $"{topic}-{partition} is watched already");
+        return watch;
+    }
 
-        Assert.NotEmpty(spans);
+    /// <summary>
+    /// Waits for <paramref name="signal"/>, and fails with <paramref name="failure"/> — built when
+    /// the deadline passes, so it describes that moment — and the fetches seen so far.
+    /// </summary>
+    private static async Task<T> AwaitSignalAsync<T>(
+        TaskCompletionSource<T> signal, ReplicationFetchWatch fetches, Func<string> failure, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await signal.Task.WaitAsync(SignalDeadline, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            // The shape of the fetches is the first thing worth seeing: many one-offset spans mean
+            // the follower kept pace with the producer and the multi-batch path was never entered.
+            Assert.Fail($"{failure()}; fetches seen: {fetches.Describe()}");
+            throw;
+        }
+    }
 
-        // Written out, not just asserted: when this fails, the shape of the fetches is the first
-        // thing worth seeing — one big span means the stall worked, many small ones mean the
-        // follower kept pace and the multi-batch path was never entered.
-        _output.WriteLine(
-            $"replication fetches: {spans.Count}, spans [{string.Join(", ", spans.Take(8))}] offsets");
+    /// <summary>
+    /// The replication fetches of one partition as the fetcher reported them, and the two moments a
+    /// test waits for: the first fetch that ingested several offsets at once, and the point where
+    /// the fetches together reached the leader's log end.
+    /// </summary>
+    /// <remarks>
+    /// The fetcher records the metric after it has appended the fetch to the local log and moved
+    /// its fetch position, so a signal raised from it describes a log that already holds the data.
+    /// </remarks>
+    private sealed class ReplicationFetchWatch(long expectedOffsets)
+    {
+        private readonly ConcurrentQueue<long> _spans = new();
+        private long _ingested;
+        private long _largest;
 
-        return spans.Max();
+        /// <summary>
+        /// <see langword="true"/> at the first fetch that ingested several offsets;
+        /// <see langword="false"/> when the partition caught up without one.
+        /// </summary>
+        public TaskCompletionSource<bool> MultiBatchFetch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes once the fetches together ingested the expected offsets, with that total.</summary>
+        public TaskCompletionSource<long> CaughtUp { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public long LargestSpan => Interlocked.Read(ref _largest);
+
+        public void Record(long offsets)
+        {
+            _spans.Enqueue(offsets);
+
+            var largest = Interlocked.Read(ref _largest);
+            while (offsets > largest)
+            {
+                var seen = Interlocked.CompareExchange(ref _largest, offsets, largest);
+                if (seen == largest)
+                    break;
+                largest = seen;
+            }
+
+            // The fetcher keeps at most one fetch in flight per leader, so the reports of one
+            // partition arrive in order: a multi-batch fetch is settled before the total it
+            // completes is looked at.
+            if (offsets >= 2)
+                MultiBatchFetch.TrySetResult(true);
+
+            var ingested = Interlocked.Add(ref _ingested, offsets);
+            if (ingested >= expectedOffsets)
+            {
+                MultiBatchFetch.TrySetResult(false);
+                CaughtUp.TrySetResult(ingested);
+            }
+        }
+
+        public string Describe()
+        {
+            var spans = _spans.ToArray();
+            return $"{spans.Length} fetch(es), {Interlocked.Read(ref _ingested)} of {expectedOffsets} offsets, " +
+                $"spans [{string.Join(", ", spans.Take(16))}{(spans.Length > 16 ? ", ..." : "")}]";
+        }
     }
 }
