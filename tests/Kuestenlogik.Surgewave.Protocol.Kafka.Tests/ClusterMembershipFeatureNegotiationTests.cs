@@ -28,6 +28,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         var config = new ClusteringConfig();
         var clusterIdManager = new ClusterIdManager(config, NullLogger<ClusterIdManager>.Instance);
         var state = new ClusterState();
+        state.TrySetClusterId("test-cluster"); // the controller has committed the cluster's id (#203)
         var membership = new ClusterMembershipService(clusterIdManager, state, NullLogger<ClusterMembershipService>.Instance);
 
         // Registration is a committed metadata-log entry now (#171); the registrar stands in for
@@ -57,7 +58,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         CorrelationId = 1,
         ClientId = $"broker-{brokerId}",
         BrokerId = brokerId,
-        ClusterId = "", // empty → ValidateClusterId short-circuits to true, keeps the test hermetic (no disk I/O)
+        ClusterId = "", // a broker that has never joined a cluster, which registration admits (#203)
         IncarnationId = Guid.NewGuid(),
         Listeners =
         [

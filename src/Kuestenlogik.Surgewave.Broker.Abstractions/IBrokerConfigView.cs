@@ -48,9 +48,10 @@ public interface IBrokerConfigView
 
     /// <summary>
     /// The cluster id every client-facing answer reports — ApiVersions, Metadata, DescribeCluster, the
-    /// cluster.id config: the configured id, otherwise the default. The same on every broker of a cluster.
+    /// cluster.id config: the configured id, or the one the cluster generated once and shares through its metadata
+    /// log (#203). The same on every broker of a cluster; <c>null</c> on a broker that has not joined one yet.
     /// </summary>
-    string ResolvedClusterId { get; }
+    string? ResolvedClusterId { get; }
 
     // Controller / leader settings
     bool AllowAutoLeaderRebalance { get; }

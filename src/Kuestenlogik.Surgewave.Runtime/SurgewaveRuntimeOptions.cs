@@ -142,6 +142,12 @@ public sealed record SurgewaveRuntimeOptions
     /// </remarks>
     public string ControllerQuorumVoters { get; init; } = "";
 
+    /// <summary>
+    /// The cluster id (#203). Unset, the cluster generates one once and every broker persists it; set, it is the id
+    /// the cluster gets, and a broker that persisted another refuses to start.
+    /// </summary>
+    public string? ClusterId { get; init; }
+
     /// <summary>Partitions of <c>__consumer_offsets</c> (#204); null keeps the broker default.</summary>
     public int? OffsetsTopicNumPartitions { get; init; }
 

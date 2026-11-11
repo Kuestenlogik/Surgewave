@@ -3,199 +3,213 @@ using Microsoft.Extensions.Logging;
 namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 
 /// <summary>
-/// Manages the cluster ID with auto-generation and persistence.
-/// The cluster ID is a unique identifier for the Surgewave cluster that:
-/// - Is auto-generated on first startup if not configured
-/// - Is persisted to disk so it survives restarts
-/// - Must match across all brokers in the cluster
+/// This broker's cluster id: the configured one, or the one it persisted in <c>cluster.id</c> when it joined its
+/// cluster — Kafka's <c>meta.properties</c> (#203).
 /// </summary>
-public sealed class ClusterIdManager
+/// <remarks>
+/// <para>
+/// A cluster has one id. A broker does not generate its own: the first controller of a cluster writes the id to the
+/// metadata log (the configured one, or one it generates), and every broker adopts it from there and persists it.
+/// It used to be generated and persisted per broker, so the brokers of one cluster had different ids and none of them
+/// could report its own to clients.
+/// </para>
+/// <para>
+/// The id is checked when the broker starts: a configured id that differs from the persisted one stops it. A broker
+/// that carries an id other than its cluster's is refused at registration with INCONSISTENT_CLUSTER_ID, as Kafka's
+/// controller refuses it.
+/// </para>
+/// </remarks>
+public sealed partial class ClusterIdManager
 {
     private const string ClusterIdFileName = "cluster.id";
 
-    private readonly ClusteringConfig _config;
+    private readonly string _dataDirectory;
     private readonly ILogger<ClusterIdManager> _logger;
+    private readonly Lock _lock = new();
+    private readonly TaskCompletionSource<string> _known = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<string> _refused = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private string? _clusterId;
-    private readonly object _lock = new();
+    private string? _candidate;
+    private bool _persisted;
 
     public ClusterIdManager(ClusteringConfig config, ILogger<ClusterIdManager> logger)
+        : this(config.ClusterId, config.DataDirectory, logger)
     {
-        _config = config;
+    }
+
+    /// <exception cref="InvalidOperationException">The configured id differs from the persisted one.</exception>
+    public ClusterIdManager(string? configuredClusterId, string dataDirectory, ILogger<ClusterIdManager> logger)
+    {
+        _dataDirectory = dataDirectory;
         _logger = logger;
+
+        var persisted = LoadPersistedClusterId();
+        if (!string.IsNullOrEmpty(configuredClusterId))
+        {
+            if (persisted is not null && !string.Equals(persisted, configuredClusterId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The configured cluster id '{configuredClusterId}' is not the id '{persisted}' this broker persisted in "
+                    + $"{ClusterIdFilePath} when it joined its cluster. A broker belongs to one cluster: configure "
+                    + $"'{persisted}', or remove the data directory to join another cluster.");
+            }
+
+            SetKnown(configuredClusterId);
+            LogUsingConfigured(configuredClusterId);
+        }
+        else if (persisted is not null)
+        {
+            SetKnown(persisted);
+            LogLoadedPersisted(persisted);
+        }
+
+        _persisted = persisted is not null;
     }
 
     /// <summary>
-    /// Gets the cluster ID, initializing it if necessary.
-    /// Thread-safe and idempotent.
+    /// This broker's cluster id — configured, persisted, or adopted from the metadata log — or <c>null</c> on a broker
+    /// that has not yet joined a cluster.
     /// </summary>
-    public string GetClusterId()
+    public string? ClusterId
     {
-        if (_clusterId != null)
-            return _clusterId;
+        get
+        {
+            lock (_lock)
+                return _clusterId;
+        }
+    }
 
+    /// <summary>Completes with this broker's cluster id once it has one.</summary>
+    public Task<string> Known => _known.Task;
+
+    /// <summary>
+    /// Completes with this broker's cluster id when its cluster refused it as not its own (INCONSISTENT_CLUSTER_ID).
+    /// </summary>
+    public Task<string> Refused => _refused.Task;
+
+    /// <summary>
+    /// The id a controller writes to the metadata log of a cluster that has none: this broker's own, or one it
+    /// generates — the same one on every call, so a controller that retries writes what it wrote before.
+    /// </summary>
+    public string ProposeClusterId()
+    {
+        lock (_lock)
+            return _clusterId ?? (_candidate ??= GenerateClusterId());
+    }
+
+    /// <summary>
+    /// The id of a broker that is its own cluster, with no metadata log: this broker's own, or one generated and
+    /// persisted now — what formatting its storage gives a Kafka broker.
+    /// </summary>
+    public string EnsureClusterId()
+    {
+        string id;
         lock (_lock)
         {
-            if (_clusterId != null)
+            if (_clusterId is not null)
+            {
+                PersistOnce(_clusterId);
                 return _clusterId;
-
-            _clusterId = InitializeClusterId();
-            return _clusterId;
+            }
+            id = GenerateClusterId();
+            PersistOnce(id);
+            SetKnown(id);
         }
+
+        LogGenerated(id);
+        return id;
     }
 
     /// <summary>
-    /// Validates that a given cluster ID matches this cluster.
+    /// Takes the id committed to the metadata log as this broker's own and persists it. A broker that already has
+    /// another keeps it and is refused by its cluster when it registers.
     /// </summary>
-    public bool ValidateClusterId(string? incomingClusterId)
+    /// <returns>Whether the committed id is this broker's.</returns>
+    public bool Adopt(string committedClusterId)
     {
-        if (string.IsNullOrEmpty(incomingClusterId))
-            return true; // Empty cluster IDs are allowed (backwards compatibility)
-
-        var myClusterId = GetClusterId();
-        return string.Equals(myClusterId, incomingClusterId, StringComparison.Ordinal);
-    }
-
-    private string InitializeClusterId()
-    {
-        // Priority 1: Use configured cluster ID from appsettings
-        if (!string.IsNullOrEmpty(_config.ClusterId))
+        lock (_lock)
         {
-            _logger.LogInformation("Using configured cluster ID: {ClusterId}", _config.ClusterId);
+            if (_clusterId is not null)
+            {
+                if (!string.Equals(_clusterId, committedClusterId, StringComparison.Ordinal))
+                {
+                    LogConflict(_clusterId, committedClusterId);
+                    return false;
+                }
 
-            // Still persist it if not already persisted
-            PersistClusterIdIfNeeded(_config.ClusterId);
-            return _config.ClusterId;
+                // A configured id is persisted once it is the cluster's, so a later change of the configuration is
+                // caught at startup.
+                PersistOnce(committedClusterId);
+                return true;
+            }
+
+            PersistOnce(committedClusterId);
+            SetKnown(committedClusterId);
         }
 
-        // Priority 2: Load from persisted file
-        var persistedId = LoadPersistedClusterId();
-        if (!string.IsNullOrEmpty(persistedId))
-        {
-            _logger.LogInformation("Loaded persisted cluster ID: {ClusterId}", persistedId);
-            return persistedId;
-        }
-
-        // Priority 3: Generate new cluster ID
-        var newClusterId = GenerateClusterId();
-        _logger.LogInformation("Generated new cluster ID: {ClusterId}", newClusterId);
-
-        PersistClusterId(newClusterId);
-        return newClusterId;
+        LogAdopted(committedClusterId);
+        return true;
     }
+
+    /// <summary>Whether <paramref name="clusterId"/> is this broker's cluster id.</summary>
+    public bool IsOwn(string clusterId) => string.Equals(ClusterId, clusterId, StringComparison.Ordinal);
+
+    /// <summary>Records that the cluster refused this broker's id at registration.</summary>
+    /// <returns>Whether this is the first refusal.</returns>
+    public bool ReportRefused(string announcedClusterId) => _refused.TrySetResult(announcedClusterId);
+
+    private void SetKnown(string id)
+    {
+        _clusterId = id;
+        _known.TrySetResult(id);
+    }
+
+    private string ClusterIdFilePath => Path.Combine(_dataDirectory, ClusterIdFileName);
 
     private string? LoadPersistedClusterId()
     {
-        try
-        {
-            var clusterIdPath = GetClusterIdFilePath();
-            if (!File.Exists(clusterIdPath))
-                return null;
-
-            var clusterId = File.ReadAllText(clusterIdPath).Trim();
-            if (string.IsNullOrEmpty(clusterId))
-                return null;
-
-            // Validate format
-            if (!IsValidClusterIdFormat(clusterId))
-            {
-                _logger.LogWarning("Invalid cluster ID format in persisted file, will generate new one");
-                return null;
-            }
-
-            return clusterId;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load persisted cluster ID, will generate new one");
+        var path = ClusterIdFilePath;
+        if (!File.Exists(path))
             return null;
-        }
+
+        var clusterId = File.ReadAllText(path).Trim();
+        return clusterId.Length == 0 ? null : clusterId;
     }
 
-    private void PersistClusterIdIfNeeded(string clusterId)
+    private void PersistOnce(string clusterId)
     {
-        try
-        {
-            var clusterIdPath = GetClusterIdFilePath();
-            if (File.Exists(clusterIdPath))
-            {
-                var existing = File.ReadAllText(clusterIdPath).Trim();
-                if (existing == clusterId)
-                    return;
-
-                // Cluster ID mismatch - this is a serious error
-                if (!string.IsNullOrEmpty(existing))
-                {
-                    _logger.LogError(
-                        "Cluster ID mismatch! Configured: {Configured}, Persisted: {Persisted}. " +
-                        "This may indicate data corruption or misconfiguration.",
-                        clusterId, existing);
-                    throw new InvalidOperationException(
-                        $"Cluster ID mismatch. Configured: {clusterId}, Persisted: {existing}. " +
-                        "Delete the cluster.id file if you intentionally changed the cluster ID.");
-                }
-            }
-
-            PersistClusterId(clusterId);
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to check/persist cluster ID");
-        }
-    }
-
-    private void PersistClusterId(string clusterId)
-    {
-        try
-        {
-            var clusterIdPath = GetClusterIdFilePath();
-            var directory = Path.GetDirectoryName(clusterIdPath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            File.WriteAllText(clusterIdPath, clusterId);
-            _logger.LogDebug("Persisted cluster ID to {Path}", clusterIdPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to persist cluster ID to disk");
-            throw;
-        }
-    }
-
-    private string GetClusterIdFilePath()
-    {
-        return Path.Combine(_config.DataDirectory, ClusterIdFileName);
+        if (_persisted)
+            return;
+        Directory.CreateDirectory(_dataDirectory);
+        File.WriteAllText(ClusterIdFilePath, clusterId);
+        _persisted = true;
     }
 
     /// <summary>
-    /// Generates a new cluster ID in Kafka-compatible format.
-    /// Format: Base64-encoded UUID without padding, similar to Kafka's cluster ID.
+    /// A new cluster id in Kafka's format: a random UUID, URL-safe Base64 without padding — what
+    /// <c>kafka-storage random-uuid</c> prints.
     /// </summary>
     private static string GenerateClusterId()
     {
-        // Generate a v4 UUID and encode as Base64 without padding
-        // This matches Kafka's cluster ID format
-        var uuid = Guid.NewGuid();
-        var bytes = uuid.ToByteArray();
-        return Convert.ToBase64String(bytes).TrimEnd('=');
+        Span<byte> bytes = stackalloc byte[16];
+        Guid.NewGuid().TryWriteBytes(bytes);
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
-    /// <summary>
-    /// Validates that a cluster ID has a valid format.
-    /// </summary>
-    private static bool IsValidClusterIdFormat(string clusterId)
-    {
-        if (string.IsNullOrWhiteSpace(clusterId))
-            return false;
+    [LoggerMessage(Level = LogLevel.Information, Message = "Using configured cluster id {ClusterId}")]
+    private partial void LogUsingConfigured(string clusterId);
 
-        // Allow any non-empty string for flexibility
-        // Kafka uses Base64-encoded UUIDs but we're lenient
-        return clusterId.Length >= 1 && clusterId.Length <= 256;
-    }
+    [LoggerMessage(Level = LogLevel.Information, Message = "Loaded persisted cluster id {ClusterId}")]
+    private partial void LogLoadedPersisted(string clusterId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Generated cluster id {ClusterId} for a broker without a cluster")]
+    private partial void LogGenerated(string clusterId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Adopted cluster id {ClusterId} from the metadata log")]
+    private partial void LogAdopted(string clusterId);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "This broker's cluster id {Own} is not {Committed}, the id in the metadata log: it belongs to another cluster and its registration will be refused")]
+    private partial void LogConflict(string own, string committed);
 }

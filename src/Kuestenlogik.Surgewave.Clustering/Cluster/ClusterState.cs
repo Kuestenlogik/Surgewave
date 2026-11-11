@@ -103,6 +103,35 @@ public sealed class ClusterState
         return newEpoch;
     }
 
+    private string? _clusterId;
+    private readonly TaskCompletionSource<string> _clusterIdCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// The cluster id committed to the metadata log (#203), or <c>null</c> while this broker has not applied it.
+    /// </summary>
+    /// <remarks>Written once in a cluster's life, so <see cref="Clear"/> keeps it.</remarks>
+    public string? ClusterId => Volatile.Read(ref _clusterId);
+
+    /// <summary>Completes with the committed cluster id once this broker has applied it.</summary>
+    public Task<string> ClusterIdCommitted => _clusterIdCommitted.Task;
+
+    /// <summary>
+    /// Takes <paramref name="clusterId"/> as the cluster's id unless it already has one: the first id in the log is
+    /// the cluster's, on every broker alike.
+    /// </summary>
+    /// <returns>Whether the cluster's id is now <paramref name="clusterId"/>.</returns>
+    public bool TrySetClusterId(string clusterId)
+    {
+        var existing = Interlocked.CompareExchange(ref _clusterId, clusterId, null);
+        if (existing is null)
+        {
+            _clusterIdCommitted.TrySetResult(clusterId);
+            return true;
+        }
+
+        return string.Equals(existing, clusterId, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// This broker's ID.
     /// </summary>

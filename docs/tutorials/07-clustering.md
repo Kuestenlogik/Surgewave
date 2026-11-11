@@ -290,7 +290,7 @@ All three brokers should be back online with full ISR membership.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `ClusterNodes` | "" | All broker endpoints, comma-separated |
-| `ClusterId` | "surgewave-cluster" | Unique cluster identifier |
+| `ClusterId` | generated | Unique cluster identifier; unset, the cluster generates one once |
 | `ReplicationPort` | 10092 | Port for inter-broker replication traffic |
 | `DefaultReplicationFactor` | 1 | Default replication for new topics |
 | `MinInSyncReplicas` | 1 | Minimum ISR count required for writes |

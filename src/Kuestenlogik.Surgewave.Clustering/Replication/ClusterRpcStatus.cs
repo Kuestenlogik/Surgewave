@@ -35,4 +35,8 @@ public enum ClusterRpcStatus : short
 
     // #197: a transaction marker was appended but not replicated in time. Pinned to Kafka ErrorCode.NotEnoughReplicas.
     NotEnoughReplicas = 19,
+
+    // #203: a broker registering with another cluster's id. Pinned to Kafka ErrorCode.InconsistentClusterId, which
+    // Kafka's controller answers a BrokerRegistration with.
+    InconsistentClusterId = 104,
 }

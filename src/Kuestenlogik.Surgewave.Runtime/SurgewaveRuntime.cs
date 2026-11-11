@@ -86,6 +86,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private Kuestenlogik.Surgewave.Broker.Queue.QueueViewManager? _queueViewManager;
     private Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor? _telemetryIngestor;
 
+    // This broker's cluster id (#203): its cluster's, adopted from the metadata log, or its own without a cluster.
+    private ClusterIdManager? _clusterIdentity;
+
     // Cluster components (only initialized when EnableCluster = true)
     private ClusterState? _clusterState;
     private ClusterController? _clusterController;
@@ -156,6 +159,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     /// The ClusterState (only valid when EnableCluster = true).
     /// </summary>
     public ClusterState? ClusterState => _clusterState;
+
+    /// <summary>
+    /// This broker's cluster id (#203): configured, persisted, or adopted from its cluster's metadata log.
+    /// </summary>
+    public ClusterIdManager ClusterIdentity => _clusterIdentity ?? throw new InvalidOperationException("Broker not started");
 
     /// <summary>
     /// Whether this broker is currently the controller (only valid when EnableCluster = true).
@@ -247,6 +255,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             ClusterNodes = clusterNodesStr,
             ProcessRoles = _options.ProcessRoles,
             ControllerQuorumVoters = _options.ControllerQuorumVoters,
+            ClusterId = _options.ClusterId,
             OffsetsTopicNumPartitions = _options.OffsetsTopicNumPartitions ?? new BrokerConfig().OffsetsTopicNumPartitions,
             TransactionStateLogNumPartitions = _options.TransactionStateLogNumPartitions ?? new BrokerConfig().TransactionStateLogNumPartitions,
             ShareStateTopicNumPartitions = _options.ShareStateTopicNumPartitions ?? new BrokerConfig().ShareStateTopicNumPartitions,
@@ -259,6 +268,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             RaftHeartbeatIntervalMs = _options.RaftHeartbeatIntervalMs,
             RaftPeerDiscoveryTimeoutSeconds = _options.RaftPeerDiscoveryTimeoutSeconds
         };
+
+        // The cluster id every client is told (#203). Checked before anything starts: a configured id that is not the
+        // one this broker persisted stops it. A broker without a cluster is its own and has its id at once; in a
+        // cluster the first controller writes one to the metadata log and every broker adopts it.
+        _clusterIdentity = new ClusterIdManager(
+            _options.ClusterId, _dataDirectory, _loggerFactory.CreateLogger<ClusterIdManager>());
+        if (!_options.EnableCluster)
+            _clusterIdentity.EnsureClusterId();
+        var clusterIdentity = _clusterIdentity;
+        config.UseClusterIdentity(() => clusterIdentity.ClusterId);
 
         // Set security settings on nested Security config
         config.Security.SaslEnabled = _options.EnableSasl;
@@ -593,8 +612,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
         // #60 Inc6b — the shared, protocol-neutral cluster-membership authority (broker registration
         // epochs + fencing). Wired unconditionally so a plugin-free broker owns it too.
-        var clusterIdManager = new ClusterIdManager(
-            clusteringConfig, _loggerFactory.CreateLogger<ClusterIdManager>());
+        var clusterIdManager = _clusterIdentity!;
+        _clusterController.SetClusterIdentity(clusterIdManager);
         // epochsAreMetadataIndices stays false: a JOINING broker registers over the native
         // lifecycle RPC, which calls ClusterMembershipService.Register directly and mints a
         // composed epoch — the metadata log carries only the controller's own registration.
@@ -689,7 +708,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _lifecycleLoop = new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop(
             lifecycleClient, clusteringConfig, _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop>(),
             metadataPosition: () => _raftNode?.CommitIndex ?? 0,
-            offlineLogDirs: () => _logManager!.OfflineLogDirectoryIds);
+            offlineLogDirs: () => _logManager!.OfflineLogDirectoryIds,
+            clusterIdentity: clusterIdManager);
         // The controller hears of a failed log directory with the next heartbeat, sent at once rather than after the
         // interval (#162).
         var lifecycleLoop = _lifecycleLoop;

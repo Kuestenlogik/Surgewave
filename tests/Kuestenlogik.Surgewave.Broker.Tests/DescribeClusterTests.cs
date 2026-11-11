@@ -12,7 +12,7 @@ namespace Kuestenlogik.Surgewave.Broker.Tests;
 
 /// <summary>
 /// DescribeCluster reports the cluster as the broker knows it, and every client-facing answer the same cluster
-/// id (#131). It reported only the broker asked, and its cluster id fell back to "surgewave-{brokerId}" where
+/// id (#131, #203). It reported only the broker asked, and its cluster id fell back to "surgewave-{brokerId}" where
 /// Metadata said "surgewave-cluster" — with KIP-1242 a client that sees two ids rebootstraps.
 /// </summary>
 [Trait("Category", TestCategories.Unit)]
@@ -66,12 +66,41 @@ public sealed class DescribeClusterTests : IDisposable
     }
 
     [Theory]
-    [InlineData(null, BrokerConfig.DefaultClusterId)]
-    [InlineData("configured-id", "configured-id")]
-    public async Task DescribeClusterMetadataAndApiVersionsReportTheSameClusterId(string? configured, string expected)
+    [InlineData("configured-id", null, "configured-id")]
+    [InlineData(null, "AAAAAAAAQAGAAAAAAAAAAQ", "AAAAAAAAQAGAAAAAAAAAAQ")] // the id the cluster generated and shares (#203)
+    public async Task DescribeClusterMetadataAndApiVersionsReportTheSameClusterId(string? configured, string? shared, string expected)
     {
         _config.ClusterId = configured;
+        if (shared is not null)
+            _config.UseClusterIdentity(() => shared);
 
+        var (described, metadata) = await DescribeAndMetadataAsync();
+        var apiVersions = await ApiVersionsV5Async(expected);
+
+        Assert.Equal(expected, described.ClusterId);
+        Assert.Equal(expected, metadata.ClusterId);
+        Assert.Equal(ErrorCode.None, apiVersions.ErrorCode); // the id a client learned is the broker's own
+    }
+
+    /// <summary>
+    /// A broker that has not joined its cluster yet has no id to report (#203) — no literal default stands in for one.
+    /// Metadata says null, as Kafka's nullable field allows; a client pinned to an id is told to rebootstrap.
+    /// </summary>
+    [Fact]
+    public async Task ABrokerWithoutAClusterIdReportsNoneAndAPinnedClientRebootstraps()
+    {
+        _config.UseClusterIdentity(() => null);
+
+        var (described, metadata) = await DescribeAndMetadataAsync();
+        var apiVersions = await ApiVersionsV5Async("AAAAAAAAQAGAAAAAAAAAAQ");
+
+        Assert.Equal("", described.ClusterId);
+        Assert.Null(metadata.ClusterId);
+        Assert.Equal(ErrorCode.RebootstrapRequired, apiVersions.ErrorCode);
+    }
+
+    private async Task<(DescribeClusterResponse Described, MetadataResponse Metadata)> DescribeAndMetadataAsync()
+    {
         var described = await DescribeClusterAsync();
         var metadata = Assert.IsType<MetadataResponse>(await _handler.HandleAsync(new MetadataRequest
         {
@@ -81,20 +110,19 @@ public sealed class DescribeClusterTests : IDisposable
             ClientId = "admin",
             Topics = [],
         }, Context(), CancellationToken.None));
-        var apiVersions = Assert.IsType<ApiVersionsResponse>(await _handler.HandleAsync(new ApiVersionsRequest
+        return (described, metadata);
+    }
+
+    private async Task<ApiVersionsResponse> ApiVersionsV5Async(string pinnedClusterId) =>
+        Assert.IsType<ApiVersionsResponse>(await _handler.HandleAsync(new ApiVersionsRequest
         {
             ApiKey = ApiKey.ApiVersions,
             ApiVersion = 5,
             CorrelationId = 3,
             ClientId = "admin",
-            ClusterId = expected,
+            ClusterId = pinnedClusterId,
             NodeId = 1,
         }, Context(), CancellationToken.None));
-
-        Assert.Equal(expected, described.ClusterId);
-        Assert.Equal(expected, metadata.ClusterId);
-        Assert.Equal(ErrorCode.None, apiVersions.ErrorCode); // the id a client learned is the broker's own
-    }
 
     [Fact]
     public async Task FindCoordinatorNamesTheCoordinatorTheClusterAgreesOnOrSaysNoneIsAvailable()

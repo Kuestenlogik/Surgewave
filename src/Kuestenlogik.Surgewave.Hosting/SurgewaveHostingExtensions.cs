@@ -206,6 +206,7 @@ internal sealed class SurgewaveBrokerHostedService : IHostedService, IAsyncDispo
             .WithReplicationFactor(options.Topics.DefaultReplicationFactor)
             .WithRetentionHours(options.Retention.Hours)
             .WithRetentionBytes(options.Retention.Bytes)
+            .WithClusterId(options.Cluster?.ClusterId)
             .WithCleanup(false) // Production broker should not delete data
             .WithLogging(_loggerFactory)
             .Build();

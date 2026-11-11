@@ -79,6 +79,10 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
                     ApplyGroupConfigChanged(entry.Data);
                     break;
 
+                case MetadataCommandType.ClusterIdSet:
+                    ApplyClusterIdSet(entry.Data);
+                    break;
+
                 default:
                     LogUnknownCommandType(entry.CommandType, entry.Index);
                     break;
@@ -108,6 +112,7 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
             ControllerEpoch = _clusterState.ControllerEpoch,
             GroupConfigs = _clusterState.GroupConfigs.ToDictionary(
                 g => g.Key, g => new Dictionary<string, string>(g.Value, StringComparer.Ordinal), StringComparer.Ordinal),
+            ClusterId = _clusterState.ClusterId,
         };
 
         var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, ClusteringJsonContext.Default.MetadataSnapshot);
@@ -148,6 +153,9 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         foreach (var (groupId, configs) in data.GroupConfigs)
             foreach (var (name, value) in configs)
                 _clusterState.SetGroupConfig(groupId, name, value);
+
+        if (data.ClusterId is not null)
+            _membership.ApplyReplicatedClusterId(data.ClusterId);
 
         LogSnapshotRestored(data.Brokers.Count, data.Topics.Count, data.PartitionStates.Count);
 
@@ -296,6 +304,14 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         LogGroupConfigChanged(cmd.GroupId, cmd.Name, cmd.Value);
     }
 
+    private void ApplyClusterIdSet(byte[] data)
+    {
+        var cmd = JsonSerializer.Deserialize(data, ClusteringJsonContext.Default.ClusterIdSetCommand);
+        if (cmd == null) return;
+
+        _membership.ApplyReplicatedClusterId(cmd.ClusterId);
+    }
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Config {Name} of group {GroupId} is now {Value}")]
     private partial void LogGroupConfigChanged(string groupId, string name, string? value);
 
@@ -423,6 +439,11 @@ public sealed record GroupConfigChangedCommand(
     string? Value
 );
 
+/// <summary>
+/// Command to set the cluster's id (#203), written once by the first controller of a cluster.
+/// </summary>
+public sealed record ClusterIdSetCommand(string ClusterId);
+
 #endregion
 
 #region Snapshot Types
@@ -440,6 +461,9 @@ internal sealed class MetadataSnapshot
 
     /// <summary>The groups' dynamic configs (#228), by group and name.</summary>
     public Dictionary<string, Dictionary<string, string>> GroupConfigs { get; set; } = [];
+
+    /// <summary>The cluster's id (#203), or null before a controller wrote one.</summary>
+    public string? ClusterId { get; set; }
 }
 
 /// <summary>

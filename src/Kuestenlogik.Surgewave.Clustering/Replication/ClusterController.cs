@@ -293,11 +293,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     var epoch = _clusterState.BecomeController(_config.BrokerId);
                     LogBecameRaftLeader(_config.BrokerId, epoch);
 
-                    // Register this broker via Raft (carry incarnation + level + replication port so
-                    // the committed entry rebuilds the membership store faithfully; #72 Inc5).
-                    _ = RegisterBrokerViaRaftAsync(
-                        _config.BrokerId, _config.Host, _config.Port, _config.Rack,
-                        _raftSelfIncarnation, InterBrokerProtocolFeature.LocalMaxSupported, _config.ReplicationPort, ct);
+                    // The cluster's id, unless an earlier controller wrote it (#203), then this broker's
+                    // registration via Raft (carry incarnation + level + replication port so the committed
+                    // entry rebuilds the membership store faithfully; #72 Inc5).
+                    _ = TakeOfficeAsync(ct);
 
                     // Start controller loop
                     _controllerTask = Task.Run(() => ControllerLoopAsync(ct), ct);

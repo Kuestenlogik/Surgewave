@@ -20,6 +20,7 @@ public class NativeMembershipGateTests
     private static (ClusterStateInterBrokerService Service, ClusterState State) NewService(int localBrokerId, int controllerId)
     {
         var state = new ClusterState { ControllerId = controllerId };
+        state.TrySetClusterId("test-cluster"); // the controller has committed the cluster's id (#203)
         var config = new ClusteringConfig { BrokerId = localBrokerId };
         var logs = new LogManager(
             Path.Combine(Path.GetTempPath(), $"surgewave-test-{Guid.NewGuid():N}"),

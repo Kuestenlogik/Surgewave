@@ -65,5 +65,11 @@ public enum MetadataCommandType
     /// Set or remove one dynamic config of a group (#228) — Kafka's ConfigRecord of a GROUP resource — so every
     /// broker applies a share group's limits as its coordinator does.
     /// </summary>
-    GroupConfigChanged = 10
+    GroupConfigChanged = 10,
+
+    /// <summary>
+    /// The cluster's id (#203), written once by the first controller of a cluster — Kafka keeps it in the metadata
+    /// log's storage too. The first such entry in the log is the cluster's id; every broker adopts it.
+    /// </summary>
+    ClusterIdSet = 11
 }

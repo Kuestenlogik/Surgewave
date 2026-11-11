@@ -22,6 +22,7 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
     private readonly ILogger<BrokerLifecycleLoop> _logger;
     private readonly Func<long>? _metadataPosition;
     private readonly Func<IReadOnlyList<Guid>>? _offlineLogDirs;
+    private readonly ClusterIdManager? _clusterIdentity;
 
     // Released to send the next heartbeat now rather than at the end of the interval (#162).
     private readonly SemaphoreSlim _heartbeatNow = new(0, 1);
@@ -44,18 +45,23 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
     /// The ids of this broker's log directories that have failed (#162), sent with every heartbeat as Kafka's broker
     /// sends them; null for a broker without log directories of its own to report.
     /// </param>
+    /// <param name="clusterIdentity">
+    /// This broker's cluster id, which it announces at registration (#203); without it, the configured one.
+    /// </param>
     public BrokerLifecycleLoop(
         IBrokerLifecycleRpc rpc,
         ClusteringConfig config,
         ILogger<BrokerLifecycleLoop> logger,
         Func<long>? metadataPosition = null,
-        Func<IReadOnlyList<Guid>>? offlineLogDirs = null)
+        Func<IReadOnlyList<Guid>>? offlineLogDirs = null,
+        ClusterIdManager? clusterIdentity = null)
     {
         _rpc = rpc;
         _config = config;
         _logger = logger;
         _metadataPosition = metadataPosition;
         _offlineLogDirs = offlineLogDirs;
+        _clusterIdentity = clusterIdentity;
     }
 
     /// <summary>
@@ -120,11 +126,18 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
                 if (BrokerEpoch < 0)
                 {
                     delayMs = RegistrationRetryMs;
-                    var outcome = await _rpc.RegisterAsync(BuildRegistrationInput(), ct).ConfigureAwait(false);
+                    var input = BuildRegistrationInput();
+                    var outcome = await _rpc.RegisterAsync(input, ct).ConfigureAwait(false);
                     if (outcome.Status == ClusterRpcStatus.None)
                     {
                         Interlocked.Exchange(ref _brokerEpoch, outcome.BrokerEpoch);
                         LogRegistered(_config.BrokerId, outcome.BrokerEpoch);
+                    }
+                    else if (outcome.Status == ClusterRpcStatus.InconsistentClusterId)
+                    {
+                        // Another cluster's broker (#203). Retried as Kafka's broker retries it; told once.
+                        if (_clusterIdentity?.ReportRefused(input.ClusterId) ?? true)
+                            LogClusterIdRefused(input.ClusterId);
                     }
                     else
                     {
@@ -211,12 +224,10 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
 
         return new BrokerRegistrationInput(
             BrokerId: _config.BrokerId,
-            // The configured id, or none. NOT a literal default: the controller validates against
-            // ClusterIdManager, which GENERATES and persists a random id when none is configured —
-            // so announcing a fixed "surgewave-cluster" made every registration in an unconfigured
-            // cluster fail the check, and no broker could ever join (#176). An empty id is the
-            // documented "no opinion" value the check admits.
-            ClusterId: _config.ClusterId ?? string.Empty,
+            // This broker's id — configured, persisted or adopted from the metadata log — which the controller checks
+            // against the log's (#203). None only on a broker that has never joined a cluster: it adopts the
+            // cluster's from the log.
+            ClusterId: _clusterIdentity?.ClusterId ?? _config.ClusterId ?? string.Empty,
             IncarnationId: _incarnationId,
             Listeners: listeners,
             Features: features,
@@ -250,6 +261,10 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Native registration pending ({Status}) — no controller reachable yet, will retry")]
     private partial void LogRegistrationPending(ClusterRpcStatus status);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "The controller refused this broker's registration: cluster id {ClusterId} is not its cluster's (INCONSISTENT_CLUSTER_ID). The broker belongs to another cluster; point it at its own, or remove its data directory to join this one")]
+    private partial void LogClusterIdRefused(string clusterId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Native heartbeat rejected ({Status}) — re-registering")]
     private partial void LogHeartbeatRejected(ClusterRpcStatus status);

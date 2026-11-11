@@ -602,6 +602,19 @@ levels, and a test holds it to Kafka's dependencies between levels. The broker r
 carries `metadata.version` next to `inter.broker.protocol`. The unused Kafka-wire
 `BrokerLifecycleManager`, which announced 1–20, is gone.
 
+### One cluster id per cluster (#203)
+
+Without a configured `ClusterId`, every broker generated and persisted an id of its own, so a cluster had none
+it could tell clients: the brokers reported the literal `surgewave-cluster` instead, and a broker's registration
+was never checked against an id. Now the first controller of a cluster writes the id to the metadata log, as
+Kafka writes it once when the storage is formatted: the configured id, or a generated one in Kafka's format.
+Every broker adopts it from the log and persists it in `cluster.id`, and Metadata, DescribeCluster, ApiVersions
+(KIP-1242) and the `cluster.id` config report it — the same id on every broker and across restarts. A broker
+that carries another cluster's id is refused at registration with `INCONSISTENT_CLUSTER_ID`, as Kafka's
+controller refuses it; a configured id that differs from the persisted one stops the broker at startup. A
+single broker and an embedded host get a generated, persisted id too, and the embedded host now passes
+`Cluster.ClusterId` through.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages
@@ -687,6 +700,17 @@ The request a broker sends the controller to create a topic now ends with
 the replicas of each partition. A broker of the previous release cannot
 read it, and the reverse, so a cluster creating topics through a broker
 that is not the controller is upgraded as a whole, not broker by broker.
+
+### Clients see the cluster's generated id, not `surgewave-cluster` (#203)
+
+A broker without a configured `ClusterId` reported `surgewave-cluster` to clients. It now reports the id its
+cluster generated, which differs per cluster; `BrokerConfig.DefaultClusterId` is gone, and
+`IBrokerConfigView.ResolvedClusterId` is `null` on a broker that has not joined its cluster yet. A client that
+pinned `surgewave-cluster` (KIP-1242) rebootstraps once; configure `ClusterId` to keep a fixed id. An existing
+cluster gets its id from its controller after the upgrade, and every broker adopts it. A broker that has a
+`cluster.id` file with another id — written for a configured id before the upgrade — is refused with
+`INCONSISTENT_CLUSTER_ID`: configure that id on every broker, or remove the file. Registration answers a wrong
+id with `INCONSISTENT_CLUSTER_ID` (104) instead of `CLUSTER_AUTHORIZATION_FAILED`.
 
 ### The JSON group-state files are gone (#219)
 

@@ -11,7 +11,7 @@ public sealed class ClusterOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Cluster ID. Auto-generated if not specified.
+    /// Cluster ID. Unset, the broker generates one once and persists it in its data directory (#203).
     /// </summary>
     public string? ClusterId { get; set; }
 

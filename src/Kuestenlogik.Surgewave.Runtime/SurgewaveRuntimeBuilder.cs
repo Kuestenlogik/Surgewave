@@ -37,6 +37,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     private List<string> _clusterNodes = [];
     private string _processRoles = "broker,controller";
     private string _controllerQuorumVoters = "";
+    private string? _clusterId;
     private int? _offsetsTopicNumPartitions;
     private int? _transactionStateLogNumPartitions;
     private int? _shareStateTopicNumPartitions;
@@ -264,6 +265,15 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
     }
 
     /// <summary>
+    /// Sets the cluster id (#203). Without one the cluster generates its id once, and every broker persists it.
+    /// </summary>
+    public SurgewaveRuntimeBuilder WithClusterId(string? clusterId)
+    {
+        _clusterId = clusterId;
+        return this;
+    }
+
+    /// <summary>
     /// Sets how many partitions <c>__consumer_offsets</c> gets — the internal topic whose partition leaders
     /// coordinate groups (#204). A test cluster that does not need Kafka's 50 can keep replication light.
     /// </summary>
@@ -480,6 +490,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         _retentionHours = config.LogRetentionHours;
         _retentionBytes = config.LogRetentionBytes;
         _enableCluster = !string.IsNullOrEmpty(config.ClusterNodes);
+        _clusterId = config.ClusterId;
         _enableSasl = config.Security.SaslEnabled;
         _enableTls = config.Security.TlsEnabled;
         _enableAcl = config.Security.AclEnabled;
@@ -511,6 +522,7 @@ public sealed class SurgewaveRuntimeBuilder : IStorageConfigurableBuilder
         ClusterNodes = _clusterNodes,
         ProcessRoles = _processRoles,
         ControllerQuorumVoters = _controllerQuorumVoters,
+        ClusterId = _clusterId,
         OffsetsTopicNumPartitions = _offsetsTopicNumPartitions,
         TransactionStateLogNumPartitions = _transactionStateLogNumPartitions,
         ShareStateTopicNumPartitions = _shareStateTopicNumPartitions,

@@ -55,7 +55,7 @@ public class ClusterMembershipServiceTests
         return service.ExpireStaleSessions(timeout);
     }
 
-    // ClusterId "" short-circuits ValidateClusterId to true, keeping tests hermetic (no cluster.id file).
+    // ClusterId "": a broker that has never joined a cluster, which registration admits (#203).
     private static BrokerRegistrationInput Registration(int brokerId, Guid incarnation, short level = InterBrokerProtocolFeature.Native, int? replicationPort = null)
     {
         var listeners = new List<ListenerSpec> { new("PLAINTEXT", "h", 9092 + brokerId, 0) };

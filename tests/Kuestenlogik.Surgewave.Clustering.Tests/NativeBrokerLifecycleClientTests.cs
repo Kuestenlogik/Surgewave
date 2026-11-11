@@ -37,6 +37,7 @@ public class NativeBrokerLifecycleClientTests : IAsyncLifetime
 
         var controllerConfig = new ClusteringConfig { BrokerId = 1, Host = "localhost", Port = 9093, RebalanceCheckIntervalSeconds = 5 };
         _controllerState.ControllerId = 1; // this broker is the controller (IsController via id fallback)
+        _controllerState.TrySetClusterId("test-cluster"); // and has committed the cluster's id (#203)
         var logs = new LogManager(
             Path.Combine(Path.GetTempPath(), $"surgewave-test-{Guid.NewGuid():N}"),
             new MemoryLogSegmentFactory());

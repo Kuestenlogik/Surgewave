@@ -133,7 +133,7 @@ Ephemeral topics store messages in a fixed-size ring buffer. When full, oldest m
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `ClusterNodes` | string | "" | Comma-separated broker endpoints |
-| `ClusterId` | string | "surgewave-cluster" | Cluster identifier |
+| `ClusterId` | string | generated | Cluster identifier. Unset, the first controller generates one and every broker persists it in `cluster.id` |
 | `Rack` | string | null | Rack awareness identifier |
 
 ## Replication Settings

@@ -572,8 +572,9 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
             controllerId = _config.BrokerId;
         }
 
-        // The same id ApiVersions and Metadata report: with KIP-1242 a client that sees two ids rebootstraps.
-        var clusterId = _config.ResolvedClusterId;
+        // The same id ApiVersions and Metadata report: with KIP-1242 a client that sees two ids rebootstraps. DescribeCluster's
+        // id is not nullable, so a broker that has not joined its cluster yet answers an empty one.
+        var clusterId = _config.ResolvedClusterId ?? string.Empty;
 
         // ClusterAuthorizedOperations: int.MinValue means not requested
         // If requested, return a bitfield of allowed operations

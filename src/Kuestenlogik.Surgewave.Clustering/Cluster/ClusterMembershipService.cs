@@ -67,10 +67,38 @@ public sealed partial class ClusterMembershipService
     }
 
     /// <summary>
-    /// Whether <paramref name="clusterId"/> is this cluster's, checked before a registration is
-    /// proposed so a wrong one never commits an entry.
+    /// Whether a broker announcing <paramref name="clusterId"/> may join this cluster, checked against the id in the
+    /// metadata log before a registration is proposed, so a wrong one never commits an entry (#203).
     /// </summary>
-    public bool ValidateClusterId(string clusterId) => _clusterIdManager.ValidateClusterId(clusterId);
+    /// <returns>
+    /// <see cref="ClusterRpcStatus.None"/> for this cluster's id, and for none: a broker that has never joined a
+    /// cluster carries no id, and adopts this one from the log. <see cref="ClusterRpcStatus.InconsistentClusterId"/>
+    /// for another cluster's, as Kafka's controller answers. <see cref="ClusterRpcStatus.BrokerNotAvailable"/> while
+    /// the controller has not committed the id yet: the broker retries.
+    /// </returns>
+    public ClusterRpcStatus CheckClusterId(string clusterId)
+    {
+        var committed = _clusterState.ClusterId;
+        if (committed is null)
+            return ClusterRpcStatus.BrokerNotAvailable;
+        if (clusterId.Length == 0 || string.Equals(clusterId, committed, StringComparison.Ordinal))
+            return ClusterRpcStatus.None;
+        return ClusterRpcStatus.InconsistentClusterId;
+    }
+
+    /// <summary>
+    /// Applies a committed cluster id (#203): the first one in the log is the cluster's, and this broker adopts it.
+    /// </summary>
+    public void ApplyReplicatedClusterId(string clusterId)
+    {
+        if (!_clusterState.TrySetClusterId(clusterId))
+        {
+            LogSecondClusterIdIgnored(clusterId, _clusterState.ClusterId!);
+            return;
+        }
+
+        _clusterIdManager.Adopt(clusterId);
+    }
 
     /// <summary>
     /// The endpoints and protocol level a registration advertises, as the metadata-log entry needs
@@ -457,6 +485,10 @@ public sealed partial class ClusterMembershipService
         /// </summary>
         public DateTime LastContactUtc { get; set; }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Ignored cluster id {Ignored} in the metadata log: the cluster's id is {ClusterId}, the first one written")]
+    private partial void LogSecondClusterIdIgnored(string ignored, string clusterId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Applied replicated broker registration: BrokerId={BrokerId} epoch={Epoch} at {Host}:{Port} (level={Level})")]
     private partial void LogReplicatedRegistration(int brokerId, long epoch, string host, int port, short level);

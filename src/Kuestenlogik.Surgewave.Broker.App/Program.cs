@@ -447,7 +447,8 @@ builder.Services.AddSingleton<BrokerMetrics>();
 builder.Services.AddSingleton<ClusterState>();
 // Singleton, because it persists cluster.id to disk — two instances
 // would race on the same file.
-builder.Services.AddSingleton<ClusterIdManager>();
+builder.Services.AddSingleton(sp => new ClusterIdManager(
+    sp.GetRequiredService<ClusteringConfig>(), sp.GetRequiredService<ILogger<ClusterIdManager>>()));
 
 // #60 Inc6b — the shared cluster-membership authority (broker registration epochs + fencing),
 // driven by the native inter-broker receive server and the native lifecycle loop.
@@ -999,8 +1000,15 @@ var clusteringConfig = app.Services.GetRequiredService<ClusteringConfig>();
 // Both configs together, so an operator fixing a deployment file sees every mistake in it at once.
 ConfigValidator.ThrowIfAnyInvalid(config, clusteringConfig);
 
+// #203 — the cluster id every client is told, checked before anything starts: a configured id that is not the one
+// this broker persisted stops it. The first controller writes the cluster's id to the metadata log and every broker
+// adopts it from there.
+var clusterIdentity = app.Services.GetRequiredService<ClusterIdManager>();
+config.UseClusterIdentity(() => clusterIdentity.ClusterId);
+
 var replicaManager = app.Services.GetRequiredService<ReplicaManager>();
 var clusterController = app.Services.GetRequiredService<ClusterController>();
+clusterController.SetClusterIdentity(clusterIdentity);
 var replicationServer = app.Services.GetRequiredService<ReplicationServer>();
 
 // #121 — the failure detector. Without it ClusterController._heartbeatManager is null, and since
@@ -1078,7 +1086,8 @@ var lifecycleLoop = new BrokerLifecycleLoop(
         app.Services.GetRequiredService<ILogger<NativeBrokerLifecycleClient>>()),
     clusteringConfig,
     app.Services.GetRequiredService<ILogger<BrokerLifecycleLoop>>(),
-    offlineLogDirs: () => app.Services.GetRequiredService<LogManager>().OfflineLogDirectoryIds);
+    offlineLogDirs: () => app.Services.GetRequiredService<LogManager>().OfflineLogDirectoryIds,
+    clusterIdentity: clusterIdentity);
 #pragma warning restore CA2000
 // The controller hears of a failed log directory with the next heartbeat, sent at once rather than after the interval
 // (#162).

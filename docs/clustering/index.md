@@ -71,7 +71,7 @@ flowchart LR
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `ClusterNodes` | "" | Comma-separated broker endpoints |
-| `ClusterId` | "surgewave-cluster" | Cluster identifier |
+| `ClusterId` | generated | Cluster identifier. Unset, the first controller generates one and every broker persists it (#203) |
 | `ReplicationPort` | 10092 | Replication traffic port |
 | `MinInSyncReplicas` | 1 | Minimum ISR for writes |
 

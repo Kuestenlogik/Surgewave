@@ -55,11 +55,18 @@ public sealed partial class BrokerRegistrationCoordinator
         if (!_registrar.IsController)
             return new BrokerRegistrationOutcome(ClusterRpcStatus.NotController, -1);
 
-        // Checked before proposing: a wrong cluster id must not commit an entry.
-        if (!_membership.ValidateClusterId(input.ClusterId))
+        // Checked before proposing, against the id in the metadata log: a wrong cluster id must not commit an entry,
+        // and is answered as Kafka's controller answers it (#203).
+        var clusterIdStatus = _membership.CheckClusterId(input.ClusterId);
+        if (clusterIdStatus == ClusterRpcStatus.InconsistentClusterId)
         {
-            LogClusterIdMismatch(input.BrokerId, input.ClusterId);
-            return new BrokerRegistrationOutcome(ClusterRpcStatus.ClusterAuthorizationFailed, -1);
+            LogClusterIdMismatch(input.BrokerId, input.ClusterId, _clusterState.ClusterId!);
+            return new BrokerRegistrationOutcome(clusterIdStatus, -1);
+        }
+        if (clusterIdStatus != ClusterRpcStatus.None)
+        {
+            LogClusterIdNotCommitted(input.BrokerId);
+            return new BrokerRegistrationOutcome(clusterIdStatus, -1);
         }
 
         var finalizedBefore = _clusterState.FinalizedInterBrokerProtocol;
@@ -105,8 +112,12 @@ public sealed partial class BrokerRegistrationCoordinator
     private partial void LogRegistration(int brokerId, string clusterId, Guid incarnationId);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Rejecting registration of broker {BrokerId}: cluster id {ClusterId} is not this cluster's")]
-    private partial void LogClusterIdMismatch(int brokerId, string clusterId);
+        Message = "Rejecting registration of broker {BrokerId}: cluster id {ClusterId} is not this cluster's, {Expected}")]
+    private partial void LogClusterIdMismatch(int brokerId, string clusterId, string expected);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Registration of broker {BrokerId} waits for the cluster id to commit; the joiner will retry")]
+    private partial void LogClusterIdNotCommitted(int brokerId);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Registration of broker {BrokerId} did not commit to the metadata log; the joiner will retry")]
