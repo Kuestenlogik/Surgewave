@@ -1,10 +1,14 @@
 ---
-title: <what this delivery is about, as a sentence — it is the release's heading, not its version>
-version: <X.Y.Z, no leading v>
+title: One metadata log, and a cluster that agrees with itself
+version: 0.6.0
 ---
 
-<One-sentence summary of what the release is about. Sets the frame
-before Highlights drops into specifics.>
+0.6.0 is about a cluster being right rather than fast. Metadata is now one replicated log that
+every broker applies, so leadership, topics, the cluster id and a broker's own epoch have a
+single answer. Around that, the release closes gaps that showed only with real clients and
+real failures: Java 4.x clients and transactions V2 end to end, a broker whose disk fails
+handing its partitions over, and a Kafka wire client that produces and consumes. It carries
+breaking changes; an existing cluster is upgraded as a whole, not broker by broker.
 
 ## Highlights
 
@@ -831,8 +835,3 @@ offline log directories, so a broker of this release and one of an earlier
 release cannot heartbeat each other natively. Upgrade the brokers of a
 cluster together. `BrokerHeartbeatInput` gains the required
 `OfflineLogDirs`, and `ClusterMembershipHandler` no longer takes a logger.
-
-## Acknowledgements
-
-<Optional. Short. Names contributors who exercised the rc series or
-reported the bugs that landed as fixes.>
