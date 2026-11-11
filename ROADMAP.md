@@ -28,10 +28,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 - [Kuestenlogik/Surgewave.Connectors#9](https://github.com/Kuestenlogik/Surgewave.Connectors/issues/9) **G17 — Flink connector** `area:connect`
 - [Kuestenlogik/Surgewave.Ai#8](https://github.com/Kuestenlogik/Surgewave.Ai/issues/8) **G26 — AI pipeline cost tracking** 
 
-### v0.6 — Correctness & durability
-
-- [#180](https://github.com/Kuestenlogik/Surgewave/issues/180) **perf(clustering): re-election and ISR propagation are too slow to assert on within 60s** `area:clustering`
-
 ### v0.7 — Hygiene: CI, dependencies, licences
 
 - [#173](https://github.com/Kuestenlogik/Surgewave/issues/173) **deps: the same package is pinned at different versions across the repos** `area:multi`
