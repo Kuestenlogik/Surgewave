@@ -13,9 +13,14 @@ namespace Kuestenlogik.Surgewave.Broker.BootTests;
 /// </summary>
 internal sealed class BrokerProcess : IAsyncDisposable
 {
-    // Emitted synchronously AFTER all IBrokerPlugin activation completes — so a plugin crashing
-    // while constructing a client never reaches it, which is exactly what makes it the crash guard.
+    // Emitted AFTER all IBrokerPlugin activation completes — so a plugin crashing while constructing a client never
+    // reaches it, which is exactly what makes it the crash guard — and once the broker has caught up with its
+    // metadata log and bound the client listener (#250): a client that connects on this line is answered from the
+    // metadata the broker had before it restarted.
     public const string ReadyLine = "Surgewave broker ready to accept connections";
+
+    // The cluster controller's word that the metadata log is applied and acted on; precedes ReadyLine.
+    public const string CaughtUpLine = "has caught up with the metadata log";
 
     // Fires only once app.RunAsync() actually binds Kestrel — also catches a TLS/dev-cert bind failure.
     public const string AppStartedLine = "Application started. Press Ctrl+C to shut down.";

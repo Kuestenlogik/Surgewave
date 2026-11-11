@@ -275,6 +275,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         _raftNode.LeadershipChanged += HandleRaftLeadershipChanged;
         FollowRaftLeadership();
 
+        // The startup handshake a host waits on before it lets clients in; ends with this controller.
+        _ = CatchUpWithMetadataAsync(_raftNode, _lifetime);
+
         await _raftNode.StartAsync(cancellationToken);
         LogRaftModeEnabled();
     }
@@ -521,6 +524,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
     public async ValueTask DisposeAsync()
     {
+        // Whoever still waits for a broker that never caught up is told so; a controller that was never started has
+        // nothing else to tell them.
+        _metadataCaughtUp.TrySetCanceled();
+
         if (_cts is not null)
         {
             try { await _cts.CancelAsync(); } catch (ObjectDisposedException) { }

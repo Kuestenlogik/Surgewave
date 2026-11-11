@@ -78,6 +78,24 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
         _channel.Writer.TryWrite(new PendingTransition(new TopicPartition { Topic = topic, Partition = -1 }, -1, 0, ConfigOnly: true));
 
     /// <summary>
+    /// Completes when every transition queued before this call has been carried out: the broker then acts as the
+    /// metadata applied so far says — it leads and follows the partitions it should, with their topics' configs.
+    /// Cancelled with <paramref name="ct"/>, and when the queue is disposed first.
+    /// </summary>
+    /// <remarks>
+    /// A marker that travels through the queue behind them, so the wait ends on the worker reaching it and not on a
+    /// look at the queue's length, which says nothing about the transition under way.
+    /// </remarks>
+    public Task WhenCarriedOutAsync(CancellationToken ct)
+    {
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var marker = new PendingTransition(new TopicPartition { Topic = string.Empty, Partition = -1 }, -1, 0, Reached: reached);
+        if (!_channel.Writer.TryWrite(marker))
+            reached.TrySetCanceled();
+        return reached.Task.WaitAsync(ct);
+    }
+
+    /// <summary>
     /// Decides which transition a leadership change implies for a given broker, or none.
     /// </summary>
     /// <remarks>
@@ -106,7 +124,11 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
             {
                 try
                 {
-                    if (pending.ConfigOnly)
+                    if (pending.Reached is { } reached)
+                    {
+                        reached.TrySetResult();
+                    }
+                    else if (pending.ConfigOnly)
                     {
                         _replicaManager.ApplyTopicConfig(pending.Partition.Topic);
                     }
@@ -150,9 +172,15 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
         try { await _worker.ConfigureAwait(false); }
         catch (OperationCanceledException) { /* expected */ }
 
+        // Whoever waits for a marker the worker never reached is told so.
+        while (_channel.Reader.TryRead(out var left))
+            left.Reached?.TrySetCanceled();
+
         _cts.Dispose();
     }
 
     /// <param name="LeaderBrokerId">-1 means "we are the leader"; otherwise the leader to follow.</param>
-    internal readonly record struct PendingTransition(TopicPartition Partition, int LeaderBrokerId, int LeaderEpoch, bool ConfigOnly = false);
+    /// <param name="Reached">Set on a marker, which is no transition: completed when the worker gets to it.</param>
+    internal readonly record struct PendingTransition(
+        TopicPartition Partition, int LeaderBrokerId, int LeaderEpoch, bool ConfigOnly = false, TaskCompletionSource? Reached = null);
 }

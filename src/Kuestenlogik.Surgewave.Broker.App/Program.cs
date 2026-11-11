@@ -265,7 +265,9 @@ builder.Services.AddSingleton(_ => ConnectServiceImplHolder.Instance
     ?? throw new InvalidOperationException("ConnectServiceImpl not initialized"));
 
 // Add health checks
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    // Not ready before the metadata log is applied (#250); the liveness probe runs no check.
+    .AddCheck<Kuestenlogik.Surgewave.Broker.Health.MetadataCaughtUpHealthCheck>("metadata");
 
 // JWT auth for the HTTP REST surface (#37). Config-gated (default off) so
 // existing deployments keep their open admin API; when enabled, management
@@ -969,6 +971,9 @@ app.UseSurgewaveRestApiAuth(config.Security.RestApiAuth, config.Security.OAuth2,
 // accepted from loopback only. See GHSA-2fv9-qr54-gjhp.
 app.UseSurgewavePrivilegedWriteGuard(config.Security.RestApiAuth, logger);
 
+// No API request is answered from metadata the broker has not applied yet (#250); health and metrics are.
+app.UseSurgewaveMetadataCatchUpGate(app.Services.GetRequiredService<ClusterController>());
+
 // Apply SIMD configuration from appsettings
 SimdBigEndian.MinBatchSize = config.SimdBatchThreshold;
 
@@ -1109,6 +1114,8 @@ RaftPersistence raftPersistence;
     // Wire up Raft to replication components
     replicationServer.SetRaftNode(raftNode);
     clusterController.SetRaftNode(raftNode);
+    // Caught up includes acting on the log: leading and following the partitions it gives this broker (#250).
+    clusterController.SetReplicationTransitions(app.Services.GetRequiredService<ReplicationTransitionQueue>());
 
     logger.LogInformation("Raft consensus initialized (BrokerId={BrokerId}, DataDir={DataDir})",
         config.BrokerId, config.ResolvedRaftDataDirectory);
@@ -1792,7 +1799,20 @@ app.Lifetime.ApplicationStopping.Register(() => heartbeatManager.DisposeAsync().
 
 logger.LogInformation("Replication components started (Controller: {IsController})", clusterController.IsController);
 
-var brokerTask = Task.Run(() => surgewaveBroker.StartAsync(CancellationToken.None));
+// The startup handshake (#250). A broker that has just started holds its metadata log and has applied none of it:
+// until its Raft node leads or follows a leader it knows no topic, no config and no controller, and a client it let
+// in was told that a topic created before the restart does not exist, or was given the topic without a config
+// change made after its creation. So the client listener is bound here, as it was — a port that is taken shows at
+// once — and its connections are accepted only once the broker has caught up: a client that comes earlier waits in
+// the listen backlog and is answered when the broker can answer, and the ready line below waits for the same. The
+// replication port has been listening since the line above: the Raft node catches up over it. As a Kafka broker in
+// KRaft mode, a broker that reaches no quorum stays not ready for as long as that lasts; its Raft node logs every
+// election it loses.
+var metadataCaughtUp = clusterController.WaitForMetadataCaughtUpAsync(app.Lifetime.ApplicationStopping);
+if (!metadataCaughtUp.IsCompleted)
+    logger.LogInformation("Catching up with the metadata log; clients on {Host}:{Port} are answered once that is done", config.Host, config.Port);
+
+var brokerTask = Task.Run(() => surgewaveBroker.StartAsync(metadataCaughtUp, CancellationToken.None));
 
 // What the listener actually speaks is decided by the plugins that activated, not by the config
 // flag: with Protocol.Kafka absent from plugins/ the flag is still true, but no Kafka connection
@@ -1801,7 +1821,7 @@ var brokerTask = Task.Run(() => surgewaveBroker.StartAsync(CancellationToken.Non
 // dropped, so report the activation instead — and say so when the two disagree.
 if (kafkaProtocolActive)
 {
-    logger.LogInformation("Kafka wire protocol listener started on {Host}:{Port}", config.Host, config.Port);
+    logger.LogInformation("Kafka wire protocol listener on {Host}:{Port}", config.Host, config.Port);
 }
 else if (config.Kafka.Enabled)
 {
@@ -1811,7 +1831,7 @@ else if (config.Kafka.Enabled)
 }
 else
 {
-    logger.LogInformation("Native-only listener started on {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
+    logger.LogInformation("Native-only listener on {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
 }
 
 app.MapGrpcService<ProducerServiceImpl>();
@@ -2063,17 +2083,40 @@ app.MapGet("/sd-targets", () =>
 // Active-active multi-DC replication and Cluster Linking require the Kuestenlogik.Surgewave.Replication package.
 
 logger.LogInformation("gRPC server started on port {GrpcPort}", config.GrpcPort);
-logger.LogInformation("Surgewave broker ready to accept connections");
-if (kafkaProtocolActive)
-    logger.LogInformation("  - Kafka wire protocol: {Host}:{Port}", config.Host, config.Port);
-else
-    logger.LogInformation("  - Native protocol only: {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
-logger.LogInformation("  - gRPC API:            {Host}:{GrpcPort}", config.Host, config.GrpcPort);
-logger.LogInformation("  - Metrics:             {Host}:{GrpcPort}/metrics", config.Host, config.GrpcPort);
-foreach (var proto in activatedProtocols)
-    logger.LogInformation("  - {Protocol}:  port {Port}", proto.DisplayName, proto.DefaultPort > 0 ? proto.DefaultPort : "shared");
-// Schema Registry startup log is now emitted by SurgewaveSchemaRegistryBrokerPlugin.Configure()
-logger.LogInformation("Press Ctrl+C to shutdown");
+
+// Ready is said from here, after every plugin is configured — a plugin that fails on the way never gets this far —
+// and once the broker accepts its clients, which it does when it has caught up with the metadata log (#250).
+// Not awaited: the HTTP port below comes up meanwhile, with the liveness probe and the metrics on it.
+_ = AnnounceReadyAsync();
+async Task AnnounceReadyAsync()
+{
+    try
+    {
+        await surgewaveBroker.WaitUntilAcceptingAsync(app.Lifetime.ApplicationStopping).ConfigureAwait(false);
+    }
+    catch (OperationCanceledException)
+    {
+        // Stopped before it caught up: it never was ready.
+        return;
+    }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "The client listener on {Host}:{Port} did not start", config.Host, config.Port);
+        return;
+    }
+
+    logger.LogInformation("Surgewave broker ready to accept connections");
+    if (kafkaProtocolActive)
+        logger.LogInformation("  - Kafka wire protocol: {Host}:{Port}", config.Host, config.Port);
+    else
+        logger.LogInformation("  - Native protocol only: {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
+    logger.LogInformation("  - gRPC API:            {Host}:{GrpcPort}", config.Host, config.GrpcPort);
+    logger.LogInformation("  - Metrics:             {Host}:{GrpcPort}/metrics", config.Host, config.GrpcPort);
+    foreach (var proto in activatedProtocols)
+        logger.LogInformation("  - {Protocol}:  port {Port}", proto.DisplayName, proto.DefaultPort > 0 ? proto.DefaultPort : "shared");
+    // Schema Registry startup log is now emitted by SurgewaveSchemaRegistryBrokerPlugin.Configure()
+    logger.LogInformation("Press Ctrl+C to shutdown");
+}
 
 // Handle shutdown gracefully --— use GracefulShutdownOrchestrator for rolling upgrade safety
 var cts = new CancellationTokenSource();

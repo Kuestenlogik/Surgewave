@@ -179,6 +179,20 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     public bool IsController => _clusterController?.IsController ?? false;
 
     /// <summary>
+    /// The startup handshake of a broker in a cluster (#250): completes when it has caught up with the metadata log —
+    /// applied what the leader of the current term had committed, and taken up the partitions that gives it — at once
+    /// if it already has, and at once without a cluster, where there is no such log. Cancelled with
+    /// <paramref name="cancellationToken"/>, and when the broker stops first.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StartAsync"/> waits for it itself where the broker is its whole quorum. A broker of a larger quorum
+    /// gets there only once a majority of the voters runs, which is after the host has started them; until then it
+    /// answers from metadata it has not applied, and a host that lets clients in waits for this first.
+    /// </remarks>
+    public Task WaitForMetadataCaughtUpAsync(CancellationToken cancellationToken = default) =>
+        _clusterController?.WaitForMetadataCaughtUpAsync(cancellationToken) ?? Task.CompletedTask;
+
+    /// <summary>
     /// Health of the peer brokers as seen by this broker's failure detector — the input to
     /// controller re-election and ISR shrinking. Empty until the first heartbeat is sent to a peer; never
     /// contains this broker itself, which is why it is not the place to ask whether the local
@@ -442,8 +456,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         _cts = new CancellationTokenSource();
         _brokerTask = Task.Run(() => _broker.StartAsync(_cts.Token), cancellationToken);
 
-        // Wait for broker to be ready
-        await WaitForBrokerReadyAsync(cancellationToken);
+        // Wait until the listener is bound and accepts; a bind that failed is reported here.
+        await _broker.WaitUntilAcceptingAsync(cancellationToken);
 
         // Initialize cluster components if enabled
         if (_options.EnableCluster)
@@ -816,6 +830,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
             // Wire up Raft node with controller and replication server
             _clusterController.SetRaftNode(_raftNode);
+            _clusterController.SetReplicationTransitions(_replicationTransitions);
             _replicationServer.SetRaftNode(_raftNode);
         }
 
@@ -838,6 +853,20 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // controller (retrying until reachable) and heartbeats.
         if (_lifecycleLoop is not null)
             await _lifecycleLoop.StartAsync(_cts!.Token);
+
+        // The startup handshake (#250), where this broker can complete it on its own: a broker that is its whole
+        // quorum elects itself and applies its own log, so it is returned to the caller caught up — a topic created
+        // before a restart is there for the first request. A broker of a larger quorum, and an observer, catch up
+        // only once a majority runs and knows them, and an embedding host starts its brokers one after the other; it
+        // waits on WaitForMetadataCaughtUpAsync once it has started them.
+        if (_raftNode.CatchesUpAlone)
+        {
+            // A cluster component that failed to start is reported, not waited out: the node behind it never leads.
+            var caughtUp = _clusterController.WaitForMetadataCaughtUpAsync(cancellationToken);
+            if (await Task.WhenAny(caughtUp, _clusterTask) == _clusterTask)
+                await _clusterTask;
+            await caughtUp;
+        }
     }
 
     private async Task WaitForReplicationServerReadyAsync(CancellationToken cancellationToken, int maxRetries = 50)
@@ -874,27 +903,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         allNodes.AddRange(_options.ClusterNodes);
 
         return string.Join(",", allNodes.Distinct());
-    }
-
-    private async Task WaitForBrokerReadyAsync(CancellationToken cancellationToken, int maxRetries = 50)
-    {
-        for (int i = 0; i < maxRetries; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                using var client = new TcpClient();
-                await client.ConnectAsync(_options.Host, _actualPort, cancellationToken);
-                return;
-            }
-            catch (SocketException)
-            {
-                await Task.Delay(50, cancellationToken);
-            }
-        }
-
-        throw new InvalidOperationException($"Surgewave broker did not start within {maxRetries * 50}ms");
     }
 
     /// <summary>

@@ -45,6 +45,12 @@ public sealed partial class RaftNode : IAsyncDisposable
     // WaitForCommitIndexAsync wait on. Costs no allocation per commit while nobody waits (#201).
     private readonly IndexWatermark _committed = new();
 
+    // Whether the commit index has reached an entry of the term this node is in, noted under _lock; _caughtUp is
+    // completed for it outside the lock, once the listeners know who leads.
+    private bool _reachedCurrentTerm;
+    private int _caughtUpSaid;
+    private readonly TaskCompletionSource _caughtUp = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     // Timing
     private DateTimeOffset _lastHeartbeat = DateTimeOffset.UtcNow;
     private int _electionTimeoutMs;
@@ -115,6 +121,18 @@ public sealed partial class RaftNode : IAsyncDisposable
     public int? LeaderId => _leaderId;
     public bool IsLeader => _state == RaftState.Leader;
     public long CommitIndex => _commitIndex;
+    /// <summary>
+    /// Whether this node has caught up with the metadata log since it started; see
+    /// <see cref="WaitForCaughtUpAsync"/>.
+    /// </summary>
+    public bool IsCaughtUp => _caughtUp.Task.IsCompletedSuccessfully;
+
+    /// <summary>
+    /// Whether this node is its whole quorum and expects no peer: it elects itself and applies its own log without
+    /// any other node, so it catches up however the rest of a cluster fares.
+    /// </summary>
+    public bool CatchesUpAlone => IsVoter && PeerIds.Count == 0 && !ExpectsClusterPeers();
+
     public long LastLogIndex => _log.Count > 0 ? _log[^1].Index : 0;
     public int LastLogTerm => _log.Count > 0 ? _log[^1].Term : 0;
 
@@ -270,6 +288,9 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Whoever still waits for a node that never caught up is told so.
+        _caughtUp.TrySetCanceled();
+
         if (_cts is null) return;
 
         try { await _cts.CancelAsync(); }
@@ -534,6 +555,7 @@ public sealed partial class RaftNode : IAsyncDisposable
                 _commitIndex = Math.Min(request.LeaderCommit, LastLogIndex);
                 ApplyCommittedEntries();
                 _committed.Advance(_commitIndex);
+                NoteCommitIndexMoved();
             }
 
             response = new AppendEntriesResponse(_currentTerm, true, LastLogIndex);
@@ -558,6 +580,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             await _persistence.AppendEntriesAsync(entriesToPersist, ct);
         }
 
+        SignalCaughtUp();
         return response;
     }
 
@@ -650,6 +673,66 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// bounds the wait with <paramref name="ct"/>, or uses <see cref="WaitForCommitAsync"/>.
     /// </remarks>
     public Task WaitForCommitIndexAsync(long index, CancellationToken ct) => _committed.WaitAsync(index, ct);
+
+    /// <summary>
+    /// Completes when this node has caught up with the metadata log since it started: at once if it already has.
+    /// Cancelled with <paramref name="ct"/>, and when the node is disposed without having got there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A node starts with its log loaded and nothing of it applied — the commit index is not persisted — so until
+    /// then its state machine is empty, or, while it applies, somewhere in the middle of the log. A broker that
+    /// answered a client in that time said a topic created before the restart did not exist, or described it without
+    /// a config change made after its creation.
+    /// </para>
+    /// <para>
+    /// Caught up means: the commit index has reached an entry of the term the node is in, and everything up to it is
+    /// applied. A leader gets there when the no-op it appends on taking office commits, which commits and applies
+    /// the whole log it started with. A follower or observer gets there with the first AppendEntries of the leader
+    /// that carries a commit index at or past that leader's no-op: it matched the follower's log against the
+    /// leader's and brought every entry the leader had, so the follower has applied what the leader had committed
+    /// when it sent it. A commit index a new leader passes on before its own no-op commits says nothing yet — after
+    /// a restart of the whole cluster it is 0 — and does not count.
+    /// </para>
+    /// <para>
+    /// Not bounded: without a quorum there is no leader, no commit and no catching up, and the node says so by not
+    /// completing this. Once, for the life of the node: a node that falls behind later is not reported here.
+    /// </para>
+    /// </remarks>
+    public Task WaitForCaughtUpAsync(CancellationToken ct) => _caughtUp.Task.WaitAsync(ct);
+
+    // Under _lock, each time the commit index moved and the entries up to it are applied.
+    private void NoteCommitIndexMoved()
+    {
+        if (!_reachedCurrentTerm && GetLogEntry(_commitIndex)?.Term == _currentTerm)
+            _reachedCurrentTerm = true;
+    }
+
+    // Outside _lock, after a step that may have moved the commit index. The listeners are told who leads first: a
+    // broker that reports itself caught up knows its controller, and the one that leads knows it is the controller.
+    private void SignalCaughtUp()
+    {
+        if (_caughtUp.Task.IsCompleted)
+            return;
+
+        long index;
+        int term;
+        lock (_lock)
+        {
+            if (!_reachedCurrentTerm)
+                return;
+            index = _commitIndex;
+            term = _currentTerm;
+        }
+
+        AnnounceLeadership();
+
+        // Said before it is signalled, so that it precedes in the log whatever a waiter says next.
+        if (Interlocked.Exchange(ref _caughtUpSaid, 1) != 0)
+            return;
+        LogCaughtUp(NodeId, index, term);
+        _caughtUp.TrySetResult();
+    }
 
     /// <summary>
     /// The entry this node's log holds at <paramref name="index"/>, if any — test-only (via InternalsVisibleTo), so
@@ -771,6 +854,9 @@ public sealed partial class RaftNode : IAsyncDisposable
         {
             // However the campaign ended: as leader, as follower of a newer term, or as a candidate nobody answered.
             AnnounceLeadership();
+
+            // A lone voter committed its no-op while it took office.
+            SignalCaughtUp();
         }
     }
 
@@ -1222,6 +1308,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         // Once before any send: a lone voter is its own majority and has no peer whose
         // completion could ever trigger the check after one.
         TryAdvanceCommitIndex(peers);
+        SignalCaughtUp();
 
         // Each peer on its own: the round does not wait for the sends, and a peer whose last send is still under way
         // is skipped. A majority is what commits an entry, and waiting for the rest hands a single unreachable peer
@@ -1256,6 +1343,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         }
 
         TryAdvanceCommitIndex(PeerIds);
+        SignalCaughtUp();
     }
 
     // Lets the heartbeat loop run its next round now; at most one wake-up is pending.
@@ -1315,6 +1403,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             LogCommitIndexAdvanced(_commitIndex);
             ApplyCommittedEntries();
             _committed.Advance(_commitIndex);
+            NoteCommitIndexMoved();
         }
     }
 
@@ -1601,6 +1690,9 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Commit index advanced to {CommitIndex}")]
     private partial void LogCommitIndexAdvanced(long commitIndex);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "[node {NodeId}] Caught up with the metadata log at index {Index} in term {Term}")]
+    private partial void LogCaughtUp(int nodeId, long index, int term);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Applied entry {Index}, type={CommandType}")]
     private partial void LogEntryApplied(long index, MetadataCommandType commandType);

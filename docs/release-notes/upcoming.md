@@ -686,6 +686,34 @@ controller without a quorum never gets, while the shutdown waited for the monito
 handles no failure and writes nothing to the metadata log, and a stopped heartbeat monitor marks no further peer
 failed.
 
+### A broker reports ready, and answers clients, only once it has caught up with its metadata log (#250)
+
+A restarted broker holds its metadata log and has applied none of it until its Raft node is elected, or hears from
+the leader. It reported ready and answered clients without waiting for that, so a request that arrived first was
+answered from a state that did not have the log yet: a topic created before the restart "does not exist", or —
+while the log was being applied — is described without a config change made after its creation. On a single
+broker the election comes an election timeout after the start, which the rest of the startup usually outlasts and
+on a fast start does not; in a cluster the window lasted until the leader's first entries arrived.
+
+The broker now waits for a startup handshake: it has caught up when it has applied what the leader of the current
+term had committed — on a single broker: it is elected and has applied its own log — and has taken up the
+partitions that gives it. Until then
+
+- the Kafka and native listener is bound and accepts no connection: a client that connects waits and is answered
+  once the broker has caught up;
+- gRPC and REST requests are answered `503` (`UNAVAILABLE`), while `/health/live` and `/metrics` are answered as
+  before;
+- `/health` and `/health/ready` report unhealthy, so a readiness probe sends the broker no traffic;
+- the line "Surgewave broker ready to accept connections" is not logged.
+
+A broker that reaches no quorum stays in that state for as long as it lasts, as a Kafka broker in KRaft mode does,
+and logs every election it loses. Brokers of one cluster therefore have to be started together, not each after the
+one before reports ready; the Helm chart and the Kubernetes manifest already do (`podManagementPolicy: Parallel`).
+
+An embedded broker (`SurgewaveRuntime`) that is its whole quorum is returned from `StartAsync` caught up. One that
+is part of a larger quorum is returned as before, because the brokers of an embedding host are started one after
+the other; the host waits on the new `SurgewaveRuntime.WaitForMetadataCaughtUpAsync` once it has started them.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

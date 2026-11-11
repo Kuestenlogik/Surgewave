@@ -55,7 +55,7 @@ public sealed class BrokerFixture : IAsyncLifetime, IDisposable
         // Set static instance for backward compatibility
         _instance = this;
 
-        // SurgewaveRuntime.WaitForBrokerReadyAsync only checks TCP connectivity.
+        // SurgewaveRuntime.StartAsync only waits for the listener to be bound.
         // Wait until the Kafka protocol layer is actually responding — the accept
         // loop, request dispatcher and ApiVersions handler need a few extra ms after
         // the TCP listener is up. Without this, early tests sporadically get

@@ -35,6 +35,9 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     private readonly ILogger<SurgewaveBroker> _logger;
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _shutdownCts = new();
+
+    // Completed when the listener is bound and its connections are accepted, failed with what kept it from binding.
+    private readonly TaskCompletionSource _accepting = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly List<Task> _clientTasks = [];
     private bool _disposed;
 
@@ -191,24 +194,73 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         // Shared memory handler requires the Kuestenlogik.Surgewave.Transport.SharedMemory package.
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Completes when the listener is bound and the broker accepts the connections made to it: what a host waits on
+    /// before it reports the broker ready. Fails with what kept the listener from binding; cancelled with
+    /// <paramref name="cancellationToken"/>, and when the broker stops before it accepted a connection.
+    /// </summary>
+    public Task WaitUntilAcceptingAsync(CancellationToken cancellationToken = default) =>
+        _accepting.Task.WaitAsync(cancellationToken);
+
+    /// <summary>Binds the listener and accepts connections until the broker stops.</summary>
+    public Task StartAsync(CancellationToken cancellationToken = default) =>
+        StartAsync(Task.CompletedTask, cancellationToken);
+
+    /// <summary>
+    /// Binds the listener at once and accepts connections from the moment <paramref name="acceptFrom"/> completes,
+    /// until the broker stops. If it is cancelled or fails, no connection is ever accepted.
+    /// </summary>
+    /// <remarks>
+    /// For a host whose broker cannot answer yet — it has not caught up with its metadata log (#250). The port is
+    /// bound first, as a Kafka broker binds its listeners before it processes requests: a port that is taken stops
+    /// the start, and a client that connects meanwhile waits in the listen backlog and is answered once the broker
+    /// can, instead of being answered from a state the broker has not caught up to.
+    /// </remarks>
+    public async Task StartAsync(Task acceptFrom, CancellationToken cancellationToken = default)
     {
         Log.BrokerStarting(_logger, _config.Host, _config.Port);
         Log.DataDirectory(_logger, _config.DataDirectory);
 
         // Enterprise plugin: Kuestenlogik.Surgewave.Transport.SharedMemory
 
-        // Buffer policy on the listener BEFORE Start: accepted sockets inherit these on
-        // Windows, and the listen-time receive buffer feeds the TCP window scale negotiated
-        // in the SYN/ACK (later dynamic-config increases only apply within that scale).
-        // Linux does not inherit listener options — the per-accept set in HandleClientAsync
-        // covers it there.
-        _listener.Server.SendBufferSize = _config.SocketSendBufferBytes;
-        _listener.Server.ReceiveBufferSize = _config.SocketReceiveBufferBytes;
-        _listener.Start();
+        try
+        {
+            // Buffer policy on the listener BEFORE Start: accepted sockets inherit these on
+            // Windows, and the listen-time receive buffer feeds the TCP window scale negotiated
+            // in the SYN/ACK (later dynamic-config increases only apply within that scale).
+            // Linux does not inherit listener options — the per-accept set in HandleClientAsync
+            // covers it there.
+            _listener.Server.SendBufferSize = _config.SocketSendBufferBytes;
+            _listener.Server.ReceiveBufferSize = _config.SocketReceiveBufferBytes;
+            _listener.Start();
+        }
+        catch (Exception ex)
+        {
+            _accepting.TrySetException(ex);
+            throw;
+        }
+
         Log.BrokerStarted(_logger);
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
+
+        try
+        {
+            await acceptFrom.WaitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The broker stops, or what it waited for was given up: nobody is let in.
+            _accepting.TrySetCanceled();
+            return;
+        }
+        catch (Exception ex)
+        {
+            _accepting.TrySetException(ex);
+            throw;
+        }
+
+        _accepting.TrySetResult();
 
         while (!linkedCts.Token.IsCancellationRequested)
         {
@@ -347,6 +399,7 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
         if (_disposed) return;
 
         Log.ShutdownStarting(_logger);
+        _accepting.TrySetCanceled();
         _listener.Stop();
         Log.ShutdownStoppedListener(_logger);
 

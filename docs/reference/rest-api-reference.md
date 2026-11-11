@@ -436,6 +436,6 @@ Requires `Surgewave:Wasm:Enabled=true`.
 |--------|------|-------------|
 | `GET` | `/metrics` | Prometheus metrics endpoint |
 | `GET` | `/sd-targets` | Prometheus HTTP service discovery targets |
-| `GET` | `/health` | Health check endpoint |
-| `GET` | `/health/ready` | Readiness probe |
-| `GET` | `/health/live` | Liveness probe |
+| `GET` | `/health` | Health check endpoint; unhealthy until the broker has caught up with its metadata log |
+| `GET` | `/health/ready` | Readiness probe; unhealthy until the broker has caught up with its metadata log |
+| `GET` | `/health/live` | Liveness probe; healthy as soon as the HTTP port is up |
