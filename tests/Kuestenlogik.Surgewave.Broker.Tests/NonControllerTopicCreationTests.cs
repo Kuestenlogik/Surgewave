@@ -149,7 +149,9 @@ public sealed class NonControllerTopicCreationTests : IDisposable
 
         public bool IsController => false;
 
-        public Task<bool> CreateTopicAsync(string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config, CancellationToken ct)
+        public Task<bool> CreateTopicAsync(
+            string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config,
+            IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct)
         {
             Asked.Add(topic);
             if (Succeeds)

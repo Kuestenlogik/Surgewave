@@ -141,9 +141,39 @@ public sealed class LogManager : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _topicCreator is { } creator
-            ? creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken)
+            ? creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, replicaAssignment: null, cancellationToken)
             : CreateLocalTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken);
     }
+
+    /// <summary>
+    /// Creates a topic as <see cref="CreateTopicAsync"/> does, with the replicas of each partition as a client chose them (#202): one entry per partition, by
+    /// index, the preferred leader first, every entry the same number of distinct broker ids. The partition count and
+    /// replication factor follow from it. Without a cluster every replica is this broker, which the caller checks
+    /// (<see cref="RoutesTopicCreation"/>); in a cluster the metadata log takes the assignment as it is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The topic exists already.</exception>
+    /// <exception cref="TopicNotCreatedException">In a cluster: no controller took the topic now; asking again may.</exception>
+    /// <exception cref="InvalidReplicaAssignmentException">In a cluster: the assignment names a broker it does not have.</exception>
+    public Task<TopicMetadata> CreateTopicWithReplicaAssignmentAsync(
+        string topicName,
+        IReadOnlyList<IReadOnlyList<int>> replicaAssignment,
+        Dictionary<string, string>? config = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentOutOfRangeException.ThrowIfZero(replicaAssignment.Count);
+        var partitionCount = replicaAssignment.Count;
+        var replicationFactor = checked((short)replicaAssignment[0].Count);
+        return _topicCreator is { } creator
+            ? creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, replicaAssignment, cancellationToken)
+            : CreateLocalTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken);
+    }
+
+    /// <summary>
+    /// Whether topics are created through the cluster (<see cref="RouteTopicCreation"/>) rather than here, by a broker
+    /// on its own.
+    /// </summary>
+    public bool RoutesTopicCreation => _topicCreator is not null;
 
     private async Task<TopicMetadata> CreateLocalTopicAsync(
         string topicName,

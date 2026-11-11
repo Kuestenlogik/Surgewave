@@ -79,7 +79,7 @@ public sealed class AtomicTopicCreationTests : IAsyncDisposable
             timeout: TimeSpan.FromSeconds(10), ct: ct));
 
         var before = machine.Applied.Count;
-        Assert.True(await controller.CreateTopicAsync("orders", 3, 1, null, ct));
+        Assert.True(await controller.CreateTopicAsync("orders", 3, 1, null, replicaAssignment: null, ct));
 
         var created = machine.Applied.Skip(before).Where(e => e.CommandType is MetadataCommandType.TopicCreated or MetadataCommandType.PartitionAssigned).ToList();
         Assert.Equal(MetadataCommandType.TopicCreated, Assert.Single(created).CommandType);

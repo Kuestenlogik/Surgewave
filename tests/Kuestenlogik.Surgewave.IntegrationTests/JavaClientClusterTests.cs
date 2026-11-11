@@ -1,3 +1,4 @@
+using Confluent.Kafka;
 using DotNet.Testcontainers.Containers;
 using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.IntegrationTests.Fixtures;
@@ -76,6 +77,41 @@ public sealed class JavaClientClusterTests(JavaClusterFixture fixture, ITestOutp
         // TransactionalId, Coordinator, ProducerId, TransactionState
         var row = Assert.Single(Columns(transactions.Stdout), c => c[0] == transactionalId);
         Assert.Equal("CompleteCommit", row[3]);
+    }
+
+    // #202 — kafka-topics' own placement: the topic has the replicas as asked, in their order, the first the leader. The
+    // assignment used to be dropped, and the topic got the controller's placement without an error.
+    [Fact(Timeout = 240_000)]
+    public async Task KafkaTopicsCreatesATopicWithTheReplicaAssignmentAsked()
+    {
+        var cluster = fixture.ClusterOrSkip();
+        var (topic, _) = Names("assigned");
+        var bootstrap = cluster.Running.First();
+        await RunOkAsync($"kafka-topics.sh --bootstrap-server $BOOTSTRAP --create --topic {topic} --replica-assignment 3:1,1:3", bootstrap);
+
+        // The tool describes through whichever broker it likes, so every broker has to know the placement first; each
+        // look follows the signal of the next change, so none is missed.
+        foreach (var clusterState in cluster.Running.Select(b => b.ClusterState!))
+        {
+            while (true)
+            {
+                var changed = clusterState.TopicsChanged;
+                if (clusterState.GetTopic(topic) is { } known && Enumerable.Range(0, known.PartitionCount).All(p =>
+                        clusterState.ReplicasOf(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = p }).Count > 0))
+                    break;
+                await changed.WaitAsync(TestContext.Current.CancellationToken);
+            }
+        }
+
+        // Read back through Kafka's DescribeTopics. kafka-topics --describe cannot do it yet: it lists partition
+        // reassignments first, and the broker's ListPartitionReassignments response does not parse (#240).
+        using var admin = new AdminClientBuilder(
+            new AdminClientConfig { BootstrapServers = bootstrap.BootstrapServers }).Build();
+        var described = await admin.DescribeTopicsAsync(TopicCollection.OfTopicNames([topic]));
+        var partitions = Assert.Single(described.TopicDescriptions).Partitions.OrderBy(p => p.Partition)
+            .Select(p => (p.Leader.Id, Replicas: string.Join(",", p.Replicas.Select(r => r.Id))))
+            .ToList();
+        Assert.Equal([(3, "3,1"), (1, "1,3")], partitions);
     }
 
     private static (string Topic, string Group) Names(string scenario)

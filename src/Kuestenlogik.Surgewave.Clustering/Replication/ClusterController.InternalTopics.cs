@@ -71,7 +71,7 @@ public sealed partial class ClusterController
 
         var created = await CreateTopicAsync(
             topic, partitions, replicationFactor,
-            new Dictionary<string, string> { ["cleanup.policy"] = "compact" }, ct).ConfigureAwait(false);
+            new Dictionary<string, string> { ["cleanup.policy"] = "compact" }, replicaAssignment: null, ct).ConfigureAwait(false);
         if (!created)
             LogInternalTopicNotCreated(topic);
     }

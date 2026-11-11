@@ -20,6 +20,7 @@ public sealed class MetadataLogTopics(
         int partitionCount,
         short replicationFactor,
         Dictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
         CancellationToken cancellationToken)
     {
         if (clusterState.GetTopic(topicName) is not null || logManager.GetTopicMetadata(topicName) is not null)
@@ -29,7 +30,13 @@ public sealed class MetadataLogTopics(
         if (clusterState.GetTopic(topicName) is not null)
             throw new InvalidOperationException($"Topic '{topicName}' already exists");
 
-        if (!await creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, cancellationToken).ConfigureAwait(false))
+        // A client's own placement names registered brokers only (#202), as Kafka's controller checks; looked at once
+        // this broker knows the cluster, so a broker that has just started does not refuse a valid one.
+        if (replicaAssignment is not null
+            && InvalidReplicaAssignmentException.ForUnknownBroker(replicaAssignment, id => clusterState.GetBroker(id) is not null) is { } unknown)
+            throw unknown;
+
+        if (!await creator.CreateTopicAsync(topicName, partitionCount, replicationFactor, config, replicaAssignment, cancellationToken).ConfigureAwait(false))
             throw new TopicNotCreatedException(topicName);
 
         // The controller committed it; this broker applies the metadata log on its own time. Each signal is taken before

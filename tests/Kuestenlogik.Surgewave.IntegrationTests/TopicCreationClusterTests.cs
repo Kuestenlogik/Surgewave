@@ -86,6 +86,73 @@ public sealed class TopicCreationClusterTests(ITestOutputHelper output) : IAsync
         }
     }
 
+    /// <summary>
+    /// A topic created with the replicas the client chose has them, in the client's order, the first the leader
+    /// (#202). The assignment was dropped and the topic got the controller's own placement, without an error.
+    /// </summary>
+    [Fact(Timeout = 120_000)]
+    public async Task CreateTopicsWithAReplicaAssignment_PlacesTheReplicasAsTheClientChose()
+    {
+        var topic = $"orders-{Guid.NewGuid():N}";
+        // Not the controller's placement for two partitions with two replicas on brokers 1..3 ([1,2], [2,3]).
+        List<int>[] chosen = [[3, 1], [1, 3]];
+        var bootstrap = _cluster.Brokers.First(b => !b.IsController);
+
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = bootstrap.BootstrapServers }).Build();
+        await admin.CreateTopicsAsync([new TopicSpecification
+        {
+            Name = topic,
+            // librdkafka wants the count beside an assignment and sends NumPartitions and ReplicationFactor -1 for it.
+            NumPartitions = chosen.Length,
+            ReplicationFactor = -1,
+            ReplicasAssignments = new Dictionary<int, List<int>> { [0] = chosen[0], [1] = chosen[1] },
+        }]);
+
+        // The client asks whichever broker it likes, so every broker has to know the placement first.
+        await EveryBrokerKnowsTheReplicasAsync(topic, TestContext.Current.CancellationToken);
+        var described = await admin.DescribeTopicsAsync(TopicCollection.OfTopicNames([topic]));
+        var partitions = Assert.Single(described.TopicDescriptions).Partitions.OrderBy(p => p.Partition).ToList();
+        Assert.Equal(chosen, partitions.Select(p => p.Replicas.Select(r => r.Id).ToList()));
+        Assert.Equal(chosen.Select(c => c[0]), partitions.Select(p => p.Leader.Id));
+    }
+
+    /// <summary>A replica assignment naming a broker the cluster does not have is refused, as Kafka refuses it (#202).</summary>
+    [Fact(Timeout = 120_000)]
+    public async Task CreateTopicsWithAReplicaAssignmentOfAnUnknownBroker_IsRefused()
+    {
+        var topic = $"orders-{Guid.NewGuid():N}";
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = _cluster.Brokers[0].BootstrapServers }).Build();
+
+        var refused = await Assert.ThrowsAsync<CreateTopicsException>(() => admin.CreateTopicsAsync([new TopicSpecification
+        {
+            Name = topic,
+            NumPartitions = 1,
+            ReplicationFactor = -1,
+            ReplicasAssignments = new Dictionary<int, List<int>> { [0] = [1, 9] },
+        }]).WaitAsync(TestContext.Current.CancellationToken));
+
+        var error = Assert.Single(refused.Results).Error;
+        Assert.Equal(ErrorCode.InvalidReplicaAssignment, error.Code);
+        Assert.Equal("The manual partition assignment includes broker 9, but no such broker is registered.", error.Reason);
+    }
+
+    // Until every broker has applied the topic and the replicas of each of its partitions from the metadata log: each
+    // look is taken after the signal of the next change, so none is missed.
+    private async Task EveryBrokerKnowsTheReplicasAsync(string topic, CancellationToken ct)
+    {
+        foreach (var clusterState in _cluster.Brokers.Select(b => b.ClusterState!))
+        {
+            while (true)
+            {
+                var changed = clusterState.TopicsChanged;
+                if (clusterState.GetTopic(topic) is { } known && Enumerable.Range(0, known.PartitionCount).All(p =>
+                        clusterState.ReplicasOf(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = topic, Partition = p }).Count > 0))
+                    break;
+                await changed.WaitAsync(ct);
+            }
+        }
+    }
+
     // Every broker knows the topic with a leader for each partition — what only a topic in the metadata log has.
     private async Task AssertEveryBrokerLeadsOrFollowsAsync(string topic, int partitions, CancellationToken ct)
     {

@@ -133,7 +133,8 @@ public sealed partial class ClusterStateInterBrokerService : INativeInterBrokerS
 
         var created = await _topicCreator.CreateTopicAsync(
             payload.Topic, payload.Partitions, payload.ReplicationFactor,
-            payload.Config.Count > 0 ? new Dictionary<string, string>(payload.Config) : null, ct).ConfigureAwait(false);
+            payload.Config.Count > 0 ? new Dictionary<string, string>(payload.Config) : null,
+            payload.ReplicaAssignment.Count > 0 ? payload.ReplicaAssignment : null, ct).ConfigureAwait(false);
         return created ? ClusterRpcStatus.None : ClusterRpcStatus.Unknown;
     }
 

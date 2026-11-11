@@ -130,6 +130,36 @@ public sealed class MetadataLogTopicsTests : IDisposable
         Assert.Equal("orders", refused.TopicName);
     }
 
+    // #202 — a client's own placement goes to the controller as it is, its partition count and replication factor
+    // taken from it.
+    [Fact]
+    public async Task AReplicaAssignmentOfRegisteredBrokersGoesToTheController()
+    {
+        JoinTheCluster();
+        _clusterState.AddBroker(new BrokerNode { BrokerId = 2, Host = "localhost", Port = 9093 });
+
+        var creating = _logManager.CreateTopicWithReplicaAssignmentAsync("orders", [[2, BrokerId], [BrokerId, 2]], cancellationToken: _ct);
+
+        var asked = Assert.Single(_controller.Asked);
+        Assert.Equal((2, (short)2), (asked.Partitions, asked.ReplicationFactor));
+        Assert.Equal([[2, BrokerId], [BrokerId, 2]], asked.Replicas!.Select(r => r.ToArray()).ToArray());
+        Apply("orders", 2, replicas: [2]);
+        Assert.Equal("orders", (await creating).Name);
+    }
+
+    // #202 — a broker the cluster does not have is refused with Kafka's message, and the controller is not asked.
+    [Fact]
+    public async Task AReplicaAssignmentNamingAnUnregisteredBrokerIsRefused()
+    {
+        JoinTheCluster();
+
+        var refused = await Assert.ThrowsAsync<InvalidReplicaAssignmentException>(
+            () => _logManager.CreateTopicWithReplicaAssignmentAsync("orders", [[BrokerId], [7]], cancellationToken: _ct));
+
+        Assert.Equal("The manual partition assignment includes broker 7, but no such broker is registered.", refused.Message);
+        Assert.Empty(_controller.Asked);
+    }
+
     [Fact]
     public async Task AConfigChangeGoesToTheControllerAndCompletesOnceThisBrokerHasIt()
     {
@@ -221,7 +251,7 @@ public sealed class MetadataLogTopicsTests : IDisposable
             return Task.FromResult(Takes);
         }
 
-        public List<(string Topic, int Partitions, short ReplicationFactor, Dictionary<string, string>? Config)> Asked { get; } = [];
+        public List<(string Topic, int Partitions, short ReplicationFactor, Dictionary<string, string>? Config, IReadOnlyList<IReadOnlyList<int>>? Replicas)> Asked { get; } = [];
 
         public bool Takes { get; set; } = true;
 
@@ -231,9 +261,10 @@ public sealed class MetadataLogTopicsTests : IDisposable
         public bool IsController => true;
 
         public Task<bool> CreateTopicAsync(
-            string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config, CancellationToken ct)
+            string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config,
+            IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct)
         {
-            Asked.Add((topic, partitionCount, replicationFactor, config));
+            Asked.Add((topic, partitionCount, replicationFactor, config, replicaAssignment));
             FirstAsk.TrySetResult();
             return Task.FromResult(Takes);
         }

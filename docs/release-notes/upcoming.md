@@ -186,6 +186,20 @@ CreateTopics was answered `TOPIC_ALREADY_EXISTS`. One entry now carries the
 topic with the replicas of every partition: it commits whole, or the topic
 is not there and the retry creates it.
 
+### CreateTopics honours a replica assignment (#202)
+
+A CreateTopics request that named each partition's replicas, as
+`kafka-topics --create --replica-assignment 3:1,1:3` sends it, got the
+controller's own placement and no error: the assignment was read, counted
+for the partition limit and dropped. The topic now has the replicas as
+asked, in their order, the first the leader. The assignment is checked as
+Kafka's controller checks it, with Kafka's codes and messages:
+`INVALID_REQUEST` when NumPartitions or ReplicationFactor is not -1 beside
+it; `INVALID_REPLICA_ASSIGNMENT` for a partition assigned twice, an empty
+replica list, a broker twice in one partition, partitions with different
+replication factors, partition indexes not numbered from 0 on, or a broker
+the cluster has not registered.
+
 ### A cluster that lost one of three voters elects a leader at once (#225)
 
 An election waited for every voter's answer, the answer of a stopped broker
@@ -644,6 +658,13 @@ installer's icon use `images/icon.png`; the web manifest's 512 px icon is `icon-
 files differ from the drawing.
 
 ## Breaking changes
+
+### The inter-broker topic creation carries a replica assignment (#202)
+
+The request a broker sends the controller to create a topic now ends with
+the replicas of each partition. A broker of the previous release cannot
+read it, and the reverse, so a cluster creating topics through a broker
+that is not the controller is upgraded as a whole, not broker by broker.
 
 ### The JSON group-state files are gone (#219)
 

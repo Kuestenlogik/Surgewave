@@ -100,12 +100,31 @@ public class NativeControllerClientTests : IAsyncLifetime
         _receiverTopicCreator.IsController = true;
 
         var created = await _client.RequestCreateTopicAsync(
-            "orders", partitions: 3, replicationFactor: 2, new Dictionary<string, string> { ["cleanup.policy"] = "compact" }, _cts.Token);
+            "orders", partitions: 3, replicationFactor: 2, new Dictionary<string, string> { ["cleanup.policy"] = "compact" },
+            replicaAssignment: null, _cts.Token);
 
         Assert.True(created);
         var request = Assert.Single(_receiverTopicCreator.Created);
         Assert.Equal(("orders", 3, (short)2), (request.Topic, request.Partitions, request.ReplicationFactor));
         Assert.Equal("compact", request.Config!["cleanup.policy"]);
+        Assert.Null(request.Replicas);
+    }
+
+    // #202 — a client's own placement reaches the controller as the client chose it, in its order: the first replica is
+    // the preferred leader.
+    [Fact]
+    public async Task RequestCreateTopic_TheControllerGetsTheClientsReplicaAssignment()
+    {
+        _senderState.ControllerId = 2;
+        _receiverTopicCreator.IsController = true;
+
+        var created = await _client.RequestCreateTopicAsync(
+            "orders", partitions: 2, replicationFactor: 2, config: null, replicaAssignment: [[2, 1], [1, 2]], _cts.Token);
+
+        Assert.True(created);
+        var request = Assert.Single(_receiverTopicCreator.Created);
+        Assert.NotNull(request.Replicas);
+        Assert.Equal([[2, 1], [1, 2]], request.Replicas.Select(r => r.ToArray()).ToArray());
     }
 
     // #207 — a broker that lost the controller role since the sender looked refuses; the sender reports failure, and
@@ -116,7 +135,7 @@ public class NativeControllerClientTests : IAsyncLifetime
         _senderState.ControllerId = 2;
         _receiverTopicCreator.IsController = false;
 
-        var created = await _client.RequestCreateTopicAsync("orders", 1, 1, null, _cts.Token);
+        var created = await _client.RequestCreateTopicAsync("orders", 1, 1, null, null, _cts.Token);
 
         Assert.False(created);
         Assert.Empty(_receiverTopicCreator.Created);
@@ -126,11 +145,13 @@ public class NativeControllerClientTests : IAsyncLifetime
     {
         public bool IsController { get; set; }
 
-        public List<(string Topic, int Partitions, short ReplicationFactor, Dictionary<string, string>? Config)> Created { get; } = [];
+        public List<(string Topic, int Partitions, short ReplicationFactor, Dictionary<string, string>? Config, IReadOnlyList<IReadOnlyList<int>>? Replicas)> Created { get; } = [];
 
-        public Task<bool> CreateTopicAsync(string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config, CancellationToken ct)
+        public Task<bool> CreateTopicAsync(
+            string topic, int partitionCount, short replicationFactor, Dictionary<string, string>? config,
+            IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct)
         {
-            Created.Add((topic, partitionCount, replicationFactor, config));
+            Created.Add((topic, partitionCount, replicationFactor, config, replicaAssignment));
             return Task.FromResult(true);
         }
     }

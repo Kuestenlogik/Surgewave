@@ -21,11 +21,16 @@ public interface IClusterTopicCreator
     /// This used to be missing from the signature, so every clustered <c>CreateTopics</c> silently
     /// dropped the client's settings while reporting success (#118 follow-up).
     /// </param>
+    /// <param name="replicaAssignment">
+    /// The replicas of each partition as the client chose them, the preferred leader first (#202); null to have the
+    /// controller place them.
+    /// </param>
     Task<bool> CreateTopicAsync(
         string topic,
         int partitionCount,
         short replicationFactor,
         Dictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
         CancellationToken ct);
 
     /// <summary>
@@ -658,6 +663,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         int partitionCount,
         short replicationFactor,
         Dictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
         CancellationToken ct)
     {
         if (!_isController)
@@ -669,10 +675,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                 LogNotController("CreateTopic");
                 return false;
             }
-            return await _topicCreationRequester.RequestCreateTopicAsync(topic, partitionCount, replicationFactor, config, ct);
+            return await _topicCreationRequester.RequestCreateTopicAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct);
         }
 
-        return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, ct);
+        return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct);
     }
 
     /// <summary>
@@ -687,6 +693,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         int partitionCount,
         short replicationFactor,
         Dictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
         CancellationToken ct)
     {
         // A topic the metadata log has already is not created again under a new id: two brokers creating the same
@@ -700,8 +707,13 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             LogNoBrokersAvailable(topic);
             return false;
         }
+        // The client's own placement as it is, in its order — its first replica is the preferred leader (#202); the
+        // broker that took the request checked it. Without one the controller places the replicas.
         var assignments = Enumerable.Range(0, partitionCount)
-            .Select(p => new PartitionAssignment(p, _replicaAssignment.AssignReplicas(brokerIds, p, replicationFactor), _config.MinInSyncReplicas))
+            .Select(p => new PartitionAssignment(
+                p,
+                replicaAssignment is not null ? [.. replicaAssignment[p]] : _replicaAssignment.AssignReplicas(brokerIds, p, replicationFactor),
+                _config.MinInSyncReplicas))
             .ToList();
 
         var topicId = Guid.NewGuid();

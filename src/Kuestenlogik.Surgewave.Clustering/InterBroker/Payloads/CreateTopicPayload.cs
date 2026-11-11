@@ -9,8 +9,13 @@ namespace Kuestenlogik.Surgewave.Clustering.InterBroker.Payloads;
 /// so a broker that is asked for one — CreateTopics, or a Metadata request that auto-creates — hands it on, as Kafka's
 /// brokers forward CreateTopics to the controller. The answer is the generic status frame.
 /// </summary>
+/// <param name="ReplicaAssignment">
+/// The replicas of each partition as the client chose them, the preferred leader first (#202); empty to have the
+/// controller place them.
+/// </param>
 public readonly record struct CreateTopicPayload(
-    string Topic, int Partitions, short ReplicationFactor, IReadOnlyDictionary<string, string> Config)
+    string Topic, int Partitions, short ReplicationFactor, IReadOnlyDictionary<string, string> Config,
+    IReadOnlyList<IReadOnlyList<int>> ReplicaAssignment)
     : ISerializablePayload<CreateTopicPayload>
 {
     public static CreateTopicPayload Read(ref SurgewavePayloadReader reader)
@@ -25,7 +30,17 @@ public readonly record struct CreateTopicPayload(
             var key = reader.ReadString() ?? string.Empty;
             config[key] = reader.ReadString() ?? string.Empty;
         }
-        return new(topic, partitions, replicationFactor, config);
+        var partitionCount = reader.ReadInt32();
+        var assignment = new IReadOnlyList<int>[partitionCount];
+        for (var p = 0; p < partitionCount; p++)
+        {
+            var replicaCount = reader.ReadInt32();
+            var replicas = new int[replicaCount];
+            for (var r = 0; r < replicaCount; r++)
+                replicas[r] = reader.ReadInt32();
+            assignment[p] = replicas;
+        }
+        return new(topic, partitions, replicationFactor, config, assignment);
     }
 
     public void Write(ref SurgewavePayloadWriter writer)
@@ -38,6 +53,13 @@ public readonly record struct CreateTopicPayload(
         {
             writer.WriteString(key);
             writer.WriteString(value);
+        }
+        writer.WriteInt32(ReplicaAssignment.Count);
+        foreach (var replicas in ReplicaAssignment)
+        {
+            writer.WriteInt32(replicas.Count);
+            foreach (var brokerId in replicas)
+                writer.WriteInt32(brokerId);
         }
     }
 
@@ -52,9 +74,17 @@ public readonly record struct CreateTopicPayload(
             writer.WriteString(key);
             writer.WriteString(value);
         }
+        writer.WriteInt32(ReplicaAssignment.Count);
+        foreach (var replicas in ReplicaAssignment)
+        {
+            writer.WriteInt32(replicas.Count);
+            foreach (var brokerId in replicas)
+                writer.WriteInt32(brokerId);
+        }
     }
 
     public int EstimateSize()
         => 2 + System.Text.Encoding.UTF8.GetByteCount(Topic) + 4 + 2 + 4
-            + Config.Sum(kv => 4 + System.Text.Encoding.UTF8.GetByteCount(kv.Key) + System.Text.Encoding.UTF8.GetByteCount(kv.Value));
+            + Config.Sum(kv => 4 + System.Text.Encoding.UTF8.GetByteCount(kv.Key) + System.Text.Encoding.UTF8.GetByteCount(kv.Value))
+            + 4 + ReplicaAssignment.Sum(replicas => 4 + 4 * replicas.Count);
 }

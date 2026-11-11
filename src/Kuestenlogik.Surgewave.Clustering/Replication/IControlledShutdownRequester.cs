@@ -58,8 +58,10 @@ public interface ITopicCreationRequester
 {
     /// <summary>
     /// Asks the controller to create the topic. True once the controller created it; false when it refused, or could
-    /// not be reached — the client is answered with a retriable error and asks again.
+    /// not be reached — the client is answered with a retriable error and asks again. A replica assignment the client
+    /// chose travels with it (#202); null has the controller place the replicas.
     /// </summary>
     Task<bool> RequestCreateTopicAsync(
-        string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config, CancellationToken ct = default);
+        string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct = default);
 }

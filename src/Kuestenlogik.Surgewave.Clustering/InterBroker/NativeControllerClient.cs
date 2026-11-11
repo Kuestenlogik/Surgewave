@@ -185,7 +185,8 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
     /// log, so a broker asked for a topic hands it on rather than creating it for itself alone.
     /// </summary>
     public async Task<bool> RequestCreateTopicAsync(
-        string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config, CancellationToken ct = default)
+        string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct = default)
     {
         var controllerId = _clusterState.ControllerId;
         if (controllerId < 0 || controllerId == _config.BrokerId)
@@ -206,7 +207,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
 
             var frame = InterBrokerFrameCodec.EncodeFrame(
                 SurgewaveOpCode.InterBrokerCreateTopic,
-                new CreateTopicPayload(topic, partitions, replicationFactor, config ?? new Dictionary<string, string>()));
+                new CreateTopicPayload(topic, partitions, replicationFactor, config ?? new Dictionary<string, string>(), replicaAssignment ?? []));
 
             var connection = await _connectionPool
                 .GetConnectionAsync(broker.Host, broker.ReplicationPort, token).ConfigureAwait(false);

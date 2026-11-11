@@ -100,27 +100,61 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
                     continue;
                 }
 
+                // A client's own placement (#202) is checked as Kafka's controller checks it, and then honoured.
+                IReadOnlyList<IReadOnlyList<int>>? replicaAssignment = null;
+                if (topic.Assignments is { Count: > 0 } requested)
+                {
+                    if (ValidateReplicaAssignment(topic, requested) is { } invalid)
+                    {
+                        results.Add(new CreateTopicsResponse.TopicResult
+                        {
+                            Name = topic.Name,
+                            ErrorCode = invalid.ErrorCode,
+                            ErrorMessage = invalid.Message
+                        });
+                        continue;
+                    }
+                    replicaAssignment = [.. requested.OrderBy(a => a.Partition).Select(a => (IReadOnlyList<int>)a.BrokerIds)];
+                }
+
+                var numPartitions = replicaAssignment?.Count
+                    ?? (topic.NumPartitions > 0 ? topic.NumPartitions : _config.DefaultNumPartitions);
+                var replicationFactor = replicaAssignment is not null
+                    ? (short)replicaAssignment[0].Count
+                    : topic.ReplicationFactor > 0 ? topic.ReplicationFactor : _config.DefaultReplicationFactor;
+
                 if (request.ValidateOnly)
                 {
                     results.Add(new CreateTopicsResponse.TopicResult
                     {
                         Name = topic.Name,
                         ErrorCode = ErrorCode.None,
-                        NumPartitions = topic.NumPartitions,
-                        ReplicationFactor = topic.ReplicationFactor
+                        NumPartitions = replicaAssignment is not null ? numPartitions : topic.NumPartitions,
+                        ReplicationFactor = replicaAssignment is not null ? replicationFactor : topic.ReplicationFactor
                     });
                     continue;
                 }
-
-                var numPartitions = topic.NumPartitions > 0 ? topic.NumPartitions : _config.DefaultNumPartitions;
-                var replicationFactor = topic.ReplicationFactor > 0 ? topic.ReplicationFactor : _config.DefaultReplicationFactor;
 
                 // In a cluster the controller creates every topic, asked by this broker when it is another one (#207),
                 // and the creation completes once the topic has reached this broker (#214); a topic is never created on
                 // one broker alone. Only a broker on its own creates it locally.
                 try
                 {
-                    await _logManager.CreateTopicAsync(topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
+                    if (replicaAssignment is not null)
+                        await _logManager.CreateTopicWithReplicaAssignmentAsync(topic.Name, replicaAssignment, topic.Configs, cancellationToken);
+                    else
+                        await _logManager.CreateTopicAsync(topic.Name, numPartitions, replicationFactor, topic.Configs, cancellationToken);
+                }
+                catch (InvalidReplicaAssignmentException ex)
+                {
+                    // In a cluster: a broker of the assignment is not registered, as the metadata log knows it.
+                    results.Add(new CreateTopicsResponse.TopicResult
+                    {
+                        Name = topic.Name,
+                        ErrorCode = ErrorCode.InvalidReplicaAssignment,
+                        ErrorMessage = ex.Message
+                    });
+                    continue;
                 }
                 catch (TopicNotCreatedException)
                 {
@@ -183,6 +217,55 @@ public sealed class TopicAdminHandler : IKafkaRequestHandler
         }
 
         return new CreateTopicsResponse { CorrelationId = request.CorrelationId, ApiVersion = request.ApiVersion, Topics = results };
+    }
+
+    /// <summary>
+    /// What is wrong with a topic's replica assignment, with Kafka's error code and message
+    /// (ReplicationControlManager.createTopic and validateManualPartitionAssignment); null when nothing is.
+    /// NumPartitions and ReplicationFactor must be -1 beside one, the partitions numbered 0 to n-1 once each, each with
+    /// the same number of distinct brokers. Whether those brokers are registered is checked where the cluster is known:
+    /// on its way into the metadata log, or here for a broker on its own, whose only broker is itself.
+    /// </summary>
+    private (ErrorCode ErrorCode, string Message)? ValidateReplicaAssignment(
+        CreateTopicsRequest.TopicToCreate topic, List<CreateTopicsRequest.ReplicaAssignment> assignments)
+    {
+        if (topic.ReplicationFactor != -1)
+            return (ErrorCode.InvalidRequest, "A manual partition assignment was specified, but replication factor was not set to -1.");
+        if (topic.NumPartitions != -1)
+            return (ErrorCode.InvalidRequest, "A manual partition assignment was specified, but numPartitions was not set to -1.");
+
+        var partitions = new HashSet<int>();
+        int? replicationFactor = null;
+        foreach (var assignment in assignments)
+        {
+            if (!partitions.Add(assignment.Partition))
+                return (ErrorCode.InvalidReplicaAssignment, $"Found multiple manual partition assignments for partition {assignment.Partition}");
+            if (assignment.BrokerIds.Count == 0)
+                return (ErrorCode.InvalidReplicaAssignment, "The manual partition assignment includes an empty replica list.");
+
+            int? previous = null;
+            foreach (var brokerId in assignment.BrokerIds.Order())
+            {
+                if (!_logManager.RoutesTopicCreation && brokerId != _config.BrokerId)
+                    return (ErrorCode.InvalidReplicaAssignment, $"The manual partition assignment includes broker {brokerId}, but no such broker is registered.");
+                if (brokerId == previous)
+                    return (ErrorCode.InvalidReplicaAssignment, $"The manual partition assignment includes the broker {brokerId} more than once.");
+                previous = brokerId;
+            }
+
+            if (replicationFactor is { } expected && assignment.BrokerIds.Count != expected)
+                return (ErrorCode.InvalidReplicaAssignment,
+                    $"The manual partition assignment includes a partition with {assignment.BrokerIds.Count} replica(s), but this is not " +
+                    $"consistent with previous partitions, which have {expected} replica(s).");
+            replicationFactor = assignment.BrokerIds.Count;
+        }
+
+        for (var p = 0; p < partitions.Count; p++)
+        {
+            if (!partitions.Contains(p))
+                return (ErrorCode.InvalidReplicaAssignment, "partitions should be a consecutive 0-based integer sequence");
+        }
+        return null;
     }
 
     /// <summary>
