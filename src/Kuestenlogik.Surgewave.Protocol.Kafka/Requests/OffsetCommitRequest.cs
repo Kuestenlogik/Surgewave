@@ -341,6 +341,47 @@ public sealed class OffsetCommitResponse : KafkaResponse
     public int ThrottleTimeMs { get; init; }
     public required List<TopicPartitionCommitResult> Topics { get; init; }
 
+    /// <summary>
+    /// Read an OffsetCommit response the way a client receives it (#236). <paramref name="body"/>
+    /// is everything after the correlation id. Non-flexible versions only (v0-7): the Kafka wire
+    /// client sends v2.
+    /// </summary>
+    public static OffsetCommitResponse ReadFrom(ReadOnlySpan<byte> body, short apiVersion, int correlationId)
+    {
+        if (apiVersion >= 8)
+        {
+            throw new NotSupportedException($"Reading a flexible OffsetCommit response (v{apiVersion}) is not implemented.");
+        }
+
+        var reader = new KafkaProtocolReader(body.ToArray());
+        var throttleTimeMs = apiVersion >= 3 ? reader.ReadInt32() : 0;
+        var topicCount = reader.ReadInt32();
+        var topics = new List<TopicPartitionCommitResult>(Math.Max(0, topicCount));
+        for (var t = 0; t < topicCount; t++)
+        {
+            var topic = reader.ReadString() ?? string.Empty;
+            var partitionCount = reader.ReadInt32();
+            var partitions = new List<PartitionCommitResult>(Math.Max(0, partitionCount));
+            for (var p = 0; p < partitionCount; p++)
+            {
+                partitions.Add(new PartitionCommitResult
+                {
+                    PartitionIndex = reader.ReadInt32(),
+                    ErrorCode = (ErrorCode)reader.ReadInt16(),
+                });
+            }
+            topics.Add(new TopicPartitionCommitResult { Topic = topic, Partitions = partitions });
+        }
+
+        return new OffsetCommitResponse
+        {
+            CorrelationId = correlationId,
+            ApiVersion = apiVersion,
+            ThrottleTimeMs = throttleTimeMs,
+            Topics = topics,
+        };
+    }
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         // Response header

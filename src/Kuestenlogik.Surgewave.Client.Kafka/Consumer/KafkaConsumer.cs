@@ -1,9 +1,12 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using Kuestenlogik.Surgewave.Client.Kafka;
 using Kuestenlogik.Surgewave.Client.Security;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Kuestenlogik.Surgewave.Client.Consumer;
 
@@ -12,6 +15,14 @@ namespace Kuestenlogik.Surgewave.Client.Consumer;
 /// </summary>
 public sealed class KafkaConsumer : IAsyncDisposable
 {
+    // Fetch v4 (record batches with last_stable_offset) and OffsetCommit v2: both still
+    // non-flexible, and what the response readers in Protocol.Kafka take (#236).
+    private const short FetchVersion = 4;
+    private const short OffsetCommitVersion = 2;
+    private const short ListOffsetsVersion = 2;
+
+    private static readonly RecordBatchSerializer s_batches = new(NullLogger<RecordBatchSerializer>.Instance);
+
     private readonly ConsumerConfig _config;
     private readonly KafkaTransport.OpenedTransport _transport;
     private readonly Stream _stream;
@@ -60,7 +71,7 @@ public sealed class KafkaConsumer : IAsyncDisposable
         }
 
         var metadata = await FetchMetadataAsync(topics, cancellationToken);
-        var initialOffset = _config.AutoOffsetReset == "earliest" ? 0L : -1L;
+        var initialOffset = StartOffset;
 
         foreach (var topic in topics)
         {
@@ -94,6 +105,77 @@ public sealed class KafkaConsumer : IAsyncDisposable
 
                 var tp = new TopicPartition { Topic = topic, Partition = partition.PartitionIndex };
                 _subscriptions[tp] = initialOffset;
+            }
+        }
+
+        // "Latest" means the end of the log when the subscription is made, not when the
+        // first poll happens to run, so the start offsets are resolved here.
+        await ResolveStartOffsetsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Where a partition with no position starts: the ListOffsets timestamp for the configured
+    /// reset, earliest (-2) or latest (-1). It is resolved to a real offset before the first
+    /// fetch; a fetch at a negative offset returns nothing, so a consumer left there would
+    /// never see a record (#236).
+    /// </summary>
+    private long StartOffset => _config.AutoOffsetReset == "earliest"
+        ? ListOffsetsRequest.TimestampType.Earliest
+        : ListOffsetsRequest.TimestampType.Latest;
+
+    private async Task ResolveStartOffsetsAsync(CancellationToken cancellationToken)
+    {
+        var unresolved = _subscriptions.Where(kv => kv.Value < 0).ToList();
+        if (unresolved.Count == 0)
+        {
+            return;
+        }
+
+        var request = new ListOffsetsRequest
+        {
+            ApiKey = ApiKey.ListOffsets,
+            ApiVersion = ListOffsetsVersion,
+            CorrelationId = Interlocked.Increment(ref _correlationId),
+            ClientId = _clientId,
+            ReplicaId = -1,
+            IsolationLevel = 0,
+            Topics = unresolved
+                .GroupBy(kv => kv.Key.Topic)
+                .Select(g => new TopicPartitionTimestamp
+                {
+                    Topic = g.Key,
+                    Partitions = g.Select(kv => new PartitionTimestamp
+                    {
+                        PartitionIndex = kv.Key.Partition,
+                        Timestamp = kv.Value,
+                    }).ToList(),
+                })
+                .ToList(),
+        };
+
+        var body = await KafkaWire.RoundTripAsync(_stream, request, nameof(ApiKey.ListOffsets), cancellationToken)
+            .ConfigureAwait(false);
+        ListOffsetsResponse response;
+        try
+        {
+            response = ListOffsetsResponse.ReadFrom(body, ListOffsetsVersion, request.CorrelationId);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new BrokerResponseException("Malformed ListOffsets response from broker", ex);
+        }
+
+        foreach (var topic in response.Topics)
+        {
+            foreach (var partition in topic.Partitions)
+            {
+                if (partition.ErrorCode != ErrorCode.None)
+                {
+                    throw new BrokerResponseException(
+                        $"ListOffsets for {topic.Topic}[{partition.PartitionIndex}] failed: {partition.ErrorCode}",
+                        nameof(ApiKey.ListOffsets));
+                }
+                _subscriptions[new TopicPartition { Topic = topic.Topic, Partition = partition.PartitionIndex }] = partition.Offset;
             }
         }
     }
@@ -182,7 +264,8 @@ public sealed class KafkaConsumer : IAsyncDisposable
     public void Assign(TopicPartition topicPartition)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _subscriptions[topicPartition] = _config.AutoOffsetReset == "earliest" ? 0 : -1;
+        // Resolved to a real offset before the next fetch.
+        _subscriptions[topicPartition] = StartOffset;
     }
 
     /// <summary>
@@ -207,6 +290,8 @@ public sealed class KafkaConsumer : IAsyncDisposable
         {
             return [];
         }
+
+        await ResolveStartOffsetsAsync(cancellationToken).ConfigureAwait(false);
 
         var records = new List<ConsumerRecord>();
 
@@ -270,7 +355,7 @@ public sealed class KafkaConsumer : IAsyncDisposable
         var request = new OffsetCommitRequest
         {
             ApiKey = ApiKey.OffsetCommit,
-            ApiVersion = 2, // v2 is widely supported
+            ApiVersion = OffsetCommitVersion,
             CorrelationId = Interlocked.Increment(ref _correlationId),
             ClientId = _clientId,
             GroupId = _config.GroupId,
@@ -280,69 +365,28 @@ public sealed class KafkaConsumer : IAsyncDisposable
             Topics = topicCommits
         };
 
-        // Send request - combine size prefix + payload into single write
-        using var writer = new KafkaProtocolWriter();
-        request.WriteTo(writer);
-
-        var requestSpan = writer.WrittenSpan;
-        var totalWriteLength = 4 + requestSpan.Length;
-        var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalWriteLength);
+        var body = await KafkaWire.RoundTripAsync(_stream, request, nameof(ApiKey.OffsetCommit), cancellationToken)
+            .ConfigureAwait(false);
+        OffsetCommitResponse response;
         try
         {
-            BinaryPrimitives.WriteInt32BigEndian(combinedBuffer, requestSpan.Length);
-            requestSpan.CopyTo(combinedBuffer.AsSpan(4));
-            await _stream.WriteAsync(combinedBuffer.AsMemory(0, totalWriteLength), cancellationToken);
-            await _stream.FlushAsync(cancellationToken);
+            response = OffsetCommitResponse.ReadFrom(body, OffsetCommitVersion, request.CorrelationId);
         }
-        finally
+        catch (InvalidDataException ex)
         {
-            ArrayPool<byte>.Shared.Return(combinedBuffer);
+            throw new BrokerResponseException("Malformed OffsetCommit response from broker", ex);
         }
 
-        // Read response - use pooled buffer
-        var responseSizeBuffer = ArrayPool<byte>.Shared.Rent(4);
-        int responseSize;
-        try
+        foreach (var topic in response.Topics)
         {
-            await _stream.ReadExactlyAsync(responseSizeBuffer.AsMemory(0, 4), cancellationToken);
-            responseSize = BinaryPrimitives.ReadInt32BigEndian(responseSizeBuffer.AsSpan(0, 4));
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(responseSizeBuffer);
-        }
-        var responseBytes = ArrayPool<byte>.Shared.Rent(responseSize);
-        try
-        {
-            await _stream.ReadExactlyAsync(responseBytes.AsMemory(0, responseSize), cancellationToken);
-
-            // Parse response to check for errors
-            using var responseStream = new MemoryStream(responseBytes, 0, responseSize, writable: false);
-            using var reader = new BinaryReader(responseStream);
-
-            var correlationId = reader.ReadInt32();
-            var topicCount = reader.ReadInt32();
-
-            for (int i = 0; i < topicCount; i++)
+            foreach (var partition in topic.Partitions)
             {
-                var topic = ReadString(reader);
-                var partitionCount = reader.ReadInt32();
-
-                for (int j = 0; j < partitionCount; j++)
+                if (partition.ErrorCode != ErrorCode.None)
                 {
-                    var partition = reader.ReadInt32();
-                    var errorCode = (ErrorCode)reader.ReadInt16();
-
-                    if (errorCode != ErrorCode.None)
-                    {
-                        throw new InvalidOperationException($"Failed to commit offset for {topic}[{partition}]: {errorCode}");
-                    }
+                    throw new InvalidOperationException(
+                        $"Failed to commit offset for {topic.Topic}[{partition.PartitionIndex}]: {partition.ErrorCode}");
                 }
             }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(responseBytes);
         }
     }
 
@@ -357,12 +401,10 @@ public sealed class KafkaConsumer : IAsyncDisposable
 
     private async Task<List<ConsumerRecord>> FetchAsync(TopicPartition topicPartition, long offset, CancellationToken cancellationToken)
     {
-        // Fetch v4 adds last_stable_offset + aborted_transactions between high_watermark
-        // and record_set. The parser below handles both v3 and v4 layouts.
         var request = new FetchRequest
         {
             ApiKey = ApiKey.Fetch,
-            ApiVersion = 4,
+            ApiVersion = FetchVersion,
             CorrelationId = Interlocked.Increment(ref _correlationId),
             ClientId = _clientId,
             ReplicaId = -1,
@@ -387,154 +429,75 @@ public sealed class KafkaConsumer : IAsyncDisposable
             ]
         };
 
-        // Send request - combine size prefix + payload into single write
-        using var writer = new KafkaProtocolWriter();
-        request.WriteTo(writer);
-
-        var requestSpan = writer.WrittenSpan;
-        var totalWriteLength = 4 + requestSpan.Length;
-        var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalWriteLength);
+        var body = await KafkaWire.RoundTripAsync(_stream, request, nameof(ApiKey.Fetch), cancellationToken)
+            .ConfigureAwait(false);
+        FetchResponse response;
         try
         {
-            BinaryPrimitives.WriteInt32BigEndian(combinedBuffer, requestSpan.Length);
-            requestSpan.CopyTo(combinedBuffer.AsSpan(4));
-            await _stream.WriteAsync(combinedBuffer.AsMemory(0, totalWriteLength), cancellationToken);
-            await _stream.FlushAsync(cancellationToken);
+            response = FetchResponse.ReadFrom(body, FetchVersion, request.CorrelationId);
         }
-        finally
+        catch (InvalidDataException ex)
         {
-            ArrayPool<byte>.Shared.Return(combinedBuffer);
+            throw new BrokerResponseException("Malformed Fetch response from broker", ex);
         }
 
-        // Read response - use pooled buffer
-        var responseSizeBuffer = ArrayPool<byte>.Shared.Rent(4);
-        int responseSize;
-        try
+        var records = new List<ConsumerRecord>();
+        foreach (var topic in response.Responses)
         {
-            await _stream.ReadExactlyAsync(responseSizeBuffer.AsMemory(0, 4), cancellationToken);
-            responseSize = BinaryPrimitives.ReadInt32BigEndian(responseSizeBuffer.AsSpan(0, 4));
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(responseSizeBuffer);
-        }
-        var responseBytes = ArrayPool<byte>.Shared.Rent(responseSize);
-        try
-        {
-            await _stream.ReadExactlyAsync(responseBytes.AsMemory(0, responseSize), cancellationToken);
-
-            // Parse response
-            using var responseStream = new MemoryStream(responseBytes, 0, responseSize, writable: false);
-            using var reader = new BinaryReader(responseStream);
-
-            var records = new List<ConsumerRecord>();
-            try
+            foreach (var partition in topic.Partitions)
             {
-                var correlationId = reader.ReadInt32();
-                var throttleTimeMs = reader.ReadInt32();
-
-                var topicCount = reader.ReadInt32();
-
-                for (int i = 0; i < topicCount; i++)
+                if (partition.ErrorCode != ErrorCode.None)
                 {
-                    var topic = ReadString(reader);
-                    var partitionCount = reader.ReadInt32();
-
-                    for (int j = 0; j < partitionCount; j++)
-                    {
-                        var partition = reader.ReadInt32();
-                        var errorCode = (ErrorCode)reader.ReadInt16();
-                        var highWatermark = reader.ReadInt64();
-
-                        // Fetch v4+: last_stable_offset + aborted_transactions
-                        var _lastStableOffset = reader.ReadInt64(); // skip
-                        var abortedTxnCount = reader.ReadInt32();
-                        for (int k = 0; k < abortedTxnCount; k++)
-                        {
-                            reader.ReadInt64(); // producerId
-                            reader.ReadInt64(); // firstOffset
-                        }
-
-                        var recordSetSize = reader.ReadInt32();
-
-                        if (errorCode == ErrorCode.None && recordSetSize > 0)
-                        {
-                            var recordSetBytes = reader.ReadBytes(recordSetSize);
-                            var parsedRecords = ParseRecordSet(topic, partition, recordSetBytes);
-                            records.AddRange(parsedRecords);
-                        }
-                    }
+                    throw new BrokerResponseException(
+                        $"Fetch of {topic.Topic}[{partition.Partition}] failed: {partition.ErrorCode}", nameof(ApiKey.Fetch));
                 }
+                records.AddRange(ParseRecordSet(topic.Topic ?? topicPartition.Topic, partition.Partition, partition.RecordSet.Span, offset));
             }
-            catch (EndOfStreamException)
-            {
-                // Truncated or unexpected response layout — treat as empty fetch. Happens
-                // when the broker returns a Fetch response in a version newer than v3 (the
-                // parser above), or when the topic has no data yet. We'd rather return an
-                // empty batch than bubble a cryptic EOF up into consumer callers.
-                return records;
-            }
-
-            return records;
         }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(responseBytes);
-        }
+        return records;
     }
 
-    private List<ConsumerRecord> ParseRecordSet(string topic, int partition, byte[] recordSetBytes)
+    /// <summary>
+    /// The records of a fetched record set: one or more record batches (magic v2) back to
+    /// back. A broker may cut the last batch short at the fetch's byte limit; that partial
+    /// batch is left for the next fetch, as Kafka clients do. Records before
+    /// <paramref name="fetchOffset"/> are skipped: a batch is returned whole even when the
+    /// fetch starts inside it.
+    /// </summary>
+    private static List<ConsumerRecord> ParseRecordSet(string topic, int partition, ReadOnlySpan<byte> recordSet, long fetchOffset)
     {
+        const int batchPrefix = 12; // base offset (8) + batch length (4)
         var records = new List<ConsumerRecord>();
-
-        using var stream = new MemoryStream(recordSetBytes);
-        using var reader = new BinaryReader(stream);
-
-        while (stream.Position < stream.Length)
+        var pos = 0;
+        while (recordSet.Length - pos >= batchPrefix)
         {
-            try
+            var batchLength = BinaryPrimitives.ReadInt32BigEndian(recordSet.Slice(pos + 8, 4));
+            var batchSize = batchPrefix + batchLength;
+            if (batchLength <= 0 || batchSize > recordSet.Length - pos)
             {
-                var recordOffset = reader.ReadInt64();
-                var timestamp = reader.ReadInt64();
+                break;
+            }
 
-                var keyLen = reader.ReadInt32();
-                var key = keyLen > 0 ? reader.ReadBytes(keyLen) : null;
-
-                var valueLen = reader.ReadInt32();
-                var value = reader.ReadBytes(valueLen);
-
-                var headersLen = reader.ReadInt32();
-                if (headersLen > 0)
+            foreach (var message in s_batches.ParseRecordBatch(recordSet.Slice(pos, batchSize).ToArray()))
+            {
+                if (message.Offset < fetchOffset)
                 {
-                    reader.ReadBytes(headersLen); // Skip headers for now
+                    continue;
                 }
-
                 records.Add(new ConsumerRecord
                 {
                     Topic = topic,
                     Partition = partition,
-                    Offset = recordOffset,
-                    Timestamp = timestamp,
-                    Key = key,
-                    Value = value
+                    Offset = message.Offset,
+                    Timestamp = message.Timestamp,
+                    Key = message.Key.IsEmpty ? null : message.Key.ToArray(),
+                    Value = message.Value.ToArray(),
+                    Headers = KafkaWire.DecodeHeaders(message.Headers.Span),
                 });
             }
-            catch (EndOfStreamException)
-            {
-                break;
-            }
+            pos += batchSize;
         }
-
         return records;
-    }
-
-    private string ReadString(BinaryReader reader)
-    {
-        var length = reader.ReadInt16();
-        if (length < 0) return string.Empty;
-
-        var bytes = reader.ReadBytes(length);
-        return System.Text.Encoding.UTF8.GetString(bytes);
     }
 
     public ValueTask DisposeAsync()

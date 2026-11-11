@@ -298,6 +298,66 @@ public sealed class ProduceResponse : KafkaResponse
     /// </summary>
     public List<NodeEndpoint>? NodeEndpoints { get; init; }
 
+    /// <summary>
+    /// Read a Produce response the way a client receives it (#236). <paramref name="body"/> is
+    /// everything after the correlation id. Non-flexible versions only (v0-8): the Kafka wire
+    /// client sends v3, and a flexible reader would be untested code.
+    /// </summary>
+    public static ProduceResponse ReadFrom(ReadOnlySpan<byte> body, short apiVersion, int correlationId)
+    {
+        if (apiVersion >= 9)
+        {
+            throw new NotSupportedException($"Reading a flexible Produce response (v{apiVersion}) is not implemented.");
+        }
+
+        var reader = new KafkaProtocolReader(body.ToArray());
+        var topicCount = reader.ReadInt32();
+        var responses = new List<TopicProduceResponse>(Math.Max(0, topicCount));
+        for (var t = 0; t < topicCount; t++)
+        {
+            var name = reader.ReadString();
+            var partitionCount = reader.ReadInt32();
+            var partitions = new List<PartitionProduceResponse>(Math.Max(0, partitionCount));
+            for (var p = 0; p < partitionCount; p++)
+            {
+                var index = reader.ReadInt32();
+                var errorCode = (ErrorCode)reader.ReadInt16();
+                var baseOffset = reader.ReadInt64();
+                var logAppendTimeMs = apiVersion >= 2 ? reader.ReadInt64() : -1;
+                var logStartOffset = apiVersion >= 5 ? reader.ReadInt64() : -1;
+                if (apiVersion >= 8)
+                {
+                    // RecordErrors: [batch_index int32, batch_index_error_message nullable string]
+                    var recordErrors = reader.ReadInt32();
+                    for (var e = 0; e < recordErrors; e++)
+                    {
+                        reader.ReadInt32();
+                        reader.ReadString();
+                    }
+                    reader.ReadString(); // ErrorMessage
+                }
+                partitions.Add(new PartitionProduceResponse
+                {
+                    Index = index,
+                    ErrorCode = errorCode,
+                    BaseOffset = baseOffset,
+                    LogAppendTimeMs = logAppendTimeMs,
+                    LogStartOffset = logStartOffset,
+                });
+            }
+            responses.Add(new TopicProduceResponse { Name = name, PartitionResponses = partitions });
+        }
+        var throttleTimeMs = apiVersion >= 1 ? reader.ReadInt32() : 0;
+
+        return new ProduceResponse
+        {
+            CorrelationId = correlationId,
+            ApiVersion = apiVersion,
+            Responses = responses,
+            ThrottleTimeMs = throttleTimeMs,
+        };
+    }
+
     public sealed class TopicProduceResponse
     {
         /// <summary>Topic name (v0-12)</summary>

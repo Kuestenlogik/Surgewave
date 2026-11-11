@@ -252,6 +252,55 @@ public sealed class ListOffsetsResponse : KafkaResponse
     public int ThrottleTimeMs { get; init; }
     public required List<TopicPartitionOffsets> Topics { get; init; }
 
+    /// <summary>
+    /// Read a ListOffsets response the way a client receives it (#236). <paramref name="body"/>
+    /// is everything after the correlation id. Versions 1-5 only: non-flexible, with one offset
+    /// per partition (v0 answers with an array). The Kafka wire client sends v2.
+    /// </summary>
+    public static ListOffsetsResponse ReadFrom(ReadOnlySpan<byte> body, short apiVersion, int correlationId)
+    {
+        if (apiVersion < 1 || apiVersion >= 6)
+        {
+            throw new NotSupportedException($"Reading a ListOffsets response v{apiVersion} is not implemented.");
+        }
+
+        var reader = new KafkaProtocolReader(body.ToArray());
+        var throttleTimeMs = apiVersion >= 2 ? reader.ReadInt32() : 0;
+        var topicCount = reader.ReadInt32();
+        var topics = new List<TopicPartitionOffsets>(Math.Max(0, topicCount));
+        for (var t = 0; t < topicCount; t++)
+        {
+            var topic = reader.ReadString() ?? string.Empty;
+            var partitionCount = reader.ReadInt32();
+            var partitions = new List<PartitionOffsetInfo>(Math.Max(0, partitionCount));
+            for (var p = 0; p < partitionCount; p++)
+            {
+                var index = reader.ReadInt32();
+                var errorCode = (ErrorCode)reader.ReadInt16();
+                var timestamp = reader.ReadInt64();
+                var offset = reader.ReadInt64();
+                var leaderEpoch = apiVersion >= 4 ? reader.ReadInt32() : -1;
+                partitions.Add(new PartitionOffsetInfo
+                {
+                    PartitionIndex = index,
+                    ErrorCode = errorCode,
+                    Timestamp = timestamp,
+                    Offset = offset,
+                    LeaderEpoch = leaderEpoch,
+                });
+            }
+            topics.Add(new TopicPartitionOffsets { Topic = topic, Partitions = partitions });
+        }
+
+        return new ListOffsetsResponse
+        {
+            CorrelationId = correlationId,
+            ApiVersion = apiVersion,
+            ThrottleTimeMs = throttleTimeMs,
+            Topics = topics,
+        };
+    }
+
     public override void WriteTo(KafkaProtocolWriter writer)
     {
         bool isFlexible = ApiVersion >= 6;

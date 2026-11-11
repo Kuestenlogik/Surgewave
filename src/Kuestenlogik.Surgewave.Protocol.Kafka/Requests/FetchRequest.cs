@@ -286,6 +286,75 @@ public sealed class FetchResponse : KafkaResponse
     /// </summary>
     public List<NodeEndpoint>? NodeEndpoints { get; init; }
 
+    /// <summary>
+    /// Read a Fetch response the way a client receives it (#236). <paramref name="body"/> is
+    /// everything after the correlation id. Non-flexible versions only (v0-11): the Kafka wire
+    /// client sends v4. The record sets are returned as received, still encoded as record
+    /// batches.
+    /// </summary>
+    public static FetchResponse ReadFrom(ReadOnlySpan<byte> body, short apiVersion, int correlationId)
+    {
+        if (apiVersion >= 12)
+        {
+            throw new NotSupportedException($"Reading a flexible Fetch response (v{apiVersion}) is not implemented.");
+        }
+
+        var reader = new KafkaProtocolReader(body.ToArray());
+        var throttleTimeMs = apiVersion >= 1 ? reader.ReadInt32() : 0;
+        var errorCode = apiVersion >= 7 ? (ErrorCode)reader.ReadInt16() : ErrorCode.None;
+        var sessionId = apiVersion >= 7 ? reader.ReadInt32() : 0;
+
+        var topicCount = reader.ReadInt32();
+        var responses = new List<FetchableTopicResponse>(Math.Max(0, topicCount));
+        for (var t = 0; t < topicCount; t++)
+        {
+            var topic = reader.ReadString();
+            var partitionCount = reader.ReadInt32();
+            var partitions = new List<PartitionResponse>(Math.Max(0, partitionCount));
+            for (var p = 0; p < partitionCount; p++)
+            {
+                var partition = reader.ReadInt32();
+                var partitionError = (ErrorCode)reader.ReadInt16();
+                var highWatermark = reader.ReadInt64();
+                var lastStableOffset = apiVersion >= 4 ? reader.ReadInt64() : -1;
+                var logStartOffset = apiVersion >= 5 ? reader.ReadInt64() : -1;
+                if (apiVersion >= 4)
+                {
+                    // AbortedTransactions: nullable [producer_id int64, first_offset int64]
+                    var aborted = reader.ReadInt32();
+                    for (var a = 0; a < aborted; a++)
+                    {
+                        reader.ReadInt64();
+                        reader.ReadInt64();
+                    }
+                }
+                var preferredReadReplica = apiVersion >= 11 ? reader.ReadInt32() : -1;
+                var records = reader.ReadBytes();
+                partitions.Add(new PartitionResponse
+                {
+                    Partition = partition,
+                    ErrorCode = partitionError,
+                    HighWatermark = highWatermark,
+                    LastStableOffset = lastStableOffset,
+                    LogStartOffset = logStartOffset,
+                    PreferredReadReplica = preferredReadReplica,
+                    RecordSet = records ?? [],
+                });
+            }
+            responses.Add(new FetchableTopicResponse { Topic = topic, Partitions = partitions });
+        }
+
+        return new FetchResponse
+        {
+            CorrelationId = correlationId,
+            ApiVersion = apiVersion,
+            ThrottleTimeMs = throttleTimeMs,
+            ErrorCode = errorCode,
+            SessionId = sessionId,
+            Responses = responses,
+        };
+    }
+
     public sealed class FetchableTopicResponse
     {
         /// <summary>Topic name (v0-12)</summary>

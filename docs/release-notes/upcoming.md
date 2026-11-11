@@ -532,6 +532,20 @@ contract it is registered under; the second dispose threw
 They now name `Kuestenlogik.Surgewave.AI` from the new default plugin source
 `surgewave-ai`, the GitHub releases of the Surgewave.Ai repository.
 
+### The client's Kafka wire produces and consumes (#236)
+
+`UseKafkaProtocol()`, and the Kafka fallback of `UseAutoDetect()`, connected and then failed at
+the first produce, against any broker, Surgewave's own included. The Kafka producer and consumer
+parsed responses little-endian and wrote records in a format of their own. Both now use the
+Kafka protocol as written: record batches v2 with headers, and response readers for Produce,
+Fetch, ListOffsets and OffsetCommit next to the request types in Protocol.Kafka. The consumer
+also resolves its starting offset with ListOffsets. `Latest`, the default, used to leave it at
+-1, where a fetch returns nothing, so it never delivered a record. Tests produce and consume
+over this wire and check each direction with the Confluent client.
+
+Record batches parsed by the broker now keep their headers (in the native header-block form)
+instead of dropping them.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

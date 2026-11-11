@@ -377,16 +377,11 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 recordsPos += valueLength;
             }
 
-            // Read headers count and skip them (zigzag-signed varints, see
-            // WriteHeadersFromNativeBlock).
-            var headerCount = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
-            for (int h = 0; h < headerCount; h++)
-            {
-                var headerKeyLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
-                if (headerKeyLen > 0) recordsPos += headerKeyLen;
-                var headerValueLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(recordsSpan, ref recordsPos));
-                if (headerValueLen > 0) recordsPos += headerValueLen;
-            }
+            // Headers (zigzag-signed varints, see WriteHeadersFromNativeBlock), kept in the
+            // native-wire block form SerializeMessages takes, so a record that is parsed and
+            // written again keeps its headers. They used to be skipped, so a reader of a
+            // parsed batch, the Kafka wire client among them, never saw any (#236).
+            var headers = ReadHeadersToNativeBlock(recordsSpan, ref recordsPos);
 
             var message = new Message
             {
@@ -394,7 +389,7 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
                 Timestamp = baseTimestamp + timestampDelta,
                 Key = key,
                 Value = value,
-                Headers = Array.Empty<byte>()
+                Headers = headers
             };
 
             RecordBatchSerializerLog.ParseRecordBatchMessageCreated(logger, message.Offset, message.Timestamp, message.Key.Length, message.Value.Length);
@@ -467,6 +462,55 @@ public sealed class RecordBatchSerializer(ILogger<RecordBatchSerializer> logger)
     {
         if (recordBatch.Length < 61) return 0;
         return System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(recordBatch.Slice(57, 4));
+    }
+
+    /// <summary>
+    /// Read the Kafka RecordBatch headers of one record at <paramref name="pos"/> (zigzag-varint
+    /// count + zigzag-varint-prefixed key/value pairs) into the native-wire header block
+    /// (int32 count + int32-prefixed pairs, big-endian): the inverse of
+    /// <see cref="WriteHeadersFromNativeBlock"/>. No headers is an empty block. A null value
+    /// (length -1) becomes an empty one, as the native wire has no nulls here.
+    /// </summary>
+    private static byte[] ReadHeadersToNativeBlock(ReadOnlySpan<byte> records, ref int pos)
+    {
+        var count = ZigZag.Decode((uint)VarintCodec.ReadVarInt(records, ref pos));
+        if (count <= 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        var start = pos;
+        var size = 4;
+        for (var h = 0; h < count; h++)
+        {
+            var keyLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(records, ref pos));
+            pos += Math.Max(0, keyLen);
+            var valueLen = ZigZag.Decode((uint)VarintCodec.ReadVarInt(records, ref pos));
+            pos += Math.Max(0, valueLen);
+            size += 8 + Math.Max(0, keyLen) + Math.Max(0, valueLen);
+        }
+
+        var block = new byte[size];
+        BinaryPrimitives.WriteInt32BigEndian(block, count);
+        var dest = 4;
+        var src = start;
+        for (var h = 0; h < count; h++)
+        {
+            var keyLen = Math.Max(0, ZigZag.Decode((uint)VarintCodec.ReadVarInt(records, ref src)));
+            BinaryPrimitives.WriteInt32BigEndian(block.AsSpan(dest), keyLen);
+            dest += 4;
+            records.Slice(src, keyLen).CopyTo(block.AsSpan(dest));
+            src += keyLen;
+            dest += keyLen;
+
+            var valueLen = Math.Max(0, ZigZag.Decode((uint)VarintCodec.ReadVarInt(records, ref src)));
+            BinaryPrimitives.WriteInt32BigEndian(block.AsSpan(dest), valueLen);
+            dest += 4;
+            records.Slice(src, valueLen).CopyTo(block.AsSpan(dest));
+            src += valueLen;
+            dest += valueLen;
+        }
+        return block;
     }
 
     /// <summary>

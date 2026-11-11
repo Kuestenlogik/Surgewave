@@ -1,9 +1,10 @@
-using System.Buffers;
-using System.Buffers.Binary;
+using Kuestenlogik.Surgewave.Client.Kafka;
 using Kuestenlogik.Surgewave.Client.Security;
 using Kuestenlogik.Surgewave.Core.Models;
+using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Kuestenlogik.Surgewave.Client.Producer;
 
@@ -12,6 +13,12 @@ namespace Kuestenlogik.Surgewave.Client.Producer;
 /// </summary>
 public sealed class KafkaProducer : IAsyncDisposable
 {
+    // Produce v3: the first version that carries record batches (magic v2), which is the only
+    // record format the broker accepts, and still non-flexible.
+    private const short ProduceVersion = 3;
+
+    private static readonly RecordBatchSerializer s_batches = new(NullLogger<RecordBatchSerializer>.Instance);
+
     private readonly ProducerConfig _config;
     private readonly KafkaTransport.OpenedTransport _transport;
     private readonly Stream _stream;
@@ -40,14 +47,10 @@ public sealed class KafkaProducer : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Serialize the record
-        var recordBatch = SerializeRecord(record);
-
-        // Create produce request
         var request = new ProduceRequest
         {
             ApiKey = ApiKey.Produce,
-            ApiVersion = 3,
+            ApiVersion = ProduceVersion,
             CorrelationId = Interlocked.Increment(ref _correlationId),
             ClientId = _clientId,
             RequiredAcks = _config.RequiredAcks,
@@ -62,119 +65,57 @@ public sealed class KafkaProducer : IAsyncDisposable
                         new ProduceRequest.PartitionProduceData
                         {
                             Index = record.Partition ?? 0,
-                            Records = recordBatch
+                            Records = SerializeRecord(record)
                         }
                     ]
                 }
             ]
         };
 
-        // Write request - combine size prefix + payload into single write to reduce syscalls
-        using var writer = new KafkaProtocolWriter();
-        request.WriteTo(writer);
-
-        var requestSpan = writer.WrittenSpan;
-        var totalWriteLength = 4 + requestSpan.Length;
-        var combinedBuffer = ArrayPool<byte>.Shared.Rent(totalWriteLength);
+        var body = await KafkaWire.RoundTripAsync(_stream, request, nameof(ApiKey.Produce), cancellationToken)
+            .ConfigureAwait(false);
+        ProduceResponse response;
         try
         {
-            BinaryPrimitives.WriteInt32BigEndian(combinedBuffer, requestSpan.Length);
-            requestSpan.CopyTo(combinedBuffer.AsSpan(4));
-            await _stream.WriteAsync(combinedBuffer.AsMemory(0, totalWriteLength), cancellationToken);
-            await _stream.FlushAsync(cancellationToken);
+            response = ProduceResponse.ReadFrom(body, ProduceVersion, request.CorrelationId);
         }
-        finally
+        catch (InvalidDataException ex)
         {
-            ArrayPool<byte>.Shared.Return(combinedBuffer);
+            throw new BrokerResponseException("Malformed Produce response from broker", ex);
         }
 
-        // Read response - use pooled buffer for response data
-        var responseSizeBuffer = ArrayPool<byte>.Shared.Rent(4);
-        int responseSize;
-        try
+        var topic = response.Responses.FirstOrDefault()
+            ?? throw new BrokerResponseException("Broker returned empty topic response", nameof(ApiKey.Produce));
+        var partition = topic.PartitionResponses.FirstOrDefault()
+            ?? throw new BrokerResponseException(
+                $"Broker returned empty partition response for topic '{topic.Name}'", nameof(ApiKey.Produce));
+
+        if (partition.ErrorCode != ErrorCode.None)
         {
-            await _stream.ReadExactlyAsync(responseSizeBuffer.AsMemory(0, 4), cancellationToken);
-            responseSize = BinaryPrimitives.ReadInt32BigEndian(responseSizeBuffer.AsSpan(0, 4));
+            throw new ProduceException(partition.ErrorCode, topic.Name ?? record.Topic, partition.Index);
         }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(responseSizeBuffer);
-        }
-        var responseBytes = ArrayPool<byte>.Shared.Rent(responseSize);
-        try
-        {
-            await _stream.ReadExactlyAsync(responseBytes.AsMemory(0, responseSize), cancellationToken);
 
-            // Parse response
-            using var responseStream = new MemoryStream(responseBytes, 0, responseSize, writable: false);
-            using var reader = new BinaryReader(responseStream);
-
-            var correlationId = reader.ReadInt32();
-            var topicCount = reader.ReadInt32();
-
-            if (topicCount == 0)
-            {
-                throw new BrokerResponseException("Broker returned empty topic response", "Produce");
-            }
-
-            var topic = ReadString(reader);
-            var partitionCount = reader.ReadInt32();
-
-            if (partitionCount == 0)
-            {
-                throw new BrokerResponseException($"Broker returned empty partition response for topic '{topic}'", "Produce");
-            }
-
-            var partition = reader.ReadInt32();
-            var errorCode = (ErrorCode)reader.ReadInt16();
-            var baseOffset = reader.ReadInt64();
-            var logAppendTime = reader.ReadInt64();
-
-            if (errorCode != ErrorCode.None)
-            {
-                throw new ProduceException(errorCode, topic, partition);
-            }
-
-            return new RecordMetadata(topic, partition, baseOffset, logAppendTime);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(responseBytes);
-        }
+        return new RecordMetadata(topic.Name ?? record.Topic, partition.Index, partition.BaseOffset, partition.LogAppendTimeMs);
     }
 
-    private byte[] SerializeRecord(ProducerRecord record)
+    /// <summary>
+    /// The record as a Kafka record batch (magic v2) of one record, headers included. The
+    /// broker assigns the offset; the timestamp is the record's own or now.
+    /// </summary>
+    private static byte[] SerializeRecord(ProducerRecord record)
     {
-        using var stream = new MemoryStream();
-        using var writer = new BinaryWriter(stream);
-
-        // Simplified record batch format
         var timestamp = record.Timestamp ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        writer.Write(0L); // Base offset (will be set by broker)
-        writer.Write(timestamp);
-        writer.Write(record.Key?.Length ?? 0);
-        if (record.Key != null)
-        {
-            writer.Write(record.Key);
-        }
-
-        writer.Write(record.Value.Length);
-        writer.Write(record.Value);
-
-        // Headers (simplified)
-        writer.Write(0); // No headers for now
-
-        return stream.ToArray();
-    }
-
-    private string ReadString(BinaryReader reader)
-    {
-        var length = reader.ReadInt16();
-        if (length < 0) return string.Empty;
-
-        var bytes = reader.ReadBytes(length);
-        return System.Text.Encoding.UTF8.GetString(bytes);
+        return s_batches.SerializeMessages(
+        [
+            new Message
+            {
+                Offset = 0,
+                Timestamp = timestamp,
+                Key = record.Key ?? ReadOnlyMemory<byte>.Empty,
+                Value = record.Value,
+                Headers = KafkaWire.EncodeHeaders(record.Headers),
+            }
+        ]);
     }
 
     public ValueTask DisposeAsync()
