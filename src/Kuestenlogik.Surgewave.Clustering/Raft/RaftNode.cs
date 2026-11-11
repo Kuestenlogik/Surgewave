@@ -41,8 +41,9 @@ public sealed partial class RaftNode : IAsyncDisposable
     // Released by a proposal, so it goes out now rather than on the next heartbeat tick.
     private readonly SemaphoreSlim _replicateNow = new(0, 1);
 
-    // Completed and replaced, under _lock, each time the commit index moves: what WaitForCommitAsync waits on.
-    private TaskCompletionSource _commitAdvanced = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // Follows _commitIndex, advanced under _lock each time it moves: what WaitForCommitAsync and
+    // WaitForCommitIndexAsync wait on. Costs no allocation per commit while nobody waits (#201).
+    private readonly IndexWatermark _committed = new();
 
     // Timing
     private DateTimeOffset _lastHeartbeat = DateTimeOffset.UtcNow;
@@ -482,7 +483,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             {
                 _commitIndex = Math.Min(request.LeaderCommit, LastLogIndex);
                 ApplyCommittedEntries();
-                SignalCommitAdvanced();
+                _committed.Advance(_commitIndex);
             }
 
             response = new AppendEntriesResponse(_currentTerm, true, LastLogIndex);
@@ -567,33 +568,47 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </remarks>
     public async Task<bool> WaitForCommitAsync(long index, TimeSpan timeout, CancellationToken ct)
     {
-        var deadline = DateTimeOffset.UtcNow + timeout;
+        if (_committed.Value >= index)
+            return true;
 
-        while (!ct.IsCancellationRequested)
+        if (ct.IsCancellationRequested || timeout <= TimeSpan.Zero)
+            return false;
+
+        // The timeout cancels the wait rather than abandoning it, so a wait that times out leaves no waiter behind.
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(timeout);
+        try
         {
-            Task advanced;
-            lock (_lock)
-            {
-                if (_commitIndex >= index)
-                    return true;
-                advanced = _commitAdvanced.Task;
-            }
-
-            var remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero)
-                break;
-
-            try
-            {
-                await advanced.WaitAsync(remaining, ct).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                break;
-            }
+            await _committed.WaitAsync(index, bounded.Token).ConfigureAwait(false);
+            return true;
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return _committed.Value >= index;
+        }
+    }
 
-        return _commitIndex >= index;
+    /// <summary>
+    /// Completes when this node's commit index reaches <paramref name="index"/>: at once if it already has.
+    /// </summary>
+    /// <remarks>
+    /// On a follower or observer the commit index is what the leader's AppendEntries said, capped at the node's own
+    /// log end, so reaching <paramref name="index"/> means the node holds the leader's entries up to it (Raft's log
+    /// matching) and has applied them (#201). Not bounded: a caller that may wait for an entry that never commits
+    /// bounds the wait with <paramref name="ct"/>, or uses <see cref="WaitForCommitAsync"/>.
+    /// </remarks>
+    public Task WaitForCommitIndexAsync(long index, CancellationToken ct) => _committed.WaitAsync(index, ct);
+
+    /// <summary>
+    /// The entry this node's log holds at <paramref name="index"/>, if any — test-only (via InternalsVisibleTo), so
+    /// a test can check that a follower holds the very entry the leader proposed.
+    /// </summary>
+    internal RaftLogEntry? LogEntryAt(long index)
+    {
+        lock (_lock)
+        {
+            return GetLogEntry(index);
+        }
     }
 
     /// <summary>
@@ -1228,16 +1243,8 @@ public sealed partial class RaftNode : IAsyncDisposable
             _commitIndex = newCommitIndex;
             LogCommitIndexAdvanced(_commitIndex);
             ApplyCommittedEntries();
-            SignalCommitAdvanced();
+            _committed.Advance(_commitIndex);
         }
-    }
-
-    // Wakes every WaitForCommitAsync; called under _lock right after the commit index moved.
-    private void SignalCommitAdvanced()
-    {
-        var advanced = _commitAdvanced;
-        _commitAdvanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        advanced.TrySetResult();
     }
 
     /// <summary>

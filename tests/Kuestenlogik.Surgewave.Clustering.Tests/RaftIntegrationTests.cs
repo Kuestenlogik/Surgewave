@@ -1010,13 +1010,26 @@ public class RaftIntegrationTests : IAsyncLifetime
         Assert.True(leader.RaftNode.LastLogIndex >= index,
             $"the leader's log should hold the proposed entry {index}, but ends at {leader.RaftNode.LastLogIndex}");
 
-        // Wait for replication (with eventual timeout)
-        await Task.Delay(1000, cancellationToken);
+        var proposed = leader.RaftNode.LogEntryAt(index);
+        Assert.NotNull(proposed);
 
-        // Verify other nodes received the entry (or at least terms advanced)
-        foreach (var broker in _brokers)
+        // Every other broker (here the observers 2 and 3) holds the entry. Waited for on the commit index each
+        // broker learns from the leader, not on its log end: an entry a follower merely holds may still be truncated,
+        // while a commit index at the entry means the broker holds the leader's log up to it and applied it. The
+        // test's timeout is the hang guard for replication that never arrives (#201).
+        foreach (var broker in _brokers.Where(b => b.BrokerId != leader.BrokerId))
         {
-            _output.WriteLine($"Broker {broker.BrokerId}: LastLogIndex={broker.RaftNode?.LastLogIndex}, Term={broker.RaftNode?.CurrentTerm}");
+            var node = broker.RaftNode;
+            Assert.NotNull(node);
+
+            await node.WaitForCommitIndexAsync(index, cancellationToken);
+
+            var replicated = node.LogEntryAt(index);
+            Assert.NotNull(replicated);
+            Assert.Equal(proposed.Term, replicated.Term);
+            Assert.Equal(MetadataCommandType.Noop, replicated.CommandType);
+            Assert.Equal(data, replicated.Data);
+            _output.WriteLine($"Broker {broker.BrokerId}: CommitIndex={node.CommitIndex}, LastLogIndex={node.LastLogIndex}, Term={node.CurrentTerm}");
         }
     }
 
