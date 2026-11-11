@@ -28,9 +28,29 @@ public class InterBrokerPayloadRoundTripTests
     [Fact]
     public void BrokerHeartbeatRequest_RoundTrips()
     {
-        var input = new BrokerHeartbeatInput(BrokerId: 7, BrokerEpoch: 42, CurrentMetadataOffset: 12345, WantFence: true, WantShutDown: false);
+        var input = new BrokerHeartbeatInput(BrokerId: 7, BrokerEpoch: 42, CurrentMetadataOffset: 12345, WantFence: true, WantShutDown: false, OfflineLogDirs: []);
         var result = RoundTrip(new BrokerHeartbeatRequestPayload(input));
-        Assert.Equal(input, result.Input);
+        AssertSameHeartbeat(input, result.Input);
+    }
+
+    // The native heartbeat carries the offline log directories as the Kafka wire's KIP-858 field does (#162), so a
+    // broker on either wire reports a failed directory the same.
+    [Fact]
+    public void BrokerHeartbeatRequest_RoundTrips_OfflineLogDirs()
+    {
+        Guid[] offline = [Guid.NewGuid(), Guid.NewGuid()];
+        var input = new BrokerHeartbeatInput(BrokerId: 3, BrokerEpoch: 9, CurrentMetadataOffset: 9, WantFence: false, WantShutDown: false, OfflineLogDirs: offline);
+        var payload = new BrokerHeartbeatRequestPayload(input);
+
+        var result = RoundTrip(payload);
+
+        AssertSameHeartbeat(input, result.Input);
+    }
+
+    private static void AssertSameHeartbeat(BrokerHeartbeatInput expected, BrokerHeartbeatInput actual)
+    {
+        Assert.Equal(expected with { OfflineLogDirs = [] }, actual with { OfflineLogDirs = [] });
+        Assert.Equal(expected.OfflineLogDirs, actual.OfflineLogDirs);
     }
 
     [Fact]

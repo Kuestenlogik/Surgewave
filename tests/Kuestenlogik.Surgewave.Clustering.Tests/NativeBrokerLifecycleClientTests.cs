@@ -121,12 +121,33 @@ public class NativeBrokerLifecycleClientTests : IAsyncLifetime
         // Caught up means having consumed the log up to this broker's own registration entry,
         // which its epoch now IS (#171) — reporting 0 would be a broker that is behind.
         var hb = await _client.HeartbeatAsync(
-            new BrokerHeartbeatInput(BrokerId: 2, BrokerEpoch: reg.BrokerEpoch, CurrentMetadataOffset: reg.BrokerEpoch, WantFence: false, WantShutDown: false),
+            new BrokerHeartbeatInput(BrokerId: 2, BrokerEpoch: reg.BrokerEpoch, CurrentMetadataOffset: reg.BrokerEpoch, WantFence: false, WantShutDown: false, OfflineLogDirs: []),
             _cts.Token);
 
         Assert.Equal(ClusterRpcStatus.None, hb.Status);
         Assert.False(hb.IsFenced);
         Assert.False(_membership.IsBrokerFenced(2));
+    }
+
+    // The native wire carries a failed log directory to the controller's membership authority (#162), which tells the
+    // controller once — however many heartbeats repeat it, as Kafka's broker repeats it in every one.
+    [Fact]
+    public async Task HeartbeatOverTcp_ReportsOfflineLogDirsToTheController()
+    {
+        var reg = await _client.RegisterAsync(JoinerRegistration(Guid.NewGuid()), _cts.Token);
+        var reported = new TaskCompletionSource<(int BrokerId, IReadOnlyList<Guid> Dirs)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _membership.LogDirsOffline += (brokerId, dirs) => reported.TrySetResult((brokerId, dirs));
+        var offline = Guid.NewGuid();
+
+        var hb = await _client.HeartbeatAsync(
+            new BrokerHeartbeatInput(BrokerId: 2, BrokerEpoch: reg.BrokerEpoch, CurrentMetadataOffset: reg.BrokerEpoch, WantFence: false, WantShutDown: false, OfflineLogDirs: [offline]),
+            _cts.Token);
+
+        Assert.Equal(ClusterRpcStatus.None, hb.Status);
+        var (brokerId, dirs) = await reported.Task.WaitAsync(_cts.Token);
+        Assert.Equal(2, brokerId);
+        Assert.Equal([offline], dirs);
+        Assert.True(_membership.HasOfflineLogDirs(2));
     }
 
     [Fact]

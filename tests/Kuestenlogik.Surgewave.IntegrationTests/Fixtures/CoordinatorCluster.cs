@@ -21,11 +21,13 @@ public sealed class CoordinatorCluster : IAsyncDisposable
     private readonly ILoggerFactory _loggerFactory;
     private readonly HashSet<SurgewaveRuntime> _stopped = [];
     private readonly string _host;
+    private readonly Func<SurgewaveRuntimeBuilder, int, SurgewaveRuntimeBuilder>? _configure;
 
-    private CoordinatorCluster(ITestOutputHelper output, string host)
+    private CoordinatorCluster(ITestOutputHelper output, string host, Func<SurgewaveRuntimeBuilder, int, SurgewaveRuntimeBuilder>? configure)
     {
         _output = output;
         _host = host;
+        _configure = configure;
         _loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.AddProvider(new XunitLoggerProvider(output));
@@ -43,9 +45,13 @@ public sealed class CoordinatorCluster : IAsyncDisposable
     /// The address every broker binds and advertises: loopback by default, the host's outbound address for a client in
     /// a container (<see cref="ContainerReachableHost"/>).
     /// </param>
-    public static async Task<CoordinatorCluster> StartAsync(ITestOutputHelper output, string host = "127.0.0.1")
+    /// <param name="configure">Applied to each broker's builder last, with the broker's id — a test's own storage, say.</param>
+    public static async Task<CoordinatorCluster> StartAsync(
+        ITestOutputHelper output,
+        string host = "127.0.0.1",
+        Func<SurgewaveRuntimeBuilder, int, SurgewaveRuntimeBuilder>? configure = null)
     {
-        var cluster = new CoordinatorCluster(output, host);
+        var cluster = new CoordinatorCluster(output, host, configure);
         try
         {
             await cluster.StartBrokersAsync();
@@ -92,7 +98,7 @@ public sealed class CoordinatorCluster : IAsyncDisposable
         for (var i = 0; i < 3; i++)
         {
             var self = i;
-            Brokers.Add(await SurgewaveRuntime.CreateBuilder()
+            var builder = SurgewaveRuntime.CreateBuilder()
                 .WithBrokerId(i + 1)
                 .WithHost(_host)
                 .WithPort(ports[i])
@@ -104,7 +110,8 @@ public sealed class CoordinatorCluster : IAsyncDisposable
                 .WithShareStateTopicPartitions(CoordinatorPartitions)
                 .WithStorageEngine(StorageEngines.Memory)
                 .WithLogging(_loggerFactory)
-                .WithShutdownTimeout(10)
+                .WithShutdownTimeout(10);
+            Brokers.Add(await (_configure?.Invoke(builder, i + 1) ?? builder)
                 .Build()
                 .StartAsync());
         }

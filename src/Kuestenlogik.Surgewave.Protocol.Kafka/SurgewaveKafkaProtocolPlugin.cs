@@ -218,7 +218,6 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
         // authority for both the Kafka and the native wire.
         services.AddSingleton<IKafkaRequestHandler>(sp => new ClusterMembershipHandler(
             sp.GetRequiredService<ClusterMembershipService>(),
-            sp.GetRequiredService<ILogger<ClusterMembershipHandler>>(),
             // Optional: a host that wires no coordinator cannot commit a registration, which is
             // what a non-controller answers anyway (#171).
             sp.GetService<BrokerRegistrationCoordinator>()));

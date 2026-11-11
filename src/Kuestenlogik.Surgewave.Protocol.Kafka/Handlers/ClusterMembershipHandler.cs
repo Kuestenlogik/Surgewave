@@ -2,7 +2,6 @@ using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Clustering.Replication;
 using Kuestenlogik.Surgewave.Protocol.Kafka;
 using Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
-using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 
@@ -31,7 +30,6 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 {
     private readonly ClusterMembershipService _membership;
     private readonly BrokerRegistrationCoordinator? _registrationCoordinator;
-    private readonly ILogger<ClusterMembershipHandler> _logger;
 
     public IEnumerable<ApiKey> SupportedApiKeys =>
     [
@@ -41,11 +39,9 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
 
     public ClusterMembershipHandler(
         ClusterMembershipService membership,
-        ILogger<ClusterMembershipHandler> logger,
         BrokerRegistrationCoordinator? registrationCoordinator = null)
     {
         _membership = membership;
-        _logger = logger;
         _registrationCoordinator = registrationCoordinator;
     }
 
@@ -91,18 +87,8 @@ public sealed class ClusterMembershipHandler : IKafkaRequestHandler
             BrokerEpoch: request.BrokerEpoch,
             CurrentMetadataOffset: request.CurrentMetadataOffset,
             WantFence: request.WantFence,
-            WantShutDown: request.WantShutDown));
-
-        // Kafka-only field: log-dir health is not part of the neutral membership contract and is
-        // log-only today — it stays a handler-side concern rather than widening the neutral record.
-        // Logged only for an ACCEPTED heartbeat, matching the pre-unification handler (a rejected
-        // unknown/stale-epoch heartbeat never reached this warning).
-        if (outcome.Status == ClusterRpcStatus.None && request.OfflineLogDirs.Count > 0)
-        {
-            _logger.LogWarning(
-                "Broker {BrokerId} reported {Count} offline log directories",
-                request.BrokerId, request.OfflineLogDirs.Count);
-        }
+            WantShutDown: request.WantShutDown,
+            OfflineLogDirs: request.OfflineLogDirs));
 
         return new BrokerHeartbeatResponse
         {

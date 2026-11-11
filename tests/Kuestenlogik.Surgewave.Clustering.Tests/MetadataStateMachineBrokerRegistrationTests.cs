@@ -37,7 +37,7 @@ public class MetadataStateMachineBrokerRegistrationTests
     // A heartbeat carrying `epoch` is accepted (None) only if the store recorded exactly that epoch;
     // any other value fences (StaleBrokerEpoch). This is how we assert the stored epoch value.
     private static ClusterRpcStatus HeartbeatStatus(ClusterMembershipService m, int brokerId, long epoch)
-        => m.Heartbeat(new BrokerHeartbeatInput(brokerId, epoch, 0, false, false)).Status;
+        => m.Heartbeat(new BrokerHeartbeatInput(brokerId, epoch, 0, false, false, [])).Status;
 
     [Fact]
     public void ApplyBrokerRegistered_UsesCommittedLogIndexAsEpoch()
@@ -92,7 +92,7 @@ public class MetadataStateMachineBrokerRegistrationTests
         sm.Apply(Entry(5, new BrokerRegisteredCommand(1, "h", 9092, null, Guid.NewGuid(), InterBrokerProtocolFeature.Native, 0)));
         // Caught up means having reached this broker's own registration entry, whose index IS the
         // epoch (#171) — so the offset has to be 5, not merely non-negative.
-        Assert.False(membership.Heartbeat(new BrokerHeartbeatInput(1, 5, 5, false, false)).IsFenced);
+        Assert.False(membership.Heartbeat(new BrokerHeartbeatInput(1, 5, 5, false, false, [])).IsFenced);
 
         // A re-registration under a NEW incarnation (higher committed index) must start fenced again —
         // it is a fresh join that has not yet caught up, not an idempotent replay of the same entry.

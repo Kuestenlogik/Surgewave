@@ -36,7 +36,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
             membership, new TestBrokerRegistrar(membership), state, config.BrokerId,
             NullLogger<BrokerRegistrationCoordinator>.Instance);
         var handler = new ClusterMembershipHandler(
-            membership, NullLogger<ClusterMembershipHandler>.Instance, coordinator);
+            membership, coordinator);
         return (handler, state, membership);
     }
 
@@ -188,7 +188,7 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         // epoch (#171).
         var outcome = membership.Heartbeat(new BrokerHeartbeatInput(
             BrokerId: 1, BrokerEpoch: response.BrokerEpoch, CurrentMetadataOffset: response.BrokerEpoch,
-            WantFence: false, WantShutDown: false));
+            WantFence: false, WantShutDown: false, OfflineLogDirs: []));
 
         Assert.Equal(ClusterRpcStatus.None, outcome.Status);
         Assert.False(outcome.IsFenced);
@@ -224,5 +224,52 @@ public sealed class ClusterMembershipFeatureNegotiationTests
         Assert.Equal(ErrorCode.None, response.ErrorCode);
         Assert.False(response.IsFenced);
         Assert.True(response.IsCaughtUp);
+    }
+
+    // ── #162: a failed log directory reported over the Kafka wire ───────────────────────────────
+
+    // KIP-858's OfflineLogDirs (tag 0, v1+) goes from the wire into the neutral heartbeat input, where the native wire
+    // puts it too: the controller acts on a failed directory whichever wire reported it. Written and parsed as on the
+    // wire, then handled.
+    [Fact]
+    public async Task KafkaHeartbeat_OfflineLogDirs_ReachTheMembershipAuthority()
+    {
+        var (handler, _, membership) = NewController();
+        const long registrationIndex = 4;
+        membership.ApplyReplicatedRegistration(
+            brokerId: 2, incarnationId: Guid.NewGuid(), epoch: registrationIndex,
+            host: "h", port: 9094, rack: null,
+            interBrokerProtocol: InterBrokerProtocolFeature.KafkaWire, replicationPort: null);
+        var reported = new List<(int BrokerId, IReadOnlyList<Guid> Dirs)>();
+        membership.LogDirsOffline += (brokerId, dirs) => reported.Add((brokerId, dirs));
+        var offline = Guid.NewGuid();
+
+        var onTheWire = new BrokerHeartbeatRequest
+        {
+            ApiKey = ApiKey.BrokerHeartbeat,
+            ApiVersion = 1,
+            CorrelationId = 8,
+            ClientId = "broker-2",
+            BrokerId = 2,
+            BrokerEpoch = registrationIndex,
+            CurrentMetadataOffset = registrationIndex,
+            WantFence = false,
+            WantShutDown = false,
+            OfflineLogDirs = [offline],
+        };
+        var writer = new KafkaProtocolWriter();
+        onTheWire.WriteTo(writer);
+        var reader = new KafkaProtocolReader(writer.ToArray());
+        reader.ReadInt16(); reader.ReadInt16(); reader.ReadInt32();
+        reader.ReadCompactString(); reader.SkipTaggedFields();
+        var parsed = BrokerHeartbeatRequest.ReadFrom(reader, 1, 8, "broker-2");
+
+        var response = (BrokerHeartbeatResponse)await handler.HandleAsync(parsed, Ctx, CancellationToken.None);
+
+        Assert.Equal(ErrorCode.None, response.ErrorCode);
+        var report = Assert.Single(reported);
+        Assert.Equal(2, report.BrokerId);
+        Assert.Equal([offline], report.Dirs);
+        Assert.True(membership.HasOfflineLogDirs(2));
     }
 }

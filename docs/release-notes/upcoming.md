@@ -68,6 +68,28 @@ and a transaction left prepared by a restart is completed. Checked with the
 Java 4.1 client: 2000 records in transactions, all 2000 read back
 `read_committed`.
 
+### A broker whose disk fails hands its partitions over (#162)
+
+A broker with a failing disk kept heartbeating, so session expiry, the
+caught-up check and the failure detector all saw a healthy broker, and it
+kept its leaderships while every produce and fetch against it failed. Now
+an I/O failure a partition log cannot recover from — a segment that cannot
+be written, read, rolled, truncated or opened — takes the broker's log
+directory offline, as Kafka's `LogDirFailureChannel` does. The broker stops
+serving its partitions (`KAFKA_STORAGE_ERROR` on the Kafka wire, `NotLeader`
+on the native one), stops replicating into the directory, and reports it in
+its next heartbeat, sent at once: Kafka's `OfflineLogDirs` (KIP-858), which
+the native heartbeat now carries too, so both wires report it alike. The
+controller moves every leadership off the broker to an in-sync replica,
+takes it out of the ISRs, and neither elects it nor lets it back into an
+ISR while the directory is offline — what Kafka's controller does with the
+same field. A partition with no other in-sync replica stays where it is
+rather than moving uncleanly.
+
+A log directory has a stable id now, kept in `meta.properties` under
+`directory.id` as in Kafka. A directory that has failed stays offline
+until the broker restarts.
+
 ## Fixes
 
 ### Java 4.x clients: produce, fetch, groups and admin requests on the wire
@@ -742,6 +764,14 @@ connection retry loop. It cannot simply skip connecting: protocol
 auto-detection is a connection. Replace
 `SurgewaveClient.Create(servers)...Build()` with
 `await SurgewaveClient.Create(servers)...BuildAsync()`.
+
+### The native heartbeat carries offline log directories (#162)
+
+The native inter-broker heartbeat payload has a new field, the broker's
+offline log directories, so a broker of this release and one of an earlier
+release cannot heartbeat each other natively. Upgrade the brokers of a
+cluster together. `BrokerHeartbeatInput` gains the required
+`OfflineLogDirs`, and `ClusterMembershipHandler` no longer takes a logger.
 
 ## Acknowledgements
 

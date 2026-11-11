@@ -615,6 +615,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _loggerFactory.CreateLogger<BrokerSessionSweeper>());
         _sessionSweeper.Start();
 
+        // #162 — a broker's heartbeat reports a failed log directory; the controller moves the partitions off it.
+        _clusterController.SetMembership(membershipService);
+
         // And what makes the fencing observable: a fenced broker stops being pushed as
         // live. Wired unconditionally — the filter falling back to "no filter" without a
         // membership authority is for a host that has none, not an opt-in.
@@ -685,7 +688,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _loggerFactory.CreateLogger<NativeBrokerLifecycleClient>());
         _lifecycleLoop = new Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop(
             lifecycleClient, clusteringConfig, _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop>(),
-            metadataPosition: () => _raftNode?.CommitIndex ?? 0);
+            metadataPosition: () => _raftNode?.CommitIndex ?? 0,
+            offlineLogDirs: () => _logManager!.OfflineLogDirectoryIds);
+        // The controller hears of a failed log directory with the next heartbeat, sent at once rather than after the
+        // interval (#162).
+        var lifecycleLoop = _lifecycleLoop;
+        _logManager!.LogDirectory.WentOffline += _ => lifecycleLoop.RequestHeartbeat();
 
         // Wire up the controller client (gated native/Kafka-wire, Inc5) so the controller can push
         // LeaderAndIsr to remote brokers when topology changes (topic create, reelection).

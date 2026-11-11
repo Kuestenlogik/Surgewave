@@ -71,7 +71,7 @@ public class NativeMembershipGateTests
     {
         var (service, _) = NewService(localBrokerId: 2, controllerId: 1);
 
-        var outcome = await service.HeartbeatAsync(new BrokerHeartbeatInput(3, 1, 0, false, false));
+        var outcome = await service.HeartbeatAsync(new BrokerHeartbeatInput(3, 1, 0, false, false, []));
 
         Assert.Equal(ClusterRpcStatus.NotController, outcome.Status);
     }

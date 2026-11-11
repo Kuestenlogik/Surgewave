@@ -21,6 +21,10 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
     private readonly ClusteringConfig _config;
     private readonly ILogger<BrokerLifecycleLoop> _logger;
     private readonly Func<long>? _metadataPosition;
+    private readonly Func<IReadOnlyList<Guid>>? _offlineLogDirs;
+
+    // Released to send the next heartbeat now rather than at the end of the interval (#162).
+    private readonly SemaphoreSlim _heartbeatNow = new(0, 1);
 
     private readonly Guid _incarnationId = Guid.NewGuid();
     private long _brokerEpoch = -1;
@@ -36,16 +40,43 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
     /// controller's caught-up check is correspondingly permissive — see the comment at
     /// the call site below (#160).
     /// </remarks>
+    /// <param name="offlineLogDirs">
+    /// The ids of this broker's log directories that have failed (#162), sent with every heartbeat as Kafka's broker
+    /// sends them; null for a broker without log directories of its own to report.
+    /// </param>
     public BrokerLifecycleLoop(
         IBrokerLifecycleRpc rpc,
         ClusteringConfig config,
         ILogger<BrokerLifecycleLoop> logger,
-        Func<long>? metadataPosition = null)
+        Func<long>? metadataPosition = null,
+        Func<IReadOnlyList<Guid>>? offlineLogDirs = null)
     {
         _rpc = rpc;
         _config = config;
         _logger = logger;
         _metadataPosition = metadataPosition;
+        _offlineLogDirs = offlineLogDirs;
+    }
+
+    /// <summary>
+    /// Sends the next heartbeat now instead of at the end of the interval — when a log directory fails (#162), as
+    /// Kafka's broker schedules its next heartbeat immediately on a directory failure, so the controller moves the
+    /// leaderships away while the interval would still be running.
+    /// </summary>
+    public void RequestHeartbeat()
+    {
+        try
+        {
+            _heartbeatNow.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // One is already requested; the next heartbeat carries this one's news too.
+        }
+        catch (ObjectDisposedException)
+        {
+            // The loop has ended; there is no next heartbeat to bring forward.
+        }
     }
 
     /// <summary>The broker epoch assigned by the controller, or -1 before a successful registration.</summary>
@@ -124,7 +155,8 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
                             // satisfies the check would fence every broker permanently.
                             CurrentMetadataOffset: _metadataPosition?.Invoke() ?? 0,
                             WantFence: false,
-                            WantShutDown: false),
+                            WantShutDown: false,
+                            OfflineLogDirs: _offlineLogDirs?.Invoke() ?? []),
                         ct).ConfigureAwait(false);
 
                     if (outcome.Status != ClusterRpcStatus.None)
@@ -150,7 +182,8 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
 
             try
             {
-                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                // The interval, or less when a heartbeat is asked for now (#162).
+                await _heartbeatNow.WaitAsync(delayMs, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -194,7 +227,10 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_cts is null)
+        {
+            _heartbeatNow.Dispose();
             return;
+        }
 
         await _cts.CancelAsync().ConfigureAwait(false);
         if (_loopTask is not null)
@@ -203,6 +239,7 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
             catch (OperationCanceledException) { /* loop ended by disposal */ }
         }
         _cts.Dispose();
+        _heartbeatNow.Dispose();
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "No cluster nodes configured — broker lifecycle loop idle (standalone)")]

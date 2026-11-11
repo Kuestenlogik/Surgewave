@@ -17,12 +17,23 @@ public readonly record struct BrokerHeartbeatRequestPayload(BrokerHeartbeatInput
     : ISerializablePayload<BrokerHeartbeatRequestPayload>
 {
     public static BrokerHeartbeatRequestPayload Read(ref SurgewavePayloadReader reader)
-        => new(new BrokerHeartbeatInput(
-            BrokerId: reader.ReadInt32(),
-            BrokerEpoch: reader.ReadInt64(),
-            CurrentMetadataOffset: reader.ReadInt64(),
-            WantFence: reader.ReadBoolean(),
-            WantShutDown: reader.ReadBoolean()));
+    {
+        var brokerId = reader.ReadInt32();
+        var brokerEpoch = reader.ReadInt64();
+        var currentMetadataOffset = reader.ReadInt64();
+        var wantFence = reader.ReadBoolean();
+        var wantShutDown = reader.ReadBoolean();
+
+        // The offline log directories (#162), each as the 16 bytes of its id, length-prefixed like the registration's
+        // incarnation id.
+        var offlineCount = reader.ReadInt32();
+        var offlineLogDirs = new List<Guid>(offlineCount);
+        for (var i = 0; i < offlineCount; i++)
+            offlineLogDirs.Add(new Guid(reader.ReadBytes()));
+
+        return new(new BrokerHeartbeatInput(
+            brokerId, brokerEpoch, currentMetadataOffset, wantFence, wantShutDown, offlineLogDirs));
+    }
 
     public void Write(ref SurgewavePayloadWriter writer)
     {
@@ -31,6 +42,9 @@ public readonly record struct BrokerHeartbeatRequestPayload(BrokerHeartbeatInput
         writer.WriteInt64(Input.CurrentMetadataOffset);
         writer.WriteBoolean(Input.WantFence);
         writer.WriteBoolean(Input.WantShutDown);
+        writer.WriteInt32(Input.OfflineLogDirs.Count);
+        foreach (var dir in Input.OfflineLogDirs)
+            writer.WriteBytes(dir.ToByteArray());
     }
 
     public void WriteTo(IPayloadWriter writer)
@@ -40,9 +54,12 @@ public readonly record struct BrokerHeartbeatRequestPayload(BrokerHeartbeatInput
         writer.WriteInt64(Input.CurrentMetadataOffset);
         writer.WriteBoolean(Input.WantFence);
         writer.WriteBoolean(Input.WantShutDown);
+        writer.WriteInt32(Input.OfflineLogDirs.Count);
+        foreach (var dir in Input.OfflineLogDirs)
+            writer.WriteBytes(dir.ToByteArray());
     }
 
-    public int EstimateSize() => 4 + 8 + 8 + 1 + 1;
+    public int EstimateSize() => 4 + 8 + 8 + 1 + 1 + 4 + Input.OfflineLogDirs.Count * (4 + 16);
 }
 
 /// <summary>Native wire form of <see cref="BrokerHeartbeatOutcome"/>.</summary>

@@ -152,6 +152,9 @@ public sealed partial class ClusterMembershipService
                 IncarnationId = incarnationId,
                 BrokerEpoch = recordedEpoch,
                 IsFenced = sameIncarnation ? existing!.IsFenced : true,
+                // A failed log directory stays failed for the incarnation that reported it (#162); a new incarnation
+                // is a restarted broker, which Kafka also takes as the only way back.
+                OfflineLogDirs = sameIncarnation ? existing!.OfflineLogDirs : [],
             };
         }
 
@@ -279,6 +282,7 @@ public sealed partial class ClusterMembershipService
         // frame from a zombie does not keep a session alive.
         registration.LastContactUtc = now;
         registration.CurrentMetadataOffset = input.CurrentMetadataOffset;
+        var newlyOffline = RecordOfflineLogDirs(registration, input.OfflineLogDirs);
 
         // Kafka's rule (#160). The broker epoch IS the committed index of this broker's own
         // registration entry (#171), which is exactly Kafka's registerBrokerRecordOffset — so
@@ -337,7 +341,62 @@ public sealed partial class ClusterMembershipService
             shouldShutDown = true;
         }
 
+        if (newlyOffline is not null)
+        {
+            LogLogDirsOffline(input.BrokerId, string.Join(",", newlyOffline));
+            try
+            {
+                LogDirsOffline?.Invoke(input.BrokerId, newlyOffline);
+            }
+            catch (Exception ex)
+            {
+                LogLogDirsOfflineHandlerFailed(ex, input.BrokerId);
+            }
+        }
+
         return new BrokerHeartbeatOutcome(ClusterRpcStatus.None, registration.IsFenced, isCaughtUp, shouldShutDown);
+    }
+
+    /// <summary>
+    /// Raised when a heartbeat reports log directories of a broker offline that it had not reported before (#162): the
+    /// broker id and those directories. The controller moves the leaderships of the replicas in them.
+    /// </summary>
+    /// <remarks>
+    /// Kafka's controller acts on the heartbeat's OfflineLogDirs the same way — only on directories newly offline, so
+    /// the broker repeating them in every heartbeat, as Kafka's broker does, triggers the move once.
+    /// </remarks>
+    public event Action<int, IReadOnlyList<Guid>>? LogDirsOffline;
+
+    /// <summary>Whether a heartbeat of the broker's current incarnation has reported any of its log directories offline.</summary>
+    /// <remarks>
+    /// Surgewave keeps all of a broker's replicas in its one log directory and assigns none of them to a directory of
+    /// its own, so a broker with an offline log directory has every replica offline: none of them may be elected or
+    /// return to an ISR while it is (#162).
+    /// </remarks>
+    public bool HasOfflineLogDirs(int brokerId)
+        => _registrations.TryGetValue(brokerId, out var reg) && reg.OfflineLogDirs.Count > 0;
+
+    // The directories of the report this registration has not recorded yet, or null when there are none.
+    private List<Guid>? RecordOfflineLogDirs(BrokerRegistrationRecord registration, IReadOnlyList<Guid> reported)
+    {
+        if (reported.Count == 0)
+            return null;
+
+        List<Guid>? added = null;
+        lock (_epochLock)
+        {
+            foreach (var dir in reported)
+            {
+                if (registration.OfflineLogDirs.Contains(dir) || (added?.Contains(dir) ?? false))
+                    continue;
+                (added ??= []).Add(dir);
+            }
+
+            if (added is not null)
+                registration.OfflineLogDirs = registration.OfflineLogDirs.Union(added);
+        }
+
+        return added;
     }
 
     /// <summary>Whether a broker is currently fenced (unknown brokers read as fenced).</summary>
@@ -380,6 +439,12 @@ public sealed partial class ClusterMembershipService
         public long CurrentMetadataOffset { get; set; } = -1;
 
         /// <summary>
+        /// The log directories this incarnation has reported offline (#162). Replaced whole under the epoch lock, so a
+        /// reader without it sees one set or the next.
+        /// </summary>
+        public System.Collections.Immutable.ImmutableHashSet<Guid> OfflineLogDirs { get; set; } = [];
+
+        /// <summary>
         /// When the fence last went up, or <c>null</c> while unfenced. Read by the dwell
         /// rule in <see cref="Heartbeat"/> (#161).
         /// </summary>
@@ -412,6 +477,12 @@ public sealed partial class ClusterMembershipService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Heartbeat from broker {BrokerId} with stale epoch {RequestEpoch} (expected {ExpectedEpoch})")]
     private partial void LogStaleBrokerEpoch(int brokerId, long requestEpoch, long expectedEpoch);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Broker {BrokerId} reports log directories offline: {Directories}")]
+    private partial void LogLogDirsOffline(int brokerId, string directories);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Handling the offline log directories of broker {BrokerId} failed")]
+    private partial void LogLogDirsOfflineHandlerFailed(Exception ex, int brokerId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Unfencing broker {BrokerId} (caught up at metadata offset {Offset})")]
     private partial void LogUnfenced(int brokerId, long offset);

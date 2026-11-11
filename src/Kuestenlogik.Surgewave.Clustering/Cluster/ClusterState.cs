@@ -22,6 +22,13 @@ public sealed class ClusterState
     /// </summary>
     public Task TopicsChanged => _topicsChanged.Next;
 
+    private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _partitionsChanged = new();
+
+    /// <summary>
+    /// Completes at the next change of a partition's leader or ISR (#162). Take it before looking, then await it.
+    /// </summary>
+    public Task PartitionsChanged => _partitionsChanged.Next;
+
     // #60 Inc6a — serializes all writes to _brokers so a read-modify-write (registration merge,
     // level convergence) cannot lose a concurrent update. A dedicated lock (not _stateLock) so broker
     // membership churn never contends with the per-partition state path. Reads stay lock-free on the
@@ -345,6 +352,7 @@ public sealed class ClusterState
             var state = GetOrCreatePartitionState(tp);
             update(state);
         }
+        _partitionsChanged.Notify();
     }
 
     /// <summary>
@@ -437,6 +445,18 @@ public sealed class ClusterState
     /// </summary>
     public bool ElectLeader(TopicPartition tp, int preferredLeader = -1)
     {
+        try
+        {
+            return ElectLeaderCore(tp, preferredLeader);
+        }
+        finally
+        {
+            _partitionsChanged.Notify();
+        }
+    }
+
+    private bool ElectLeaderCore(TopicPartition tp, int preferredLeader)
+    {
         lock (_stateLock)
         {
             var state = GetOrCreatePartitionState(tp);
@@ -489,6 +509,7 @@ public sealed class ClusterState
             state.Isr.Clear();
             state.Isr.AddRange(isr);
         }
+        _partitionsChanged.Notify();
     }
 
     /// <summary>
@@ -515,13 +536,12 @@ public sealed class ClusterState
         lock (_stateLock)
         {
             var state = GetOrCreatePartitionState(tp);
-            if (!state.Isr.Contains(brokerId))
-            {
-                state.Isr.Add(brokerId);
-                return true;
-            }
-            return false;
+            if (state.Isr.Contains(brokerId))
+                return false;
+            state.Isr.Add(brokerId);
         }
+        _partitionsChanged.Notify();
+        return true;
     }
 
     /// <summary>
@@ -533,8 +553,11 @@ public sealed class ClusterState
         lock (_stateLock)
         {
             var state = GetOrCreatePartitionState(tp);
-            return state.Isr.Remove(brokerId);
+            if (!state.Isr.Remove(brokerId))
+                return false;
         }
+        _partitionsChanged.Notify();
+        return true;
     }
 
     /// <summary>

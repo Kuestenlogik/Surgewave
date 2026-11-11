@@ -1046,6 +1046,8 @@ clusterController.SetTopicCreationRequester(nativeControllerClient);
 // #228 — a group's configs are in the metadata log, changed through the controller and read by every broker.
 clusterController.SetGroupConfigRequester(nativeControllerClient);
 clusterController.SetTopicConfigRequester(nativeControllerClient);
+// #162 — a broker's heartbeat reports a failed log directory; the controller moves the partitions off it.
+clusterController.SetMembership(membershipService);
 app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.ShareGroups.ShareGroupCoordinator>()
     .SetGroupConfigStore(new ClusterGroupConfigStore(clusterState, clusterController));
 
@@ -1075,8 +1077,12 @@ var lifecycleLoop = new BrokerLifecycleLoop(
         app.Services.GetRequiredService<ConnectionPool>(), clusterState, clusteringConfig,
         app.Services.GetRequiredService<ILogger<NativeBrokerLifecycleClient>>()),
     clusteringConfig,
-    app.Services.GetRequiredService<ILogger<BrokerLifecycleLoop>>());
+    app.Services.GetRequiredService<ILogger<BrokerLifecycleLoop>>(),
+    offlineLogDirs: () => app.Services.GetRequiredService<LogManager>().OfflineLogDirectoryIds);
 #pragma warning restore CA2000
+// The controller hears of a failed log directory with the next heartbeat, sent at once rather than after the interval
+// (#162).
+app.Services.GetRequiredService<LogManager>().LogDirectory.WentOffline += _ => lifecycleLoop.RequestHeartbeat();
 
 // Initialize Raft consensus — every broker has a metadata log (#163 step 3).
 RaftNode raftNode;

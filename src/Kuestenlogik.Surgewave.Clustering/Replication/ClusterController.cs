@@ -87,6 +87,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
     // #180 — how a departing broker that is NOT the controller gets its partitions moved.
     private IControlledShutdownRequester? _shutdownRequester;
+
+    // #162 — which brokers report a failed log directory, and so may not lead or rejoin an ISR.
+    private ClusterMembershipService? _membership;
     private ITopicCreationRequester? _topicCreationRequester;
     private IGroupConfigRequester? _groupConfigRequester;
     private ITopicConfigRequester? _topicConfigRequester;
@@ -167,6 +170,28 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// </summary>
     public void SetControlledShutdownRequester(IControlledShutdownRequester requester)
         => _shutdownRequester = requester;
+
+    /// <summary>
+    /// Set the membership authority whose heartbeats report failed log directories (#162). A broker reporting one has
+    /// its leaderships moved to in-sync replicas elsewhere, leaves the ISRs, and is not elected while the directory is
+    /// offline.
+    /// </summary>
+    public void SetMembership(ClusterMembershipService membership)
+    {
+        _membership = membership;
+        // Off the heartbeat: the heartbeat is answered at once, and the moves commit one by one behind it.
+        membership.LogDirsOffline += (brokerId, offlineDirs) => _ = Task.Run(() => HandleLogDirsOfflineAsync(brokerId));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="brokerId"/> may lead a partition it replicates: alive, and with its log directory online
+    /// (#162). Every replica of a Surgewave broker lives in its one log directory, so an offline directory makes the
+    /// broker ineligible for all of them.
+    /// </summary>
+    private bool IsEligibleLeader(int brokerId)
+        => (_heartbeatManager?.IsBrokerAlive(brokerId) ?? true) && !HasOfflineLogDir(brokerId);
+
+    private bool HasOfflineLogDir(int brokerId) => _membership?.HasOfflineLogDirs(brokerId) ?? false;
 
     /// <summary>How this broker has a topic created while another broker is the controller (#207).</summary>
     public void SetTopicCreationRequester(ITopicCreationRequester requester)
@@ -1037,23 +1062,24 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         // Determine new leader
         int newLeader;
-        if (preferredLeader.HasValue && partitionState.Isr.Contains(preferredLeader.Value))
+        if (preferredLeader.HasValue && partitionState.Isr.Contains(preferredLeader.Value)
+            && !HasOfflineLogDir(preferredLeader.Value))
         {
             newLeader = preferredLeader.Value;
         }
-        else if (partitionState.Isr.FirstOrDefault(b => _heartbeatManager?.IsBrokerAlive(b) ?? true, -1) is var liveIsrMember
+        else if (partitionState.Isr.FirstOrDefault(IsEligibleLeader, -1) is var liveIsrMember
                  && liveIsrMember >= 0)
         {
-            // The first ISR member that is alive. A broker just declared dead can still be in this view of
-            // the ISR — its removal is a committed log entry that may not be applied here yet (#124).
+            // The first ISR member that is alive and whose log directory is online. A broker just declared dead can
+            // still be in this view of the ISR — its removal is a committed log entry that may not be applied here yet
+            // (#124); a broker with a failed log directory likewise (#162).
             newLeader = liveIsrMember;
         }
         else if (partitionState.Replicas.Count > 0)
         {
-            // Unclean election from any alive replica
-            var aliveReplica = _heartbeatManager != null
-                ? partitionState.Replicas.FirstOrDefault(r => _heartbeatManager.IsBrokerAlive(r), -1)
-                : partitionState.Replicas[0];
+            // Unclean election from any alive replica — never one whose log directory is offline (#162), which would
+            // be a leader that serves nothing.
+            var aliveReplica = partitionState.Replicas.FirstOrDefault(IsEligibleLeader, -1);
 
             if (aliveReplica < 0)
             {
@@ -1129,9 +1155,16 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return state;
         }
 
+        // A replica in a failed log directory does not rejoin an ISR while the directory is offline (#162): the leader
+        // may still count it until its lag expires, and its report would otherwise put it back. Kafka refuses such an
+        // AlterPartition as INELIGIBLE_REPLICA; here the ineligible replica is left out of what is committed.
+        var isr = newIsr.Where(b => !HasOfflineLogDir(b)).ToList();
+        if (isr.Count == 0)
+            isr = [.. newIsr];
+
         // Apply the ISR wholesale (an ISR-only change does not bump LeaderEpoch). Replicas
         // converge by applying the committed entry, not by being told.
-        await UpdateIsrViaRaftAsync(tp, newIsr.ToList(), ct);
+        await UpdateIsrViaRaftAsync(tp, isr, ct);
 
         var updated = _clusterState.GetPartitionState(tp);
 
@@ -1204,6 +1237,98 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         LogControlledShutdownCompleted(brokerId, stillLed.Count);
         return stillLed;
+    }
+
+    /// <summary>
+    /// Controller-side handling of a failed log directory (#162): every partition the broker replicates is moved off
+    /// it. Where it leads, an eligible in-sync replica is elected; where it is in the ISR, it leaves it. Returns the
+    /// partitions it still leads because no other in-sync replica can take them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Kafka's controller does the same with the OfflineLogDirs of a heartbeat (<c>handleDirectoriesOffline</c>): the
+    /// replicas in those directories leave the ISRs and lose their leaderships. Surgewave keeps all of a broker's
+    /// replicas in its one log directory, so a broker reporting it offline has all of them offline.
+    /// </para>
+    /// <para>
+    /// A partition no other in-sync replica can lead stays with the broker, whose storage answers it with
+    /// KAFKA_STORAGE_ERROR. Electing an out-of-sync replica would be an unclean election, and this path does not make
+    /// it, any more than a controlled shutdown does (#180). The broker also stays in that partition's ISR: an ISR
+    /// without its leader would be one no election can choose from.
+    /// </para>
+    /// <para>
+    /// Idempotent: a partition already moved finds the broker neither leading it nor in its ISR. That is what lets a
+    /// controller elected later redo it from the next heartbeat, which repeats the offline directories.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<TopicPartition>> MoveReplicasOffOfflineLogDirAsync(int brokerId, CancellationToken ct = default)
+    {
+        if (!_isController)
+        {
+            LogNotController("HandleLogDirsOffline");
+            return [];
+        }
+
+        LogMovingOffOfflineLogDir(brokerId);
+
+        var stillLed = new List<TopicPartition>();
+        foreach (var (tp, state) in _clusterState.PartitionStates)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (!state.Replicas.Contains(brokerId))
+                continue;
+
+            var isr = _clusterState.GetIsrSnapshot(tp);
+            var remainingIsr = isr.Where(b => b != brokerId).ToList();
+
+            if (state.LeaderBrokerId == brokerId)
+            {
+                var successor = remainingIsr.FirstOrDefault(IsEligibleLeader, -1);
+                if (successor < 0)
+                {
+                    stillLed.Add(tp);
+                    LogNoEligibleLeaderForPartition(tp.Topic, tp.Partition);
+                    continue;
+                }
+
+                if (!await ElectLeaderAsync(tp, successor, ct).ConfigureAwait(false))
+                {
+                    stillLed.Add(tp);
+                    LogLeadershipHandoverFailed(tp.Topic, tp.Partition, successor);
+                    continue;
+                }
+
+                LogPartitionLeadershipTransferred(tp.Topic, tp.Partition, successor);
+            }
+
+            if (remainingIsr.Count != isr.Count && remainingIsr.Count > 0
+                && await UpdateIsrViaRaftAsync(tp, remainingIsr, ct).ConfigureAwait(false))
+            {
+                LogRemovedFromIsr(tp.Topic, tp.Partition, brokerId);
+            }
+        }
+
+        LogMovedOffOfflineLogDir(brokerId, stillLed.Count);
+        return stillLed;
+    }
+
+    private async Task HandleLogDirsOfflineAsync(int brokerId)
+    {
+        // For as long as this controller runs, as the failure path does (#234).
+        var ct = _cts?.Token ?? CancellationToken.None;
+        try
+        {
+            await MoveReplicasOffOfflineLogDirAsync(brokerId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // This controller stops; the next one learns of the directory from the broker's next heartbeat.
+        }
+        catch (Exception ex)
+        {
+            LogOfflineLogDirHandlingFailed(ex, brokerId);
+        }
     }
 
     private async Task HandleBrokerFailedAsync(int failedBrokerId)
@@ -1295,8 +1420,8 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
         foreach (var (tp, state) in _clusterState.PartitionStates)
         {
-            // Skip if preferred leader is not alive
-            if (_heartbeatManager != null && !_heartbeatManager.IsBrokerAlive(state.PreferredLeader))
+            // Skip if the preferred leader is not alive, or its log directory is offline (#162)
+            if (!IsEligibleLeader(state.PreferredLeader))
                 continue;
 
             if (state.LeaderBrokerId != state.PreferredLeader &&

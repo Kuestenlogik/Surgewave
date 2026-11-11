@@ -170,4 +170,15 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Handover to broker {SuccessorId} left unconfirmed: it did not acknowledge the leadership decision before the shutdown budget ran out, so it may not know it is the leader")]
     private partial void LogHandoverNotConfirmed(int successorId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Broker {BrokerId} reports its log directory offline: moving its partitions to in-sync replicas elsewhere")]
+    private partial void LogMovingOffOfflineLogDir(int brokerId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Moved the partitions of broker {BrokerId} off its offline log directory, {StillLed} partition(s) left with it — no eligible in-sync successor for them")]
+    private partial void LogMovedOffOfflineLogDir(int brokerId, int stillLed);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Moving the partitions of broker {BrokerId} off its offline log directory failed")]
+    private partial void LogOfflineLogDirHandlingFailed(Exception ex, int brokerId);
 }

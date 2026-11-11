@@ -97,7 +97,7 @@ public class ClusterMembershipServiceTests
 
         var outcome = service.Heartbeat(new BrokerHeartbeatInput(
             BrokerId: 1, BrokerEpoch: 42, CurrentMetadataOffset: 41,
-            WantFence: false, WantShutDown: false));
+            WantFence: false, WantShutDown: false, OfflineLogDirs: []));
 
         Assert.False(outcome.IsCaughtUp);
         Assert.True(outcome.IsFenced);
@@ -115,7 +115,7 @@ public class ClusterMembershipServiceTests
 
         var outcome = service.Heartbeat(new BrokerHeartbeatInput(
             BrokerId: 1, BrokerEpoch: 42, CurrentMetadataOffset: 42,
-            WantFence: false, WantShutDown: false));
+            WantFence: false, WantShutDown: false, OfflineLogDirs: []));
 
         Assert.True(outcome.IsCaughtUp);
         Assert.False(outcome.IsFenced);
@@ -287,7 +287,7 @@ public class ClusterMembershipServiceTests
     /// </summary>
     private static BrokerHeartbeatInput Beat(int brokerId, long epoch) => new(
         BrokerId: brokerId, BrokerEpoch: epoch, CurrentMetadataOffset: epoch,
-        WantFence: false, WantShutDown: false);
+        WantFence: false, WantShutDown: false, OfflineLogDirs: []);
 
     [Fact]
     public void ExpireStaleSessions_FencesABrokerThatWentSilent()
@@ -395,7 +395,7 @@ public class ClusterMembershipServiceTests
         // The epoch bookkeeping is gone too: a heartbeat from the removed broker is answered
         // as unregistered rather than from a record no longer visible in cluster state.
         var outcome = service.Heartbeat(new BrokerHeartbeatInput(
-            BrokerId: 1, BrokerEpoch: 1, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false));
+            BrokerId: 1, BrokerEpoch: 1, CurrentMetadataOffset: 0, WantFence: false, WantShutDown: false, OfflineLogDirs: []));
         Assert.Equal(ClusterRpcStatus.BrokerNotAvailable, outcome.Status);
     }
 
@@ -547,8 +547,8 @@ public class ClusterMembershipServiceTests
 
         // A heartbeat still carrying the pre-failover epoch is fenced — the lifecycle loop's
         // re-register self-heal path — while the fresh epoch heartbeats fine.
-        Assert.Equal(ClusterRpcStatus.StaleBrokerEpoch, service.Heartbeat(new BrokerHeartbeatInput(1, stale, 0, false, false)).Status);
-        Assert.Equal(ClusterRpcStatus.None, service.Heartbeat(new BrokerHeartbeatInput(1, fresh, 0, false, false)).Status);
+        Assert.Equal(ClusterRpcStatus.StaleBrokerEpoch, service.Heartbeat(new BrokerHeartbeatInput(1, stale, 0, false, false, [])).Status);
+        Assert.Equal(ClusterRpcStatus.None, service.Heartbeat(new BrokerHeartbeatInput(1, fresh, 0, false, false, [])).Status);
     }
 
     [Fact]
@@ -567,7 +567,7 @@ public class ClusterMembershipServiceTests
     {
         var (service, _) = NewService();
 
-        var outcome = service.Heartbeat(new BrokerHeartbeatInput(99, 1, 0, false, false));
+        var outcome = service.Heartbeat(new BrokerHeartbeatInput(99, 1, 0, false, false, []));
 
         Assert.Equal(ClusterRpcStatus.BrokerNotAvailable, outcome.Status);
         Assert.True(outcome.IsFenced);
@@ -579,7 +579,7 @@ public class ClusterMembershipServiceTests
         var (service, _) = NewService();
         var reg = Register(service, Registration(1, Guid.NewGuid()));
 
-        var outcome = service.Heartbeat(new BrokerHeartbeatInput(1, reg.BrokerEpoch + 99, 0, false, false));
+        var outcome = service.Heartbeat(new BrokerHeartbeatInput(1, reg.BrokerEpoch + 99, 0, false, false, []));
 
         Assert.Equal(ClusterRpcStatus.StaleBrokerEpoch, outcome.Status);
     }
