@@ -675,6 +675,17 @@ registered — the report was dropped each time, and on every other broker the I
 leads stayed the controller alone. A controller that then shut down found no in-sync successor for those
 partitions. The controller's own report now reaches the metadata log whatever the finalized level is.
 
+### The last broker of a cluster stops without hanging in its heartbeat monitor
+
+A broker stopping after its peers could hang in its own shutdown for minutes. Its heartbeat monitor goes through
+the watched peers in one health check and awaits the controller's handling of each failure. The shutdown ended the
+handling of the first failed peer, and the check then went on to the next peer and raised its failure too — after
+the controller had stopped, if the broker's shutdown had got that far. A stopped controller handled that failure
+with no end to it: one five-second wait for a commit per partition the failed broker was in the ISR of, which a
+controller without a quorum never gets, while the shutdown waited for the monitor. A stopped controller now
+handles no failure and writes nothing to the metadata log, and a stopped heartbeat monitor marks no further peer
+failed.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

@@ -376,10 +376,22 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
         }
     }
 
-    private async Task CheckBrokerHealthAsync(CancellationToken ct)
+    /// <summary>
+    /// One health check: every watched peer that has not answered for the heartbeat timeout, or has failed
+    /// <see cref="ClusteringConfig.MaxHeartbeatFailures"/> times in a row, is marked failed and reported.
+    /// </summary>
+    /// <remarks>
+    /// Ends with the manager, between two peers as well as between two checks. The handler of a failure is awaited
+    /// here and can run for as long as the controller needs to decide; a check that was in it when the manager was
+    /// stopped used to go on to the next peer afterwards and report that one failed too, on a broker whose shutdown
+    /// had by then taken down what handles a failure.
+    /// </remarks>
+    internal async Task CheckBrokerHealthAsync(CancellationToken ct)
     {
         foreach (var (brokerId, state) in _brokerHealth)
         {
+            ct.ThrowIfCancellationRequested();
+
             if (state.ShouldMarkFailed(_config.HeartbeatTimeoutMs) ||
                 state.ConsecutiveFailures >= _config.MaxHeartbeatFailures)
             {

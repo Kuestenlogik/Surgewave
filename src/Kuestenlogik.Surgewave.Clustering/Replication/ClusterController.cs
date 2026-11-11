@@ -101,6 +101,9 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     // The Raft leadership this controller acted on last, and the lock under which it follows the node (#180).
     private readonly object _leadershipLock = new();
     private RaftLeadership _followedLeadership;
+
+    // Ends when this controller stops, and stays ended: what its background work runs under. Not read from _cts,
+    // which the stop disposes and clears.
     private CancellationToken _lifetime;
 
     // #72 Inc5 — process-stable incarnation for THIS broker's Raft self-registration; a restart gets
@@ -1325,7 +1328,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private async Task HandleLogDirsOfflineAsync(int brokerId)
     {
         // For as long as this controller runs, as the failure path does (#234).
-        var ct = _cts?.Token ?? CancellationToken.None;
+        var ct = _lifetime;
         try
         {
             await MoveReplicasOffOfflineLogDirAsync(brokerId, ct).ConfigureAwait(false);
@@ -1357,7 +1360,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // For as long as this controller runs (#234): each decision waits for its commit, which a controller that
         // lost its quorum never gets, and the failure of a broker with a hundred partitions held a stopping broker
         // for minutes — the heartbeat monitor awaits this handler, and the broker's shutdown awaits the monitor.
-        var ct = _cts?.Token ?? CancellationToken.None;
+        //
+        // The lifetime, not the source it came from: the stop clears that field, and a failure raised after it —
+        // the monitor is stopped after this controller — found none and ran with no end at all.
+        var ct = _lifetime;
         var affectedPartitions = new List<TopicPartition>();
 
         try
