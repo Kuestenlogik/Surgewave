@@ -654,6 +654,27 @@ controller refuses it; a configured id that differs from the persisted one stops
 single broker and an embedded host get a generated, persisted id too, and the embedded host now passes
 `Cluster.ClusterId` through.
 
+### A broker watches every peer it sends heartbeats to
+
+A broker kept a health record only for the peers it knew when its heartbeat manager started, and for those it
+had exchanged a heartbeat with since. A broker that learned of a peer later — the embedded host reads its
+cluster nodes after that start — and never heard from it sent it heartbeats for good, counted none of the
+failures and never reported it failed. As the controller it left the dead broker in every ISR and leading its
+partitions: a controller promoted within its first heartbeat interval never handled the failure of the
+controller before it. Every broker a heartbeat is sent to is now watched from the first heartbeat on, and is
+alive until it has not answered for the heartbeat timeout — as Kafka's controller gives every registered broker
+one session timeout from the moment it takes office. `HeartbeatManager.HealthChanged` and the embedded host's
+`PeerHealthChanged` complete at the next change of a peer's health.
+
+### The controller reports the ISR of the partitions it leads at every inter-broker protocol level
+
+A partition leader reports an ISR change to the controller over the wire the cluster is finalized to. The
+controller's own report goes on no wire, and only the native client hands it to the metadata log; while the
+cluster was finalized to the Kafka wire — as it is until every broker named in the cluster nodes has
+registered — the report was dropped each time, and on every other broker the ISR of a partition the controller
+leads stayed the controller alone. A controller that then shut down found no in-sync successor for those
+partitions. The controller's own report now reaches the metadata log whatever the finalized level is.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

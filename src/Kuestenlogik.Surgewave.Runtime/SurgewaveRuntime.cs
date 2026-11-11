@@ -180,12 +180,18 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
     /// <summary>
     /// Health of the peer brokers as seen by this broker's failure detector — the input to
-    /// controller re-election and ISR shrinking. Empty until the first peer is observed; never
+    /// controller re-election and ISR shrinking. Empty until the first heartbeat is sent to a peer; never
     /// contains this broker itself, which is why it is not the place to ask whether the local
     /// broker is alive (<c>HeartbeatManager.IsBrokerAlive</c> answers that one directly).
     /// </summary>
     public IReadOnlyDictionary<int, BrokerHealthState> PeerHealth =>
         _heartbeatManager?.AllBrokerHealth ?? ReadOnlyDictionary<int, BrokerHealthState>.Empty;
+
+    /// <summary>
+    /// Completes at the next change of <see cref="PeerHealth"/>: a peer watched for the first time, reported failed,
+    /// or recovered. Take it before looking, then await it. Never completes on a broker without a cluster.
+    /// </summary>
+    public Task PeerHealthChanged => _heartbeatManager?.HealthChanged ?? Task.Delay(Timeout.Infinite);
 
     /// <summary>
     /// Whether this broker is the Raft leader — that is, the active controller.

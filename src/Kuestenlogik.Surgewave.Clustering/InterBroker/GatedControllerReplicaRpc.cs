@@ -52,7 +52,17 @@ public sealed partial class GatedControllerReplicaRpc : IIsrChangeNotifier
         int leaderEpoch,
         IReadOnlyList<int> isr,
         CancellationToken ct = default)
-        => Select()?.NotifyIsrChangedAsync(tp, leaderId, leaderEpoch, isr, ct) ?? Task.FromResult(false);
+    {
+        // The controller's own report goes on no wire, so the wire level does not choose its way: the native client
+        // hands it to the metadata log (#176), and the Kafka-wire client has nothing to hand it to and answers "not
+        // taken". Routed by the level, the report was dropped for as long as the cluster was finalized to the Kafka
+        // wire — as it is until every broker named in the cluster nodes has registered — and on every other broker
+        // the ISR of a partition the controller leads stayed the controller alone.
+        if (_clusterState.ControllerId == _clusterState.LocalBrokerId)
+            return _nativeClient.NotifyIsrChangedAsync(tp, leaderId, leaderEpoch, isr, ct);
+
+        return Select()?.NotifyIsrChangedAsync(tp, leaderId, leaderEpoch, isr, ct) ?? Task.FromResult(false);
+    }
 
     private IIsrChangeNotifier? Select()
     {

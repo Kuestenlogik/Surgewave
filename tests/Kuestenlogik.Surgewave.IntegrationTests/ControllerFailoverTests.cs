@@ -1,6 +1,5 @@
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
-using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Core.Storage;
 using Kuestenlogik.Surgewave.Runtime;
 using Kuestenlogik.Surgewave.Testing;
@@ -79,13 +78,11 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
             await BuildBrokerAsync(3, clientPorts[2], replicationPorts[2], quorum, nodes[0], nodes[1]),
         };
 
-        foreach (var self in brokers)
-        {
-            foreach (var peer in brokers)
-            {
-                if (!ReferenceEquals(self, peer)) StitchMesh(self, peer);
-            }
-        }
+        // The brokers know each other from their cluster nodes and their registrations, and nothing is added to that
+        // here. This fixture used to write each peer into each broker's cluster state once more, as a node without
+        // the inter-broker protocol level its registration had given it: whenever that came after the last
+        // registration, the cluster was finalized to the Kafka wire for the rest of the test — which a cluster of
+        // these brokers is only until the last of them has registered.
 
         Assert.True(
             await TestWaitHelpers.WaitForClusterStabilizationAsync(brokers, output: _output),
@@ -99,14 +96,11 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         _secondSurvivor = survivors[1];
         _output.WriteLine($"broker {_controller.BrokerId} holds the controller role");
 
-        // The failure detector only reports brokers it is actually tracking, so a broker killed
-        // before the survivor ever saw it would go unnoticed for reasons that have nothing to do
-        // with what these tests are about. Make the precondition explicit rather than racing it.
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => _survivor.PeerHealth.TryGetValue(_controller.BrokerId, out var health) && health.IsAlive,
-                timeout: TimeSpan.FromSeconds(30), output: _output),
-            $"the survivor never saw broker {_controller.BrokerId} as a live peer, so it could never detect its death");
+        // No wait for the survivors to have heard from the controller: a broker watches every peer it sends
+        // heartbeats to, from the first one on. This fixture used to wait until ONE survivor had a health record of
+        // the controller. The other one, promoted with none, never reported the controller failed and left it in
+        // every ISR — the product's defect, which that wait hid for one survivor and
+        // HeartbeatTracksEveryPeerTests pins.
     }
 
     public async ValueTask DisposeAsync()
@@ -176,15 +170,12 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
     [Fact(Timeout = 180_000)]
     public async Task ThePromotedControllerHandlesTheFailureThatPromotedIt()
     {
-        // Taking the role is not the same as doing the job. The failure of the old controller is
-        // reported exactly once, and it is reported to a broker that is not yet controller; if the
-        // promotion is where the handling stops, the controller-side repair for that failure —
-        // dropping the dead broker out of every ISR — never runs, and no second event ever comes.
+        // Taking the role is not the same as doing the job. The broker that takes over has to notice that the
+        // controller before it is gone, and do the controller's repair for that failure — dropping the dead broker
+        // out of every ISR — although it was not the controller while that broker was alive.
         var cancellationToken = TestContext.Current.CancellationToken;
         var controller = _controller!;
-        // The ISR precondition is watched on a broker that is a replica of the partition; whichever
-        // survivor is promoted afterwards is asserted separately.
-        var survivor = _survivor!;
+        var survivors = new[] { _survivor!, _secondSurvivor! };
         var topic = $"controller-failover-{Guid.NewGuid():N}";
         var tp = new SwTopicPartition { Topic = topic, Partition = 0 };
 
@@ -201,11 +192,19 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
             ]);
         }
 
-        Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => survivor.ClusterState!.GetIsrSnapshot(tp).Contains(controller.BrokerId),
-                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
-            $"the survivor never saw broker {controller.BrokerId} in the ISR, so its removal would prove nothing");
+        // Every replica in the ISR, on both survivors, before the controller leaves. The controller leads the new
+        // partition, and until its followers have fetched once the ISR is the controller alone: "the ISR contains
+        // the controller", which this used to wait for, held from the first moment on. The controller then left
+        // with no in-sync successor ("No eligible leader in ISR"), and what the test saw afterwards was an unclean
+        // election, not a dead broker leaving the ISR of a partition that goes on.
+        foreach (var survivor in survivors)
+        {
+            Assert.True(
+                await IsrBecomesAsync(survivor, tp, isr => isr.Count == 3, TimeSpan.FromSeconds(60), cancellationToken),
+                $"broker {survivor.BrokerId} never saw all three replicas in the ISR " +
+                $"({string.Join(",", survivor.ClusterState!.GetIsrSnapshot(tp))}), so the removal of broker " +
+                $"{controller.BrokerId} would prove nothing");
+        }
 
         await controller.DisposeAsync();
         _controllerDisposed = true;
@@ -213,10 +212,17 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         var promoted = await WaitForNewControllerAsync(cancellationToken);
         _output.WriteLine($"broker {promoted.BrokerId} took the controller role");
 
+        // What a controller does about a failed broker begins with its failure detector reporting it. Watched for
+        // itself, and before the ISR: the partition's new leader drops a follower it has not heard from for 40 s on
+        // its own, so the dead broker leaves the ISR below under a controller that never noticed the failure too.
         Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => !promoted.ClusterState!.GetIsrSnapshot(tp).Contains(controller.BrokerId),
-                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
+            await IsReportedFailedAsync(promoted, controller.BrokerId, TimeSpan.FromSeconds(60), cancellationToken),
+            $"the promoted controller's failure detector never reported broker {controller.BrokerId} failed; it watches " +
+            $"[{string.Join(",", promoted.PeerHealth.Select(peer => $"{peer.Key}:{(peer.Value.IsAlive ? "alive" : "failed")}"))}]");
+
+        Assert.True(
+            await IsrBecomesAsync(
+                promoted, tp, isr => !isr.Contains(controller.BrokerId), TimeSpan.FromSeconds(60), cancellationToken),
             $"the dead broker is still in the ISR ({string.Join(",", promoted.ClusterState!.GetIsrSnapshot(tp))}) — " +
             "the promoted controller never processed the failure it was promoted for");
 
@@ -224,11 +230,10 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
         // ISR, not only the controller. (That the controller's removal is itself a log entry, #124, is
         // pinned by IsrRemovalThroughTheLogTests; here the partition leader's own ISR shrink would get the
         // other survivor there too, only later.)
-        var otherSurvivor = new[] { _survivor!, _secondSurvivor! }.Single(b => !ReferenceEquals(b, promoted));
+        var otherSurvivor = survivors.Single(b => !ReferenceEquals(b, promoted));
         Assert.True(
-            await TestWaitHelpers.WaitForConditionAsync(
-                () => !otherSurvivor.ClusterState!.GetIsrSnapshot(tp).Contains(controller.BrokerId),
-                timeout: TimeSpan.FromSeconds(60), ct: cancellationToken, output: _output),
+            await IsrBecomesAsync(
+                otherSurvivor, tp, isr => !isr.Contains(controller.BrokerId), TimeSpan.FromSeconds(60), cancellationToken),
             $"broker {otherSurvivor.BrokerId} still has the dead broker in the ISR " +
             $"({string.Join(",", otherSurvivor.ClusterState!.GetIsrSnapshot(tp))}) — the removal never reached the log");
     }
@@ -248,6 +253,61 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
             "no surviving broker became controller, so nothing in this cluster can elect a partition leader again");
 
         return survivors.First(b => b.IsController);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="broker"/> sees the ISR of <paramref name="tp"/> as <paramref name="expected"/> within
+    /// <paramref name="timeout"/>.
+    /// </summary>
+    /// <remarks>
+    /// The handshake on applied metadata: the signal is taken before each look, so no change in between is missed.
+    /// </remarks>
+    private static async Task<bool> IsrBecomesAsync(
+        SurgewaveRuntime broker, SwTopicPartition tp, Func<List<int>, bool> expected, TimeSpan timeout, CancellationToken ct)
+    {
+        var state = broker.ClusterState!;
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(timeout);
+        try
+        {
+            while (true)
+            {
+                var next = state.PartitionsChanged;
+                if (expected(state.GetIsrSnapshot(tp)))
+                    return true;
+                await next.WaitAsync(bounded.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the failure detector of <paramref name="broker"/> reports <paramref name="peerId"/> failed within
+    /// <paramref name="timeout"/>.
+    /// </summary>
+    /// <remarks>The handshake on the detector: the signal is taken before each look.</remarks>
+    private static async Task<bool> IsReportedFailedAsync(
+        SurgewaveRuntime broker, int peerId, TimeSpan timeout, CancellationToken ct)
+    {
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(timeout);
+        try
+        {
+            while (true)
+            {
+                var next = broker.PeerHealthChanged;
+                if (broker.PeerHealth.TryGetValue(peerId, out var health) && !health.IsAlive)
+                    return true;
+                await next.WaitAsync(bounded.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     /// <summary>Ports nothing is listening on yet, so a quorum can name them before they exist.</summary>
@@ -294,13 +354,4 @@ public sealed class ControllerFailoverTests : IAsyncLifetime
             .WithHeartbeatTimeout(HeartbeatTimeoutMs)
             .Build()
             .StartAsync();
-
-    private static void StitchMesh(SurgewaveRuntime self, SurgewaveRuntime peer)
-        => self.ClusterState!.AddBroker(new BrokerNode
-        {
-            BrokerId = peer.BrokerId,
-            Host = peer.Host,
-            Port = peer.Port,
-            ReplicationPort = peer.ReplicationPort
-        });
 }

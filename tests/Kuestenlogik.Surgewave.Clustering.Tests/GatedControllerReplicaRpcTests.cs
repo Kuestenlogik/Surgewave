@@ -96,6 +96,41 @@ public class GatedControllerReplicaRpcTests
     }
 
     [Fact]
+    public async Task KafkaWirePinned_TheControllersOwnReport_GoesToTheNativeClient()
+    {
+        // The controller's own report goes on no wire: the native client hands it to the metadata log, the Kafka-wire
+        // client has nothing to hand it to. Routed by the level it was dropped, report after report, and the ISR of
+        // every partition the controller leads stayed the controller alone on the other brokers — in a cluster one
+        // of whose configured brokers has not registered yet, and in ControllerFailoverTests, whose fixture reset
+        // the registered levels.
+        var state = ClusterWith(InterBrokerProtocolFeature.Native, InterBrokerProtocolFeature.KafkaWire);
+        state.LocalBrokerId = 0;
+        state.ControllerId = 0;
+        var (native, fallback) = (new RecordingRpc(), new RecordingRpc());
+        var gate = Gate(state, native, fallback);
+
+        Assert.True(await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0, 1]));
+
+        Assert.Equal(1, native.IsrChangeCalls);
+        Assert.Equal(0, fallback.IsrChangeCalls);
+    }
+
+    [Fact]
+    public async Task KafkaWirePinned_AReportToAnotherBrokersController_StaysOnTheFallback()
+    {
+        var state = ClusterWith(InterBrokerProtocolFeature.Native, InterBrokerProtocolFeature.KafkaWire);
+        state.LocalBrokerId = 0;
+        state.ControllerId = 1;
+        var (native, fallback) = (new RecordingRpc(), new RecordingRpc());
+        var gate = Gate(state, native, fallback);
+
+        await gate.NotifyIsrChangedAsync(new TopicPartition { Topic = "t", Partition = 0 }, 0, 0, [0, 1]);
+
+        Assert.Equal(0, native.IsrChangeCalls);
+        Assert.Equal(1, fallback.IsrChangeCalls);
+    }
+
+    [Fact]
     public async Task OldBrokerJoiningMidFlight_ReroutesNextCallToFallback()
     {
         var state = ClusterWith(InterBrokerProtocolFeature.Native);

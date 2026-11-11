@@ -36,6 +36,7 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
     private readonly ClusteringConfig _config;
     private readonly ConcurrentDictionary<int, BrokerHealthState> _brokerHealth = new();
     private readonly ConcurrentDictionary<int, TcpClient> _connections = new();
+    private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _healthChanged = new();
 
     private CancellationTokenSource? _cts;
     private Task? _heartbeatTask;
@@ -74,6 +75,12 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
     public IReadOnlyDictionary<int, BrokerHealthState> AllBrokerHealth => _brokerHealth;
 
     /// <summary>
+    /// Completes at the next change of a peer's health: a peer watched for the first time, reported failed, or
+    /// recovered. Take it before looking, then await it.
+    /// </summary>
+    public Task HealthChanged => _healthChanged.Next;
+
+    /// <summary>
     /// Check if a broker is currently alive. The local broker always is: we are running.
     /// </summary>
     /// <remarks>
@@ -82,7 +89,9 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
     /// be answered here instead of looked up. Without it every caller asking "is this replica alive"
     /// about a replica that happens to be us gets "no", which is never true and is exactly wrong at
     /// the moments that matter: the local broker is the one candidate whose liveness is certain.
-    /// A peer with no record still answers false: not observed is not the same as known alive.
+    /// A peer with no record still answers false: not observed is not the same as known alive. A peer has a record
+    /// from the first heartbeat sent to it (<see cref="Track"/>), and counts as alive until it has failed to answer
+    /// for the heartbeat timeout.
     /// </remarks>
     public bool IsBrokerAlive(int brokerId) =>
         brokerId == _config.BrokerId ||
@@ -97,7 +106,7 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
         {
             if (brokerId != _config.BrokerId)
             {
-                _brokerHealth[brokerId] = new BrokerHealthState { BrokerId = brokerId };
+                _ = Track(brokerId);
             }
         }
 
@@ -143,13 +152,14 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
         var brokerId = request.BrokerId;
 
         // Update or create health state for the sending broker
-        var healthState = _brokerHealth.GetOrAdd(brokerId, id => new BrokerHealthState { BrokerId = id });
+        var healthState = Track(brokerId);
 
         var wasAlive = healthState.IsAlive;
         healthState.RecordHeartbeat(request.BrokerEpoch);
 
         if (!wasAlive)
         {
+            _healthChanged.Notify();
             LogBrokerRecovered(brokerId);
             _ = Task.Run(async () =>
             {
@@ -215,6 +225,7 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
             if (brokerId == _config.BrokerId)
                 continue;
 
+            _ = Track(brokerId);
             tasks.Add(SendHeartbeatToBrokerAsync(brokerId, broker, ct));
         }
 
@@ -259,12 +270,13 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
             var response = await ReadHeartbeatResponseAsync(stream, cts.Token);
             if (response != null)
             {
-                var healthState = _brokerHealth.GetOrAdd(brokerId, id => new BrokerHealthState { BrokerId = id });
+                var healthState = Track(brokerId);
                 var wasAlive = healthState.IsAlive;
                 healthState.RecordHeartbeat(response.BrokerEpoch);
 
                 if (!wasAlive)
                 {
+                    _healthChanged.Notify();
                     LogBrokerRecovered(brokerId);
                     if (OnBrokerRecovered != null)
                         await OnBrokerRecovered(this, new BrokerHealthEventArgs(brokerId));
@@ -333,6 +345,29 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
         return null;
     }
 
+    /// <summary>
+    /// Starts watching <paramref name="brokerId"/> unless it is watched already: from here on it is alive until it has
+    /// failed to answer for the heartbeat timeout, or <see cref="ClusteringConfig.MaxHeartbeatFailures"/> times in a row.
+    /// </summary>
+    /// <remarks>
+    /// Every broker this one sends a heartbeat to is watched from the first heartbeat on, as Kafka's controller gives
+    /// every registered broker one session timeout from the moment it takes office. The record used to be made at the
+    /// start, for the brokers known then, and otherwise by the first heartbeat a peer answered or sent — so a broker
+    /// that learned of a peer after its heartbeat manager had started (the embedded runtime reads its cluster nodes
+    /// after it; a broker that registers later) and never heard from it sent it heartbeats for good, counted none of
+    /// the failures and never reported it failed. A controller in that state left a dead broker in every ISR and
+    /// leading its partitions.
+    /// </remarks>
+    private BrokerHealthState Track(int brokerId)
+    {
+        if (_brokerHealth.TryGetValue(brokerId, out var watched))
+            return watched;
+
+        var added = _brokerHealth.GetOrAdd(brokerId, static id => new BrokerHealthState { BrokerId = id });
+        _healthChanged.Notify();
+        return added;
+    }
+
     private void RecordHeartbeatFailure(int brokerId)
     {
         if (_brokerHealth.TryGetValue(brokerId, out var state))
@@ -351,6 +386,7 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
                 if (state.IsAlive)
                 {
                     state.MarkFailed();
+                    _healthChanged.Notify();
                     LogBrokerFailed(brokerId, state.TimeSinceLastHeartbeatMs, state.ConsecutiveFailures);
 
                     if (OnBrokerFailed != null)
