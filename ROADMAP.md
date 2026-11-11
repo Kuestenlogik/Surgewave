@@ -30,8 +30,6 @@ Field conventions live in [`docs/contributing/project-board.md`](docs/contributi
 
 ### v0.6 — Correctness & durability
 
-- [#162](https://github.com/Kuestenlogik/Surgewave/issues/162) **feat(clustering): fence a broker that is reachable but not serving** 
-- [#179](https://github.com/Kuestenlogik/Surgewave/issues/179) **bug(tests): the replication stall is undone by the metadata log, so the failover class passes by luck** `area:clustering`
 - [#180](https://github.com/Kuestenlogik/Surgewave/issues/180) **perf(clustering): re-election and ISR propagation are too slow to assert on within 60s** `area:clustering`
 
 ### v0.7 — Hygiene: CI, dependencies, licences
