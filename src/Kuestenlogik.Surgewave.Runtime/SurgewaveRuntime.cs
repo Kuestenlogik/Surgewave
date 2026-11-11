@@ -98,7 +98,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     private ConnectionPool? _connectionPool;
     private ControllerClient? _controllerClient;
     private KafkaConnectionHandler? _kafkaConnectionHandler;
+    private ConfigApiHandler? _configApiHandler;
     private Kuestenlogik.Surgewave.Clustering.Cluster.BrokerLifecycleLoop? _lifecycleLoop;
+    private Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager? _reassignmentManager;
     private Task? _clusterTask;
     private BrokerSessionSweeper? _sessionSweeper;
     private ReplicationTransitionQueue? _replicationTransitions;
@@ -159,6 +161,12 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
     /// The ClusterState (only valid when EnableCluster = true).
     /// </summary>
     public ClusterState? ClusterState => _clusterState;
+
+    /// <summary>
+    /// Whether this broker answers the Kafka API: a request for an API without a handler gets a frame without a body,
+    /// which a Kafka client cannot read (#240).
+    /// </summary>
+    public bool HandlesKafkaApi(ApiKey apiKey) => _kafkaConnectionHandler?.HasHandler(apiKey) ?? false;
 
     /// <summary>
     /// This broker's cluster id (#203): configured, persisted, or adopted from its cluster's metadata log.
@@ -387,7 +395,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 _dataApiHandler,
                 _metadataApiHandler,
                 _topicAdminHandler,
-                new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
+                _configApiHandler = new ConfigApiHandler(config, dynamicBrokerConfig, _logManager),
                 new SecurityApiHandler(config, saslAuthenticator: null, aclAuthorizer: null, auditLogger: null, _loggerFactory.CreateLogger<SecurityApiHandler>()),
                 // The classic consumer-group, consumer-group v2 (KIP-848) and streams-group
                 // (KIP-1071) APIs now route through the dispatcher (their broker fast-paths
@@ -400,6 +408,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 // (broker fast-paths removed when the coordinators went protocol-neutral, #59).
                 new TransactionApiHandler(transactionCoordinator, _loggerFactory.CreateLogger<TransactionApiHandler>()),
                 new ShareGroupApiHandler(shareGroupCoordinator, _loggerFactory.CreateLogger<ShareGroupApiHandler>()),
+                // Advertised by ApiVersions like the rest, so they are answered here as in the broker host (#240).
+                new QuotaApiHandler(_quotaManager, _loggerFactory.CreateLogger<QuotaApiHandler>()),
+                new DelegationTokenApiHandler(
+                    new DelegationTokenManager(config.DelegationTokens, config.DataDirectory, _loggerFactory.CreateLogger<DelegationTokenManager>()),
+                    _loggerFactory.CreateLogger<DelegationTokenApiHandler>()),
                 new TelemetryApiHandler(
                     _loggerFactory.CreateLogger<TelemetryApiHandler>(),
                     config.Telemetry,
@@ -433,6 +446,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         }
         else
         {
+            // A broker without a cluster advertises the cluster admin APIs too, so it answers them: nothing is being
+            // reassigned, and there is no controller to elect a leader or move a replica (#240).
+            _kafkaConnectionHandler?.AddHandler(new ClusterAdminHandler(
+                controller: null, reassignmentManager: null, new ClusterState(),
+                _loggerFactory.CreateLogger<ClusterAdminHandler>()));
             await _offsetStore!.StartLocalAsync(cancellationToken);
             await _transactionStateLog!.StartLocalAsync(cancellationToken);
             await _shareStateStore!.StartLocalAsync(cancellationToken);
@@ -735,12 +753,24 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _kafkaConnectionHandler?.AddHandler(new InterBrokerApiHandler(
                 config, _clusterState, _replicaManager, _logManager!, interBrokerApiLogger,
                 _transactionCoordinator, isrUpdateApplier: _clusterController));
+
+            // The cluster admin APIs (ElectLeaders, AlterPartitionReassignments, ListPartitionReassignments) need the
+            // controller too. ApiVersions advertises them, so they must be answered: kafka-topics --describe lists
+            // the partition reassignments before it describes a topic, and without this handler it got a frame with
+            // no body and failed (#240).
+            _reassignmentManager = new Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager(
+                _loggerFactory.CreateLogger<Kuestenlogik.Surgewave.Clustering.Cluster.PartitionReassignmentManager>(),
+                _clusterState, _clusterController, _replicaManager, _logManager!, clusteringConfig);
+            _kafkaConnectionHandler?.AddHandler(new ClusterAdminHandler(
+                _clusterController, _reassignmentManager, _clusterState,
+                _loggerFactory.CreateLogger<ClusterAdminHandler>()));
         }
 
         // Wire up topic admin handler to use cluster controller for topic creation
 
         // Wire up metadata handler to use cluster state for accurate replica info
         _metadataApiHandler?.SetClusterState(_clusterState);
+        _configApiHandler?.SetClusterState(_clusterState);
 
         // In a cluster, a group's coordinator is the leader of its __consumer_offsets partition (#204); without a
         // cluster the handlers keep coordinating every group themselves.
@@ -986,6 +1016,9 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
 
         if (_replicationTransitions is not null)
             await _replicationTransitions.DisposeAsync();
+
+        if (_reassignmentManager is not null)
+            await _reassignmentManager.DisposeAsync();
 
         // #60 Inc6b — stop the lifecycle loop first so it no longer heartbeats over the pool.
         if (_lifecycleLoop != null)

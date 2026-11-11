@@ -135,10 +135,15 @@ public sealed class SurgewaveKafkaProtocolPlugin : IProtocolPlugin
             return topicAdminHandler;
         });
 
-        services.AddSingleton<IKafkaRequestHandler>(sp => new ConfigApiHandler(
-            sp.GetRequiredService<IBrokerConfigView>(),
-            sp.GetRequiredService<IDynamicBrokerConfig>(),
-            sp.GetRequiredService<LogManager>()));
+        services.AddSingleton<IKafkaRequestHandler>(sp =>
+        {
+            var configApiHandler = new ConfigApiHandler(
+                sp.GetRequiredService<IBrokerConfigView>(),
+                sp.GetRequiredService<IDynamicBrokerConfig>(),
+                sp.GetRequiredService<LogManager>());
+            configApiHandler.SetClusterState(sp.GetRequiredService<ClusterState>());
+            return configApiHandler;
+        });
 
         services.AddSingleton<IKafkaRequestHandler>(sp =>
         {

@@ -22,7 +22,7 @@ public sealed class PartitionReassignmentWireRoundTripTests
     {
         var reader = new KafkaProtocolReader(payload);
         reader.ReadInt16(); reader.ReadInt16(); reader.ReadInt32();
-        reader.ReadCompactString(); reader.SkipTaggedFields();
+        reader.ReadString(); reader.SkipTaggedFields();
         return reader;
     }
 
@@ -329,5 +329,124 @@ public sealed class PartitionReassignmentWireRoundTripTests
         var reader = new KafkaProtocolReader(writer.ToArray().AsSpan(4).ToArray());
         var parsed = ListPartitionReassignmentsResponse.ReadFrom(reader, apiVersion: 0, correlationId: 1);
         Assert.Empty(parsed.Topics);
+    }
+
+    // #240 — the exact bytes Kafka's ListPartitionReassignmentsResponse.json implies for v0, which is flexible: response
+    // header v1 (correlation id, tagged fields), compact arrays and strings, tagged fields after every struct.
+    [Fact]
+    public void ListResponse_NoOngoingReassignments_IsTheBytesKafkasSchemaImplies()
+    {
+        var response = new ListPartitionReassignmentsResponse
+        {
+            ApiVersion = 0,
+            CorrelationId = 7,
+            ThrottleTimeMs = 0,
+            ErrorCode = ErrorCode.None,
+            ErrorMessage = null,
+            Topics = [],
+        };
+
+        byte[] expected =
+        [
+            0x00, 0x00, 0x00, 0x07, // correlation id
+            0x00,                   // response header tagged fields
+            0x00, 0x00, 0x00, 0x00, // ThrottleTimeMs
+            0x00, 0x00,             // ErrorCode
+            0x00,                   // ErrorMessage: null compact string
+            0x01,                   // Topics: compact array of 0
+            0x00,                   // tagged fields
+        ];
+        Assert.Equal(expected, Written(response));
+    }
+
+    [Fact]
+    public void ListResponse_WithAnOngoingReassignment_IsTheBytesKafkasSchemaImplies()
+    {
+        var response = new ListPartitionReassignmentsResponse
+        {
+            ApiVersion = 0,
+            CorrelationId = 7,
+            ThrottleTimeMs = 0,
+            ErrorCode = ErrorCode.None,
+            ErrorMessage = null,
+            Topics =
+            [
+                new ListPartitionReassignmentsResponse.OngoingTopicReassignment
+                {
+                    Name = "orders",
+                    Partitions =
+                    [
+                        new ListPartitionReassignmentsResponse.OngoingPartitionReassignment
+                        {
+                            PartitionIndex = 2,
+                            Replicas = [1, 2, 3],
+                            AddingReplicas = [3],
+                            RemovingReplicas = [],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        byte[] expected =
+        [
+            0x00, 0x00, 0x00, 0x07, // correlation id
+            0x00,                   // response header tagged fields
+            0x00, 0x00, 0x00, 0x00, // ThrottleTimeMs
+            0x00, 0x00,             // ErrorCode
+            0x00,                   // ErrorMessage: null compact string
+            0x02,                   // Topics: compact array of 1
+            0x07, 0x6F, 0x72, 0x64, 0x65, 0x72, 0x73, // Name: compact string "orders"
+            0x02,                   // Partitions: compact array of 1
+            0x00, 0x00, 0x00, 0x02, // PartitionIndex
+            0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03, // Replicas: 1, 2, 3
+            0x02, 0x00, 0x00, 0x00, 0x03, // AddingReplicas: 3
+            0x01,                   // RemovingReplicas: none
+            0x00,                   // partition tagged fields
+            0x00,                   // topic tagged fields
+            0x00,                   // tagged fields
+        ];
+        Assert.Equal(expected, Written(response));
+    }
+
+    // Request header v2: the client id is a classic string (int16 length) in every header version, then the tagged
+    // fields. It was written as a compact string, which no broker reads.
+    [Fact]
+    public void ListRequest_IsTheBytesKafkasSchemaImplies()
+    {
+        var request = new ListPartitionReassignmentsRequest
+        {
+            ApiKey = ApiKey.ListPartitionReassignments,
+            ApiVersion = 0,
+            CorrelationId = 9,
+            ClientId = "ab",
+            TimeoutMs = 1000,
+            Topics = [new ListPartitionReassignmentsRequest.ListPartitionReassignmentsTopic { Name = "orders", PartitionIndexes = [0, 1] }],
+        };
+        var writer = new KafkaProtocolWriter();
+        request.WriteTo(writer);
+
+        byte[] expected =
+        [
+            0x00, 0x2E,             // api key 46
+            0x00, 0x00,             // api version
+            0x00, 0x00, 0x00, 0x09, // correlation id
+            0x00, 0x02, 0x61, 0x62, // client id "ab"
+            0x00,                   // request header tagged fields
+            0x00, 0x00, 0x03, 0xE8, // TimeoutMs
+            0x02,                   // Topics: compact array of 1
+            0x07, 0x6F, 0x72, 0x64, 0x65, 0x72, 0x73, // Name: compact string "orders"
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // PartitionIndexes: 0, 1
+            0x00,                   // topic tagged fields
+            0x00,                   // tagged fields
+        ];
+        Assert.Equal(expected, writer.ToArray());
+    }
+
+    private static byte[] Written(KafkaResponse response)
+    {
+        var writer = new KafkaProtocolWriter();
+        response.WriteTo(writer);
+        return writer.ToArray();
     }
 }

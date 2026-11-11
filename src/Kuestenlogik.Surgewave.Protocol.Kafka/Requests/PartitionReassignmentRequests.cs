@@ -41,7 +41,7 @@ public sealed class AlterPartitionReassignmentsRequest : KafkaRequest
         writer.WriteInt16((short)ApiKey);
         writer.WriteInt16(ApiVersion);
         writer.WriteInt32(CorrelationId);
-        writer.WriteCompactString(ClientId);
+        writer.WriteString(ClientId); // a classic string in every request header version
         writer.WriteVarInt(0); // Header tagged fields
 
         writer.WriteInt32(TimeoutMs);
@@ -299,7 +299,7 @@ public sealed class ListPartitionReassignmentsRequest : KafkaRequest
         writer.WriteInt16((short)ApiKey);
         writer.WriteInt16(ApiVersion);
         writer.WriteInt32(CorrelationId);
-        writer.WriteCompactString(ClientId);
+        writer.WriteString(ClientId); // a classic string in every request header version
         writer.WriteVarInt(0); // Header tagged fields
 
         writer.WriteInt32(TimeoutMs);

@@ -21,7 +21,7 @@ namespace Kuestenlogik.Surgewave.Protocol.Kafka.Handlers;
 /// </summary>
 public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
 {
-    private readonly ClusterController _controller;
+    private readonly ClusterController? _controller;
     private readonly PartitionReassignmentManager? _reassignmentManager;
     private readonly ClusterState _clusterState;
     private readonly ILogger<ClusterAdminHandler> _logger;
@@ -33,8 +33,13 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
         ApiKey.ListPartitionReassignments,
     ];
 
+    /// <param name="controller">The cluster's controller; null in a broker without a cluster, which answers
+    /// ListPartitionReassignments with nothing in flight and the other two with NOT_CONTROLLER.</param>
+    /// <param name="reassignmentManager">The reassignments in flight; null where there are none to make.</param>
+    /// <param name="clusterState">The cluster's partitions.</param>
+    /// <param name="logger">The logger.</param>
     public ClusterAdminHandler(
-        ClusterController controller,
+        ClusterController? controller,
         PartitionReassignmentManager? reassignmentManager,
         ClusterState clusterState,
         ILogger<ClusterAdminHandler> logger)
@@ -64,6 +69,18 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
         // ISR is empty; client-requested unclean (1) takes the same path.
         // Honouring ElectionType=0 strictly (refuse fallback) would need an
         // extra param on ClusterController — tracked but not blocking.
+
+        if (_controller is null)
+        {
+            return new ElectLeadersResponse
+            {
+                CorrelationId = request.CorrelationId,
+                ApiVersion = request.ApiVersion,
+                ThrottleTimeMs = 0,
+                ErrorCode = ErrorCode.NotController,
+                ReplicaElectionResults = [],
+            };
+        }
 
         // Null TopicPartitionsList means "elect for all" per Kafka spec.
         var requested = ResolveRequestedTopicPartitions(request.TopicPartitionsList);
@@ -152,7 +169,7 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
         // reassignment for that partition". The PartitionReassignmentManager
         // in Surgewave's clustering layer does not yet expose a cancel API, so
         // we surface a per-partition error rather than silently no-op'ing.
-        if (_reassignmentManager is null || !_controller.IsController)
+        if (_reassignmentManager is null || _controller is not { IsController: true })
         {
             return new AlterPartitionReassignmentsResponse
             {

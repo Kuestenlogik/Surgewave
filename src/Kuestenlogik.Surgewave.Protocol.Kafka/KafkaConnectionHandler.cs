@@ -55,6 +55,9 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
     public void AddHandler(IKafkaRequestHandler handler)
         => _dispatcher = _dispatcher.WithAdditionalHandler(handler);
 
+    /// <summary>Whether a handler is registered for the API.</summary>
+    public bool HasHandler(ApiKey apiKey) => _dispatcher.HasHandler(apiKey);
+
     public Task HandleConnectionAsync(
         Stream stream,
         ReadOnlyMemory<byte> magic,

@@ -1,3 +1,4 @@
+using Kuestenlogik.Surgewave.Clustering.Cluster;
 using Kuestenlogik.Surgewave.Broker;
 using Kuestenlogik.Surgewave.Broker.ShareGroups;
 using Kuestenlogik.Surgewave.Core.Models;
@@ -29,6 +30,8 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
 
     public IEnumerable<ApiKey> SupportedApiKeys => [ApiKey.DescribeConfigs, ApiKey.AlterConfigs, ApiKey.IncrementalAlterConfigs];
 
+    private ClusterState? _clusterState;
+
     public ConfigApiHandler(IBrokerConfigView config, IDynamicBrokerConfig dynamicConfig, LogManager logManager, IShareGroupConfigStore? shareGroupCoordinator = null)
     {
         _config = config;
@@ -36,6 +39,12 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
         _logManager = logManager;
         _shareGroupCoordinator = shareGroupCoordinator;
     }
+
+    /// <summary>
+    /// Sets the cluster state, so a topic's configs are described by a broker that hosts none of its replicas too:
+    /// the configs are in the metadata log, and a Kafka admin client asks any broker (#240).
+    /// </summary>
+    public void SetClusterState(ClusterState clusterState) => _clusterState = clusterState;
 
     public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
@@ -75,7 +84,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
 
             if (resource.ResourceType == ConfigResourceType.Topic)
             {
-                var metadata = _logManager.GetTopicMetadata(resource.ResourceName);
+                var metadata = _clusterState?.GetTopic(resource.ResourceName) ?? _logManager.GetTopicMetadata(resource.ResourceName);
                 if (metadata == null)
                 {
                     results.Add(new DescribeConfigsResponse.DescribeConfigsResult { ErrorCode = ErrorCode.UnknownTopicOrPartition, ErrorMessage = $"Topic '{resource.ResourceName}' does not exist", ResourceType = resource.ResourceType, ResourceName = resource.ResourceName, Configs = [] });

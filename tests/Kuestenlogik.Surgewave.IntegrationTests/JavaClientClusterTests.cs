@@ -1,4 +1,3 @@
-using Confluent.Kafka;
 using DotNet.Testcontainers.Containers;
 using Kuestenlogik.Surgewave.Coordination.Coordinators;
 using Kuestenlogik.Surgewave.IntegrationTests.Fixtures;
@@ -103,16 +102,20 @@ public sealed class JavaClientClusterTests(JavaClusterFixture fixture, ITestOutp
             }
         }
 
-        // Read back through Kafka's DescribeTopics. kafka-topics --describe cannot do it yet: it lists partition
-        // reassignments first, and the broker's ListPartitionReassignments response does not parse (#240).
-        using var admin = new AdminClientBuilder(
-            new AdminClientConfig { BootstrapServers = bootstrap.BootstrapServers }).Build();
-        var described = await admin.DescribeTopicsAsync(TopicCollection.OfTopicNames([topic]));
-        var partitions = Assert.Single(described.TopicDescriptions).Partitions.OrderBy(p => p.Partition)
-            .Select(p => (p.Leader.Id, Replicas: string.Join(",", p.Replicas.Select(r => r.Id))))
+        // kafka-topics --describe asks for the topic's configs and its partition reassignments too, any broker it likes
+        // (#240), then prints one row per partition: Topic: <t>  Partition: 0  Leader: 3  Replicas: 3,1  Isr: ...
+        var described = await RunOkAsync($"kafka-topics.sh --bootstrap-server $BOOTSTRAP --describe --topic {topic}", bootstrap);
+        output.WriteLine(described.Stdout);
+        var partitions = Columns(described.Stdout)
+            .Where(c => c.Contains("Partition:"))
+            .Select(c => (Partition: After(c, "Partition:"), Leader: After(c, "Leader:"), Replicas: After(c, "Replicas:")))
+            .OrderBy(p => p.Partition, StringComparer.Ordinal)
             .ToList();
-        Assert.Equal([(3, "3,1"), (1, "1,3")], partitions);
+        Assert.Equal([("0", "3", "3,1"), ("1", "1", "1,3")], partitions);
     }
+
+    /// <summary>The value that follows a label in a row of <c>kafka-topics --describe</c>.</summary>
+    private static string After(string[] row, string label) => row[Array.IndexOf(row, label) + 1];
 
     private static (string Topic, string Group) Names(string scenario)
     {

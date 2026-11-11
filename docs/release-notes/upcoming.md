@@ -222,6 +222,29 @@ replica list, a broker twice in one partition, partitions with different
 replication factors, partition indexes not numbered from 0 on, or a broker
 the cluster has not registered.
 
+### `kafka-topics --describe` works (#240)
+
+`kafka-topics --describe` failed against a Surgewave cluster, for two
+reasons:
+
+- **APIs advertised and not answered:** the embedded broker
+  (`SurgewaveRuntime`) advertised the cluster admin APIs — ElectLeaders,
+  AlterPartitionReassignments, ListPartitionReassignments — and the quota
+  and delegation token APIs, but had no handler for them, and answered
+  with a frame that holds no body. The tool lists the partition
+  reassignments of the topic it describes and stopped with "Buffer
+  underflow while parsing response". The embedded broker now answers
+  them as the broker host does, with or without a cluster, and a test
+  holds that every API it advertises has a handler.
+- **DescribeConfigs on a broker without a replica of the topic:** the
+  tool asks any broker for the topic's configs, and a broker that hosts
+  none of its replicas answered `UNKNOWN_TOPIC_OR_PARTITION`. It now
+  describes every topic of the cluster, from the metadata log.
+
+The ListPartitionReassignments and AlterPartitionReassignments requests
+the Kafka wire client writes carried the client id as a compact string;
+it is a classic string in every request header version.
+
 ### A cluster that lost one of three voters elects a leader at once (#225)
 
 An election waited for every voter's answer, the answer of a stopped broker
