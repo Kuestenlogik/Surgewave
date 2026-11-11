@@ -32,7 +32,7 @@
          one-way triangle Protocol.Kafka -> Broker.Abstractions <- Broker holds. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker.Abstractions\Kuestenlogik.Surgewave.Broker.Abstractions.csproj" />
     <!-- #59 b5 ATOMIC FLIP: the Clustering<->Protocol.Kafka edge is inverted. The relocated
-         inter-broker/control-plane handlers + ControllerClient/BrokerLifecycleManager reach
+         inter-broker/control-plane handlers + ControllerClient reach
          ClusterState/ClusterController/ReplicaManager/Raft here. Clustering no longer references
          Protocol.Kafka, so there is no cycle. -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Clustering\Kuestenlogik.Surgewave.Clustering.csproj" />

@@ -6,9 +6,9 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// <summary>
 /// #60 Inc6b — the protocol-neutral broker-lifecycle loop: registers this broker with the controller
 /// and heartbeats periodically, driving an injected <see cref="IBrokerLifecycleRpc"/> (native SRWV in
-/// a plugin-free broker). It replaces the never-instantiated Kafka-wire <c>BrokerLifecycleManager</c>
-/// and is the piece that actually makes a broker JOIN — so a native-only broker becomes visible to the
-/// controller and the finalized inter-broker protocol level can rise to native.
+/// a plugin-free broker). It is the only broker-side registration sender, and the piece that actually
+/// makes a broker JOIN — so a native-only broker becomes visible to the controller and the finalized
+/// inter-broker protocol level can rise to native.
 /// <para>
 /// It no-ops on the controller/seed itself: the RPC resolves the controller and refuses to dial self,
 /// so the lowest-id broker (which is already self-registered in <see cref="ClusterState"/> at startup)
@@ -168,7 +168,13 @@ public sealed partial class BrokerLifecycleLoop : IAsyncDisposable
         if (_config.ReplicationPort != _config.Port)
             listeners.Add(new ListenerSpec("REPLICATION", _config.Host, _config.ReplicationPort, SecurityProtocol: 0));
 
-        var features = new List<FeatureSpec> { InterBrokerProtocolFeature.LocalFeatureSpec };
+        // metadata.version from the one feature table ApiVersions reads too (#199); the controller
+        // validates only inter.broker.protocol.
+        var features = new List<FeatureSpec>
+        {
+            BrokerFeatureLevels.MetadataVersion.ToFeatureSpec(),
+            InterBrokerProtocolFeature.LocalFeatureSpec,
+        };
 
         return new BrokerRegistrationInput(
             BrokerId: _config.BrokerId,

@@ -3,8 +3,8 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// <summary>
 /// Neutral broker-to-controller lifecycle RPC surface (#59 b5): registration and periodic
 /// heartbeat. Inputs and outcomes are protocol-neutral records carrying only the fields the
-/// caller supplies or reads, so no Kafka DTO is exposed here. The concrete wire
-/// implementation lives in <c>BrokerLifecycleManager</c> (in the Kafka plugin, #59 b5).
+/// caller supplies or reads, so no Kafka DTO is exposed here. The wire implementation is
+/// <see cref="InterBroker.NativeBrokerLifecycleClient"/>, driven by <see cref="BrokerLifecycleLoop"/>.
 /// </summary>
 public interface IBrokerLifecycleRpc
 {

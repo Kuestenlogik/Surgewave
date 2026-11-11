@@ -74,7 +74,7 @@ Java: the controller derives `advertised.listeners` from
 `controller.quorum.voters` when not explicitly defined. Surgewave
 has its own cluster discovery logic in
 `Kuestenlogik.Surgewave.Clustering`, which uses different defaults
-(see `BrokerLifecycleManager`). KRaft-mode quorum bootstrap in
+(see `BrokerLifecycleLoop`). KRaft-mode quorum bootstrap in
 Surgewave is not directly comparable; if mixed clusters with
 Java controllers become necessary, a separate analysis is needed.
 

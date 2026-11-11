@@ -2,8 +2,8 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 
 /// <summary>
 /// Neutral input for a broker registration RPC (#59 b5). Carries only the values the
-/// wire request is built from; the Kafka-DTO construction stays inside the concrete
-/// <c>BrokerLifecycleManager</c> (in the Kafka plugin, #59 b5).
+/// wire request is built from; the frame construction stays inside the concrete
+/// <see cref="IBrokerLifecycleRpc"/> implementation.
 /// </summary>
 /// <param name="BrokerId">The registering broker's id.</param>
 /// <param name="ClusterId">The cluster id of the broker process.</param>

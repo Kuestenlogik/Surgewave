@@ -8,7 +8,7 @@ namespace Kuestenlogik.Surgewave.Clustering.Cluster;
 /// #60 Inc6b — the protocol-neutral cluster-membership authority: the owner of native broker
 /// registration state (incarnation-keyed epochs, fence-until-caught-up). It is the authority for the
 /// NATIVE inter-broker join path — the only registration mechanism driven from inside the cluster
-/// today (the Kafka-wire <c>BrokerLifecycleManager</c> sender is dead code). It lets the finalized
+/// today (<see cref="BrokerLifecycleLoop"/> is the only broker-side sender). It lets the finalized
 /// inter-broker protocol level rise as native brokers join.
 /// <para>
 /// Lives in <c>Clustering</c> (no Protocol.Kafka dependency) so a broker without the Kafka plugin can

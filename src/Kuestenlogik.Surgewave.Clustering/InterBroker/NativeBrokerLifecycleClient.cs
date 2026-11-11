@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Kuestenlogik.Surgewave.Clustering.InterBroker;
 
 /// <summary>
-/// #60 Inc6b — the native SRWV broker-lifecycle client: the protocol-neutral <see cref="IBrokerLifecycleRpc"/>
-/// counterpart of the (dead) Kafka-wire <c>BrokerLifecycleManager</c>. It sends BrokerRegistration and
+/// #60 Inc6b — the native SRWV broker-lifecycle client: the implementation of the protocol-neutral
+/// <see cref="IBrokerLifecycleRpc"/> that <see cref="BrokerLifecycleLoop"/> drives. It sends BrokerRegistration and
 /// BrokerHeartbeat frames to the CONTROLLER's <b>ReplicationPort</b>, where the
 /// <see cref="NativeInterBrokerServer"/> routes them to the membership authority — so a broker without
 /// the Kafka plugin can join the cluster. Lives in <c>Clustering</c> with no Protocol.Kafka edge.

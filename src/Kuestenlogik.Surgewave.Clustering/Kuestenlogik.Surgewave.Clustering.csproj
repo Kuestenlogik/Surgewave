@@ -19,7 +19,7 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Broker.Abstractions\Kuestenlogik.Surgewave.Broker.Abstractions.csproj" />
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Core\Kuestenlogik.Surgewave.Core.csproj" />
     <!-- #59 b5 ATOMIC FLIP: Protocol.Kafka reference REMOVED. Clustering is now wire-neutral;
-         the Kafka codecs (ControllerClient/BrokerLifecycleManager) moved into Protocol.Kafka,
+         the Kafka codecs (ControllerClient) moved into Protocol.Kafka,
          which now references Clustering (edge inverted). -->
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
     <!-- #60 Inc2: the native inter-broker payloads reuse the SRWV reader/writer, opcodes and

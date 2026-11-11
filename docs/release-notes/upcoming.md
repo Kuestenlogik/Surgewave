@@ -556,6 +556,16 @@ connects, as the producer has since #133. Concurrent first calls share one
 attempt, each waits only as long as its own token allows, and a failed
 attempt is retried by the next call. `CreateAsync` still connects up front.
 
+### `metadata.version` announces the levels the broker implements (#199)
+
+ApiVersions offered `metadata.version` 14–22 and finalized 22, although the broker has the
+transactions V2 and share groups that levels 24 and 28 gate. It now offers 14–29 and finalizes
+29; 30 and above gate cordoned log directories, CIDR ACLs and controller unregistration, which
+Surgewave does not have. ApiVersions and the broker registration read one table of feature
+levels, and a test holds it to Kafka's dependencies between levels. The broker registration
+carries `metadata.version` next to `inter.broker.protocol`. The unused Kafka-wire
+`BrokerLifecycleManager`, which announced 1–20, is gone.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

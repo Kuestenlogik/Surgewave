@@ -1,3 +1,5 @@
+using Kuestenlogik.Surgewave.Clustering.Cluster;
+
 namespace Kuestenlogik.Surgewave.Protocol.Kafka.Requests;
 
 /// <summary>
@@ -388,30 +390,20 @@ public sealed class ApiVersionsResponse : KafkaResponse
                 new SupportedApiVersion { ApiKey = (short)ApiKey.StreamsGroupHeartbeat, MinVersion = 0, MaxVersion = 0 },  // Kafka: 0-1
                 new SupportedApiVersion { ApiKey = (short)ApiKey.StreamsGroupDescribe, MinVersion = 0, MaxVersion = 0 },   // Kafka: 0-1
             ],
-            // KIP-848 capability advertisement: librdkafka 2.4+ refuses to start the
-            // ConsumerGroupHeartbeat loop unless `group.version >= 1` is offered both
-            // in SupportedFeatures (range) and FinalizedFeatures (active level).
-            // Without these tagged fields the next-gen consumer hangs in join-state
-            // init forever even though the broker advertises every API key correctly.
+            // Supported and finalized features come from BrokerFeatureLevels, the one table the broker
+            // registration reads too (#199). librdkafka 2.4+ refuses to start the ConsumerGroupHeartbeat
+            // loop unless group.version >= 1 is offered in both lists.
             SupportedFeatures =
             [
-                new SupportedFeature { Name = "group.version", MinVersion = 0, MaxVersion = 1 },
-                new SupportedFeature { Name = "transaction.version", MinVersion = 0, MaxVersion = 2 },
-                new SupportedFeature { Name = "metadata.version", MinVersion = 14, MaxVersion = 22 },
-                // KAFKA-20415 / KIP-1191: share.version=2 adds DLQ support for share groups
-                // (gated at IBP_4_4_IV0). Surgewave currently has no DLQ implementation,
-                // so we advertise only 0-1. As soon as KIP-1191 is implemented in
-                // ShareGroupCoordinator, raise MaxVersion to 2.
-                new SupportedFeature { Name = "share.version", MinVersion = 0, MaxVersion = 1 },
+                .. BrokerFeatureLevels.Announced.Select(f =>
+                    new SupportedFeature { Name = f.Name, MinVersion = f.MinSupported, MaxVersion = f.MaxSupported }),
             ],
             FinalizedFeaturesEpoch = 1,
+            // Finalized at one level, as Kafka finalizes every feature (min = max = the level).
             FinalizedFeatures =
             [
-                new FinalizedFeature { Name = "group.version", MinVersionLevel = 1, MaxVersionLevel = 1 },
-                // Finalized at one level, as Kafka finalizes every feature (min = max = the level).
-                new FinalizedFeature { Name = "transaction.version", MinVersionLevel = 2, MaxVersionLevel = 2 },
-                new FinalizedFeature { Name = "metadata.version", MinVersionLevel = 22, MaxVersionLevel = 22 },
-                new FinalizedFeature { Name = "share.version", MinVersionLevel = 1, MaxVersionLevel = 1 },
+                .. BrokerFeatureLevels.Announced.Select(f =>
+                    new FinalizedFeature { Name = f.Name, MinVersionLevel = f.Finalized, MaxVersionLevel = f.Finalized }),
             ],
         };
     }
