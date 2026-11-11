@@ -27,6 +27,7 @@ public sealed partial class ClusterIdManager
     private readonly ILogger<ClusterIdManager> _logger;
     private readonly Lock _lock = new();
     private readonly TaskCompletionSource<string> _known = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<string> _persistedId = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<string> _refused = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private string? _clusterId;
@@ -65,6 +66,8 @@ public sealed partial class ClusterIdManager
         }
 
         _persisted = persisted is not null;
+        if (persisted is not null)
+            _persistedId.TrySetResult(persisted);
     }
 
     /// <summary>
@@ -82,6 +85,12 @@ public sealed partial class ClusterIdManager
 
     /// <summary>Completes with this broker's cluster id once it has one.</summary>
     public Task<string> Known => _known.Task;
+
+    /// <summary>
+    /// Completes with the cluster id once it is in <c>cluster.id</c> on disk — at construction when it already was.
+    /// A committed id is persisted after the commit, so this, not the commit, is the signal that the file holds it.
+    /// </summary>
+    public Task<string> Persisted => _persistedId.Task;
 
     /// <summary>
     /// Completes with this broker's cluster id when its cluster refused it as not its own (INCONSISTENT_CLUSTER_ID).
@@ -182,8 +191,13 @@ public sealed partial class ClusterIdManager
         if (_persisted)
             return;
         Directory.CreateDirectory(_dataDirectory);
-        File.WriteAllText(ClusterIdFilePath, clusterId);
+        // Written beside the file and moved over it, as Kafka writes meta.properties: a reader, or a broker that
+        // crashes mid-write, sees the old content or the new one, never a partial file or one still being written.
+        var temporary = ClusterIdFilePath + ".tmp";
+        File.WriteAllText(temporary, clusterId);
+        File.Move(temporary, ClusterIdFilePath, overwrite: true);
         _persisted = true;
+        _persistedId.TrySetResult(clusterId);
     }
 
     /// <summary>

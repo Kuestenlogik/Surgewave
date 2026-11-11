@@ -67,6 +67,8 @@ public sealed class ClusterIdClusterTests(ITestOutputHelper output) : IAsyncLife
         {
             var clusterId = await DescribeClusterIdAsync(broker, ct);
             output.WriteLine($"broker {broker.BrokerId} reports cluster id {clusterId}");
+            // The id is persisted after it is committed; wait for the file rather than racing its write.
+            Assert.Equal(clusterId, await broker.ClusterIdentity.Persisted.WaitAsync(Timeout, ct));
             Assert.Equal(PersistedClusterId(broker), clusterId);
             reported.Add(clusterId);
         }

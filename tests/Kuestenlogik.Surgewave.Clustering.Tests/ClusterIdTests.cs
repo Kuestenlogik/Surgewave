@@ -323,7 +323,7 @@ public sealed class ClusterIdTests : IDisposable
             await first.Controller.StartAsync(ct);
             written = await first.State.ClusterIdCommitted.WaitAsync(Timeout, ct);
 
-            Assert.Equal(written, first.Identity.ClusterId);
+            Assert.Equal(written, await first.Identity.Persisted.WaitAsync(Timeout, ct));
             Assert.Equal(written, Persisted(Dir("data-1")));
         }
 
@@ -332,7 +332,7 @@ public sealed class ClusterIdTests : IDisposable
         await later.Controller.StartAsync(ct);
 
         Assert.Equal(written, await later.State.ClusterIdCommitted.WaitAsync(Timeout, ct));
-        Assert.Equal(written, await later.Identity.Known.WaitAsync(Timeout, ct));
+        Assert.Equal(written, await later.Identity.Persisted.WaitAsync(Timeout, ct));
         Assert.Equal(written, Persisted(Dir("data-2")));
     }
 
@@ -345,6 +345,8 @@ public sealed class ClusterIdTests : IDisposable
         await controller.Controller.StartAsync(ct);
 
         Assert.Equal("configured-id", await controller.State.ClusterIdCommitted.WaitAsync(Timeout, ct));
+        // Persisted after the commit: wait for the file, not just the log entry.
+        Assert.Equal("configured-id", await controller.Identity.Persisted.WaitAsync(Timeout, ct));
         Assert.Equal("configured-id", Persisted(Dir("data")));
     }
 }
