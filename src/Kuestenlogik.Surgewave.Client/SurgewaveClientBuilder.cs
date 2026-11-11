@@ -217,18 +217,6 @@ public sealed class SurgewaveClientBuilder
     }
 
     /// <summary>
-    /// Build the client synchronously.
-    /// For Auto protocol, this will block on protocol detection.
-    /// </summary>
-    /// <remarks>
-    /// The caller is responsible for disposing the returned client.
-    /// </remarks>
-#pragma warning disable CA2000 // Dispose objects before losing scope - caller owns the result
-    public ISurgewaveClient Build()
-        => BuildAsync().GetAwaiter().GetResult();
-#pragma warning restore CA2000
-
-    /// <summary>
     /// Probe the Surgewave native protocol and return the CONNECTED client for
     /// reuse, or <c>null</c> if native isn't reachable (the caller then falls back
     /// to Kafka). Bounded by a short detection timeout — and that token is actually
@@ -237,7 +225,7 @@ public sealed class SurgewaveClientBuilder
     /// successful probe avoids a second connect.
     /// </summary>
     // CA2000: on success the connected client is RETURNED and owned by the caller
-    // (same "caller owns the result" pattern as Build/BuildAsync); every failure
+    // (same "caller owns the result" pattern as BuildAsync); every failure
     // path below disposes the probe. The analyzer can't prove the ownership
     // transfer through the try/catch, so suppress it here.
 #pragma warning disable CA2000

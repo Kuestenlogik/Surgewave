@@ -146,7 +146,9 @@ public sealed class ConsumerBuilder<TKey, TValue>
             _ => builder.UseAutoDetect()
         };
 
-        var client = builder.Build();
+        // Confluent's Build() is synchronous, so the wrapper waits for the connection here; the Surgewave
+        // builder itself only builds asynchronously (#200).
+        var client = builder.BuildAsync().GetAwaiter().GetResult();
 
         // Create Surgewave consumer
         var surgewaveConsumer = client.CreateConsumer<byte[], byte[]>(options =>

@@ -221,9 +221,8 @@ Continue to Lesson X.Y+1 to learn about...
 
 **Code Focus**:
 ```csharp
-await using var client = new SurgewaveClientBuilder()
-    .WithBootstrapServers("localhost:9092")
-    .Build();
+await using var client = await SurgewaveClient.Create("localhost:9092")
+    .BuildAsync();
 Console.WriteLine("Connected to Surgewave!");
 ```
 

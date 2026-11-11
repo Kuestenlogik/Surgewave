@@ -546,6 +546,16 @@ over this wire and check each direction with the Confluent client.
 Record batches parsed by the broker now keep their headers (in the native header-block form)
 instead of dropping them.
 
+### A consumer built with a constructor connects on its first use (#200)
+
+The `SurgewaveConsumer` constructors connected synchronously, running the
+client's connection retry loop on the caller's thread: over a minute against
+an unreachable broker, in an ASP.NET application at startup. The first call
+that needs the broker (`SubscribeAsync`, `ConsumeAsync`, the lag queries) now
+connects, as the producer has since #133. Concurrent first calls share one
+attempt, each waits only as long as its own token allows, and a failed
+attempt is retried by the next call. `CreateAsync` still connects up front.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages
@@ -693,6 +703,14 @@ controllers. Name the voters on every broker, as Kafka requires
 `controller.quorum.voters`. A lone broker still needs no declaration. An
 embedded cluster states both with `SurgewaveRuntimeBuilder.WithControllerQuorum`
 and `WithProcessRoles`.
+
+### `SurgewaveClientBuilder.Build()` is gone; use `BuildAsync()` (#200)
+
+`Build()` blocked the caller's thread on `BuildAsync()`, through the
+connection retry loop. It cannot simply skip connecting: protocol
+auto-detection is a connection. Replace
+`SurgewaveClient.Create(servers)...Build()` with
+`await SurgewaveClient.Create(servers)...BuildAsync()`.
 
 ## Acknowledgements
 

@@ -83,6 +83,11 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     private bool _isConnected;
     private int _reconnectAttempts;
 
+    // The connection, made once: by CreateAsync up front, or by the first call that needs the broker for a
+    // consumer built with a constructor. A failed attempt is dropped so the next call tries again.
+    private readonly Lock _connectLock = new();
+    private Task? _connect;
+
     // Consumer group state
     private string? _memberId;
     private int _generationId;
@@ -143,7 +148,9 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         => PartitionsRevoked?.Invoke(this, new PartitionsRevokedEventArgs(partitions));
 
     /// <summary>
-    /// Creates a new consumer with configuration.
+    /// Creates a new consumer with configuration. It connects on the first call that needs the broker
+    /// (subscribe, consume, lag), so the constructor never waits on the network; <c>CreateAsync</c> connects up
+    /// front and reports an unreachable broker there.
     /// </summary>
     public SurgewaveConsumer(Action<SurgewaveConsumerOptions<TKey, TValue>> configure)
     {
@@ -153,11 +160,12 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
 
         (_host, _port) = ParseBootstrapServers(_options.BootstrapServers!);
         _client = CreateClient(_options, _host, _port);
-        ConnectWithRetry();
     }
 
     /// <summary>
-    /// Creates a new consumer with options object.
+    /// Creates a new consumer with an options object. It connects on the first call that needs the broker
+    /// (subscribe, consume, lag), so the constructor never waits on the network; <c>CreateAsync</c> connects up
+    /// front and reports an unreachable broker there.
     /// </summary>
     public SurgewaveConsumer(SurgewaveConsumerOptions<TKey, TValue> options)
     {
@@ -166,7 +174,6 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
 
         (_host, _port) = ParseBootstrapServers(_options.BootstrapServers!);
         _client = CreateClient(_options, _host, _port);
-        ConnectWithRetry();
     }
 
     /// <summary>
@@ -187,6 +194,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         _port = port;
         _isConnected = true;
         _reconnectAttempts = 0;
+        _connect = Task.CompletedTask; // CreateAsync connected it
     }
 
     /// <summary>
@@ -243,11 +251,27 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     }
 #pragma warning restore CA2000
 
-    private void ConnectWithRetry()
+    /// <summary>
+    /// Connects on first use. Concurrent first calls share one attempt; each waits only as long as its own token
+    /// allows, without cancelling the attempt for the others.
+    /// </summary>
+    private Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    {
+        Task connect;
+        lock (_connectLock)
+        {
+            if (_connect is null || _connect.IsFaulted || _connect.IsCanceled)
+                _connect = ConnectFirstAsync(_client);
+            connect = _connect;
+        }
+        return connect.IsCompletedSuccessfully ? Task.CompletedTask : connect.WaitAsync(cancellationToken);
+    }
+
+    private async Task ConnectFirstAsync(SurgewaveNativeClient client)
     {
         try
         {
-            _client.ConnectAsync().GetAwaiter().GetResult();
+            await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
             _isConnected = true;
             _reconnectAttempts = 0;
         }
@@ -287,6 +311,8 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     private async Task InitializeSubscriptionAsync(CancellationToken cancellationToken)
     {
         if (_initialized) return;
+
+        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
         // Ensure topics exist on the broker (triggers auto-creation if enabled)
         await EnsureTopicsExistAsync(cancellationToken);
@@ -569,6 +595,8 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
         // Lazy initialization on first consume (for fire-and-forget Subscribe())
         // Also retry initialization if previous attempt yielded 0 partitions (topic didn't exist yet)
         if (_subscribedTopics.Count > 0 && _offsets.Count == 0)
@@ -845,6 +873,8 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
                 await _client.DisposeAsync();
                 _client = CreateClient(_options, _host, _port);
                 await _client.ConnectAsync();
+                lock (_connectLock)
+                    _connect = Task.CompletedTask; // the new client is the connected one
                 _isConnected = true;
                 _reconnectAttempts = 0;
                 Reconnected?.Invoke(this, EventArgs.Empty);
@@ -1155,6 +1185,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
         if (!_offsets.TryGetValue((topic, partition), out var currentOffset))
             throw new InvalidConfigurationException("Partition", (topic, partition), "Partition not assigned");
 
+        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
         var highWatermark = await _client.Messaging.GetLatestOffsetAsync(topic, partition, cancellationToken);
         return Math.Max(0, highWatermark - currentOffset);
     }
@@ -1166,6 +1197,7 @@ public sealed class SurgewaveConsumer<TKey, TValue> : IConsumer<TKey, TValue>
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
         var result = new Dictionary<(string topic, int partition), long>();
 
         foreach (var ((topic, partition), currentOffset) in _offsets)

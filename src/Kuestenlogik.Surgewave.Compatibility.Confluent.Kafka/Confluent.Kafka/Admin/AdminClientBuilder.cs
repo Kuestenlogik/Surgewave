@@ -95,7 +95,9 @@ public sealed class AdminClientBuilder
             _ => builder.UseAutoDetect()
         };
 
-        var client = builder.Build();
+        // Confluent's Build() is synchronous, so the wrapper waits for the connection here; the Surgewave
+        // builder itself only builds asynchronously (#200).
+        var client = builder.BuildAsync().GetAwaiter().GetResult();
         return new AdminClient(client);
     }
 }
