@@ -144,7 +144,7 @@ jobs:
             --verbosity minimal
 
       - name: Generate coverage report
-        uses: danielpalme/ReportGenerator-GitHub-Action@5
+        uses: danielpalme/ReportGenerator-GitHub-Action@5f3701a41d14548c9b8e575a5c235230e515cbc0 # v5.6.0
         with:
           reports: 'artifacts/coverage/raw/**/*.cobertura.xml'
           targetdir: 'artifacts/coverage/report'
