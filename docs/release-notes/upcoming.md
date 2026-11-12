@@ -726,9 +726,9 @@ waits for one broker to be ready before it starts the next:
   quorum forms.
 - **Liveness and readiness are different questions.** `/health/live` says the process runs and never fails for want
   of a quorum; it is the liveness probe. `/health/ready` is the readiness probe; a broker that fails it is taken
-  out of the client service and must not be restarted for it. The HTTP endpoint is bound only after the broker has
-  looked for a peer, for up to `RaftPeerDiscoveryTimeoutSeconds` (30 s) where none answers — as on every broker of
-  a cluster started from nothing — so `/health/live` needs a startup probe, or thresholds, that cover that wait.
+  out of the client service and must not be restarted for it. The HTTP endpoint is bound a few seconds after the
+  process starts, whether or not another broker runs (see "A cluster started from nothing no longer waits 30
+  seconds" below), so a startup probe on `/health/live` has the start of the process to cover and nothing else.
 - **Docker Compose:** no broker may depend on another broker's `service_healthy`. Services that use the cluster may
   wait for a healthy broker.
 
@@ -821,6 +821,63 @@ construction, so two brokers that had waited out the peer discovery together cam
 - A voter that does not answer has one pre-vote and one vote request out at a time: it is not asked again while
   the earlier request is under way, and a voter with too few peers left to ask for a majority starts no round
   until one of them has answered or its connect attempts have given up — at the pace it campaigned at before.
+
+### A cluster started from nothing no longer waits 30 seconds, and a broker alone is live at once (#270, #267)
+
+Brokers started together each waited 30 seconds before they did anything: "Peer discovery timeout after 30s,
+proceeding without peer confirmation". A broker's Raft node looked for a peer before it started its elections, by
+connecting to every peer's replication port every 100 ms for up to `RaftPeerDiscoveryTimeoutSeconds`, and the
+broker opened its own replication port only after that — so each waited for a port none of them had opened yet.
+The broker's HTTP endpoint came after it too: a broker started alone answered `/health/live` only once the wait
+was over, which is why the deployment manifests carry a startup probe that covers it.
+
+- **A broker starts in the order: read the persisted Raft state, open the replication port, look for peers.** The
+  start no longer waits for a peer at all; only the node's first election does. Measured on the shipped broker,
+  three controller voters, as processes on one Windows machine: two brokers started together with the third down
+  were ready 1 to 2 seconds after their start (32 to 38 seconds before), and a broker started alone answered
+  `/health/live` with 200 and `/health/ready` with 503 after 2 seconds (33 to 35 seconds before).
+- **Looking for a peer is a handshake, not a poll.** The node tries each peer once and is then told: by the first
+  Raft request a voter sends it, or by the first broker heartbeat a voter sends to its replication port. Of two
+  brokers the one that tries later finds the other's port open, starts its elections and asks the other for a
+  pre-vote; a broker whose peers come up after its attempt hears their heartbeats.
+  `RaftPeerDiscoveryTimeoutSeconds` still bounds the wait, and now delays only the first election of a broker that
+  hears from nobody: it answers its peers' requests, and serves its HTTP endpoint, throughout.
+- `ClusterController.LoadAsync` and `RaftNode.LoadAsync` are the first step for a host that opens the replication
+  port itself; `StartAsync` alone still does both steps. `RaftNode.StartAsync` and `ClusterController.StartAsync`
+  return once the elections are under way instead of after the peer discovery.
+- An embedded broker (`SurgewaveRuntime`) starts in the same order. `SurgewaveRuntime.StartAsync` now fails with
+  the error if the metadata log cannot be read or the replication port cannot be bound, and leaves nothing running;
+  both used to surface when the runtime was disposed, as a logged warning, on a broker that never joined its
+  cluster.
+
+The startup probes of the Helm chart and the Kubernetes manifests, and the Compose health checks' start period,
+are left as they are: they hold more time than the start needs now.
+
+### A Raft request is answered from what the node persisted, and by its own answer (#275)
+
+Three defects of the Raft node, found by reading the election code. Each was shown by a test before it was changed.
+
+- **A request could reach a node that had not read its persisted state.** A node is constructed with term 0, no
+  vote and an empty log, and reads what it persisted when it is started. The embedded runtime opened the
+  replication port and started the node side by side, so a peer's request could arrive in between: a node that had
+  voted in term 5 before it restarted granted a second vote in term 5 — two leaders of one term, if both
+  candidates count it — granted the pre-vote of a candidate terms behind, and took the entries of a deposed leader,
+  appending them to the log file behind the ones it had not read. The shipped broker opened the port after the
+  node's start and was not affected. Both hosts now read the state before the port opens, and the node itself
+  answers no request from the state it was constructed with: a request that arrives first waits for the one
+  reading of the persisted state.
+- **The answer to an abandoned request could be read as the answer to the next one.** A TCP connection to a peer
+  carries one request after the other. A request that was written and not answered in its five seconds, on the
+  last of its three attempts, or whose caller gave up, left the connection in place with its answer still to
+  come, and the next request on that connection read it: a pre-vote granted for one term counted as the vote of
+  another — the two answers have the same layout — or an earlier AppendEntries' match index taken for the current
+  one. A connection is now closed with the request that was abandoned on it, and the answer's correlation id, which
+  a broker has always returned and nothing read, is checked: an answer to another request is not taken, and the
+  request is asked again on a new connection. The wire format is unchanged.
+- **A leader that stepped down campaigned again within 50 ms.** Its election timer was not restarted on the way
+  down and had long run out, so it asked for pre-votes on its next tick — of the peers it had just found
+  unreachable, when it stepped down for the loss of its quorum. It now waits out an election timeout as any
+  follower does.
 
 ### The broker image starts with no configuration and speaks Kafka (#269)
 

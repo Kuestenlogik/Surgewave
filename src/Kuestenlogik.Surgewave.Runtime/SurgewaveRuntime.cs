@@ -247,7 +247,16 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var instance = new SurgewaveRuntime(options);
-        await instance.StartInternalAsync(cancellationToken);
+        try
+        {
+            await instance.StartInternalAsync(cancellationToken);
+        }
+        catch
+        {
+            // A start that failed leaves nothing behind: the caller gets no instance it could dispose.
+            await instance.DisposeAsync();
+            throw;
+        }
         return instance;
     }
 
@@ -834,19 +843,23 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             _replicationServer.SetRaftNode(_raftNode);
         }
 
-        // Start cluster components
+        // Start cluster components, in the order a Raft node needs (#275): the node reads the term, the vote and the
+        // log it persisted, then the replication port opens, then the node looks for its peers and starts its
+        // elections. The port and the controller used to be started side by side, so a peer's request could reach a
+        // node that had not read its state yet and was answered from term 0 and no vote. Both steps are awaited
+        // here: a log that cannot be read and a port that cannot be bound stop the start, and the port is listening
+        // when its start returns — it was waited for by connecting to it every 50 ms.
+        await _clusterController.LoadAsync(_cts!.Token);
+        await _replicationServer.StartAsync(_cts.Token);
+
         _clusterTask = Task.Run(async () =>
         {
-            var replicationTask = _replicationServer.StartAsync(_cts!.Token);
             var heartbeatTask = _heartbeatManager.StartAsync(_cts.Token);
             var controllerTask = _clusterController.StartAsync(_cts.Token);
             var replicaManagerTask = _replicaManager.StartAsync(_cts.Token);
 
-            await Task.WhenAll(replicationTask, heartbeatTask, controllerTask, replicaManagerTask);
+            await Task.WhenAll(heartbeatTask, controllerTask, replicaManagerTask);
         }, cancellationToken);
-
-        // Wait for replication server to be ready
-        await WaitForReplicationServerReadyAsync(cancellationToken);
 
         // #60 Inc6b — start the native lifecycle loop once our replication server is up. It idles on
         // the controller/seed and when standalone; on a joining broker it registers with the
@@ -867,27 +880,6 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
                 await _clusterTask;
             await caughtUp;
         }
-    }
-
-    private async Task WaitForReplicationServerReadyAsync(CancellationToken cancellationToken, int maxRetries = 50)
-    {
-        for (int i = 0; i < maxRetries; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                using var client = new TcpClient();
-                await client.ConnectAsync(_options.Host, _actualReplicationPort, cancellationToken);
-                return;
-            }
-            catch (SocketException)
-            {
-                await Task.Delay(50, cancellationToken);
-            }
-        }
-
-        throw new InvalidOperationException($"Replication server did not start within {maxRetries * 50}ms");
     }
 
     private string BuildClusterNodesString()

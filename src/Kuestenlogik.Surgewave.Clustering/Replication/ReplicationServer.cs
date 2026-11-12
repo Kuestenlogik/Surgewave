@@ -555,6 +555,11 @@ public sealed partial class ReplicationServer : IAsyncDisposable
 
     private PooledFrame HandleHeartbeat(ReplicationRequest request)
     {
+        // A broker that sends its heartbeat here is up and reaches this port: what a Raft node that waits for a
+        // peer before its first election waits to be told.
+        if (request.HeartbeatRequest is { } heartbeat)
+            _raftNode?.NotePeerHeard(heartbeat.BrokerId);
+
         if (_heartbeatManager == null || request.HeartbeatRequest == null)
         {
             return BuildErrorResponse(request.CorrelationId, ClusterRpcStatus.Unknown);

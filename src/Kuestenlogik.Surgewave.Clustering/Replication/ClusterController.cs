@@ -231,8 +231,23 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// </summary>
     public RaftNode? RaftNode => _raftNode;
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The first step of this broker's start in its cluster, before its replication port is opened (#275): registers
+    /// the broker and the configured cluster nodes, follows the Raft node's leadership, and has the node read the
+    /// term, the vote and the log it persisted. A log that cannot be read is thrown here. Once; a second call does
+    /// nothing.
+    /// </summary>
+    /// <remarks>
+    /// A host starts in this order: <see cref="LoadAsync"/>, the replication server, <see cref="StartAsync"/>. The
+    /// port is then open only on a node that answers from what it persisted, and it is open before this broker
+    /// looks for its peers, which look for it on that port. <see cref="StartAsync"/> alone does both steps, for a
+    /// controller with no port to open in between.
+    /// </remarks>
+    public async Task LoadAsync(CancellationToken cancellationToken)
     {
+        if (_cts is not null)
+            return;
+
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         // Register this broker in cluster state. Merge with a pre-registered node instead of
@@ -278,7 +293,18 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // The startup handshake a host waits on before it lets clients in; ends with this controller.
         _ = CatchUpWithMetadataAsync(_raftNode, _lifetime);
 
-        await _raftNode.StartAsync(cancellationToken);
+        await _raftNode.LoadAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts the Raft node's elections, after <see cref="LoadAsync"/>, which this calls if the host has not.
+    /// Returns once they are under way: it does not wait for a peer, see <see cref="RaftNode.StartAsync"/>.
+    /// </summary>
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        await LoadAsync(cancellationToken);
+
+        await _raftNode!.StartAsync(cancellationToken);
         LogRaftModeEnabled();
     }
 

@@ -24,6 +24,15 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
     private readonly ConcurrentDictionary<int, IPeerConnection> _connections = new();
     private int _correlationId;
 
+    // An answer is 13 or 21 bytes; anything far from that is a stream out of step, not an answer to allocate for.
+    private const int MaxResponseBytes = 1024;
+
+    /// <summary>
+    /// How long one attempt of a request may take, written and answered — settable for tests only (via
+    /// InternalsVisibleTo), which cannot wait out three attempts of five seconds each.
+    /// </summary>
+    internal TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
     public RaftTransport(
         ILogger<RaftTransport> logger,
         ClusterState clusterState,
@@ -59,16 +68,48 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
         }
     }
 
-    public async Task<PreVoteResponse> SendPreVoteAsync(int peerId, PreVoteRequest request, CancellationToken ct)
+    public Task<PreVoteResponse> SendPreVoteAsync(int peerId, PreVoteRequest request, CancellationToken ct) =>
+        SendAsync(peerId, "PreVote", id => SerializePreVote(request, id), ParsePreVoteResponse, ct);
+
+    public Task<RequestVoteResponse> SendRequestVoteAsync(int peerId, RequestVoteRequest request, CancellationToken ct) =>
+        SendAsync(peerId, "RequestVote", id => SerializeRequestVote(request, id), ParseRequestVoteResponse, ct);
+
+    public Task<AppendEntriesResponse> SendAppendEntriesAsync(int peerId, AppendEntriesRequest request, CancellationToken ct) =>
+        SendAsync(peerId, "AppendEntries", id => SerializeAppendEntries(request, id), ParseAppendEntriesResponse, ct);
+
+    /// <summary>
+    /// Sends one request and returns its answer, in up to three attempts, each on a connection that carries nothing
+    /// of an earlier request.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A TCP connection carries one request after the other and the answers in that order, so a request that was
+    /// written and not answered — the caller cancelled, the attempt ran out of time, the read failed — leaves an
+    /// answer on it that nobody waits for. The connection used to stay in place when the caller cancelled and when
+    /// the last attempt failed, and the next request on it read that answer as its own (#275): a pre-vote granted for
+    /// one term as the vote of another, the two having the same layout, or the match index of an AppendEntries sent
+    /// earlier. A connection is now dropped with the request that was abandoned on it, however the request ended,
+    /// and the next one connects anew.
+    /// </para>
+    /// <para>
+    /// The answer names the request it answers: the peer returns the correlation id it was sent, and an answer with
+    /// another one is not taken. With the connection dropped as above that does not happen between two brokers of
+    /// this version; it is the check that says so if the pairing breaks some other way, instead of a wrong vote.
+    /// </para>
+    /// </remarks>
+    private async Task<TResponse> SendAsync<TResponse>(
+        int peerId, string rpc, Func<int, byte[]> serialize, Func<byte[], TResponse> parse, CancellationToken ct)
     {
         const int maxRetries = 3;
         var delayMs = RetryHelper.DefaultInitialDelayMs;
 
-        for (var attempt = 1; attempt <= maxRetries; attempt++)
+        for (var attempt = 1; ; attempt++)
         {
+            IPeerConnection? connection = null;
+            var written = false;
             try
             {
-                var connection = await GetOrCreateConnectionAsync(peerId, ct);
+                connection = await GetOrCreateConnectionAsync(peerId, ct);
                 if (connection == null)
                 {
                     if (attempt < maxRetries)
@@ -81,7 +122,7 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
                 }
 
                 var correlationId = Interlocked.Increment(ref _correlationId);
-                var requestBytes = SerializePreVote(request, correlationId);
+                var requestBytes = serialize(correlationId);
 
                 // AcquireStreamAsync: QUIC opens a fresh bidi stream per RPC
                 // (independent flow control, no head-of-line blocking); TCP
@@ -90,129 +131,40 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
                 var stream = lease.Stream;
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(5000);
+                cts.CancelAfter(RequestTimeout);
 
+                written = true;
                 await stream.WriteAsync(requestBytes, cts.Token);
                 await stream.FlushAsync(cts.Token);
 
-                return await ReadPreVoteResponseAsync(stream, cts.Token);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (attempt < maxRetries)
-            {
-                LogPreVoteRetry(peerId, attempt, ex);
-                await RemoveConnectionAsync(peerId);
-                await Task.Delay(delayMs, ct);
-                delayMs *= 2;
-            }
-        }
-
-        throw new RaftTransportException($"Failed to send PreVote to peer {peerId} after {maxRetries} attempts");
-    }
-
-    public async Task<RequestVoteResponse> SendRequestVoteAsync(int peerId, RequestVoteRequest request, CancellationToken ct)
-    {
-        const int maxRetries = 3;
-        var delayMs = RetryHelper.DefaultInitialDelayMs;
-
-        for (var attempt = 1; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                var connection = await GetOrCreateConnectionAsync(peerId, ct);
-                if (connection == null)
+                var body = await ReadResponseAsync(stream, cts.Token);
+                var answered = BinaryPrimitives.ReadInt32BigEndian(body);
+                if (answered != correlationId)
                 {
-                    if (attempt < maxRetries)
-                    {
-                        await Task.Delay(delayMs, ct);
-                        delayMs *= 2;
-                        continue;
-                    }
-                    throw new RaftTransportException($"Cannot connect to peer {peerId}");
+                    throw new RaftTransportException(
+                        $"Peer {peerId} answered request {answered} where {rpc} request {correlationId} was asked");
                 }
 
-                var correlationId = Interlocked.Increment(ref _correlationId);
-                var requestBytes = SerializeRequestVote(request, correlationId);
-
-                await using var lease = await connection.AcquireStreamAsync(ct);
-                var stream = lease.Stream;
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(5000);
-
-                await stream.WriteAsync(requestBytes, cts.Token);
-                await stream.FlushAsync(cts.Token);
-
-                return await ReadRequestVoteResponseAsync(stream, cts.Token);
+                return parse(body);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
+                // A caller that gave up before anything was written leaves the connection as it found it.
+                if (written)
+                    await DropConnectionAsync(peerId, connection);
                 throw;
             }
-            catch (Exception ex) when (attempt < maxRetries)
+            catch (Exception ex)
             {
-                LogRequestVoteRetry(peerId, attempt, ex);
-                await RemoveConnectionAsync(peerId);
+                await DropConnectionAsync(peerId, connection);
+                if (attempt >= maxRetries)
+                    throw;
+
+                LogRequestRetry(rpc, peerId, attempt, ex);
                 await Task.Delay(delayMs, ct);
                 delayMs *= 2;
             }
         }
-
-        throw new RaftTransportException($"Failed to send RequestVote to peer {peerId} after {maxRetries} attempts");
-    }
-
-    public async Task<AppendEntriesResponse> SendAppendEntriesAsync(int peerId, AppendEntriesRequest request, CancellationToken ct)
-    {
-        const int maxRetries = 3;
-        var delayMs = RetryHelper.DefaultInitialDelayMs;
-
-        for (var attempt = 1; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                var connection = await GetOrCreateConnectionAsync(peerId, ct);
-                if (connection == null)
-                {
-                    if (attempt < maxRetries)
-                    {
-                        await Task.Delay(delayMs, ct);
-                        delayMs *= 2;
-                        continue;
-                    }
-                    throw new RaftTransportException($"Cannot connect to peer {peerId}");
-                }
-
-                var correlationId = Interlocked.Increment(ref _correlationId);
-                var requestBytes = SerializeAppendEntries(request, correlationId);
-
-                await using var lease = await connection.AcquireStreamAsync(ct);
-                var stream = lease.Stream;
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(5000);
-
-                await stream.WriteAsync(requestBytes, cts.Token);
-                await stream.FlushAsync(cts.Token);
-
-                return await ReadAppendEntriesResponseAsync(stream, cts.Token);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (attempt < maxRetries)
-            {
-                LogAppendEntriesRetry(peerId, attempt, ex);
-                await RemoveConnectionAsync(peerId);
-                await Task.Delay(delayMs, ct);
-                delayMs *= 2;
-            }
-        }
-
-        throw new RaftTransportException($"Failed to send AppendEntries to peer {peerId} after {maxRetries} attempts");
     }
 
     private async Task<IPeerConnection?> GetOrCreateConnectionAsync(int peerId, CancellationToken ct)
@@ -371,16 +323,23 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
         return bytes;
     }
 
-    private static async Task<PreVoteResponse> ReadPreVoteResponseAsync(Stream stream, CancellationToken ct)
+    // One answer frame: the correlation id of the request it answers, then the answer.
+    private static async Task<byte[]> ReadResponseAsync(Stream stream, CancellationToken ct)
     {
         var sizeBuffer = new byte[4];
         await stream.ReadExactlyAsync(sizeBuffer, ct);
         var size = BinaryPrimitives.ReadInt32BigEndian(sizeBuffer);
+        if (size < 4 || size > MaxResponseBytes)
+            throw new RaftTransportException($"A Raft answer of {size} bytes is not one");
 
         var body = new byte[size];
         await stream.ReadExactlyAsync(body, ct);
+        return body;
+    }
 
-        var offset = 4; // Skip correlation ID
+    private static PreVoteResponse ParsePreVoteResponse(byte[] body)
+    {
+        var offset = 4; // The correlation id, checked by the caller
         var term = BinaryPrimitives.ReadInt32BigEndian(body.AsSpan(offset, 4));
         offset += 4;
         var voteGranted = body[offset] != 0;
@@ -388,16 +347,9 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
         return new PreVoteResponse(term, voteGranted);
     }
 
-    private static async Task<RequestVoteResponse> ReadRequestVoteResponseAsync(Stream stream, CancellationToken ct)
+    private static RequestVoteResponse ParseRequestVoteResponse(byte[] body)
     {
-        var sizeBuffer = new byte[4];
-        await stream.ReadExactlyAsync(sizeBuffer, ct);
-        var size = BinaryPrimitives.ReadInt32BigEndian(sizeBuffer);
-
-        var body = new byte[size];
-        await stream.ReadExactlyAsync(body, ct);
-
-        var offset = 4; // Skip correlation ID
+        var offset = 4; // The correlation id, checked by the caller
         var term = BinaryPrimitives.ReadInt32BigEndian(body.AsSpan(offset, 4));
         offset += 4;
         var voteGranted = body[offset] != 0;
@@ -405,16 +357,9 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
         return new RequestVoteResponse(term, voteGranted);
     }
 
-    private static async Task<AppendEntriesResponse> ReadAppendEntriesResponseAsync(Stream stream, CancellationToken ct)
+    private static AppendEntriesResponse ParseAppendEntriesResponse(byte[] body)
     {
-        var sizeBuffer = new byte[4];
-        await stream.ReadExactlyAsync(sizeBuffer, ct);
-        var size = BinaryPrimitives.ReadInt32BigEndian(sizeBuffer);
-
-        var body = new byte[size];
-        await stream.ReadExactlyAsync(body, ct);
-
-        var offset = 4; // Skip correlation ID
+        var offset = 4; // The correlation id, checked by the caller
         var term = BinaryPrimitives.ReadInt32BigEndian(body.AsSpan(offset, 4));
         offset += 4;
         var success = body[offset] != 0;
@@ -426,25 +371,29 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var (_, connection) in _connections)
+        // Whoever removes a connection closes it; see DropConnectionAsync.
+        foreach (var entry in _connections)
         {
-            try { await connection.DisposeAsync(); } catch { /* best-effort */ }
+            if (!_connections.TryRemove(entry))
+                continue;
+            try { await entry.Value.DisposeAsync(); } catch { /* best-effort */ }
         }
-        _connections.Clear();
     }
 
-    private async Task RemoveConnectionAsync(int peerId)
+    // Takes the connection a request was abandoned on out of use and closes it. Whoever removes it closes it: a
+    // request that waited for its turn on the same connection fails on it and closes nothing a second time.
+    private async Task DropConnectionAsync(int peerId, IPeerConnection? connection)
     {
-        if (!_connections.TryRemove(peerId, out var connection))
-        {
+        if (connection is null || !_connections.TryRemove(new KeyValuePair<int, IPeerConnection>(peerId, connection)))
             return;
-        }
 
-        await using (connection)
+        try
         {
-            // Disposal happens at the end of this using-scope. Any exception
-            // from DisposeAsync is rethrown by the await using, which is what
-            // we want for accurate shutdown diagnostics.
+            await connection.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            LogConnectionCloseFailed(peerId, ex);
         }
     }
 
@@ -454,14 +403,11 @@ public sealed partial class RaftTransport : IRaftTransport, IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to connect to peer {PeerId}")]
     private partial void LogConnectionFailed(int peerId, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "PreVote to peer {PeerId} failed on attempt {Attempt}, retrying")]
-    private partial void LogPreVoteRetry(int peerId, int attempt, Exception ex);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Rpc} to peer {PeerId} failed on attempt {Attempt}, retrying")]
+    private partial void LogRequestRetry(string rpc, int peerId, int attempt, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "RequestVote to peer {PeerId} failed on attempt {Attempt}, retrying")]
-    private partial void LogRequestVoteRetry(int peerId, int attempt, Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "AppendEntries to peer {PeerId} failed on attempt {Attempt}, retrying")]
-    private partial void LogAppendEntriesRetry(int peerId, int attempt, Exception ex);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Closing the connection to peer {PeerId} failed")]
+    private partial void LogConnectionCloseFailed(int peerId, Exception ex);
 }
 
 /// <summary>

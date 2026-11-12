@@ -83,9 +83,9 @@ So the brokers are started together and **no broker depends on another broker's 
 (`depends_on: condition: service_healthy`): the first one would wait for a broker that cannot become
 healthy alone. Services that use the cluster may wait for a healthy broker.
 
-A cluster started from nothing takes about half a minute to become ready: every broker first looks
-for a peer (`RaftPeerDiscoveryTimeoutSeconds`, 30 s) and binds its HTTP endpoint after that. A single
-broker that restarts next to two running ones is ready within seconds.
+A cluster started from nothing is ready within seconds of the second broker's start, and so is a
+single broker that restarts next to two running ones. A broker's HTTP endpoint, `/health/live`
+included, is bound a few seconds after its process starts, whether or not another broker runs.
 
 ### Clients
 

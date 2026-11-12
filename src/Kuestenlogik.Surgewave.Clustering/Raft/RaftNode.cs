@@ -67,6 +67,14 @@ public sealed partial class RaftNode : IAsyncDisposable
     private readonly Dictionary<int, Task> _preVoteInFlight = [];
     private readonly Dictionary<int, Task> _voteInFlight = [];
 
+    // The persisted term, vote and log, read once: by LoadAsync, or by the first request that arrives before it.
+    private readonly object _loadLock = new();
+    private Task? _loaded;
+
+    // The first voter this node heard from or reached since it started: what the election loop waits for where
+    // peers are expected, see WaitForPeerAsync.
+    private readonly TaskCompletionSource<int> _peerHeard = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     // Shutdown state
     private volatile bool _isShuttingDown;
 
@@ -279,27 +287,84 @@ public sealed partial class RaftNode : IAsyncDisposable
         return new ConfiguredVoterSet(voterIds);
     }
 
+    /// <summary>
+    /// Reads the term, the vote and the log this node persisted, once; a second call waits for the first one's
+    /// reading. A log that cannot be read is thrown here, and by every call after it: the node does not start on it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first step of a broker's start, before the port its peers reach this node on is opened (#275): load, open
+    /// the port, <see cref="StartAsync"/>. A node is constructed with term 0, no vote and an empty log, and a request
+    /// answered from that grants a second vote in a term the node voted in before it stopped, and takes the entries
+    /// of a leader deposed long ago.
+    /// </para>
+    /// <para>
+    /// A request that arrives before this was called is not answered from the constructed state either: the handlers
+    /// read the persisted state first, by the same single reading.
+    /// </para>
+    /// </remarks>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        var loaded = EnsureLoaded();
+        return loaded.IsCompletedSuccessfully ? loaded : loaded.WaitAsync(cancellationToken);
+    }
+
+    private Task EnsureLoaded()
+    {
+        lock (_loadLock)
+        {
+            // Off the caller's thread and under no caller's token: the one reading is every caller's.
+            return _loaded ??= Task.Run(LoadPersistedStateAsync);
+        }
+    }
+
+    private async Task LoadPersistedStateAsync()
+    {
+        var state = await _persistence.LoadStateAsync(CancellationToken.None).ConfigureAwait(false);
+        var entries = await _persistence.LoadLogAsync(CancellationToken.None).ConfigureAwait(false);
+
+        lock (_lock)
+        {
+            _currentTerm = state.CurrentTerm;
+            _votedFor = state.VotedFor;
+            _log.AddRange(entries);
+        }
+    }
+
+    /// <summary>
+    /// Starts the node's elections, on the persisted state (see <see cref="LoadAsync"/>, which this calls if the host
+    /// has not). Returns once they are under way: it does not wait for a peer.
+    /// </summary>
+    /// <remarks>
+    /// Where peers are expected the first election waits until one was heard from or reached, at most
+    /// <see cref="ClusteringConfig.RaftPeerDiscoveryTimeoutSeconds"/>. That wait used to be part of this call, and the
+    /// broker host opened its replication port only after it: brokers started together each waited for a port none
+    /// of them had opened yet, the whole 30 s (#270), and a broker started alone bound its HTTP port, health
+    /// endpoints included, only after them.
+    /// </remarks>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        // Load persistent state
-        var state = await _persistence.LoadStateAsync(cancellationToken);
-        _currentTerm = state.CurrentTerm;
-        _votedFor = state.VotedFor;
+        await LoadAsync(cancellationToken);
 
-        // Load log entries
-        var entries = await _persistence.LoadLogAsync(cancellationToken);
-        _log.AddRange(entries);
-
-        // Wait for at least one peer to be reachable before enabling elections
-        // This prevents split-brain during sequential broker startup
-        await WaitForPeerReadinessAsync(_cts.Token);
-
-        // Start election timeout loop
-        _electionTask = Task.Run(() => ElectionTimeoutLoopAsync(_cts.Token), _cts.Token);
+        _electionTask = Task.Run(() => RunElectionsAsync(_cts.Token), _cts.Token);
 
         LogRaftNodeStarted(NodeId, _currentTerm, _log.Count);
+    }
+
+    private async Task RunElectionsAsync(CancellationToken ct)
+    {
+        try
+        {
+            await WaitForPeerAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+
+        await ElectionTimeoutLoopAsync(ct).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -353,7 +418,20 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public Task<PreVoteResponse> HandlePreVoteAsync(PreVoteRequest request, CancellationToken ct)
     {
-        PreVoteResponse response;
+        // Answered from the term and the log this node persisted, never from the ones it was constructed with.
+        var loaded = EnsureLoaded();
+        return loaded.IsCompletedSuccessfully ? Task.FromResult(DecidePreVote(request)) : AfterLoadAsync();
+
+        async Task<PreVoteResponse> AfterLoadAsync()
+        {
+            await loaded.WaitAsync(ct).ConfigureAwait(false);
+            return DecidePreVote(request);
+        }
+    }
+
+    private PreVoteResponse DecidePreVote(PreVoteRequest request)
+    {
+        NotePeerHeard(request.CandidateId);
 
         lock (_lock)
         {
@@ -363,15 +441,13 @@ public sealed partial class RaftNode : IAsyncDisposable
             // real voters plus observers elect a leader.
             if (!IsVoter)
             {
-                response = new PreVoteResponse(_currentTerm, false);
-                return Task.FromResult(response);
+                return new PreVoteResponse(_currentTerm, false);
             }
 
             // If proposed term is less than our current term, reject
             if (request.ProposedTerm < _currentTerm)
             {
-                response = new PreVoteResponse(_currentTerm, false);
-                return Task.FromResult(response);
+                return new PreVoteResponse(_currentTerm, false);
             }
 
             // A leader that still has quorum does not help elect a rival. Pre-vote exists to stop a
@@ -390,8 +466,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             if (_state == RaftState.Leader && HasQuorumConnectivity)
             {
                 LogPreVoteRejectedLeaderActive(request.CandidateId, NodeId);
-                response = new PreVoteResponse(_currentTerm, false);
-                return Task.FromResult(response);
+                return new PreVoteResponse(_currentTerm, false);
             }
 
             // Check if we've heard from a leader recently
@@ -400,8 +475,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             if (_leaderId.HasValue && timeSinceLastHeartbeat < _config.RaftElectionTimeoutMinMs)
             {
                 LogPreVoteRejectedLeaderActive(request.CandidateId, _leaderId.Value);
-                response = new PreVoteResponse(_currentTerm, false);
-                return Task.FromResult(response);
+                return new PreVoteResponse(_currentTerm, false);
             }
 
             // Grant pre-vote if candidate's log is at least as up-to-date as ours
@@ -412,11 +486,9 @@ public sealed partial class RaftNode : IAsyncDisposable
                 LogPreVoteGranted(request.CandidateId, request.ProposedTerm);
             }
 
-            response = new PreVoteResponse(_currentTerm, canVote);
+            // Note: Pre-Vote does NOT persist state changes (no term update, no votedFor)
+            return new PreVoteResponse(_currentTerm, canVote);
         }
-
-        // Note: Pre-Vote does NOT persist state changes (no term update, no votedFor)
-        return Task.FromResult(response);
     }
 
     /// <summary>
@@ -424,6 +496,10 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public async Task<RequestVoteResponse> HandleRequestVoteAsync(RequestVoteRequest request, CancellationToken ct)
     {
+        // Answered from the term and the vote this node persisted, never from the ones it was constructed with.
+        await LoadAsync(ct).ConfigureAwait(false);
+        NotePeerHeard(request.CandidateId);
+
         // A disposed node grants no vote: it could not persist it.
         if (!_writes.TryEnter())
             return new RequestVoteResponse(_currentTerm, false);
@@ -504,6 +580,10 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public async Task<AppendEntriesResponse> HandleAppendEntriesAsync(AppendEntriesRequest request, CancellationToken ct)
     {
+        // Matched against the log this node persisted, never against the empty one it was constructed with.
+        await LoadAsync(ct).ConfigureAwait(false);
+        NotePeerHeard(request.LeaderId);
+
         // A disposed node takes no entry: it could not persist it.
         if (!_writes.TryEnter())
             return new AppendEntriesResponse(_currentTerm, false, 0);
@@ -1216,10 +1296,39 @@ public sealed partial class RaftNode : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits for at least one peer to be reachable before enabling elections.
-    /// This prevents split-brain during sequential broker startup.
+    /// Tells the node that a broker was heard from or reached. The first voter other than this node ends the wait
+    /// for a peer that precedes the first election; see <see cref="WaitForPeerAsync"/>.
     /// </summary>
-    private async Task WaitForPeerReadinessAsync(CancellationToken ct)
+    /// <remarks>
+    /// Called by the node for every Raft request it is sent and for the peer it reached itself, and by the
+    /// replication server for the broker heartbeats that arrive on the same port.
+    /// </remarks>
+    public void NotePeerHeard(int nodeId)
+    {
+        if (_peerHeard.Task.IsCompleted || nodeId == NodeId || !_voterSet.VoterIds.Contains(nodeId))
+            return;
+
+        _peerHeard.TrySetResult(nodeId);
+    }
+
+    /// <summary>
+    /// Waits, where peers are expected, until one voter was heard from or reached before the first election, at most
+    /// <see cref="ClusteringConfig.RaftPeerDiscoveryTimeoutSeconds"/>: a broker started before the others does not
+    /// campaign, and log, round after round while it is alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A handshake, where it was a connect attempt to every peer every 100 ms (#267): each peer is tried once, and
+    /// after that the node is told — by the first Raft request or broker heartbeat a voter sends it. Every broker
+    /// opens its replication port before it gets here, so of two brokers the one that tries later finds the other's
+    /// port open, starts its elections and asks the other for a pre-vote, and the brokers' heartbeats, which go on
+    /// for as long as they run, tell a node whose peers came up after its attempt.
+    /// </para>
+    /// <para>
+    /// The requests of a peer are answered throughout: this delays only the elections this node starts.
+    /// </para>
+    /// </remarks>
+    private async Task WaitForPeerAsync(CancellationToken ct)
     {
         // Skip if single-node mode (no peers expected)
         if (!ExpectsClusterPeers())
@@ -1235,29 +1344,40 @@ public sealed partial class RaftNode : IAsyncDisposable
             LogWaitingForPeerDiscoveryStart();
         }
 
-        var timeout = TimeSpan.FromSeconds(_config.RaftPeerDiscoveryTimeoutSeconds);
-        var deadline = DateTimeOffset.UtcNow + timeout;
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(TimeSpan.FromSeconds(_config.RaftPeerDiscoveryTimeoutSeconds));
 
-        while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
+        // Not waited for: an attempt ends by itself, reached or not, and with this wait at the latest.
+        foreach (var peerId in peers)
+            _ = TryReachAsync(peerId, bounded.Token);
+
+        try
         {
-            // Refresh in case new brokers were registered — the voter set is queried, not
-            // snapshotted, precisely so this keeps working.
-            peers = PeerIds;
-
-            // Try to reach at least one peer
-            foreach (var peerId in peers)
-            {
-                if (await _transport.IsPeerReachableAsync(peerId, ct))
-                {
-                    LogPeerDiscovered(peerId);
-                    return;
-                }
-            }
-
-            await Task.Delay(100, ct);
+            var peer = await _peerHeard.Task.WaitAsync(bounded.Token).ConfigureAwait(false);
+            LogPeerDiscovered(peer);
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            LogPeerDiscoveryTimeout(_config.RaftPeerDiscoveryTimeoutSeconds);
+        }
+        finally
+        {
+            await bounded.CancelAsync().ConfigureAwait(false);
+        }
+    }
 
-        LogPeerDiscoveryTimeout(_config.RaftPeerDiscoveryTimeoutSeconds);
+    // One attempt to reach a peer; it is heard if the attempt succeeds, and nothing is said if it does not.
+    private async Task TryReachAsync(int peerId, CancellationToken ct)
+    {
+        try
+        {
+            if (await _transport.IsPeerReachableAsync(peerId, ct).ConfigureAwait(false))
+                NotePeerHeard(peerId);
+        }
+        catch (Exception ex)
+        {
+            LogPeerNotReached(peerId, ex);
+        }
     }
 
     private void BecomeFollower(int term)
@@ -1362,6 +1482,10 @@ public sealed partial class RaftNode : IAsyncDisposable
 
             LogSteppingDown(_currentTerm);
             BecomeFollower(_currentTerm);
+
+            // A follower from here, with a follower's election timeout ahead of it: the timer was last restarted by
+            // the campaign this node won, and left as it was the node campaigned on its next tick.
+            RestartElectionTimer();
         }
 
         AnnounceLeadership();
@@ -1810,6 +1934,9 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Peer {PeerId} is reachable, enabling elections")]
     private partial void LogPeerDiscovered(int peerId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Peer {PeerId} was not reached")]
+    private partial void LogPeerNotReached(int peerId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Peer discovery timeout after {TimeoutSeconds}s, proceeding without peer confirmation")]
     private partial void LogPeerDiscoveryTimeout(int timeoutSeconds);

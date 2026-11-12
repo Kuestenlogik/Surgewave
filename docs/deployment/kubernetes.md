@@ -115,10 +115,9 @@ readinessProbe:
 | liveness | `/health/live` | The process answers. Never fails for want of a quorum, so a broker that waits for its peers is not restarted. |
 | readiness | `/health/ready` | The broker has caught up with the metadata log. A broker without a quorum is taken out of the client service. |
 
-A broker that finds no peer when it starts waits for one (`RaftPeerDiscoveryTimeoutSeconds`, 30 s)
-before it binds the HTTP endpoint, and every broker of a new cluster starts that way. The startup
-probe's `periodSeconds × failureThreshold` has to cover that wait plus the start itself on the CPU
-the pod is given.
+A broker binds the HTTP endpoint a few seconds after its process starts, whether or not another
+broker runs: it does not wait for a peer first. The startup probe's `periodSeconds × failureThreshold`
+has to cover the start itself on the CPU the pod is given.
 
 ### PodDisruptionBudget
 

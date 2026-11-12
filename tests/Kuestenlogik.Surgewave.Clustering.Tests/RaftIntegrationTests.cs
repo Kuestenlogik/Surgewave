@@ -165,42 +165,6 @@ public class RaftIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RaftNode_WaitsForPeerReadiness_WithShortTimeout()
-    {
-        // This test verifies that when RaftPeerDiscoveryTimeoutSeconds is set,
-        // the node waits for peer discovery before starting elections.
-        // With no peers reachable and a short timeout, it should proceed after timeout.
-
-        // Arrange
-        var config = new ClusteringConfig
-        {
-            BrokerId = 1,
-            RaftElectionTimeoutMinMs = 150,
-            RaftElectionTimeoutMaxMs = 300,
-            RaftDataDirectory = Path.Combine(Path.GetTempPath(), "surgewave-raft-peerwait-" + Guid.NewGuid().ToString("N")),
-            ClusterNodes = "2:localhost:9092:9093", // Configured to expect peers
-            RaftPeerDiscoveryTimeoutSeconds = 1 // Short timeout for test (1 second)
-        };
-
-        var persistence = new RaftPersistence(_loggerFactory.CreateLogger<RaftPersistence>(), config);
-        var transport = new InMemoryRaftTransport(); // Returns no reachable peers
-        var stateMachine = new NoOpStateMachine();
-        var logger = _loggerFactory.CreateLogger<RaftNode>();
-
-        await using var raftNode = new RaftNode(logger, config, persistence, transport, stateMachine);
-
-        // Act - Start should wait for peer discovery timeout before starting elections
-        var startTime = DateTimeOffset.UtcNow;
-        await raftNode.StartAsync(CancellationToken.None);
-        var elapsed = DateTimeOffset.UtcNow - startTime;
-
-        // Assert - Should have waited at least 1 second (the peer discovery timeout)
-        Assert.True(elapsed >= TimeSpan.FromSeconds(0.9),
-            $"Should have waited for peer discovery timeout, but only waited {elapsed.TotalMilliseconds}ms");
-        _output.WriteLine($"Node waited {elapsed.TotalMilliseconds}ms for peer discovery before proceeding");
-    }
-
-    [Fact]
     public async Task RaftNode_HandleRequestVote_GrantsVoteForHigherTerm()
     {
         // Arrange

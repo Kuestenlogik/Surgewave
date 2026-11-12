@@ -1786,10 +1786,15 @@ if (activatedFeatures.Contains("Surgewave.Api.GraphQL"))
     GraphQLBrokerServiceHolder.Instance = graphqlBrokerService;
 }
 
-// Start replication components
+// Start replication components, in the order a Raft node needs (#275, #270): the node reads the term, the vote and
+// the log it persisted, then the replication port opens, then the node looks for its peers and starts its elections.
+// A request that reaches the port is so answered from what the node persisted, and the peers find the port open when
+// they look for this broker. The port used to open only after the node's start, which waited for a peer first: brokers
+// started together each waited the 30 s of the peer discovery for a port none of them had opened yet.
+await clusterController.LoadAsync(CancellationToken.None);
+await replicationServer.StartAsync(CancellationToken.None);
 await clusterController.StartAsync(CancellationToken.None);
 await replicaManager.StartAsync(CancellationToken.None);
-await replicationServer.StartAsync(CancellationToken.None);
 
 // #121 — started after the controller, so the health map is seeded from a cluster state that
 // already knows the configured peers. With no peers it idles: the send loop skips self and finds
@@ -1810,7 +1815,7 @@ logger.LogInformation("Replication components started (Controller: {IsController
 // change made after its creation. So the client listener is bound here, as it was — a port that is taken shows at
 // once — and its connections are accepted only once the broker has caught up: a client that comes earlier waits in
 // the listen backlog and is answered when the broker can answer, and the ready line below waits for the same. The
-// replication port has been listening since the line above: the Raft node catches up over it. As a Kafka broker in
+// replication port has been listening since before the Raft node's start: the node catches up over it. As a Kafka broker in
 // KRaft mode, a broker that reaches no quorum stays not ready for as long as that lasts; its Raft node logs every
 // election it loses.
 var metadataCaughtUp = clusterController.WaitForMetadataCaughtUpAsync(app.Lifetime.ApplicationStopping);

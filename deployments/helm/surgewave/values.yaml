@@ -178,10 +178,9 @@ antiAffinity: soft
 # has a quorum. /health/ready answers 200 only once the broker has caught up with the metadata
 # log, which takes a leader and therefore a majority of the brokers.
 #
-# The startup probe holds the other two back until the endpoint is bound. A broker that finds no
-# peer when it starts waits for one (RaftPeerDiscoveryTimeoutSeconds, 30 s) before it binds the
-# endpoint, and all brokers of a new cluster start that way; periodSeconds * failureThreshold
-# has to cover that wait and the start itself on the CPU the pod is given.
+# The startup probe holds the other two back until the endpoint is bound, which is a few seconds
+# after the process starts, whether or not another broker runs; periodSeconds * failureThreshold
+# has to cover the start itself on the CPU the pod is given.
 startupProbe:
   periodSeconds: 5
   timeoutSeconds: 3
