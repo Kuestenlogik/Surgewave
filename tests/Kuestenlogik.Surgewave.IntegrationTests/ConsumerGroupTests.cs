@@ -21,12 +21,19 @@ public class ConsumerGroupTests
     }
 
     /// <summary>
-    /// Test that a new consumer joining a group triggers rebalancing.
+    /// A consumer that joins a group another one holds alone gets a share of the partitions, the one that was there
+    /// keeps the rest, and the one that stays takes them all when the other leaves.
     /// </summary>
-    [Fact]
+    /// <remarks>
+    /// Both consumers are driven while the group rebalances: a member gives its partitions up and rejoins from inside
+    /// its own poll, and the group waits for it for its rebalance timeout. A consumer is closed here only once the
+    /// rebalance it is part of is through — one closed with a rebalance event unserved can stay in <c>Close()</c>
+    /// for good, see <see cref="ConsumerCloseExtensions"/>.
+    /// </remarks>
+    [Fact(Timeout = 120_000)]
     public async Task NewConsumer_TriggersRebalance()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var ct = TestContext.Current.CancellationToken;
         var topic = $"rebalance-test-{Guid.NewGuid():N}";
         var groupId = $"rebalance-group-{Guid.NewGuid():N}";
         var messageCount = 30;
@@ -74,6 +81,10 @@ public class ConsumerGroupTests
         _output.WriteLine($"Consumer 1 consumed {consumer1Messages.Count} messages before rebalance");
         Assert.True(consumer1Assigned.Count > 0, "Consumer 1 should have partitions assigned");
 
+        // Alone in the group, consumer 1 holds every partition of the topic.
+        var partitionCount = consumer1.Assignment.Count;
+        Assert.True(partitionCount >= 2, $"the topic needs a partition for each consumer, consumer 1 holds {partitionCount}");
+
         // Start second consumer in the same group
         var consumer2Assigned = new List<TopicPartition>();
         var config2 = CreateConsumerConfig(groupId, "consumer-2");
@@ -87,38 +98,31 @@ public class ConsumerGroupTests
 
         consumer2.Subscribe(topic);
 
-        // Wait for consumer 2 to get partitions assigned
-        var assigned = await TestWaitHelpers.WaitForConsumerAssignmentAsync(consumer2, minPartitionCount: 1, ct: cts.Token, output: _output);
-        if (!assigned)
-        {
-            _output.WriteLine("Warning: Consumer 2 did not get partitions assigned within timeout");
-        }
-
-        // Consume with both consumers
-        var consumer2Messages = new List<ConsumeResult<string, string>>();
-        var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-
-        try
-        {
-            while (!cts2.Token.IsCancellationRequested)
+        // Both are driven: consumer 1 rejoins from inside its own poll, and consumer 2 gets nothing before it has.
+        var split = await TestWaitHelpers.WaitForConditionAsync(
+            () =>
             {
-                var result = consumer2.Consume(TimeSpan.FromMilliseconds(100));
-                if (result != null && !result.IsPartitionEOF)
-                {
-                    consumer2Messages.Add(result);
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
+                consumer1.Consume(TimeSpan.FromMilliseconds(50));
+                consumer2.Consume(TimeSpan.FromMilliseconds(50));
+                return consumer1.Assignment.Count >= 1 && consumer2.Assignment.Count >= 1
+                    && consumer1.Assignment.Union(consumer2.Assignment).Count() == partitionCount
+                    && !consumer1.Assignment.Intersect(consumer2.Assignment).Any();
+            },
+            timeout: TimeSpan.FromSeconds(60), pollInterval: TimeSpan.FromMilliseconds(10), ct: ct, output: _output);
+        Assert.True(split,
+            $"the consumers did not split the {partitionCount} partitions: consumer 1 [{string.Join(",", consumer1.Assignment)}], consumer 2 [{string.Join(",", consumer2.Assignment)}]");
+        Assert.True(consumer2Assigned.Count > 0, "Consumer 2 should have been assigned partitions");
 
-        consumer1.Close();
-        consumer2.Close();
+        // Close sends LeaveGroup; the one that stays rebalances alone and is closed once it holds everything.
+        consumer1.CloseWithinBound();
 
-        _output.WriteLine($"Consumer 2 consumed {consumer2Messages.Count} messages");
+        Assert.True(
+            await TestWaitHelpers.WaitForConsumerAssignmentAsync(consumer2, minPartitionCount: partitionCount, timeout: TimeSpan.FromSeconds(60), ct: ct, output: _output),
+            $"consumer 2 did not take all {partitionCount} partitions after consumer 1 left: [{string.Join(",", consumer2.Assignment)}]");
+
+        consumer2.CloseWithinBound();
+
         _output.WriteLine($"Consumer 1 partitions: {consumer1Assigned.Count}, Consumer 2 partitions: {consumer2Assigned.Count}");
-
-        // Both consumers should have received some partitions
-        Assert.True(consumer2Assigned.Count >= 0, "Consumer 2 should have been assigned partitions");
     }
 
     /// <summary>
@@ -157,7 +161,7 @@ public class ConsumerGroupTests
             $"the consumers did not split the partitions: first [{string.Join(",", first.Assignment)}], second [{string.Join(",", second.Assignment)}]");
 
         // Close sends LeaveGroup; the one that stays rebalances alone.
-        second.Close();
+        second.CloseWithinBound();
 
         Assert.True(
             await TestWaitHelpers.WaitForConsumerAssignmentAsync(first, minPartitionCount: 2, timeout: TimeSpan.FromSeconds(60), ct: ct, output: _output),
@@ -231,7 +235,7 @@ public class ConsumerGroupTests
         _output.WriteLine($"Initial: Consumer1 has {initialConsumer1Partitions}, Consumer2 has {initialConsumer2Partitions} partitions");
 
         // Close consumer1 - should trigger rebalance
-        consumer1.Close();
+        consumer1.CloseWithinBound();
         _output.WriteLine("Consumer 1 closed");
 
         // Wait for consumer 2 to get reassigned all partitions
@@ -249,7 +253,7 @@ public class ConsumerGroupTests
             consumer2.Consume(TimeSpan.FromMilliseconds(200));
         }
 
-        consumer2.Close();
+        consumer2.CloseWithinBound();
 
         // Consumer 2 should have been reassigned more partitions
         _output.WriteLine($"Consumer 2 final partitions after rebalance: {consumer2ReassignedPartitions.Count}");
@@ -283,8 +287,8 @@ public class ConsumerGroupTests
         var messages1 = ConsumeMessages(consumer1, messageCount, TimeSpan.FromSeconds(15));
         var messages2 = ConsumeMessages(consumer2, messageCount, TimeSpan.FromSeconds(15));
 
-        consumer1.Close();
-        consumer2.Close();
+        consumer1.CloseWithinBound();
+        consumer2.CloseWithinBound();
 
         _output.WriteLine($"Group 1 received {messages1.Count} messages");
         _output.WriteLine($"Group 2 received {messages2.Count} messages");
@@ -352,7 +356,7 @@ public class ConsumerGroupTests
                 _output.WriteLine($"Committed {offsets.Count} partition offset(s): {string.Join(", ", offsets.Select(o => $"{o.Partition}@{o.Offset}"))}");
             }
 
-            consumer1.Close();
+            consumer1.CloseWithinBound();
         }
 
         _output.WriteLine($"First consumer received {firstBatch.Count} messages and committed");
@@ -369,7 +373,7 @@ public class ConsumerGroupTests
         {
             consumer2.Subscribe(topic);
             secondBatch = ConsumeMessages(consumer2, messageCount / 2, TimeSpan.FromSeconds(10));
-            consumer2.Close();
+            consumer2.CloseWithinBound();
         }
 
         _output.WriteLine($"Second consumer received {secondBatch.Count} messages");
@@ -435,7 +439,7 @@ public class ConsumerGroupTests
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         _output.WriteLine($"Consumed {msgCount} messages over 8 seconds");
         _output.WriteLine($"Revocations during session: {revokedCount}");
@@ -468,7 +472,7 @@ public class ConsumerGroupTests
             firstAssignmentCount = consumer1.Assignment.Count;
             _output.WriteLine($"First consumer assignment count: {firstAssignmentCount}");
 
-            consumer1.Close();
+            consumer1.CloseWithinBound();
         }
 
         // With static membership, the instance should remain in group briefly
@@ -488,7 +492,7 @@ public class ConsumerGroupTests
             secondAssignmentCount = consumer2.Assignment.Count;
             _output.WriteLine($"Second consumer assignment count: {secondAssignmentCount}");
 
-            consumer2.Close();
+            consumer2.CloseWithinBound();
         }
 
         // With static membership, assignments should be the same

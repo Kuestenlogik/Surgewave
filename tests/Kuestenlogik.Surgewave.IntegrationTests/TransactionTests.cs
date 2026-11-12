@@ -417,7 +417,7 @@ public class TransactionTests
             // Timeout - expected
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         return messages;
     }
 
@@ -512,6 +512,6 @@ public class TransactionTests
         Assert.Equal(messageCount, outputs.Count);
         Assert.All(outputs, m => Assert.StartsWith("processed:", m.Message.Value));
 
-        consumer.Close();
+        consumer.CloseWithinBound();
     }
 }

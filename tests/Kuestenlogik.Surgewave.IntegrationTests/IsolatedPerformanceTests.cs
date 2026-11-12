@@ -204,7 +204,7 @@ public class IsolatedPerformanceTests : IAsyncLifetime
         // and has to surface rather than be reported as a count mismatch.
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         return count;
     }
 }

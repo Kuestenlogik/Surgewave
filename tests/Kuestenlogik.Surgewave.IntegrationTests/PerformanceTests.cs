@@ -138,7 +138,7 @@ public class PerformanceTests
         catch (OperationCanceledException) { }
 
         sw.Stop();
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         var totalBytes = (long)consumed * messageSize;
         var throughputMsgs = consumed * 1000.0 / sw.ElapsedMilliseconds;
@@ -209,7 +209,7 @@ public class PerformanceTests
             }
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         if (latencies.Count > 0)
         {
@@ -379,7 +379,7 @@ public class PerformanceTests
                 catch { }
             }
 
-            consumer.Close();
+            consumer.CloseWithinBound();
         });
 
         await Task.WhenAll(producerTask, consumerTask);
@@ -430,7 +430,7 @@ public class PerformanceTests
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         return count;
     }
 }

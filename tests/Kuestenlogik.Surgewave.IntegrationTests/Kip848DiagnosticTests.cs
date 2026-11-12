@@ -62,7 +62,7 @@ public sealed class Kip848DiagnosticTests
             if (result?.Message != null) break;
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
     }
 
     private static async Task CreateTopicAsync(string topic, int partitions)

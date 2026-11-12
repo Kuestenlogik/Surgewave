@@ -243,7 +243,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         // Assert - be more lenient, at least some messages should be received
         _output.WriteLine($"Total messages fetched: {messages.Count}");
@@ -342,7 +342,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
             _output.WriteLine($"Exception during consume: {ex.Message}");
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         // Assert - log status even if failed
         _output.WriteLine($"Group join status: {joinedGroup}, partitions: {assignedPartitions.Count}");
@@ -384,7 +384,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
         consumer.Consume(TimeSpan.FromSeconds(2));
 
         // Act - Close triggers LeaveGroup
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         // Assert - Close should have triggered revoke handler
         _output.WriteLine($"Consumer left group {groupId}, revoke called: {leftGroup}");
@@ -443,7 +443,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
                 _output.WriteLine($"Committed offset: {offsetToCommit.Offset.Value}");
             }
 
-            consumer.Close();
+            consumer.CloseWithinBound();
         }
         catch (Exception ex)
         {
@@ -683,7 +683,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
             _output.WriteLine($"  Group: {group.Group}, State: {group.State}, Protocol: {group.ProtocolType}");
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
     }
 
     /// <summary>
@@ -733,7 +733,7 @@ public class KafkaProtocolApiCoverageTests : IAsyncLifetime
             _output.WriteLine("Group not found in list (may have already been cleaned up)");
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
     }
 
     #endregion

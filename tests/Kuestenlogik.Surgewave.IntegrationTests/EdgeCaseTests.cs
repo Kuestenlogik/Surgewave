@@ -161,7 +161,7 @@ public class EdgeCaseTests
                 }
                 catch (OperationCanceledException) { }
 
-                consumer.Close();
+                consumer.CloseWithinBound();
                 _output.WriteLine($"Consumer {consumerId} received {localCount} messages");
             })
             .ToList();
@@ -293,7 +293,7 @@ public class EdgeCaseTests
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         Assert.Equal(3, messages.Count);
 
@@ -366,7 +366,7 @@ public class EdgeCaseTests
         var contentType = result.Message.Headers.GetLastBytes("content-type");
         Assert.Equal("application/json", System.Text.Encoding.UTF8.GetString(contentType));
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         _output.WriteLine("Verified all headers preserved");
     }
 
@@ -643,7 +643,7 @@ public class EdgeCaseTests
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         _output.WriteLine($"Consumed {messages.Count} messages");
 
@@ -685,7 +685,7 @@ public class EdgeCaseTests
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         return messages;
     }
 }

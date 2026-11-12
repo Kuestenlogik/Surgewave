@@ -574,7 +574,7 @@ public sealed class ReplicationFailoverConsistencyTests : IAsyncLifetime
             }
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         _output.WriteLine($"consumed {consumed.Count} records from the new leader");
 
         return (consumed, [.. errors]);

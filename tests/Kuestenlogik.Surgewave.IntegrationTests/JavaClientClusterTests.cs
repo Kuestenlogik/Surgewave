@@ -29,13 +29,17 @@ public sealed class JavaClientClusterTests(JavaClusterFixture fixture, ITestOutp
         var (first, second) = (running[0], running[1]);
         await RunOkAsync($"kafka-topics.sh --bootstrap-server $BOOTSTRAP --create --topic {topic} --partitions 3 --replication-factor 3", first);
 
-        // Both join before anything is produced, so neither takes every record before the other arrives.
+        // Both hold partitions before anything is produced, so neither takes every record before the other has its
+        // share. Being members is not enough: the first to join holds every partition until it rejoins, a heartbeat
+        // interval after the second one joined, and takes every record produced until then. And both read from the
+        // beginning: a record produced before a consumer has found the end of its partition is not lost to it.
         var consumers = new[] { first, second }.Select(b => fixture.RunAsync(
-            $"kafka-console-consumer.sh --bootstrap-server $BOOTSTRAP --topic {topic} --group {group} --timeout-ms 20000",
+            $"kafka-console-consumer.sh --bootstrap-server $BOOTSTRAP --topic {topic} --group {group} --from-beginning --timeout-ms 20000",
             b, TestContext.Current.CancellationToken)).ToArray();
         Assert.True(await TestWaitHelpers.WaitForConditionAsync(
-                async () => (await MembersAsync(group, first)) == 2, timeout: TimeSpan.FromSeconds(90), output: output),
-            "the two consumers did not meet in one group");
+                async () => (await MemberPartitionsAsync(group, first)) is { Count: 2 } held && held.All(partitions => partitions > 0),
+                timeout: TimeSpan.FromSeconds(90), output: output),
+            "the two consumers did not share the partitions in one group");
 
         // Keyed, so the records spread over the partitions: without keys the producer puts them all into one.
         await RunOkAsync(
@@ -123,12 +127,15 @@ public sealed class JavaClientClusterTests(JavaClusterFixture fixture, ITestOutp
         return ($"java-cluster-{scenario}-{suffix}", $"g-{scenario}-{suffix}");
     }
 
-    private async Task<int> MembersAsync(string group, SurgewaveRuntime bootstrap)
+    // The number of partitions each member of the group holds, one entry per member.
+    private async Task<List<int>> MemberPartitionsAsync(string group, SurgewaveRuntime bootstrap)
     {
         var result = await fixture.RunAsync(
             $"kafka-consumer-groups.sh --bootstrap-server $BOOTSTRAP --describe --group {group} --members", bootstrap, TestContext.Current.CancellationToken);
         // GROUP, CONSUMER-ID, HOST, CLIENT-ID, #PARTITIONS
-        return Columns(result.Stdout).Count(c => c.Length >= 5 && c[0] == group);
+        return [.. Columns(result.Stdout)
+            .Where(c => c.Length >= 5 && c[0] == group)
+            .Select(c => int.TryParse(c[4], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var partitions) ? partitions : 0)];
     }
 
     // The sum of the group's committed offsets; a partition without one counts 0.

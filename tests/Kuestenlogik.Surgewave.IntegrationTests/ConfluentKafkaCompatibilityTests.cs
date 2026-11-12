@@ -126,7 +126,7 @@ public class ConfluentKafkaCompatibilityTests
             // Timeout reached
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         // Assert
         Assert.Equal(MessageCount, messages.Count);
@@ -212,7 +212,7 @@ public class ConfluentKafkaCompatibilityTests
                 // Expected on timeout
             }
 
-            consumer.Close();
+            consumer.CloseWithinBound();
         }
 
         // Assert

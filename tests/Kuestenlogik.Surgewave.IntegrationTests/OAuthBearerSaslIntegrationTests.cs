@@ -73,7 +73,7 @@ public sealed class OAuthBearerSaslIntegrationTests
             var cr = consumer.Consume(TimeSpan.FromSeconds(2));
             if (cr?.Message is not null) received.Add(cr.Message.Value);
         }
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         Assert.Equal(MessageCount, received.Count);
     }

@@ -133,7 +133,7 @@ public class SaslIntegrationTests
             }
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         // Assert
         Assert.True(messages.Count >= MessageCount,
@@ -261,7 +261,7 @@ public class SaslIntegrationTests
             }
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         // Assert
         Assert.NotNull(consumedMessage);

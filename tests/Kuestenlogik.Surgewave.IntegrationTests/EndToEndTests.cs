@@ -177,8 +177,8 @@ public class EndToEndTests
         Assert.True(assigned2 || consumer2Partitions.Count >= 0,
             "Consumer 2 should participate in rebalance");
 
-        consumer1.Close();
-        consumer2.Close();
+        consumer1.CloseWithinBound();
+        consumer2.CloseWithinBound();
     }
 
     /// <summary>
@@ -215,7 +215,7 @@ public class EndToEndTests
         _output.WriteLine($"Consumer 2 had {partitionsBeforeLeave} partition(s) before consumer 1 leaves");
 
         // Close consumer 1 to trigger rebalance
-        consumer1.Close();
+        consumer1.CloseWithinBound();
         _output.WriteLine("Consumer 1 closed — rebalance expected");
 
         // Consumer 2 should now absorb all partitions
@@ -230,7 +230,7 @@ public class EndToEndTests
         Assert.True(consumer2.Assignment.Count >= partitionsBeforeLeave,
             "Remaining consumer should own at least as many partitions after peer leaves");
 
-        consumer2.Close();
+        consumer2.CloseWithinBound();
     }
 
     // =========================================================================
@@ -469,7 +469,7 @@ public class EndToEndTests
             }
         }
         catch (OperationCanceledException) { }
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         Assert.NotNull(result);
         var (receivedId, receivedJson) = DecodeFrame(result.Message.Value);
@@ -535,7 +535,7 @@ public class EndToEndTests
                 consumer.Commit(offsets);
                 _output.WriteLine($"First consumer committed offsets: {string.Join(", ", offsets.Select(o => $"p{o.Partition}@{o.Offset}"))}");
             }
-            consumer.Close();
+            consumer.CloseWithinBound();
         }
 
         Assert.Equal(firstBatchSize, firstBatch.Count);
@@ -551,7 +551,7 @@ public class EndToEndTests
         {
             consumer.Subscribe(topic);
             secondBatch = ConsumeExact(consumer, totalMessages - firstBatchSize, TimeSpan.FromSeconds(15));
-            consumer.Close();
+            consumer.CloseWithinBound();
         }
 
         _output.WriteLine($"Second consumer received {secondBatch.Count} messages");
@@ -615,7 +615,7 @@ public class EndToEndTests
             }
         }
         catch (OperationCanceledException) { }
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         _output.WriteLine($"Consumed {messages.Count} messages starting from offset {seekOffset}");
         Assert.True(messages.Count > 0, "Should consume messages after seek offset");
@@ -667,7 +667,7 @@ public class EndToEndTests
             TimeSpan.FromSeconds(10));
 
         _output.WriteLine($"Low watermark: {watermarks.Low.Value}, High watermark: {watermarks.High.Value}");
-        tempConsumer.Close();
+        tempConsumer.CloseWithinBound();
 
         // High watermark should equal the number of produced messages
         Assert.Equal(totalMessages, watermarks.High.Value);
@@ -724,7 +724,7 @@ public class EndToEndTests
                 consumer.Commit(offsets);
                 _output.WriteLine($"Committed at offset(s): {string.Join(", ", offsets.Select(o => $"p{o.Partition}@{o.Offset}"))}");
             }
-            consumer.Close();
+            consumer.CloseWithinBound();
         }
 
         // Wait for session to expire
@@ -751,7 +751,7 @@ public class EndToEndTests
         var watermarks = tempConsumer.QueryWatermarkOffsets(
             new TopicPartition(topic, targetPartition!.Value),
             TimeSpan.FromSeconds(10));
-        tempConsumer.Close();
+        tempConsumer.CloseWithinBound();
 
         _output.WriteLine($"High watermark: {watermarks.High.Value}");
 
@@ -801,8 +801,8 @@ public class EndToEndTests
         var batch1 = ConsumeExact(consumer1, messageCount, TimeSpan.FromSeconds(20));
         var batch2 = ConsumeExact(consumer2, messageCount, TimeSpan.FromSeconds(20));
 
-        consumer1.Close();
-        consumer2.Close();
+        consumer1.CloseWithinBound();
+        consumer2.CloseWithinBound();
 
         _output.WriteLine($"Group 1 received {batch1.Count}, Group 2 received {batch2.Count}");
         Assert.Equal(messageCount, batch1.Count);
@@ -855,7 +855,7 @@ public class EndToEndTests
             }
         }
         catch (OperationCanceledException) { }
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         Assert.NotNull(result);
         Assert.Equal("entity-123", result.Message.Key);
@@ -1051,7 +1051,7 @@ public class EndToEndTests
         }
         catch (OperationCanceledException) { }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
         return messages;
     }
 

@@ -65,7 +65,7 @@ public sealed class Kip848ConsumerProtocolTests
             }
         }
 
-        consumer.Close();
+        consumer.CloseWithinBound();
 
         Assert.Equal(9, consumed.Count);
         Assert.All(consumed, r => Assert.Equal(_topic, r.Topic));
@@ -110,8 +110,8 @@ public sealed class Kip848ConsumerProtocolTests
         var c1Assignment = c1.Assignment.ToList();
         var c2Assignment = c2.Assignment.ToList();
 
-        c1.Close();
-        c2.Close();
+        c1.CloseWithinBound();
+        c2.CloseWithinBound();
 
         // Both members must have been assigned at least one partition by the
         // server-side range/uniform assignor, with no overlap.

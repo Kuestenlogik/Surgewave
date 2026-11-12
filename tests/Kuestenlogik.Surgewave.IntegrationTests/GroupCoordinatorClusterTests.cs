@@ -165,7 +165,7 @@ public sealed class GroupCoordinatorClusterTests : IAsyncLifetime
                 },
                 timeout: TimeSpan.FromSeconds(90), pollInterval: TimeSpan.FromMilliseconds(10), ct: ct, output: _output),
                 $"the first consumer read {consumed} of {consumedBefore} records");
-            first.Close();
+            first.CloseWithinBound();
         }
 
         await coordinator.DisposeAsync();
