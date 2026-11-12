@@ -139,18 +139,21 @@ Compose network. Run clients in that network, or make the names resolvable where
 
 ### Embedded Connect
 
-Every broker of the cluster file runs the embedded Connect worker, as the image's
-`appsettings.json` has it. The worker is a client of its own broker and starts once that broker
-accepts clients; until it has, `/api/pipelines` and the connector API answer 503. The broker's
-readiness does not wait for it.
+The cluster file switches the embedded Connect worker off (`Surgewave__Connect__Enabled=false`);
+the image's `appsettings.json` has it on. Run Connect as its own worker against the cluster.
 
-Each worker reads and writes its stores through its own broker: the connector configs
-(`surgewave-connect-configs`) and the pipeline definitions (`_surgewave-pipelines`), one partition
-with one replica each. Only the worker on the broker that leads those partitions has them. On
-the other brokers the worker starts without the stored connectors and pipelines (it logs
-"starting fresh"), lists none and answers a change to a pipeline with 500. Use the Connect and
-pipeline API of the broker that leads the two partitions, or set
-`Surgewave__Connect__Enabled=false` and run Connect as its own worker against the cluster.
+The reason: the workers of a cluster's brokers do not form a group yet. Each worker reads and
+writes its stores through its own broker: the connector configs (`surgewave-connect-configs`) and
+the pipeline definitions (`_surgewave-pipelines`), one partition with one replica each. Only the
+worker on the broker that leads those partitions has them. On the other brokers the worker starts
+without the stored connectors and pipelines (it logs "starting fresh"), lists none and answers a
+change to a pipeline with 500.
+
+A broker of a cluster that is started with the worker on runs it all the same and says so in a
+warning at every start. The worker is a client of its own broker and starts once that broker
+accepts clients; until it has, `/api/pipelines` and the connector API answer 503. The broker's
+readiness does not wait for it. Use the Connect and pipeline API of the broker that leads the two
+partitions.
 
 ## Health checks
 

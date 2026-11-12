@@ -57,6 +57,11 @@ x-surgewave-broker-environment: &surgewave-broker-environment
   Kestrel__Endpoints__GrpcHttp3__Url: http://*:9098
   Surgewave__DataDirectory: /app/data
   Surgewave__RaftDataDirectory: /app/data/raft
+  # The embedded Connect worker is on in the image. The workers of a cluster's brokers do not form
+  # a group yet (#282): only the one on the broker that leads the partitions of the connector and
+  # pipeline stores has the stored connectors and pipelines. Run Connect as its own worker
+  # against the cluster.
+  Surgewave__Connect__Enabled: "false"
   # Who exists (id:host:port:replicationPort) and who votes on metadata (id@host:replicationPort).
   # Identical on every broker.
   Surgewave__ClusterNodes: 1:surgewave-1:9092:10092,2:surgewave-2:9092:10092,3:surgewave-3:9092:10092

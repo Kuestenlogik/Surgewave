@@ -2102,6 +2102,18 @@ if (grpcEndpointUrl is null || !grpcEndpointUrl.StartsWith("https://", StringCom
             : "is not served: no endpoint is set to HTTP/2 alone");
 }
 
+// The embedded Connect worker of a broker in a cluster is said at every start as well (#282): the workers of the
+// brokers do not form a group, and an operator who sees three healthy brokers is to know that one of them has the
+// stored connectors and pipelines.
+if (Kuestenlogik.Surgewave.Broker.Hosting.EmbeddedConnectInCluster.Applies(config))
+{
+    logger.LogWarning(
+        "The embedded Connect worker is enabled on a broker of a cluster. Each broker runs its own worker, and only "
+        + "the one on the broker that leads the partitions of the connector and pipeline stores has the stored "
+        + "connectors and pipelines; the others list none and refuse changes. Use the Connect API of that broker, "
+        + "or set Surgewave:Connect:Enabled=false and run Connect as its own worker (docs/deployment/docker.md).");
+}
+
 // Ready is said from here, after every plugin is configured — a plugin that fails on the way never gets this far —
 // and once the broker accepts its clients, which it does when it has caught up with the metadata log (#250).
 // Not awaited: the HTTP port below comes up meanwhile, with the liveness probe and the metrics on it. The embedded

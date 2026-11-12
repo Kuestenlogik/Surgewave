@@ -828,10 +828,12 @@ in the start:
   it, instead of failing or answering for the old one. And the controller creates one topic at a time: two brokers
   that asked for the same topic at once could both find it missing and both write it, under two ids.
 
-`docker-compose.cluster.yml` no longer switches the worker off. What a cluster does not have yet: each broker's
-worker reads and writes its stores through its own broker, so only the worker on the broker that leads the
-partitions of `surgewave-connect-configs` and `_surgewave-pipelines` has the stored connectors and pipelines; on the
-other brokers it starts without them and answers a change to a pipeline with 500.
+What a cluster does not have yet: the workers of its brokers do not form a group. Each broker's worker reads and
+writes its stores through its own broker, so only the worker on the broker that leads the partitions of
+`surgewave-connect-configs` and `_surgewave-pipelines` has the stored connectors and pipelines; on the other brokers
+it starts without them and answers a change to a pipeline with 500. A broker of a cluster that runs the worker says
+so in a warning at every start, and the cluster deployments under `deployments/` keep the worker off: run Connect as
+its own worker against a cluster. A worker group across the brokers is planned for the next release.
 
 ### Two controller voters that split the vote elect a leader while a third one is down
 
