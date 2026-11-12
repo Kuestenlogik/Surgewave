@@ -6,7 +6,8 @@ namespace Kuestenlogik.Surgewave.Broker.BootTests;
 /// <summary>
 /// A broker with topic auto-creation off and Connect on (#215) starts: the Connect worker creates its internal topics
 /// itself, as Kafka Connect does, independent of auto-creation. The start hung in the worker, which waited for a config
-/// topic nobody created, and the broker never became ready.
+/// topic nobody created, and the broker never became ready. The worker now starts beside the broker (#268), and its
+/// own line says when it has.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("BrokerBoot")]
@@ -22,6 +23,7 @@ public sealed class ConnectWithoutAutoCreationTests
         try
         {
             await using var broker = await BrokerProcess.StartAsync(dataDir, cancellationToken, "--Surgewave:AutoCreateTopics=false");
+            await broker.WaitForLineAsync(BrokerProcess.ConnectStartedLine, cancellationToken);
 
             using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = broker.BootstrapServers }).Build();
             var topics = admin.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Select(t => t.Topic).ToHashSet(StringComparer.Ordinal);

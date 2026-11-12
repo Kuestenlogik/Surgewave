@@ -57,11 +57,29 @@ public interface ITopicConfigRequester
 public interface ITopicCreationRequester
 {
     /// <summary>
-    /// Asks the controller to create the topic. True once the controller created it; false when it refused, or could
-    /// not be reached — the client is answered with a retriable error and asks again. A replica assignment the client
-    /// chose travels with it (#202); null has the controller place the replicas.
+    /// Asks the controller to create the topic, and says what it answered. A replica assignment the client chose
+    /// travels with it (#202); null has the controller place the replicas.
     /// </summary>
-    Task<bool> RequestCreateTopicAsync(
+    Task<TopicCreationAnswer> RequestCreateTopicAsync(
         string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config,
         IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct = default);
+}
+
+/// <summary>What the broker asked for a topic as the controller answered (#268).</summary>
+public enum TopicCreationAnswer
+{
+    /// <summary>The controller wrote the topic to the metadata log.</summary>
+    Created,
+
+    /// <summary>
+    /// The broker asked does not hold the office: it lost it since this broker's node last heard of a leader, or this
+    /// broker knows no controller yet. The next leader is asked once the node knows it.
+    /// </summary>
+    NotController,
+
+    /// <summary>
+    /// The controller did not create the topic, or could not be reached: the client is answered with a retriable
+    /// error and asks again.
+    /// </summary>
+    NotCreated,
 }

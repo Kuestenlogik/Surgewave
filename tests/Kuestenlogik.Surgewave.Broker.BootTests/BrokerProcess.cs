@@ -13,10 +13,11 @@ namespace Kuestenlogik.Surgewave.Broker.BootTests;
 /// </summary>
 internal sealed class BrokerProcess : IAsyncDisposable
 {
-    // Emitted AFTER all IBrokerPlugin activation completes — so a plugin crashing while constructing a client never
+    // Emitted AFTER all IBrokerPlugin activation completes — so a plugin crashing while it is configured never
     // reaches it, which is exactly what makes it the crash guard — and once the broker has caught up with its
     // metadata log and bound the client listener (#250): a client that connects on this line is answered from the
-    // metadata the broker had before it restarted.
+    // metadata the broker had before it restarted. The embedded Connect worker is not part of it (#268); see
+    // ConnectStartedLine.
     public const string ReadyLine = "Surgewave broker ready to accept connections";
 
     // The cluster controller's word that the metadata log is applied and acted on; precedes ReadyLine.
@@ -25,6 +26,10 @@ internal sealed class BrokerProcess : IAsyncDisposable
     // The host's word, at the start of the wait, that it has not caught up yet and lets no client in until it has
     // (#250): what a broker says that waits for a quorum, and all it says about it until the quorum is there.
     public const string CatchingUpLine = "Catching up with the metadata log; clients on";
+
+    // The embedded Connect worker's word that it has started, with its pipelines loaded (#268). It starts once the
+    // broker accepts clients, beside the ready line and not before it: a test that asks Connect waits for this one.
+    public const string ConnectStartedLine = "Pipeline Orchestration framework started";
 
     // Fires only once app.RunAsync() actually binds Kestrel — also catches a TLS/dev-cert bind failure.
     public const string AppStartedLine = "Application started. Press Ctrl+C to shut down.";
@@ -195,6 +200,18 @@ internal sealed class BrokerProcess : IAsyncDisposable
             Assert.Fail($"Broker exited with code {await _exited.Task} before it said '{text}'.\n{Dump()}");
         if (first == timeout)
             Assert.Fail($"Broker did not say '{text}' within 90s.\n{Dump()}");
+    }
+
+    /// <summary>
+    /// Waits until the broker process has exited, and gives its exit code. Fails the test if it is still running
+    /// after the time a broker is given for everything else.
+    /// </summary>
+    public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
+    {
+        var timeout = Task.Delay(TimeSpan.FromSeconds(90), cancellationToken);
+        if (await Task.WhenAny(_exited.Task, timeout) == timeout)
+            Assert.Fail($"Broker did not exit within 90s.\n{Dump()}");
+        return await _exited.Task;
     }
 
     /// <summary>Whether the broker has said it is ready.</summary>

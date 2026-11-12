@@ -103,7 +103,7 @@ public class NativeControllerClientTests : IAsyncLifetime
             "orders", partitions: 3, replicationFactor: 2, new Dictionary<string, string> { ["cleanup.policy"] = "compact" },
             replicaAssignment: null, _cts.Token);
 
-        Assert.True(created);
+        Assert.Equal(TopicCreationAnswer.Created, created);
         var request = Assert.Single(_receiverTopicCreator.Created);
         Assert.Equal(("orders", 3, (short)2), (request.Topic, request.Partitions, request.ReplicationFactor));
         Assert.Equal("compact", request.Config!["cleanup.policy"]);
@@ -121,7 +121,7 @@ public class NativeControllerClientTests : IAsyncLifetime
         var created = await _client.RequestCreateTopicAsync(
             "orders", partitions: 2, replicationFactor: 2, config: null, replicaAssignment: [[2, 1], [1, 2]], _cts.Token);
 
-        Assert.True(created);
+        Assert.Equal(TopicCreationAnswer.Created, created);
         var request = Assert.Single(_receiverTopicCreator.Created);
         Assert.NotNull(request.Replicas);
         Assert.Equal([[2, 1], [1, 2]], request.Replicas.Select(r => r.ToArray()).ToArray());
@@ -137,7 +137,7 @@ public class NativeControllerClientTests : IAsyncLifetime
 
         var created = await _client.RequestCreateTopicAsync("orders", 1, 1, null, null, _cts.Token);
 
-        Assert.False(created);
+        Assert.Equal(TopicCreationAnswer.NotController, created);
         Assert.Empty(_receiverTopicCreator.Created);
     }
 

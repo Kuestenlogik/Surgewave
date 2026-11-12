@@ -102,6 +102,14 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private readonly object _leadershipLock = new();
     private RaftLeadership _followedLeadership;
 
+    // Notified each time the controller has followed a change of the node's leadership, after the role and the
+    // controller id are set: what a topic creation that found the office changing hands waits on (#268).
+    private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _leadershipFollowed = new();
+
+    // One topic creation at a time: the look for the topic and the entry that creates it are one step, or two brokers
+    // asking for the same topic at once both find it missing and both write it, under two ids (#268).
+    private readonly OneAtATime _topicCreation = new();
+
     // Ends when this controller stops, and stays ended: what its background work runs under. Not read from _cts,
     // which the stop disposes and clears.
     private CancellationToken _lifetime;
@@ -377,6 +385,44 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             {
                 LogRaftLeadershipError(ex);
             }
+            finally
+            {
+                _leadershipFollowed.Notify();
+            }
+        }
+    }
+
+    // The leadership this controller acts on, read under the lock it is followed under: the role and the controller
+    // id this broker names belong to it, never to one half followed. The node is followed first: it announces a
+    // change after it made it, and what waited on the node — for a commit, say — may run before the announcement.
+    private RaftLeadership FollowedLeadership()
+    {
+        FollowRaftLeadership();
+        lock (_leadershipLock)
+            return _followedLeadership;
+    }
+
+    /// <summary>
+    /// Completes once this controller follows a leadership other than <paramref name="asked"/> that has a leader: the
+    /// office changed hands and the next holder is known. False when this controller stops first.
+    /// </summary>
+    private async Task<bool> NextLeaderAsync(RaftLeadership asked, CancellationToken ct)
+    {
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime);
+        try
+        {
+            while (true)
+            {
+                var followed = _leadershipFollowed.Next;
+                var now = FollowedLeadership();
+                if (now != asked && now.LeaderId is not null)
+                    return true;
+                await followed.WaitAsync(waiting.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return false;
         }
     }
 
@@ -733,6 +779,13 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     /// <summary>
     /// Create a new topic with partition and replica assignment.
     /// </summary>
+    /// <remarks>
+    /// A creation that finds the office changing hands asks the next holder (#268): the controller that lost its
+    /// leadership with the topic's entry not yet committed, the broker asked that says it is not the controller any
+    /// more, and the request that failed while the leadership moved. It waits for this broker's node to know the next
+    /// leader, which an election gives it, and not for a time. Refused by a controller that is in office all the while
+    /// — no broker to place a replica on, an entry that does not commit — it is false, and the client asks again.
+    /// </remarks>
     public async Task<bool> CreateTopicAsync(
         string topic,
         int partitionCount,
@@ -741,19 +794,37 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
         CancellationToken ct)
     {
-        if (!_isController)
+        while (true)
         {
-            // Only the controller writes the topic to the metadata log; any other broker asks it to (#207). It used to
-            // be refused here, and the handlers then created the topic on their own broker alone.
-            if (_topicCreationRequester is null)
+            var asked = FollowedLeadership();
+            TopicCreationAnswer answer;
+            if (_isController)
             {
+                answer = await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct)
+                    ? TopicCreationAnswer.Created
+                    : TopicCreationAnswer.NotCreated;
+            }
+            else if (_topicCreationRequester is null)
+            {
+                // Only the controller writes the topic to the metadata log; any other broker asks it to (#207). It
+                // used to be refused here, and the handlers then created the topic on their own broker alone.
                 LogNotController("CreateTopic");
                 return false;
             }
-            return await _topicCreationRequester.RequestCreateTopicAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct);
-        }
+            else
+            {
+                answer = await _topicCreationRequester.RequestCreateTopicAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct);
+            }
 
-        return await CreateTopicViaRaftAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct);
+            if (answer == TopicCreationAnswer.Created)
+                return true;
+            if (answer != TopicCreationAnswer.NotController && FollowedLeadership() == asked)
+                return false;
+
+            LogTopicCreationAsksNextController(topic);
+            if (!await NextLeaderAsync(asked, ct))
+                return false;
+        }
     }
 
     /// <summary>
@@ -771,8 +842,20 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
         CancellationToken ct)
     {
+        return await _topicCreation.RunAsync(
+            () => CreateTopicInTurnAsync(topic, partitionCount, replicationFactor, config, replicaAssignment, ct));
+    }
+
+    private async Task<bool> CreateTopicInTurnAsync(
+        string topic,
+        int partitionCount,
+        short replicationFactor,
+        Dictionary<string, string>? config,
+        IReadOnlyList<IReadOnlyList<int>>? replicaAssignment,
+        CancellationToken ct)
+    {
         // A topic the metadata log has already is not created again under a new id: two brokers creating the same
-        // internal topic at once both find it there (#214).
+        // internal topic at once both find it there (#214), the second one once the first one's entry is applied.
         if (_clusterState.GetTopic(topic) is not null)
             return true;
 
@@ -803,7 +886,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         }
 
         // Wait for commit
-        var committed = await _raftNode!.WaitForCommitAsync(index, TimeSpan.FromSeconds(10), ct);
+        var committed = await _raftNode!.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(10), ct);
         if (!committed)
         {
             LogRaftCommitTimeout("TopicCreated", index);
@@ -836,27 +919,33 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         }
 
         var assigned = new List<(int Partition, List<int> Replicas)>();
-        long lastIndex = -1;
+        var proposed = new List<(long Index, byte[] Data)>();
         foreach (var partition in partitions)
         {
             var replicas = _replicaAssignment.AssignReplicas(brokerIds, partition, replicationFactor);
             var assignCmd = new PartitionAssignedCommand(topic, partition, replicas, _config.MinInSyncReplicas);
             var assignData = JsonSerializer.SerializeToUtf8Bytes(assignCmd, ClusteringJsonContext.Default.PartitionAssignedCommand);
 
-            lastIndex = await ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
-            if (lastIndex < 0)
+            var index = await ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
+            if (index < 0)
             {
                 LogNotController("CreateTopic (Raft propose failed)");
                 return false;
             }
             assigned.Add((partition, replicas));
+            proposed.Add((index, assignData));
         }
 
         if (assigned.Count == 0)
             return true;
-        if (!await _raftNode!.WaitForCommitAsync(lastIndex, TimeSpan.FromSeconds(5), ct))
+
+        // The last one first, which is the one wait; the others are then looked at, each being this controller's own
+        // entry only if no other leader wrote at its index meanwhile.
+        for (var i = proposed.Count - 1; i >= 0; i--)
         {
-            LogRaftCommitTimeout("PartitionAssigned", lastIndex);
+            if (await _raftNode!.WaitForCommitOfAsync(proposed[i].Index, proposed[i].Data, TimeSpan.FromSeconds(5), ct))
+                continue;
+            LogRaftCommitTimeout("PartitionAssigned", proposed[i].Index);
             return false;
         }
 
@@ -903,7 +992,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var index = await ProposeAsync(MetadataCommandType.BrokerRegistered, data, ct);
         if (index < 0) return false;
 
-        var committed = await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+        var committed = await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct);
         if (committed)
         {
             LogBrokerRegisteredViaRaft(brokerId, host, port);
@@ -958,7 +1047,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var index = await ProposeAsync(MetadataCommandType.BrokerRemoved, data, ct);
         if (index < 0) return BrokerRemovalOutcome.NotCommitted;
 
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct)
+        return await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct)
             ? BrokerRemovalOutcome.Removed
             : BrokerRemovalOutcome.NotCommitted;
     }
@@ -979,7 +1068,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var index = await ProposeAsync(MetadataCommandType.IsrChanged, data, ct);
         if (index < 0) return false;
 
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+        return await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct);
     }
 
     /// <summary>
@@ -1007,7 +1096,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var index = await ProposeAsync(MetadataCommandType.LeaderChanged, data, ct);
         if (index < 0) return -1;
 
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct) ? index : -1;
+        return await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct) ? index : -1;
     }
 
     /// <summary>
@@ -1026,7 +1115,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var index = await ProposeAsync(MetadataCommandType.TopicDeleted, data, ct);
         if (index < 0) return false;
 
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
+        return await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct);
     }
 
     /// <inheritdoc />
@@ -1049,7 +1138,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             new GroupConfigChangedCommand(groupId, name, value), ClusteringJsonContext.Default.GroupConfigChangedCommand);
         var index = await ProposeAsync(MetadataCommandType.GroupConfigChanged, data, ct).ConfigureAwait(false);
         if (index < 0) return false;
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+        return await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -1075,7 +1164,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             ClusteringJsonContext.Default.ConfigChangedCommand);
         var index = await ProposeAsync(MetadataCommandType.ConfigChanged, data, ct).ConfigureAwait(false);
         if (index < 0) return false;
-        return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+        return await _raftNode.WaitForCommitOfAsync(index, data, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }
 
     #endregion

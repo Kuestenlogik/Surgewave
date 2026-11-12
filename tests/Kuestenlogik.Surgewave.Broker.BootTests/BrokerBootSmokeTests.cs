@@ -55,6 +55,10 @@ public sealed class BrokerBootSmokeTests
             // to stage the plugin itself, which hid that the build put it where the broker never looks.
             Assert.Contains(KafkaPluginActivatedLine, broker.Log, StringComparison.Ordinal);
 
+            // The worker starts once the broker accepts clients (#268) and stops the broker if it cannot: its line,
+            // not the ready line, is what says the Connect closure loaded and ran.
+            await broker.WaitForLineAsync(BrokerProcess.ConnectStartedLine, cancellationToken);
+
             // #211 — with Connect enabled the host mapped the Connect gRPC service and the Connect plugin mapped it
             // again, so every transcoded Connect route matched two endpoints and answered 500 (AmbiguousMatchException).
             using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{broker.RestPort}") };

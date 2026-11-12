@@ -61,7 +61,8 @@ public static class PipelineRestApi
     public static IEndpointRouteBuilder MapSurgewavePipelines(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/pipelines")
-            .WithTags("Pipelines");
+            .WithTags("Pipelines")
+            .AddEndpointFilter(RefuseBeforeTheOrchestratorAsync);
 
         // List all pipelines
         group.MapGet("", ListPipelines)
@@ -336,6 +337,15 @@ public static class PipelineRestApi
 
         return app;
     }
+
+    // The endpoints are mapped before the host starts and the orchestrator is there once the worker has started,
+    // which it does when the broker accepts clients (#268): 503 until then, as a client that comes too early to a
+    // broker is answered everywhere else.
+    private static ValueTask<object?> RefuseBeforeTheOrchestratorAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
+        PipelineOrchestratorHolder.Instance is null
+            ? ValueTask.FromResult<object?>(Results.Problem(
+                "The pipeline orchestrator has not started yet", statusCode: StatusCodes.Status503ServiceUnavailable))
+            : next(context);
 
     private static IResult ListPipelines()
     {

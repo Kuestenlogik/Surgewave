@@ -83,9 +83,12 @@ broker; use an odd number.
 
 ### Kafka Connect
 
-`connect.enabled` turns on the Connect worker embedded in each broker. Leave it off with more than one
-broker: a broker that does not lead the partition of the worker's pipeline store topic does not
-finish starting and never becomes ready.
+`connect.enabled` turns on the Connect worker embedded in each broker. The worker starts once its
+broker accepts clients, and the broker's readiness does not wait for it. Each worker reads and
+writes its stores through its own broker: with more than one broker, only the worker on the broker
+that leads the partitions of `surgewave-connect-configs` and `_surgewave-pipelines` has the stored
+connectors and pipelines; on the others it starts without them and answers a change to a pipeline
+with 500.
 
 ## Custom Values
 

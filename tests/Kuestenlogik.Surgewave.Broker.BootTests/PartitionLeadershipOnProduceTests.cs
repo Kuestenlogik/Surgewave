@@ -38,8 +38,7 @@ public sealed class PartitionLeadershipOnProduceTests
             var starting = Enumerable.Range(0, 2).Select(i => BrokerProcess.StartAsync(dirs[i], ports[i], ct,
                 $"--Surgewave:BrokerId={i + 1}",
                 $"--Surgewave:ClusterNodes={nodes}",
-                $"--Surgewave:ControllerQuorumVoters={voters}",
-                "--Surgewave:Connect:Enabled=false")).ToArray();
+                $"--Surgewave:ControllerQuorumVoters={voters}")).ToArray();
             await using var first = await starting[0];
             await using var second = await starting[1];
 

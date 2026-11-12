@@ -62,6 +62,20 @@ public sealed class NativeDataHandler : INativeRequestHandler
         _logger = logger;
     }
 
+    /// <summary>
+    /// Whether the partition is one of a topic of the cluster that another broker leads: asked where this broker has
+    /// no metadata of its own for the topic, which is the case on a broker that hosts no replica of it.
+    /// </summary>
+    /// <remarks>
+    /// Such a topic is not a missing one (#268). It was taken for one and auto-created, which the metadata log
+    /// refuses — the topic exists — and the exception ended the connection's requests without an answer to this
+    /// one. The embedded Connect worker of a broker that hosts no replica of the worker's config topic asks for the
+    /// topic's offsets when it starts, and waited for the answer for as long as the broker ran. NotLeader is what a
+    /// produce for a partition led elsewhere is answered with (#164), and what a client retries with fresh metadata.
+    /// </remarks>
+    private bool IsTheClustersAndLedElsewhere(string topic, int partition) =>
+        _partitionLeadership?.IsLedByAnotherBroker(new TopicPartition { Topic = topic, Partition = partition }) == true;
+
     public Task HandleAsync(NativeRequestContext context, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         return context.Header.OpCode switch
@@ -109,6 +123,13 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topicMetadata = _logManager.GetTopicMetadata(topic);
         if (topicMetadata == null)
         {
+            if (IsTheClustersAndLedElsewhere(topic, partition))
+            {
+                await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.ProduceAck,
+                    SurgewaveErrorCode.NotLeader, ReadOnlyMemory<byte>.Empty, cancellationToken);
+                return;
+            }
+
             // Auto-create topic if enabled
             if (_config.AutoCreateTopics)
             {
@@ -250,8 +271,11 @@ public sealed class NativeDataHandler : INativeRequestHandler
 
                 var topicMetadata = _logManager.GetTopicMetadata(topicBatch.Topic);
 
-                // Auto-create topic if enabled and not found
-                if (topicMetadata == null && _config.AutoCreateTopics)
+                // Auto-create topic if enabled and not found; a topic of the cluster this broker hosts no replica of
+                // is not one, and its partitions are answered NotLeader below.
+                var ledElsewhere = topicMetadata == null
+                    && topicBatch.Partitions.Any(p => IsTheClustersAndLedElsewhere(topicBatch.Topic, p.Partition));
+                if (topicMetadata == null && !ledElsewhere && _config.AutoCreateTopics)
                 {
                     _logger.LogInformation("Auto-creating topic {Topic} with {Partitions} partitions", topicBatch.Topic, _config.DefaultNumPartitions);
                     topicMetadata = await _logManager.CreateTopicAsync(
@@ -268,7 +292,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
 
                     if (topicMetadata == null)
                     {
-                        writer.Write((short)SurgewaveErrorCode.TopicNotFound);
+                        writer.Write((short)(ledElsewhere ? SurgewaveErrorCode.NotLeader : SurgewaveErrorCode.TopicNotFound));
                         writer.Write(-1L);
                         continue;
                     }
@@ -446,6 +470,13 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topicMetadata = _logManager.GetTopicMetadata(topic);
         if (topicMetadata == null)
         {
+            if (IsTheClustersAndLedElsewhere(topic, partition))
+            {
+                await context.SendErrorAsync(context.Header.RequestId, context.Header.OpCode,
+                    SurgewaveErrorCode.NotLeader, $"Another broker leads {topic}-{partition}", cancellationToken);
+                return;
+            }
+
             if (_config.AutoCreateTopics)
             {
                 _logger.LogInformation("Auto-creating topic {Topic} on fetch with {Partitions} partitions", topic, _config.DefaultNumPartitions);
@@ -615,6 +646,13 @@ public sealed class NativeDataHandler : INativeRequestHandler
         var topicMetadata = _logManager.GetTopicMetadata(topic!);
         if (topicMetadata == null)
         {
+            if (IsTheClustersAndLedElsewhere(topic!, partition))
+            {
+                await context.SendErrorAsync(context.Header.RequestId, context.Header.OpCode,
+                    SurgewaveErrorCode.NotLeader, $"Another broker leads {topic}-{partition}", cancellationToken);
+                return;
+            }
+
             if (_config.AutoCreateTopics)
             {
                 _logger.LogInformation("Auto-creating topic {Topic} on ListOffsets with {Partitions} partitions", topic, _config.DefaultNumPartitions);

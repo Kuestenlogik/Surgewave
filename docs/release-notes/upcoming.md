@@ -793,9 +793,45 @@ Two additions to the broker carry this:
   the same container and exits 0 or 1. It is what a container health check runs, the image holding no HTTP
   client; the endpoint is taken from the broker's own configuration.
 
-The embedded Connect worker (`Surgewave:Connect:Enabled`) stays off in the cluster deployments: a broker that does
-not lead the partition of the worker's pipeline store topic does not finish starting. `.github/workflows/deployments.yml`
-lints, renders and validates the manifests and brings each of them up on every change to them.
+`.github/workflows/deployments.yml` lints, renders and validates the manifests and brings each of them up on every
+change to them.
+
+### A broker with the embedded Connect worker becomes ready in a cluster (#268)
+
+With `Surgewave:Connect:Enabled`, which the image has on, two of three brokers of a new cluster never became ready
+and never bound their HTTP port, and a broker that waited for a quorum answered no liveness probe. Three causes, all
+in the start:
+
+- **The worker's start was a step of the host's start.** The worker is a client of the broker it runs in, and since
+  #250 a broker accepts clients only once it has caught up with its metadata log. The host waited for the worker
+  before it bound its HTTP port, so a broker without a quorum waited inside the worker's connect, with `/health/live`
+  unanswered, and whatever kept the worker from starting kept the broker from being ready. The worker now starts
+  beside the host, on the listener's accept signal: the endpoints are mapped at once and answer 503 until the worker
+  has started, the broker says ready and answers its probes without it, and a worker that cannot start stops the
+  broker with a non-zero exit code.
+- **A request for a topic the broker hosts no replica of was never answered.** With topic auto-creation on, which is
+  the default, a broker asked over the native protocol for the offsets, the records or a produce of a topic it had
+  no replica of took the topic for a missing one and went on to create it. The metadata log refuses that — the topic
+  exists — and the exception ended the connection's requests without an answer. The worker of a broker that hosts no
+  replica of the worker's config topic asks for the topic's offsets when it starts, and waited for the answer for as
+  long as the broker ran: that is what kept brokers 2 and 3 of the cluster deployments from starting. Such a request
+  is now answered `NotLeader`, as a produce for a partition another broker leads is.
+- **A topic reported as created that no metadata log had.** A controller that lost its leadership with a topic's
+  entry proposed and not yet on a majority has that entry cut off by the next leader, which writes its own entries
+  from that index on. The commit index passes the index all the same, and the controller took that for its own
+  entry: it answered "created", made itself the leader of the topic's partitions, and the broker that had asked
+  waited for the topic to reach it for as long as it ran. Each broker's worker asks for its topics the moment its
+  broker lets it in, which is while the first elections are still under way, so a cluster start ran into it now and
+  then. A controller now takes an entry as committed only if it is the entry it proposed, for every decision it
+  writes, not topics alone. A creation that finds the office changing hands — the controller deposed on the way, the
+  broker asked saying it is not the controller any more — asks the next holder once this broker's Raft node knows
+  it, instead of failing or answering for the old one. And the controller creates one topic at a time: two brokers
+  that asked for the same topic at once could both find it missing and both write it, under two ids.
+
+`docker-compose.cluster.yml` no longer switches the worker off. What a cluster does not have yet: each broker's
+worker reads and writes its stores through its own broker, so only the worker on the broker that leads the
+partitions of `surgewave-connect-configs` and `_surgewave-pipelines` has the stored connectors and pipelines; on the
+other brokers it starts without them and answers a change to a pipeline with 500.
 
 ### Two controller voters that split the vote elect a leader while a third one is down
 

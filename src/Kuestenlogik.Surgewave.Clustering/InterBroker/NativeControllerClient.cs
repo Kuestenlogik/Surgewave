@@ -180,23 +180,23 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
     }
 
     /// <summary>
-    /// Ask the controller to create a topic (#207). True once it did; false when it refused — it is not the controller
-    /// any more, or the creation failed — or could not be reached. Only the controller writes topics to the metadata
-    /// log, so a broker asked for a topic hands it on rather than creating it for itself alone.
+    /// Ask the controller to create a topic (#207), and say what it answered: that it did, that it is not the
+    /// controller any more, or that the creation failed or it could not be reached. Only the controller writes topics
+    /// to the metadata log, so a broker asked for a topic hands it on rather than creating it for itself alone.
     /// </summary>
-    public async Task<bool> RequestCreateTopicAsync(
+    public async Task<TopicCreationAnswer> RequestCreateTopicAsync(
         string topic, int partitions, short replicationFactor, IReadOnlyDictionary<string, string>? config,
         IReadOnlyList<IReadOnlyList<int>>? replicaAssignment, CancellationToken ct = default)
     {
         var controllerId = _clusterState.ControllerId;
         if (controllerId < 0 || controllerId == _config.BrokerId)
-            return false; // no controller known yet, or this broker thinks it is one and is not: the client retries
+            return TopicCreationAnswer.NotController; // none known yet, or this broker is named and has lost the office
 
         var broker = _clusterState.GetBroker(controllerId);
         if (broker is null)
         {
             LogBrokerNotFound(controllerId);
-            return false;
+            return TopicCreationAnswer.NotCreated;
         }
 
         try
@@ -227,9 +227,11 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
                 if (response.Opcode != SurgewaveOpCode.InterBrokerCreateTopic || status != ClusterRpcStatus.None)
                 {
                     LogRejected(SurgewaveOpCode.InterBrokerCreateTopic, controllerId, status);
-                    return false;
+                    return response.Opcode == SurgewaveOpCode.InterBrokerCreateTopic && status == ClusterRpcStatus.NotController
+                        ? TopicCreationAnswer.NotController
+                        : TopicCreationAnswer.NotCreated;
                 }
-                return true;
+                return TopicCreationAnswer.Created;
             }
             finally
             {
@@ -239,7 +241,7 @@ public sealed partial class NativeControllerClient : Replication.IIsrChangeNotif
         catch (Exception ex)
         {
             LogSendFailed(SurgewaveOpCode.InterBrokerCreateTopic, controllerId, ex);
-            return false;
+            return TopicCreationAnswer.NotCreated;
         }
     }
 

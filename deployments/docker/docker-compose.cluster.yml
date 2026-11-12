@@ -55,10 +55,6 @@ x-surgewave-broker-environment: &surgewave-broker-environment
   # Identical on every broker.
   Surgewave__ClusterNodes: 1:surgewave-1:9092:10092,2:surgewave-2:9092:10092,3:surgewave-3:9092:10092
   Surgewave__ControllerQuorumVoters: 1@surgewave-1:10092,2@surgewave-2:10092,3@surgewave-3:10092
-  # The embedded Connect worker is on in the image's appsettings.json and does not start on a
-  # broker that does not lead the partition of its pipeline store topic: that broker never
-  # becomes ready. Run Connect as its own worker against the cluster.
-  Surgewave__Connect__Enabled: "false"
   Surgewave__AutoCreateTopics: "true"
   Surgewave__DefaultNumPartitions: 3
   Surgewave__DefaultReplicationFactor: 3

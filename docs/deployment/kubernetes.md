@@ -140,8 +140,9 @@ Two of three brokers keep the quorum; a node drain may take one.
 The ConfigMap replaces the image's `appsettings.json`. It binds REST, `/health` and `/metrics`
 in cleartext on port 9093 (see [TLS](tls.md) to serve them over HTTPS; the ConfigMap names no second
 endpoint, so the brokers of these manifests serve no gRPC), and leaves the
-embedded Connect worker off: with it on, a broker that does not
-lead the partition of the worker's pipeline store topic does not finish starting.
+embedded Connect worker off. With it on, each broker runs a
+worker that reads and writes its stores through its own broker, and only the one on the broker
+that leads the stores' partitions has the stored connectors and pipelines.
 
 ### Storage
 

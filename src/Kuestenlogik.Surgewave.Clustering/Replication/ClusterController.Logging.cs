@@ -85,8 +85,11 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Error, Message = "Error following the Raft leadership")]
     private partial void LogRaftLeadershipError(Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Raft commit timeout for {CommandType} at index {Index}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{CommandType} proposed at index {Index} did not commit: not in time, or another leader's entry took its place")]
     private partial void LogRaftCommitTimeout(string commandType, long index);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Topic {Topic} was not created while the controller changed; asking the next one")]
+    private partial void LogTopicCreationAsksNextController(string topic);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Broker {BrokerId} registered via Raft at {Host}:{Port}")]
     private partial void LogBrokerRegisteredViaRaft(int brokerId, string host, int port);

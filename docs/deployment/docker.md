@@ -112,9 +112,18 @@ Compose network. Run clients in that network, or make the names resolvable where
 
 ### Embedded Connect
 
-The cluster file sets `Surgewave__Connect__Enabled=false`. With the embedded Connect worker on, a
-broker that does not lead the partition of the worker's pipeline store topic does not finish
-starting and never becomes ready. Run Connect as its own worker against the cluster.
+Every broker of the cluster file runs the embedded Connect worker, as the image's
+`appsettings.json` has it. The worker is a client of its own broker and starts once that broker
+accepts clients; until it has, `/api/pipelines` and the connector API answer 503. The broker's
+readiness does not wait for it.
+
+Each worker reads and writes its stores through its own broker: the connector configs
+(`surgewave-connect-configs`) and the pipeline definitions (`_surgewave-pipelines`), one partition
+with one replica each. Only the worker on the broker that leads those partitions has them. On
+the other brokers the worker starts without the stored connectors and pipelines (it logs
+"starting fresh"), lists none and answers a change to a pipeline with 500. Use the Connect and
+pipeline API of the broker that leads the two partitions, or set
+`Surgewave__Connect__Enabled=false` and run Connect as its own worker against the cluster.
 
 ## Health checks
 

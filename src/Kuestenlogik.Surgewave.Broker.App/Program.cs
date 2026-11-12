@@ -245,6 +245,7 @@ builder.Services.AddSingleton(_ => SchemaRegistryServiceImplHolder.Instance
     ?? throw new InvalidOperationException("SchemaRegistryServiceImpl not initialized"));
 builder.Services.AddSingleton(_ => ConnectServiceImplHolder.Instance
     ?? throw new InvalidOperationException("ConnectServiceImpl not initialized"));
+builder.Services.AddSingleton<ClientListenerSignal>();
 
 // Add health checks
 builder.Services.AddHealthChecks()
@@ -1811,6 +1812,10 @@ if (!metadataCaughtUp.IsCompleted)
 
 var brokerTask = Task.Run(() => surgewaveBroker.StartAsync(metadataCaughtUp, CancellationToken.None));
 
+// What in this host is a client of the broker — the embedded Connect worker — starts on this signal and not as a step
+// of the start below (#268): the start is what brings the signal about.
+app.Services.GetRequiredService<ClientListenerSignal>().Follow(surgewaveBroker.WaitUntilAcceptingAsync(app.Lifetime.ApplicationStopping));
+
 // What the listener actually speaks is decided by the plugins that activated, not by the config
 // flag: with Protocol.Kafka absent from plugins/ the flag is still true, but no Kafka connection
 // handler is registered and a Kafka peer is closed on the magic-byte probe (#61). Reporting the
@@ -1871,9 +1876,9 @@ if (!builder.Configuration.GetValue("Surgewave:SchemaRegistry:Enabled", true))
         getSchemaTypes: () => []);
 }
 
-// Connect: service init, connector discovery, pipeline orchestrator, gRPC holder and
-// REST API mapping are all handled by SurgewaveConnectBrokerPlugin.ConfigureAsync() via
-// BrokerPluginActivator.ConfigureBrokerPluginsAsync. When Connect is disabled, set the
+// Connect: connector discovery, gRPC holder and REST API mapping are handled by
+// SurgewaveConnectBrokerPlugin.ConfigureAsync() via BrokerPluginActivator.ConfigureBrokerPluginsAsync; the worker and
+// the pipeline orchestrator start once the broker accepts clients (#268). When Connect is disabled, set the
 // gRPC holder to no-op delegates so clients get a clean Unavailable error.
 if (!config.Connect.Enabled)
 {
@@ -2099,7 +2104,9 @@ if (grpcEndpointUrl is null || !grpcEndpointUrl.StartsWith("https://", StringCom
 
 // Ready is said from here, after every plugin is configured — a plugin that fails on the way never gets this far —
 // and once the broker accepts its clients, which it does when it has caught up with the metadata log (#250).
-// Not awaited: the HTTP port below comes up meanwhile, with the liveness probe and the metrics on it.
+// Not awaited: the HTTP port below comes up meanwhile, with the liveness probe and the metrics on it. The embedded
+// Connect worker is not waited for (#268): it is a client of this broker and starts on the same signal, saying
+// "Pipeline Orchestration framework started" when it has; if it cannot start, it stops the broker.
 _ = AnnounceReadyAsync();
 async Task AnnounceReadyAsync()
 {
@@ -2215,6 +2222,9 @@ logManager.Dispose();
 cts.Dispose();
 
 logger.LogInformation("Surgewave broker stopped");
-return 0;
+
+// 0, unless a part of the host that started beside it failed and stopped the broker for it: the embedded Connect
+// worker says so through the process's exit code (#268).
+return Environment.ExitCode;
 
 // ACL enum mapping functions moved to AclEnumMapper class in Startup folder

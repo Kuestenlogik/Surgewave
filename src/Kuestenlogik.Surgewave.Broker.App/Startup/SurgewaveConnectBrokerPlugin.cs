@@ -19,8 +19,13 @@ namespace Kuestenlogik.Surgewave.Broker.Startup;
 /// gRPC service holder, and the Pipeline REST API at <c>/api/pipelines</c>.
 ///
 /// <para>
-/// This is the first plugin to use <see cref="IBrokerPlugin.ConfigureAsync"/> — the Connect
-/// framework needs async lifecycle (client connection, worker start, pipeline init).
+/// The worker is a client of the broker it runs in, so it starts once that broker accepts clients, beside the host's
+/// start and not as a step of it (#268). <see cref="ConfigureAsync"/> maps the endpoints, which a host can only do
+/// before it starts, and returns; the client connection, the worker and the pipelines follow on the listener's accept
+/// signal. It used to do all of it before the host went on: a broker accepts clients only once it has caught up with
+/// its metadata log, so one that waited for a quorum waited inside this plugin, with its HTTP port unbound and its
+/// liveness probe unanswered, and one whose worker waited for a topic was never ready. Until the worker has started,
+/// the Connect and pipeline endpoints answer 503.
 /// </para>
 /// </summary>
 public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
@@ -60,13 +65,18 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
         services.AddSurgewavePipelines();
     }
 
+    // The worker once it has started; the Connect service answers UNAVAILABLE, which REST transcodes to 503, before.
+    private volatile ConnectWorker? _worker;
+
+    private ConnectWorker Worker() => _worker
+        ?? throw new RpcException(new Status(StatusCode.Unavailable, "The Connect worker has not started yet"));
+
     /// <inheritdoc />
-    public async Task ConfigureAsync(object host, IServiceProvider services)
+    public Task ConfigureAsync(object host, IServiceProvider services)
     {
         var app = (WebApplication)host;
         var config = services.GetRequiredService<BrokerConfig>();
         var connectConfig = services.GetRequiredService<ConnectWorkerConfig>();
-        var loggerFactory = services.GetRequiredService<ILoggerFactory>();
         var programLogger = services.GetRequiredService<ILogger<Program>>();
 
         // Discover connectors from plugins directory
@@ -84,6 +94,97 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
             pluginDiscovery.DiscoverPlugins(directory, useDefaultContext: false);
         }
 
+        // Wire gRPC service holder. The service is resolved once, so it is this one from the start and reaches the
+        // worker through Worker(), which refuses until the worker has started.
+        ConnectServiceImplHolder.Instance = new ConnectServiceImpl(
+            listConnectors: () => Worker().ListConnectors().ToList(),
+            getConnector: name =>
+            {
+                var info = Worker().GetConnectorStatus(name);
+                if (info == null) return null;
+                return new ConnectorInfoDto(
+                    info.Name, info.Type, info.State, info.WorkerId,
+                    new Dictionary<string, string>(info.Config),
+                    info.Tasks.Select(t => new TaskStatusDto(t.Id, t.State, t.WorkerId, null)).ToList());
+            },
+            createConnector: async (name, cfg) =>
+            {
+                var connectorClass = cfg.GetValueOrDefault("connector.class")
+                    ?? throw new RpcException(new Status(StatusCode.InvalidArgument, "Missing connector.class"));
+                return await Worker().CreateConnectorAsync(name, connectorClass, cfg);
+            },
+            deleteConnector: name => Worker().StopConnectorAsync(name),
+            updateConnectorConfig: async (name, cfg) =>
+            {
+                var worker = Worker();
+                await worker.RestartConnectorAsync(name);
+                var info = worker.GetConnectorStatus(name);
+                if (info == null) return null;
+                return new ConnectorInfoDto(
+                    info.Name, info.Type, info.State, info.WorkerId,
+                    new Dictionary<string, string>(info.Config),
+                    info.Tasks.Select(t => new TaskStatusDto(t.Id, t.State, t.WorkerId, null)).ToList());
+            },
+            restartConnector: (name, _, _) => Worker().RestartConnectorAsync(name),
+            pauseConnector: name => Worker().PauseConnectorAsync(name),
+            resumeConnector: name => Worker().ResumeConnectorAsync(name),
+            restartConnectorTask: (connector, taskId) => Worker().RestartTaskAsync(connector, taskId),
+            listConnectorPlugins: (includeSink, includeSource) =>
+            {
+                return pluginDiscovery.GetAllPlugins()
+                    .Where(p => (includeSink && p.Type.Equals("sink", StringComparison.OrdinalIgnoreCase)) ||
+                               (includeSource && p.Type.Equals("source", StringComparison.OrdinalIgnoreCase)) ||
+                               (!includeSink && !includeSource))
+                    .Select(p => new ConnectorPluginDto(p.Class, p.Type, p.Version))
+                    .ToList();
+            });
+
+        // REST + gRPC, mapped now: a host maps its endpoints before it starts. /api/pipelines (+ /chat) answers 503
+        // until the orchestrator is there.
+        app.MapGrpcService<ConnectServiceImpl>();
+        app.MapSurgewavePipelines();
+        app.MapSurgewavePipelineChat();
+        app.Logger.LogInformation("Pipeline REST API mapped at /api/pipelines (+ /chat)");
+
+        programLogger.LogInformation("  - Connect API:         {Host}:{GrpcPort}/connectors (gRPC + REST + Pipelines)",
+            config.Host, config.GrpcPort);
+
+        // Not awaited: the host goes on to bind its HTTP port and to say ready without the worker.
+        _ = StartOnceTheBrokerAcceptsAsync(app, services, pluginDiscovery);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Connects the worker's client, starts the worker and the pipelines, once the broker accepts clients. A start
+    /// that fails stops the broker, as it did when it was a step of the host's start: a broker that runs with Connect
+    /// enabled and no worker would answer for connectors it does not run.
+    /// </summary>
+    private async Task StartOnceTheBrokerAcceptsAsync(WebApplication app, IServiceProvider services, PluginDiscovery pluginDiscovery)
+    {
+        var stopping = app.Lifetime.ApplicationStopping;
+        try
+        {
+            await services.GetRequiredService<ClientListenerSignal>().WaitUntilAcceptingAsync(stopping).ConfigureAwait(false);
+            await StartAsync(app, services, pluginDiscovery, stopping).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+        {
+            // The broker stopped before it accepted a client, or while the worker started: nothing to run.
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogCritical(ex, "The Connect worker did not start; stopping the broker");
+            Environment.ExitCode = 1;
+            app.Lifetime.StopApplication();
+        }
+    }
+
+    private async Task StartAsync(WebApplication app, IServiceProvider services, PluginDiscovery pluginDiscovery, CancellationToken stopping)
+    {
+        var config = services.GetRequiredService<BrokerConfig>();
+        var connectConfig = services.GetRequiredService<ConnectWorkerConfig>();
+        var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+
         // Pipeline metrics + worker services
         var pipelineMetrics = new PipelineMetricsCollector();
         var workerServices = new ConnectWorkerServices { MetricsCollector = pipelineMetrics };
@@ -96,15 +197,16 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
         var localClient = await SurgewaveClient
             .Create(config.LocalListenerAddress())
             .UseSurgewaveProtocol()
-            .BuildAsync();
-        await localClient.ConnectAsync();
+            .BuildAsync(stopping).ConfigureAwait(false);
+        await localClient.ConnectAsync(stopping).ConfigureAwait(false);
 
         var connectLogger = loggerFactory.CreateLogger<ConnectWorker>();
 #pragma warning disable CA2000 // Lifecycle managed by the application (runs until broker shutdown)
         var connectWorker = new ConnectWorker(connectConfig, localClient, connectLogger, workerServices, ownsClient: true);
 #pragma warning restore CA2000
         connectWorker.SetTypeResolver(className => pluginDiscovery.LoadPluginType(className));
-        await connectWorker.StartAsync();
+        await connectWorker.StartAsync(stopping).ConfigureAwait(false);
+        _worker = connectWorker;
         app.Logger.LogInformation("Kafka Connect framework started");
 
         // Pipeline orchestrator
@@ -113,66 +215,14 @@ public sealed class SurgewaveConnectBrokerPlugin : IBrokerPlugin
         var pipelineLogger = loggerFactory.CreateLogger<PipelineOrchestrator>();
         var pipelineOrchestrator = new PipelineOrchestrator(
             pipelineStore, pipelineTopicManager, connectWorker, pluginDiscovery, pipelineLogger, pipelineMetrics);
+        await pipelineOrchestrator.InitializeAsync(stopping).ConfigureAwait(false);
+
+        // Pipeline chat (agent pipelines): the manager behind /api/pipelines/{id}/chat. Without the holder
+        // assignment every chat endpoint answers 503.
+        PipelineChatManagerHolder.Instance = new PipelineChatManager(connectConfig, loggerFactory.CreateLogger<PipelineChatManager>());
+
+        // Last: from here /api/pipelines answers, with the pipelines loaded.
         PipelineOrchestratorHolder.Instance = pipelineOrchestrator;
-        await pipelineOrchestrator.InitializeAsync();
         app.Logger.LogInformation("Pipeline Orchestration framework started");
-
-        // Wire gRPC service holder
-        ConnectServiceImplHolder.Instance = new ConnectServiceImpl(
-            listConnectors: () => connectWorker.ListConnectors().ToList(),
-            getConnector: name =>
-            {
-                var info = connectWorker.GetConnectorStatus(name);
-                if (info == null) return null;
-                return new ConnectorInfoDto(
-                    info.Name, info.Type, info.State, info.WorkerId,
-                    new Dictionary<string, string>(info.Config),
-                    info.Tasks.Select(t => new TaskStatusDto(t.Id, t.State, t.WorkerId, null)).ToList());
-            },
-            createConnector: async (name, cfg) =>
-            {
-                var connectorClass = cfg.GetValueOrDefault("connector.class")
-                    ?? throw new RpcException(new Status(StatusCode.InvalidArgument, "Missing connector.class"));
-                return await connectWorker.CreateConnectorAsync(name, connectorClass, cfg);
-            },
-            deleteConnector: name => connectWorker.StopConnectorAsync(name),
-            updateConnectorConfig: async (name, cfg) =>
-            {
-                await connectWorker.RestartConnectorAsync(name);
-                var info = connectWorker.GetConnectorStatus(name);
-                if (info == null) return null;
-                return new ConnectorInfoDto(
-                    info.Name, info.Type, info.State, info.WorkerId,
-                    new Dictionary<string, string>(info.Config),
-                    info.Tasks.Select(t => new TaskStatusDto(t.Id, t.State, t.WorkerId, null)).ToList());
-            },
-            restartConnector: (name, _, _) => connectWorker.RestartConnectorAsync(name),
-            pauseConnector: name => connectWorker.PauseConnectorAsync(name),
-            resumeConnector: name => connectWorker.ResumeConnectorAsync(name),
-            restartConnectorTask: (connector, taskId) => connectWorker.RestartTaskAsync(connector, taskId),
-            listConnectorPlugins: (includeSink, includeSource) =>
-            {
-                return pluginDiscovery.GetAllPlugins()
-                    .Where(p => (includeSink && p.Type.Equals("sink", StringComparison.OrdinalIgnoreCase)) ||
-                               (includeSource && p.Type.Equals("source", StringComparison.OrdinalIgnoreCase)) ||
-                               (!includeSink && !includeSource))
-                    .Select(p => new ConnectorPluginDto(p.Class, p.Type, p.Version))
-                    .ToList();
-            });
-
-        // Pipeline chat (agent pipelines): manager + REST API at /api/pipelines/{id}/chat.
-        // Without the holder assignment every chat endpoint answers 503; without the
-        // mapping the Control PipelineEditor chat panel gets 404s.
-        var chatManager = new PipelineChatManager(connectConfig, loggerFactory.CreateLogger<PipelineChatManager>());
-        PipelineChatManagerHolder.Instance = chatManager;
-
-        // REST + gRPC
-        app.MapGrpcService<ConnectServiceImpl>();
-        app.MapSurgewavePipelines();
-        app.MapSurgewavePipelineChat();
-        app.Logger.LogInformation("Pipeline REST API mapped at /api/pipelines (+ /chat)");
-
-        programLogger.LogInformation("  - Connect API:         {Host}:{GrpcPort}/connectors (gRPC + REST + Pipelines)",
-            config.Host, config.GrpcPort);
     }
 }

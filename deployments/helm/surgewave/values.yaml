@@ -80,9 +80,9 @@ schemaRegistry:
 
 # ─── Kafka Connect ────────────────────────────────────────────────────────────
 
-# The Connect worker embedded in each broker. Leave it off with more than one broker: a broker
-# that does not lead the partition of the worker's pipeline store topic does not finish
-# starting and never becomes ready.
+# The Connect worker embedded in each broker. Each worker reads and writes its stores through
+# its own broker: with more than one broker, only the worker on the broker that leads the
+# stores' partitions has the stored connectors and pipelines.
 connect:
   enabled: false
   groupId: surgewave-connect

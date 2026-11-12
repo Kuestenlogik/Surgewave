@@ -96,7 +96,7 @@ All configuration is done via `values.yaml` or `--set` flags.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `schemaRegistry.enabled` | Enable Schema Registry | `true` |
-| `connect.enabled` | Enable the Connect worker embedded in each broker. Leave off with more than one broker: a broker that does not lead the partition of the worker's pipeline store topic does not finish starting | `false` |
+| `connect.enabled` | Enable the Connect worker embedded in each broker. With more than one broker, only the worker on the broker that leads the stores' partitions has the stored connectors and pipelines | `false` |
 | `features.mqtt.enabled` | Enable MQTT protocol | `false` |
 | `features.graphql.enabled` | Enable GraphQL API | `false` |
 | `features.dataMesh.enabled` | Enable Data Mesh | `false` |

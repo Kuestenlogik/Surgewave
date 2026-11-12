@@ -61,7 +61,8 @@ Confluent-compatible Schema Registry API. Enabled by default (`Surgewave:SchemaR
 
 ## Kafka Connect
 
-Confluent Connect-compatible API. Requires `Surgewave:Connect:Enabled=true`.
+Confluent Connect-compatible API. Requires `Surgewave:Connect:Enabled=true`. The embedded worker starts
+once its broker accepts clients; until it has, the connector routes answer 503.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -87,7 +88,8 @@ Confluent Connect-compatible API. Requires `Surgewave:Connect:Enabled=true`.
 
 ## Pipelines
 
-Visual pipeline designer API. Requires `Surgewave:Connect:Enabled=true`.
+Visual pipeline designer API. Requires `Surgewave:Connect:Enabled=true`. Answers 503 until the embedded
+Connect worker has started, which it does once its broker accepts clients.
 
 | Method | Path | Description |
 |--------|------|-------------|

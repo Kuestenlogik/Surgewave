@@ -63,7 +63,7 @@ public sealed partial class ClusterController
                 if (index < 0)
                     return;
 
-                if (await _raftNode.WaitForCommitAsync(index, ClusterIdCommitTimeout, ct).ConfigureAwait(false))
+                if (await _raftNode.WaitForCommitOfAsync(index, data, ClusterIdCommitTimeout, ct).ConfigureAwait(false))
                 {
                     LogClusterIdWritten(clusterId);
                     return;
