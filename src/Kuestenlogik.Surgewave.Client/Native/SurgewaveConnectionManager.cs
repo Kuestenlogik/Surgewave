@@ -165,10 +165,28 @@ public sealed class SurgewaveConnectionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Throws if not connected.
+    /// Completes when the connection has ended, with why; never before the client is connected (#281).
     /// </summary>
+    internal Task<Exception> ConnectionEnded => _transport?.ConnectionEnded ?? NotConnected.Task;
+
+    private static readonly TaskCompletionSource<Exception> NotConnected = new();
+
+    /// <summary>
+    /// Throws if not connected: with what ended the connection if it was lost, and otherwise because the client
+    /// was never connected.
+    /// </summary>
+    /// <remarks>
+    /// A client whose broker had closed the connection was told to call ConnectAsync first, which it had (#281).
+    /// A lost connection is an <see cref="IOException"/>, as it is for the request that was waiting when it went,
+    /// so the same retry applies to both.
+    /// </remarks>
     internal void EnsureConnected()
     {
+        if (_transport is { ConnectionEnded: { IsCompletedSuccessfully: true, Result: IOException lost } })
+        {
+            throw Transport.ConnectionLoss.Again(lost);
+        }
+
         if (_transport == null || !_transport.IsConnected)
         {
             throw new InvalidOperationException("Client is not connected. Call ConnectAsync first.");

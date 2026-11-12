@@ -1046,6 +1046,47 @@ then have to ask over HTTPS, which the manifests take as an edit and the chart h
 `scripts/ci/compose-cluster-smoke.sh` and `scripts/ci/kubernetes-cluster-smoke.sh` ask every broker for its
 topics over gRPC and over REST, through the published ports and through the services, in every scenario.
 
+### A native request is answered or its connection is closed, and a client fails what waited on a connection that went (#281)
+
+A request over the native protocol could be left without an answer, and its caller then waited for as
+long as the connection stood. That is how a refused topic creation hung the embedded Connect worker (#268
+fixed two cases of it; this is the mechanism).
+
+- **Broker.** Whatever a handler threw that it had not turned into an answer itself ended the connection's
+  request loop, while the connection stayed open: the request was never answered, and the next request on
+  the connection closed it. A request whose payload the handler could not read was one such case — 42 of
+  the 155 op codes left a request of too few bytes unanswered. Every such request is now answered with the
+  new error code `InternalError` (22) and a message that names the operation and the request id; the
+  exception goes to the broker's log under that id, not to the client, and the connection takes the next
+  request. A broker that stops does not answer request by request: it closes the connection. So does a
+  broker that cannot write an answer.
+- **Streaming.** `StreamAck` was taken without an answer, while the streaming consumer sends it as a request
+  and waits for the answer before it sends the next: a consumer returned credit once. It is answered now —
+  `SubscriptionNotFound` for a subscription the connection does not have. And a `Subscribe` at "latest"
+  (`-1`, the client's default) or "earliest" (`-2`) was never answered and stopped every later request on
+  its connection: the offset was read at as it was instead of being resolved, and the push loop went round
+  inside the request without waiting.
+- **Client.** A request that waits for its answer when the broker closes or resets the connection failed
+  already, over TCP and over QUIC, with what the read had thrown ("Unable to read beyond the end of the
+  stream"). It now fails with an `IOException` that names the broker and says the connection was closed or
+  reset, as does every request made on that connection afterwards — over TCP such a request was written into
+  the closed connection and waited for good. `SurgewaveStreamingConsumer.Records` ends with the same failure
+  instead of waiting for the next record, and `IsConnected` is false from then on. An `IOException` is what
+  the client's retry policies and the consumer's reconnect already take for a lost connection.
+  `SurgewaveProtocolException.BrokerMessage` now carries what the broker said in an error answer; it was
+  always null.
+- **Kafka wire.** A request that failed in its handler was logged and not answered. A Kafka client matches
+  answers to requests by their order, so it waited for the answer until its request timeout and read the
+  answer to its next request as the answer to this one. The broker now closes the connection, as it does
+  for a request it cannot read, which a client takes as a disconnect and retries; it does not build Kafka's
+  per-API `UNKNOWN_SERVER_ERROR` response. Produce, Fetch and Metadata were checked for the auto-creation
+  case of #268 — a topic of the cluster this broker hosts no replica of, taken for a missing one — and do
+  not have it.
+- **Logging.** The native data, key-value and streaming handlers wrote to a logger that discarded every
+  line. They log under their own categories now, so "Auto-creating topic …" appears.
+
+`InternalError` (22) is an addition to the native protocol's error codes; a client that does not know it
+sees a non-zero code, which is a failed request as before.
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages
@@ -1280,3 +1321,15 @@ In the ConfigMap the tiered-storage keys carry the names the broker reads: `S3Bu
 `dotnet build` and `dotnet publish` with `-r <runtime>` write to `artifacts/obj`, `artifacts/bin` and
 `artifacts/pub` under `<project>/<configuration>/<runtime>/`, no longer to `<project>/<configuration>/`. A publish
 with `-o` goes where it is told, as before.
+
+### What a native client and a host see of a failed or lost request (#281)
+
+- A call on a `SurgewaveNativeClient` whose connection was lost throws an `IOException` that says so. Before, it waited for an answer or threw
+  `InvalidOperationException` ("Client is not connected. Call ConnectAsync first."), depending on what the socket
+  had noticed.
+- `ISurgewaveTransport` has a new member, `ConnectionEnded`. It has a default that never completes, so a
+  transport of your own compiles unchanged, and a streaming consumer on it does not notice a lost connection
+  until the transport implements it.
+- `SurgewaveNativeHandler` takes the host's `ILoggerFactory` instead of an `ILogger<SurgewaveNativeHandler>`.
+- Over the Kafka wire, a request that fails in its handler or cannot be read closes the connection; the
+  requests after it on that connection were answered before.

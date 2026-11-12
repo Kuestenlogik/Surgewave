@@ -28,6 +28,12 @@ public enum SurgewaveErrorCode : ushort
     NotCoordinator = 20,
     CoordinatorNotAvailable = 21,
 
+    /// <summary>
+    /// The broker failed while it carried out the request, in a way the operation does not account for (#281).
+    /// The request may or may not have taken effect; what failed is in the broker's log under the request's id.
+    /// </summary>
+    InternalError = 22,
+
     // Transaction errors
     InvalidProducerEpoch = 30,
     UnknownProducerId = 31,

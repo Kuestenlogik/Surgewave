@@ -33,6 +33,7 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
     private readonly Channel<ReceivedMessage> _channel;
     private readonly CancellationTokenSource _cts;
     private readonly Task _ackTask;
+    private readonly Task _connectionWatch;
 
     // Total bytes received; used for flow-control acknowledgments
     private long _receivedBytes;
@@ -66,6 +67,26 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
 
         // Start periodic ack background task
         _ackTask = Task.Run(() => AckLoopAsync(_cts.Token));
+
+        _connectionWatch = EndWithTheConnectionAsync(_cts.Token);
+    }
+
+    /// <summary>
+    /// Ends <see cref="Records"/> when the connection ends, with why (#281). The consumer waits for frames the
+    /// broker pushes and has no request in flight that fails when the connection goes: a reader of
+    /// <see cref="Records"/> waited for the next record of a broker that was gone for as long as the consumer lived.
+    /// </summary>
+    private async Task EndWithTheConnectionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var why = await _client.ConnectionEnded.WaitAsync(cancellationToken).ConfigureAwait(false);
+            _channel.Writer.TryComplete(why);
+        }
+        catch (OperationCanceledException)
+        {
+            // Disposed first: the records end without a failure.
+        }
     }
 
     /// <summary>
@@ -124,7 +145,8 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
 
     /// <summary>
     /// Stream of records pushed by the broker. Enumerate this with <c>await foreach</c>.
-    /// The enumeration ends when the consumer is disposed.
+    /// The enumeration ends when the consumer is disposed, and fails with an <see cref="IOException"/> that says
+    /// why once the connection to the broker has ended and the records received before that have been read.
     /// </summary>
     public IAsyncEnumerable<ReceivedMessage> Records => ReadRecordsAsync(_cts.Token);
 
@@ -233,6 +255,7 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
         _channel.Writer.TryComplete();
 
         try { await _ackTask; } catch (OperationCanceledException) { }
+        await _connectionWatch;
 
         // Deregister the push handler
         _client.UnregisterPushHandler(SurgewaveOpCode.FetchResponse);

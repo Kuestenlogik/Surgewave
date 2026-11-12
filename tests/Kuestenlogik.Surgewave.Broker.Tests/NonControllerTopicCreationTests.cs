@@ -85,6 +85,26 @@ public sealed class NonControllerTopicCreationTests : IDisposable
         Assert.Null(_logManager.GetTopicMetadata("orders"));
     }
 
+    /// <summary>
+    /// A topic the cluster has and this broker hosts no replica of is not a missing one (#281, the Kafka wire's side
+    /// of what #268 found in the native protocol): Metadata answers it from the cluster's state and asks nobody to
+    /// create it, which the metadata log would refuse.
+    /// </summary>
+    [Fact]
+    public async Task ATopicOfTheClusterThisBrokerHostsNoReplicaOfIsAnsweredAndNotCreatedAgain()
+    {
+        await _controller.CreateTopicAsync("orders", 2, 1, config: null, replicaAssignment: null, CancellationToken.None);
+        _controller.Asked.Clear();
+        Assert.Null(_logManager.GetTopicMetadata("orders"));
+
+        var response = await AutoCreateAsync("orders");
+
+        var topic = Assert.Single(response.Topics);
+        Assert.Equal(ErrorCode.None, topic.ErrorCode);
+        Assert.Equal(2, topic.Partitions.Count);
+        Assert.Empty(_controller.Asked);
+    }
+
     [Fact]
     public async Task AnAutoCreationTheControllerDidNotDoAnswersLeaderNotAvailable()
     {

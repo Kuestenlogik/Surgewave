@@ -206,6 +206,11 @@ public sealed class NativeStreamingHandler : INativeRequestHandler
     ///   subscriptionId  string (int16 length + UTF-8)
     ///   creditBytes     int64  (number of bytes the client is ready to receive)
     /// </summary>
+    /// <remarks>
+    /// Answered like every request (#281). It was taken without an answer, while the client sends it as a request
+    /// and waits for the answer before it sends the next: a streaming consumer returned credit once and then waited
+    /// in its first acknowledgement for as long as it lived.
+    /// </remarks>
     private Task HandleStreamAckAsync(
         NativeRequestContext context,
         ReadOnlyMemory<byte> payload,
@@ -213,17 +218,28 @@ public sealed class NativeStreamingHandler : INativeRequestHandler
     {
         var manager = context.SubscriptionManager;
         if (manager == null)
-            return Task.CompletedTask;
+        {
+            return context.SendErrorAsync(context.Header.RequestId, context.Header.OpCode,
+                SurgewaveErrorCode.InvalidRequest, "Streaming not available for this connection", cancellationToken);
+        }
 
         var reader = new SurgewavePayloadReader(payload.Span);
         var subscriptionId = reader.ReadString();
 
         if (string.IsNullOrEmpty(subscriptionId) || reader.Remaining < 8)
-            return Task.CompletedTask;
+        {
+            return context.SendErrorAsync(context.Header.RequestId, context.Header.OpCode,
+                SurgewaveErrorCode.InvalidRequest, "StreamAck: subscriptionId and creditBytes are required", cancellationToken);
+        }
 
         var creditBytes = reader.ReadInt64();
-        manager.AddCredit(subscriptionId!, creditBytes);
+        if (!manager.AddCredit(subscriptionId!, creditBytes))
+        {
+            return context.SendErrorAsync(context.Header.RequestId, context.Header.OpCode,
+                SurgewaveErrorCode.SubscriptionNotFound, $"StreamAck: no subscription {subscriptionId} on this connection", cancellationToken);
+        }
 
-        return Task.CompletedTask;
+        return context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.StreamAck,
+            SurgewaveErrorCode.None, ReadOnlyMemory<byte>.Empty, cancellationToken);
     }
 }

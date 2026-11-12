@@ -175,7 +175,7 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
             serializer,
             nativeGroupCoordinator,
             _config,
-            _nativeLoggerFactory.CreateLogger<SurgewaveNativeHandler>(),
+            _nativeLoggerFactory,
             transactionCoordinator: transactionCoordinator,
             quotaManager: quotaManager,
             schemaStore: schemaStore,

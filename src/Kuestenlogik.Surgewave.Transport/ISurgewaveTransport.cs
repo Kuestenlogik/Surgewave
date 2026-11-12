@@ -24,6 +24,16 @@ public interface ISurgewaveTransport : IAsyncDisposable
     bool ServerSupportsCompression { get; }
 
     /// <summary>
+    /// Completes when the connection has ended, with why: what a request made on it from then on fails with (#281).
+    /// </summary>
+    /// <remarks>
+    /// For what waits on the connection without a request of its own in flight — a streaming consumer waits for
+    /// frames the broker pushes, and has nothing that fails when the connection goes. The transports of this
+    /// repository complete it; the default, for a transport that does not say when its connection ends, never does.
+    /// </remarks>
+    Task<Exception> ConnectionEnded => ConnectionThatDoesNotSay.WhenItEnds;
+
+    /// <summary>
     /// Connect to the broker.
     /// </summary>
     ValueTask ConnectAsync(CancellationToken cancellationToken = default);
@@ -75,4 +85,10 @@ public interface ISurgewaveTransport : IAsyncDisposable
     /// Remove a previously registered push handler.
     /// </summary>
     void UnregisterPushHandler(SurgewaveOpCode opCode);
+}
+
+/// <summary>What <see cref="ISurgewaveTransport.ConnectionEnded"/> is for a transport that does not implement it.</summary>
+internal static class ConnectionThatDoesNotSay
+{
+    public static Task<Exception> WhenItEnds { get; } = new TaskCompletionSource<Exception>().Task;
 }

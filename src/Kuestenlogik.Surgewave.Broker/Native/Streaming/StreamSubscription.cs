@@ -132,6 +132,22 @@ public sealed class StreamSubscription : IAsyncDisposable
 
         try
         {
+            // Off the Subscribe request's call path: the loop runs until its first wait, and what it does before
+            // that must not stand between the request and its answer (#281).
+            await Task.Yield();
+
+            // "Latest" (-1) and "earliest" (-2) are positions to resolve, not offsets to read at. Read at as they
+            // are, -1 is below every high watermark, so the wait for data returned at once, the read found nothing
+            // and the loop went round without ever waiting — inside the Subscribe request, which was never answered,
+            // and with it no later request on the connection (#281). -1 is the client's default.
+            var requested = Volatile.Read(ref _currentOffsets[partitionIndex]);
+            if (requested < 0)
+            {
+                var subscribed = _logManager.GetOrCreateLog(topicPartition);
+                Volatile.Write(ref _currentOffsets[partitionIndex],
+                    requested == -1 ? subscribed.HighWatermark : subscribed.LogStartOffset);
+            }
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 // Wait for credit before pushing more data

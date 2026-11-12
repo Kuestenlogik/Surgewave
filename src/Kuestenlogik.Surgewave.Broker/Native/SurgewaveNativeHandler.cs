@@ -54,7 +54,7 @@ public sealed class SurgewaveNativeHandler
         RecordBatchSerializer recordBatchSerializer,
         NativeGroupCoordinator groupCoordinator,
         BrokerConfig config,
-        ILogger<SurgewaveNativeHandler> logger,
+        ILoggerFactory loggerFactory,
         PartitionReassignmentManager? reassignmentManager = null,
         TransactionCoordinator? transactionCoordinator = null,
         QuotaManager? quotaManager = null,
@@ -70,13 +70,15 @@ public sealed class SurgewaveNativeHandler
         Kuestenlogik.Surgewave.Core.Monitoring.ILagCalculator? lagCalculator = null)
     {
         _config = config;
-        _logger = logger;
+        _logger = loggerFactory.CreateLogger<SurgewaveNativeHandler>();
         _logManager = logManager;
         _recordBatchSerializer = recordBatchSerializer;
 
-        // Create handlers
+        // Each handler logs under its own category, from the host's factory. They were handed this handler's logger
+        // cast to their own type (`logger as ILogger<NativeDataHandler>`), which it never is, and so wrote to a
+        // NullLogger: no line of the data, the key-value or the streaming handler ever appeared (#281).
         _dataHandler = new NativeDataHandler(config, logManager, recordBatchSerializer, groupCoordinator,
-            logger as ILogger<NativeDataHandler> ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NativeDataHandler>.Instance,
+            loggerFactory.CreateLogger<NativeDataHandler>(),
             dlqManager: dlqManager);
 
         var handlers = new List<INativeRequestHandler>
@@ -116,13 +118,11 @@ public sealed class SurgewaveNativeHandler
         // Add KV Store handler if bucket manager is available
         if (kvBucketManager != null)
         {
-            handlers.Add(new NativeKvStoreHandler(kvBucketManager,
-                logger as ILogger<NativeKvStoreHandler> ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NativeKvStoreHandler>.Instance));
+            handlers.Add(new NativeKvStoreHandler(kvBucketManager, loggerFactory.CreateLogger<NativeKvStoreHandler>()));
         }
 
         // Add Streaming handler (always enabled â€” manager is per-connection, created in HandleConnectionAsync)
-        handlers.Add(new NativeStreamingHandler(
-            logger as ILogger<NativeStreamingHandler> ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<NativeStreamingHandler>.Instance));
+        handlers.Add(new NativeStreamingHandler(loggerFactory.CreateLogger<NativeStreamingHandler>()));
 
         _dispatcher = new NativeRequestDispatcher(handlers);
     }
@@ -206,15 +206,26 @@ public sealed class SurgewaveNativeHandler
                     FullMode = BoundedChannelFullMode.Wait
                 });
 
-                // Start reader and processor as concurrent tasks
-                var readerTask = ReadRequestsAsync(pipeReader, requestChannel.Writer, cancellationToken);
+                // Start reader and processor as concurrent tasks. The reader has a token of its own: it reads for
+                // as long as the processor answers.
+                using var readerStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var readerTask = ReadRequestsAsync(pipeReader, requestChannel.Writer, readerStop.Token);
                 var processorTask = ProcessPipelinedRequestsAsync(responder, subscriptionManager, requestChannel.Reader, cancellationToken);
 
                 // Wait for either to complete (reader finishes on disconnect, processor on channel completion)
-                await Task.WhenAny(readerTask, processorTask);
+                var first = await Task.WhenAny(readerTask, processorTask);
 
                 // Ensure channel is completed so processor can drain and exit
                 requestChannel.Writer.TryComplete();
+
+                // A processor that ended before the reader ended on what it could not answer or write. Nothing
+                // answers the requests still to come, so the reader stops and the caller closes the connection: the
+                // reader used to go on waiting for the client's next request, and a client waiting for the answer to
+                // its last one sends none (#281).
+                if (first == processorTask)
+                {
+                    await readerStop.CancelAsync();
+                }
 
                 // Wait for both to finish (processor drains remaining items)
                 try { await Task.WhenAll(readerTask, processorTask); }
@@ -349,6 +360,14 @@ public sealed class SurgewaveNativeHandler
     /// Processor task: dequeues requests from the channel and processes them.
     /// The writeLock serializes PipeWriter access between this loop and push-streaming background tasks.
     /// </summary>
+    /// <remarks>
+    /// Every request is answered or the connection is closed (#281). Whatever a handler throws that it did not
+    /// turn into an answer itself is answered here with <see cref="SurgewaveErrorCode.InternalError"/> and logged
+    /// with the request it belongs to; the request's frame was read completely, so the connection goes on. Two
+    /// things end the loop instead, and with it the connection: the broker stopping, which cancels the handlers and
+    /// is not answered request by request, and an answer that cannot be written — a client that went while its
+    /// request was being carried out is no failed request and is not logged as one.
+    /// </remarks>
     private async Task ProcessPipelinedRequestsAsync(
         NativeConnectionResponder responder,
         StreamSubscriptionManager? subscriptionManager,
@@ -371,7 +390,32 @@ public sealed class SurgewaveNativeHandler
                 context.SetHeader(request.Header);
 
                 // Dispatch to appropriate handler using O(1) lookup
-                var handled = await _dispatcher.TryDispatchAsync(context, actualPayload, cancellationToken);
+                bool handled;
+                try
+                {
+                    handled = await _dispatcher.TryDispatchAsync(context, actualPayload, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception) when (responder.WriteFailed)
+                {
+                    // The handler failed on writing its answer: the client has gone, or a frame is partly on
+                    // the wire. That is the connection's end, which the caller logs, not a failed request.
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // The exception is the operator's; the client gets the request to ask the operator about.
+                    _logger.LogError(ex, "Native request {RequestId} ({OpCode}) failed in its handler and was answered {ErrorCode}",
+                        request.Header.RequestId, request.Header.OpCode, SurgewaveErrorCode.InternalError);
+                    await responder.SendErrorAsync(request.Header.RequestId, request.Header.OpCode,
+                        SurgewaveErrorCode.InternalError,
+                        $"The broker failed to carry out {request.Header.OpCode} (request {request.Header.RequestId}); the cause is in the broker's log",
+                        cancellationToken);
+                    continue;
+                }
 
                 if (!handled)
                 {

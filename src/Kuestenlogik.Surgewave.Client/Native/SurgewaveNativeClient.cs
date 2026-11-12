@@ -189,5 +189,11 @@ public sealed class SurgewaveNativeClient : IAsyncDisposable
     internal void UnregisterPushHandler(SurgewaveOpCode opCode)
         => _connectionManager.UnregisterPushHandler(opCode);
 
+    /// <summary>
+    /// Completes when the connection has ended, with why. For what waits on the connection without a request of
+    /// its own in flight, as SurgewaveStreamingConsumer does (#281).
+    /// </summary>
+    internal Task<Exception> ConnectionEnded => _connectionManager.ConnectionEnded;
+
     public ValueTask DisposeAsync() => _connectionManager.DisposeAsync();
 }

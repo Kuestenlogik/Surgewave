@@ -20,6 +20,12 @@ internal sealed class NativeConnectionResponder
     /// <summary>Set once the handshake has negotiated compression; false before that.</summary>
     public bool ClientSupportsCompression { get; set; }
 
+    /// <summary>
+    /// Whether a frame could not be written. Nothing can follow a frame that is partly on the wire, and a client
+    /// that has gone takes none: the connection is over, and what failed is not a request to answer (#281).
+    /// </summary>
+    public bool WriteFailed { get; private set; }
+
     public NativeConnectionResponder(PipeWriter pipeWriter, SemaphoreSlim writeLock)
     {
         _pipeWriter = pipeWriter;
@@ -70,6 +76,11 @@ internal sealed class NativeConnectionResponder
 
                 // Flush to push data to the socket
                 await _pipeWriter.FlushAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                WriteFailed = true;
+                throw;
             }
             finally
             {

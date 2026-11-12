@@ -30,6 +30,14 @@ public sealed class TcpTransport : ISurgewaveTransport
     // 0 = usable, 1 = torn down because a request frame was left half-written (#117).
     private int _connectionFaulted;
 
+    // Why the connection ended; null while it stands. Set once, and before the requests waiting on the connection
+    // are failed with it: a request that registers itself afterwards finds it and fails the same way (#281).
+    private Exception? _ended;
+    private readonly TaskCompletionSource<Exception> _connectionEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <inheritdoc />
+    public Task<Exception> ConnectionEnded => _connectionEnded.Task;
+
     // Server-push handler support (streaming subscriptions)
     private readonly ConcurrentDictionary<SurgewaveOpCode, Func<SurgewaveResponseHeader, ReadOnlyMemory<byte>, Task>> _pushHandlers = new();
     private readonly SemaphoreSlim _pushConcurrencyLimit = new(16, 16); // Limit concurrent push handlers
@@ -41,7 +49,7 @@ public sealed class TcpTransport : ISurgewaveTransport
     /// half-written frame reports <see langword="false"/> even though the socket may still look
     /// open to the OS — the peer stopped making sense of the stream, so it is not usable (#117).
     /// </summary>
-    public bool IsConnected => Volatile.Read(ref _connectionFaulted) == 0 && _client?.Connected == true;
+    public bool IsConnected => Volatile.Read(ref _ended) is null && Volatile.Read(ref _connectionFaulted) == 0 && _client?.Connected == true;
     public bool ServerSupportsCompression { get; private set; }
 
     public TcpTransport(TransportOptions options)
@@ -197,6 +205,14 @@ public sealed class TcpTransport : ISurgewaveTransport
 
         try
         {
+            // Registered first, looked at second: the connection's end is recorded before the registered requests
+            // are failed, so a request is either seen by that or sees this. A request made after the reader had
+            // gone was written into a socket the broker had closed and waited for an answer nobody would read (#281).
+            if (Volatile.Read(ref _ended) is { } ended)
+            {
+                throw ConnectionLoss.Again(ended);
+            }
+
             var flags = SurgewaveProtocolFlags.None;
             ReadOnlyMemory<byte> actualPayload = payload;
             byte[]? compressionBuffer = null;
@@ -304,6 +320,11 @@ public sealed class TcpTransport : ISurgewaveTransport
         await _sendLock.WaitAsync(cancellationToken);
         try
         {
+            if (Volatile.Read(ref _ended) is { } ended)
+            {
+                throw ConnectionLoss.Again(ended);
+            }
+
             var requestId = NextRequestId();
 
             var flags = SurgewaveProtocolFlags.None;
@@ -352,16 +373,25 @@ public sealed class TcpTransport : ISurgewaveTransport
                 }
             }
 
-            await _stream!.ReadExactlyAsync(_responseHeaderBuffer, cancellationToken);
-            var responseHeader = SurgewaveResponseHeader.ReadFrom(_responseHeaderBuffer);
-
-            if (responseHeader.RequestId != requestId)
+            try
             {
-                throw new InvalidOperationException(
-                    $"Request ID mismatch: expected {requestId}, got {responseHeader.RequestId}");
-            }
+                await _stream!.ReadExactlyAsync(_responseHeaderBuffer, cancellationToken);
+                var responseHeader = SurgewaveResponseHeader.ReadFrom(_responseHeaderBuffer);
 
-            return await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
+                if (responseHeader.RequestId != requestId)
+                {
+                    throw new InvalidOperationException(
+                        $"Request ID mismatch: expected {requestId}, got {responseHeader.RequestId}");
+                }
+
+                return await ReadPayloadAsync(_stream, responseHeader, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException ex)
+            {
+                // The answer did not come because the connection went: said in those words, and remembered for
+                // the requests after this one (#281).
+                throw EndConnection(ConnectionLoss.Describe(ex, _options.Host, _options.Port));
+            }
         }
         finally
         {
@@ -490,18 +520,36 @@ public sealed class TcpTransport : ISurgewaveTransport
                 // is shared with the QUIC transport so a fix cannot land on only one of them (#117).
                 ResponseDelivery.DeliverOrRelease(_pendingRequests, responseHeader.RequestId, lease);
             }
+
+            // Cancelled between two answers: the same end as a cancelled read, and not a silent one.
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Normal shutdown — but everything still in flight has to be failed, otherwise
             // those awaiters would hang forever: nothing will ever read their response
             // once this loop is gone (#80).
-            FailAllPending(new ObjectDisposedException(nameof(TcpTransport), "The transport was disposed while requests were in flight."));
+            EndConnection(new ObjectDisposedException(nameof(TcpTransport), "The transport was disposed while requests were in flight."));
         }
         catch (Exception ex)
         {
-            FailAllPending(ex);
+            // The broker closed the connection, it was reset, or what arrived could not be read: nothing reads
+            // an answer from here on, so every request that waits for one fails, and says why (#281).
+            EndConnection(ConnectionLoss.Describe(ex, _options.Host, _options.Port));
         }
+    }
+
+    /// <summary>
+    /// Records why the connection ended and fails every request waiting on it with that (#281). The first reason
+    /// stays; whatever is found waiting later is failed with it too.
+    /// </summary>
+    /// <returns>The reason the connection ended with, which is <paramref name="reason"/> unless it had ended before.</returns>
+    private Exception EndConnection(Exception reason)
+    {
+        var ended = Interlocked.CompareExchange(ref _ended, reason, null) ?? reason;
+        _connectionEnded.TrySetResult(ended);
+        FailAllPending(ended);
+        return ended;
     }
 
     /// <summary>
@@ -524,7 +572,7 @@ public sealed class TcpTransport : ISurgewaveTransport
         if (Interlocked.Exchange(ref _connectionFaulted, 1) != 0)
             return;
 
-        FailAllPending(new IOException(
+        EndConnection(new IOException(
             "The connection was torn down: a request frame could not be written completely, so the stream is no longer in a state the peer can parse.",
             cause));
 

@@ -50,7 +50,7 @@ public sealed class CommandExecutor
             // Check for protocol errors
             if (header.ErrorCode != SurgewaveErrorCode.None)
             {
-                throw new SurgewaveProtocolException(header.ErrorCode, command.OpCode);
+                throw new SurgewaveProtocolException(header.ErrorCode, command.OpCode, BrokerMessage(header, responsePayload.Span));
             }
 
             // Parse and return response
@@ -64,6 +64,23 @@ public sealed class CommandExecutor
                 ArrayPool<byte>.Shared.Return(payloadBuffer);
             }
         }
+    }
+
+    /// <summary>
+    /// What the broker said about a refused request: an error frame carries a message (a length and UTF-8), which
+    /// was not read, so the failure named a code and an operation and nothing of what the broker had said — for an
+    /// internal error, the id of the request to look up in the broker's log (#281). Null when the answer is not an
+    /// error frame, or says nothing.
+    /// </summary>
+    private static string? BrokerMessage(SurgewaveResponseHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (header.OpCode != SurgewaveOpCode.Error || payload.Length < sizeof(short))
+            return null;
+
+        var length = System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(payload);
+        return length > 0 && length <= payload.Length - sizeof(short)
+            ? System.Text.Encoding.UTF8.GetString(payload.Slice(sizeof(short), length))
+            : null;
     }
 
     /// <summary>

@@ -88,15 +88,25 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
         var pipeWriter = System.IO.Pipelines.PipeWriter.Create(stream,
             new System.IO.Pipelines.StreamPipeWriterOptions(minimumBufferSize: 4096));
 
-        // Start reader and processor as concurrent tasks
-        var readerTask = ReadKafkaRequestsAsync(stream, initialBytes, requestChannel.Writer, endpoint, cancellationToken);
+        // Start reader and processor as concurrent tasks. The reader has a token of its own: it reads for as long
+        // as the processor answers.
+        using var readerStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var readerTask = ReadKafkaRequestsAsync(stream, initialBytes, requestChannel.Writer, endpoint, readerStop.Token);
         var processorTask = ProcessKafkaRequestsAsync(pipeWriter, connectionState, requestChannel.Reader, endpoint, cancellationToken);
 
         // Wait for either to complete (reader finishes on disconnect, processor on channel completion)
-        await Task.WhenAny(readerTask, processorTask);
+        var first = await Task.WhenAny(readerTask, processorTask);
 
         // Ensure channel is completed so processor can drain and exit
         requestChannel.Writer.TryComplete();
+
+        // A processor that ended before the reader ended on a request it could not answer. No request after it
+        // can be answered either — a Kafka client takes answers in the order of its requests — so the reader
+        // stops and the caller closes the connection (#281).
+        if (first == processorTask)
+        {
+            await readerStop.CancelAsync();
+        }
 
         // Wait for both to finish
         try { await Task.WhenAll(readerTask, processorTask); }
@@ -185,10 +195,14 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to parse Kafka request ({Size} bytes) from {Endpoint}", size, endpoint);
+                    // A request that cannot be read cannot be answered: there is no API to answer in, and often
+                    // no correlation id. Kafka closes the connection for it. Reading on left the client waiting
+                    // for an answer until its request timeout, and handed it the answer to its next request as
+                    // the answer to this one (#281).
+                    _logger.LogWarning(ex, "Failed to parse Kafka request ({Size} bytes) from {Endpoint}; closing the connection", size, endpoint);
                     ArrayPool<byte>.Shared.Return(rentedBuffer);
                     pipeReader.AdvanceTo(buffer.GetPosition(totalFrameSize));
-                    continue;
+                    break;
                 }
 
                 // Advance pipe past the consumed frame
@@ -261,10 +275,15 @@ public sealed class KafkaConnectionHandler : IConnectionHandler
             }
             catch (Exception ex)
             {
-                // Don't kill the connection for a single request failure — log and continue
-                // so subsequent requests on the same connection still work.
-                _logger.LogError(ex, "Unhandled exception processing {ApiKey} (correlationId={CorrelationId})",
+                // A request that failed in its handler, or whose answer could not be written, ends the
+                // connection (#281). It was logged and the next request served, with nothing written for this
+                // one: the client waited for it until its request timeout, and a Kafka client matches answers to
+                // requests by their order, so it read the next answer as this request's. Kafka answers with an
+                // error response of the API where it can build one and closes the connection where it cannot;
+                // no error response is built here, and a closed connection is what every client retries on.
+                _logger.LogError(ex, "Unhandled exception processing {ApiKey} (correlationId={CorrelationId}); closing the connection",
                     pending.Request.ApiKey, pending.Request.CorrelationId);
+                return;
             }
             finally
             {

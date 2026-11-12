@@ -396,6 +396,7 @@ the request.
 | 19   | GroupAuthorizationFailed        |
 | 20   | NotCoordinator                  |
 | 21   | CoordinatorNotAvailable         |
+| 22   | InternalError                   |
 | 30-37 | Transaction errors             |
 | 40-42 | Security errors                |
 | 50-51 | Config errors                  |
