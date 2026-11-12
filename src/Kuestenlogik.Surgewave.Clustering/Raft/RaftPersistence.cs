@@ -116,6 +116,12 @@ public sealed partial class RaftPersistence
     /// <summary>
     /// Load log entries from disk.
     /// </summary>
+    /// <remarks>
+    /// A log that cannot be opened or read is an error, and the caller's: it used to be logged and answered with no
+    /// entries, which a node takes for the log of a broker that never ran. That node then led a new cluster — a new
+    /// cluster id, none of the topics — and appended its entries, numbered from 1 again, behind the ones it could
+    /// not read; and <see cref="TruncateLogAsync"/>, which reads the log to rewrite it, rewrote it empty.
+    /// </remarks>
     public async Task<List<RaftLogEntry>> LoadLogAsync(CancellationToken ct)
     {
         EnsureDirectoryExists();
@@ -127,27 +133,19 @@ public sealed partial class RaftPersistence
             return entries;
         }
 
-        try
-        {
-            await using var stream = new FileStream(_logFile, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var reader = new BinaryReader(stream);
+        await using var stream = new FileStream(_logFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var reader = new BinaryReader(stream);
 
-            while (stream.Position < stream.Length)
+        while (stream.Position < stream.Length)
+        {
+            var entry = ReadLogEntry(reader);
+            if (entry != null)
             {
-                var entry = ReadLogEntry(reader);
-                if (entry != null)
-                {
-                    entries.Add(entry);
-                }
+                entries.Add(entry);
             }
-
-            LogEntriesLoaded(entries.Count);
-        }
-        catch (Exception ex)
-        {
-            LogLogLoadError(ex);
         }
 
+        LogEntriesLoaded(entries.Count);
         return entries;
     }
 
@@ -384,9 +382,6 @@ public sealed partial class RaftPersistence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Loaded {Count} Raft log entries")]
     private partial void LogEntriesLoaded(int count);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error loading Raft log")]
-    private partial void LogLogLoadError(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Truncated log from index {FromIndex}, removed {Count} entries")]
     private partial void LogLogTruncated(long fromIndex, int count);

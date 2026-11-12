@@ -58,6 +58,10 @@ public sealed partial class RaftNode : IAsyncDisposable
     // Shutdown state
     private volatile bool _isShuttingDown;
 
+    // What this node writes to its log and state files passes through here — a proposal, a vote, the entries of a
+    // leader — and DisposeAsync closes it: a disposed node writes nothing, whoever still holds it.
+    private readonly WriteGate _writes = new();
+
     /// <summary>
     /// Event raised when the leader detects it has lost quorum connectivity.
     /// </summary>
@@ -291,6 +295,12 @@ public sealed partial class RaftNode : IAsyncDisposable
         // Whoever still waits for a node that never caught up is told so.
         _caughtUp.TrySetCanceled();
 
+        // The stop's handshake with the node's writers: none is admitted from here on, and those under way have
+        // written what they write when this returns. The hosts dispose the node before the controller and the
+        // replication server, which went on proposing and passing on a leader's entries, and the node went on
+        // appending them to raft-log.bin — while the broker started next on that directory was loading it.
+        await _writes.CloseAsync().ConfigureAwait(false);
+
         if (_cts is null) return;
 
         try { await _cts.CancelAsync(); }
@@ -402,6 +412,22 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public async Task<RequestVoteResponse> HandleRequestVoteAsync(RequestVoteRequest request, CancellationToken ct)
     {
+        // A disposed node grants no vote: it could not persist it.
+        if (!_writes.TryEnter())
+            return new RequestVoteResponse(_currentTerm, false);
+
+        try
+        {
+            return await DecideVoteAsync(request, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writes.Exit();
+        }
+    }
+
+    private async Task<RequestVoteResponse> DecideVoteAsync(RequestVoteRequest request, CancellationToken ct)
+    {
         bool stateChanged;
         int termToSave;
         int? votedForToSave;
@@ -464,6 +490,22 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// Handle AppendEntries RPC from leader.
     /// </summary>
     public async Task<AppendEntriesResponse> HandleAppendEntriesAsync(AppendEntriesRequest request, CancellationToken ct)
+    {
+        // A disposed node takes no entry: it could not persist it.
+        if (!_writes.TryEnter())
+            return new AppendEntriesResponse(_currentTerm, false, 0);
+
+        try
+        {
+            return await FollowLeaderAsync(request, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writes.Exit();
+        }
+    }
+
+    private async Task<AppendEntriesResponse> FollowLeaderAsync(AppendEntriesRequest request, CancellationToken ct)
     {
         bool stateChanged;
         bool logChanged;
@@ -586,7 +628,7 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     /// <summary>
     /// Propose a new command to be replicated (leader only).
-    /// Returns the log index if successful, or -1 if not leader.
+    /// Returns the log index if successful, or -1 if not leader, or if the node was disposed.
     /// </summary>
     public async Task<long> ProposeAsync(MetadataCommandType commandType, byte[] data, CancellationToken ct)
     {
@@ -595,7 +637,8 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         lock (_lock)
         {
-            if (_state != RaftState.Leader)
+            // Admitted with the entry, under the lock: a disposed node holds no entry it did not write.
+            if (_state != RaftState.Leader || !_writes.TryEnter())
             {
                 return -1;
             }
@@ -615,8 +658,15 @@ public sealed partial class RaftNode : IAsyncDisposable
             LogEntryProposed(entry.Index, commandType);
         }
 
-        // Persist log entry before considering it proposed (Raft correctness requirement)
-        await _persistence.AppendEntriesAsync([entryToSave], ct);
+        try
+        {
+            // Persist log entry before considering it proposed (Raft correctness requirement)
+            await _persistence.AppendEntriesAsync([entryToSave], ct);
+        }
+        finally
+        {
+            _writes.Exit();
+        }
 
         // Commit what is already on a majority, here rather than on the next heartbeat tick
         // (#177). For a single-voter quorum this entry IS on a majority the moment it is

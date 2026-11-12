@@ -59,7 +59,7 @@ public sealed partial class ClusterController
                 var clusterId = _clusterIdentity.ProposeClusterId();
                 var data = JsonSerializer.SerializeToUtf8Bytes(
                     new ClusterIdSetCommand(clusterId), ClusteringJsonContext.Default.ClusterIdSetCommand);
-                var index = await _raftNode.ProposeAsync(MetadataCommandType.ClusterIdSet, data, ct).ConfigureAwait(false);
+                var index = await ProposeAsync(MetadataCommandType.ClusterIdSet, data, ct).ConfigureAwait(false);
                 if (index < 0)
                     return;
 

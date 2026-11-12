@@ -714,6 +714,26 @@ An embedded broker (`SurgewaveRuntime`) that is its whole quorum is returned fro
 is part of a larger quorum is returned as before, because the brokers of an embedding host are started one after
 the other; the host waits on the new `SurgewaveRuntime.WaitForMetadataCaughtUpAsync` once it has started them.
 
+### A stopped broker writes nothing more to its metadata log, and a log that cannot be read stops the start
+
+A broker's Raft node and its controller went on writing to the metadata log after they had been stopped. Stopping
+them cancelled their work, and a cancellation ends a wait, not a write: a controller that had just taken office
+still registered itself and created the internal topics, and the node, which a broker disposes first, still
+appended those entries to `raft-log.bin` — as it did with the entries a leader sent and the votes a candidate
+asked for while the replication server was still up. A process that exits is not affected. A broker restarted in
+the same process on the same directory is, which is what an embedding host and its tests do: the new broker read a
+log the old one was still appending to, and ended up with entries it had not loaded behind the ones it had.
+
+If the new broker opened the log at the moment the old one was writing, it could not read it at all. That was
+logged as an error and treated as an empty log, so the broker started as the first of a new cluster: with a new
+cluster id, without the topics, its entries numbered from 1 again behind the ones it had not read.
+
+- Stopping the Raft node and stopping the controller now return only when their writes under way are done, and
+  nothing is written after that: a proposal is refused as it is on a node that does not lead, an AppendEntries is
+  answered as not accepted, a vote is not granted.
+- A metadata log that exists and cannot be opened or read fails the broker's start with the I/O error. Truncating
+  a follower's log, which reads it first, fails in the same way instead of rewriting it empty.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

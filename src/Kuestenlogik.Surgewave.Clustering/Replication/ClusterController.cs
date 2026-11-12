@@ -533,6 +533,11 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             try { await _cts.CancelAsync(); } catch (ObjectDisposedException) { }
         }
 
+        // The stop's handshake with what this controller has under way — taking office, the internal topics, a
+        // request it is answering: none of it writes to the metadata log from here on, and what it was writing is
+        // written when this returns.
+        await _decisions.CloseAsync().ConfigureAwait(false);
+
         if (_controllerTask != null)
         {
             try { await _controllerTask; } catch (OperationCanceledException) { }
@@ -764,7 +769,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var command = new TopicCreatedCommand(topic, topicId, partitionCount, replicationFactor, config, assignments);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.TopicCreatedCommand);
 
-        var index = await _raftNode!.ProposeAsync(MetadataCommandType.TopicCreated, data, ct);
+        var index = await ProposeAsync(MetadataCommandType.TopicCreated, data, ct);
         if (index < 0)
         {
             LogNotController("CreateTopic (Raft propose failed)");
@@ -772,7 +777,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         }
 
         // Wait for commit
-        var committed = await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(10), ct);
+        var committed = await _raftNode!.WaitForCommitAsync(index, TimeSpan.FromSeconds(10), ct);
         if (!committed)
         {
             LogRaftCommitTimeout("TopicCreated", index);
@@ -812,7 +817,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             var assignCmd = new PartitionAssignedCommand(topic, partition, replicas, _config.MinInSyncReplicas);
             var assignData = JsonSerializer.SerializeToUtf8Bytes(assignCmd, ClusteringJsonContext.Default.PartitionAssignedCommand);
 
-            lastIndex = await _raftNode!.ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
+            lastIndex = await ProposeAsync(MetadataCommandType.PartitionAssigned, assignData, ct);
             if (lastIndex < 0)
             {
                 LogNotController("CreateTopic (Raft propose failed)");
@@ -869,7 +874,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             brokerId, host, port, rack, incarnationId, interBrokerProtocol, replicationPort);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.BrokerRegisteredCommand);
 
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.BrokerRegistered, data, ct);
+        var index = await ProposeAsync(MetadataCommandType.BrokerRegistered, data, ct);
         if (index < 0) return false;
 
         var committed = await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
@@ -924,7 +929,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var command = new BrokerRemovedCommand(brokerId);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.BrokerRemovedCommand);
 
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.BrokerRemoved, data, ct);
+        var index = await ProposeAsync(MetadataCommandType.BrokerRemoved, data, ct);
         if (index < 0) return BrokerRemovalOutcome.NotCommitted;
 
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct)
@@ -945,7 +950,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var command = new IsrChangedCommand(tp.Topic, tp.Partition, isr);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.IsrChangedCommand);
 
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.IsrChanged, data, ct);
+        var index = await ProposeAsync(MetadataCommandType.IsrChanged, data, ct);
         if (index < 0) return false;
 
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
@@ -973,7 +978,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var command = new LeaderChangedCommand(tp.Topic, tp.Partition, newLeader, leaderEpoch);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.LeaderChangedCommand);
 
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.LeaderChanged, data, ct);
+        var index = await ProposeAsync(MetadataCommandType.LeaderChanged, data, ct);
         if (index < 0) return -1;
 
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct) ? index : -1;
@@ -992,7 +997,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var command = new TopicDeletedCommand(topicName);
         var data = JsonSerializer.SerializeToUtf8Bytes(command, ClusteringJsonContext.Default.TopicDeletedCommand);
 
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.TopicDeleted, data, ct);
+        var index = await ProposeAsync(MetadataCommandType.TopicDeleted, data, ct);
         if (index < 0) return false;
 
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct);
@@ -1016,7 +1021,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             return false;
         var data = JsonSerializer.SerializeToUtf8Bytes(
             new GroupConfigChangedCommand(groupId, name, value), ClusteringJsonContext.Default.GroupConfigChangedCommand);
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.GroupConfigChanged, data, ct).ConfigureAwait(false);
+        var index = await ProposeAsync(MetadataCommandType.GroupConfigChanged, data, ct).ConfigureAwait(false);
         if (index < 0) return false;
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }
@@ -1042,7 +1047,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var data = JsonSerializer.SerializeToUtf8Bytes(
             new ConfigChangedCommand(topic, new Dictionary<string, string>(set), [.. removed]),
             ClusteringJsonContext.Default.ConfigChangedCommand);
-        var index = await _raftNode.ProposeAsync(MetadataCommandType.ConfigChanged, data, ct).ConfigureAwait(false);
+        var index = await ProposeAsync(MetadataCommandType.ConfigChanged, data, ct).ConfigureAwait(false);
         if (index < 0) return false;
         return await _raftNode.WaitForCommitAsync(index, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
     }

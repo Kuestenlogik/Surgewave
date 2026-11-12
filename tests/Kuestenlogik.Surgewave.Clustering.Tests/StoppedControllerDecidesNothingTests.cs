@@ -117,4 +117,31 @@ public sealed class StoppedControllerDecidesNothingTests : IAsyncLifetime
         Assert.Equal(indexBefore, _raftNode.LastLogIndex);
         Assert.Contains(FailedBrokerId, _state.GetIsrSnapshot(tp));
     }
+
+    /// <summary>
+    /// Whatever a stopped controller is still asked or still has under way, it writes nothing: its stop cancels its
+    /// work, and a cancellation does not end a write. The controller that had just taken office went on to register
+    /// itself and to create the internal topics after its stop had returned, and the log index the test above reads
+    /// after the stop moved under it ("Assert.Equal() Failure: Values differ", now and then on a loaded machine).
+    /// </summary>
+    [Fact(Timeout = 60_000)]
+    public async Task ARequestAnsweredAfterTheControllerStopped_WritesNothingToTheMetadataLog()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        await _controller.DisposeAsync();
+        var indexBefore = _raftNode.LastLogIndex;
+
+        // The node still leads, so its log would take the entries.
+        Assert.True(_raftNode.IsLeader);
+        Assert.False(await _controller.RegisterBrokerViaRaftAsync(
+            FailedBrokerId, "localhost", 9093, rack: null, Guid.NewGuid(),
+            InterBrokerProtocolFeature.LocalMaxSupported, replicationPort: 10093, cancellationToken));
+        Assert.False(await _controller.CreateTopicAsync(
+            "orders", partitionCount: 1, replicationFactor: 1, config: null, replicaAssignment: null, cancellationToken));
+
+        Assert.Equal(indexBefore, _raftNode.LastLogIndex);
+        Assert.Null(_state.GetBroker(FailedBrokerId));
+        Assert.Null(_state.GetTopic("orders"));
+    }
 }
