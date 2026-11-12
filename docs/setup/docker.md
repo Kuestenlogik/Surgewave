@@ -4,35 +4,48 @@ Run Surgewave in Docker containers for easy deployment and isolation.
 
 ## Quick Start
 
+The broker image is `ghcr.io/kuestenlogik/surgewave-broker` (also `kuestenlogik/surgewave-broker` on
+Docker Hub). The Compose files in the repository are the quickest way to a running broker:
+
 ```bash
-docker run -d \
-  --name surgewave \
-  -p 9092:9092 \
-  -p 9093:9093 \
-  kuestenlogik/surgewave
+# Single broker
+docker compose -f deployments/docker/docker-compose.yml up -d --wait surgewave-broker
+
+# Three brokers
+docker compose -f deployments/docker/docker-compose.cluster.yml up -d --wait
 ```
 
 ## Docker Compose
 
 ### Single Broker
 
-Create `docker-compose.yml`:
-
 ```yaml
-version: '3.8'
 services:
-  surgewave:
-    image: kuestenlogik/surgewave:latest
-    container_name: surgewave
+  surgewave-broker:
+    image: ghcr.io/kuestenlogik/surgewave-broker:0.6.0
+    # The image runs as an unprivileged user that cannot write to a fresh named volume.
+    user: "0:0"
     ports:
       - "9092:9092"
       - "9093:9093"
     environment:
-      - Surgewave__BrokerId=1
-      - Surgewave__Host=0.0.0.0
-      - Surgewave__AutoCreateTopics=true
+      # The name clients are told; the listener binds every interface.
+      - Surgewave__Host=surgewave-broker
+      - Surgewave__BindAddress=0.0.0.0
+      # gRPC, REST, /health and /metrics in cleartext; the image binds them over HTTPS,
+      # which needs a certificate.
+      - Surgewave__GrpcUseTls=false
+      - Kestrel__Endpoints__Grpc__Url=http://*:9093
+      - Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094
+      - Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2
     volumes:
-      - surgewave-data:/data
+      - surgewave-data:/app/data
+    healthcheck:
+      test: ["CMD", "dotnet", "/app/surgewave-broker.dll", "health", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
@@ -40,68 +53,25 @@ volumes:
 ```
 
 ```bash
-docker-compose up -d
+docker compose up -d --wait
 ```
 
 ### Multi-Broker Cluster
 
+Use `deployments/docker/docker-compose.cluster.yml`. Every broker carries its own id and name and
+the same two lists — who exists and who votes on metadata:
+
 ```yaml
-version: '3.8'
-services:
-  surgewave-1:
-    image: kuestenlogik/surgewave:latest
-    container_name: surgewave-1
-    ports:
-      - "9092:9092"
-      - "9093:9093"
-    environment:
-      - Surgewave__BrokerId=1
-      - Surgewave__Host=surgewave-1
-      - Surgewave__ClusterNodes=surgewave-1:9092,surgewave-2:9092,surgewave-3:9092
-    volumes:
-      - surgewave-1-data:/data
-    networks:
-      - surgewave-network
-
-  surgewave-2:
-    image: kuestenlogik/surgewave:latest
-    container_name: surgewave-2
-    ports:
-      - "9192:9092"
-      - "9193:9093"
-    environment:
-      - Surgewave__BrokerId=2
-      - Surgewave__Host=surgewave-2
-      - Surgewave__ClusterNodes=surgewave-1:9092,surgewave-2:9092,surgewave-3:9092
-    volumes:
-      - surgewave-2-data:/data
-    networks:
-      - surgewave-network
-
-  surgewave-3:
-    image: kuestenlogik/surgewave:latest
-    container_name: surgewave-3
-    ports:
-      - "9292:9092"
-      - "9293:9093"
-    environment:
-      - Surgewave__BrokerId=3
-      - Surgewave__Host=surgewave-3
-      - Surgewave__ClusterNodes=surgewave-1:9092,surgewave-2:9092,surgewave-3:9092
-    volumes:
-      - surgewave-3-data:/data
-    networks:
-      - surgewave-network
-
-networks:
-  surgewave-network:
-    driver: bridge
-
-volumes:
-  surgewave-1-data:
-  surgewave-2-data:
-  surgewave-3-data:
+environment:
+  Surgewave__BrokerId: 1
+  Surgewave__Host: surgewave-1
+  Surgewave__BindAddress: 0.0.0.0
+  Surgewave__ClusterNodes: 1:surgewave-1:9092:10092,2:surgewave-2:9092:10092,3:surgewave-3:9092:10092
+  Surgewave__ControllerQuorumVoters: 1@surgewave-1:10092,2@surgewave-2:10092,3@surgewave-3:10092
 ```
+
+A broker is ready only once it has a quorum, so no broker may wait for another broker's health.
+[Docker Deployment](../deployment/docker.md) explains the settings and the start order.
 
 ## Building Custom Image
 
@@ -132,38 +102,43 @@ docker build -t my-surgewave .
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `Surgewave__BrokerId` | Unique broker ID | 1 |
-| `Surgewave__Host` | Bind address | 0.0.0.0 |
-| `Surgewave__Port` | Kafka protocol port | 9092 |
-| `Surgewave__GrpcPort` | gRPC API port | 9093 |
-| `Surgewave__DataDirectory` | Data storage path | /data |
-| `Surgewave__StorageMode` | Storage backend | File |
+| `Surgewave__BrokerId` | Unique broker ID | 0 |
+| `Surgewave__Host` | Name or address clients and brokers are told | localhost |
+| `Surgewave__BindAddress` | Address the client listener binds; `Host` when unset | - |
+| `Surgewave__Port` | Client port | 9092 |
+| `Surgewave__GrpcPort` | gRPC / REST port | 9093 |
+| `Surgewave__ReplicationPort` | Inter-broker port | 10092 |
+| `Surgewave__DataDirectory` | Data storage path | ./data (`/app/data` in the image) |
 | `Surgewave__AutoCreateTopics` | Auto-create topics | true |
-| `Surgewave__ClusterNodes` | Cluster endpoints | - |
+| `Surgewave__ClusterNodes` | Brokers of the cluster, `id:host:port:replicationPort` | - |
+| `Surgewave__ControllerQuorumVoters` | Voters, `id@host:replicationPort` | - |
 
 ## Volume Mounts
 
 | Path | Purpose |
 |------|---------|
-| `/data` | Topic data and offsets |
-| `/logs` | Log files |
-| `/config` | Custom configuration |
+| `/app/data` | Topic data, offsets and the metadata log |
+| `/app/logs` | Log files |
+| `/app/plugins` | Installed plugins |
 
 ## Health Checks
 
-Add health check to docker-compose:
+The image holds no `curl`; the broker executable asks its own health endpoint:
 
 ```yaml
 services:
-  surgewave:
+  surgewave-broker:
     # ...
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:9093/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      test: ["CMD", "dotnet", "/app/surgewave-broker.dll", "health", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 ```
+
+`/health/ready` answers 200 once the broker has caught up with the metadata log, which in a cluster
+takes a majority of the brokers; `/health/live` answers as soon as the HTTP endpoint is bound.
 
 ## Resource Limits
 

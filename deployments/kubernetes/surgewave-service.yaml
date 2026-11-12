@@ -1,5 +1,5 @@
----
-# Headless service for StatefulSet DNS
+# Headless service for StatefulSet DNS: every broker is
+# <pod>.surgewave-headless.<namespace>.svc, the name it tells clients and the other brokers.
 apiVersion: v1
 kind: Service
 metadata:
@@ -9,6 +9,9 @@ metadata:
     app.kubernetes.io/name: surgewave
 spec:
   clusterIP: None
+  # The brokers reach each other by these names before they are ready: a broker is ready only
+  # once it has a quorum, and it finds the quorum through this service.
+  publishNotReadyAddresses: true
   selector:
     app: surgewave
   ports:
@@ -23,7 +26,7 @@ spec:
       targetPort: replication
 
 ---
-# Client-facing service (LoadBalancer or ClusterIP)
+# Client-facing service (LoadBalancer or ClusterIP): ready brokers only
 apiVersion: v1
 kind: Service
 metadata:

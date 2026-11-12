@@ -18,10 +18,18 @@ Deployment configurations for Surgewave in production environments.
 
 | Path | Description |
 |------|-------------|
-| `kubernetes/surgewave-statefulset.yaml` | StatefulSet for Surgewave brokers |
+| `kubernetes/surgewave-statefulset.yaml` | StatefulSet for three Surgewave brokers, PodDisruptionBudget |
 | `kubernetes/surgewave-service.yaml` | Kubernetes Service definitions |
 | `kubernetes/surgewave-configmap.yaml` | Configuration ConfigMap |
 | `kubernetes/operator/` | Surgewave Kubernetes Operator CRDs and RBAC |
+
+### Docker Compose
+
+| Path | Description |
+|------|-------------|
+| `docker/docker-compose.yml` | Single broker with gateway, Connect worker, Control UI and marketplace |
+| `docker/docker-compose.cluster.yml` | Three brokers; Prometheus and Grafana under the `monitoring` profile |
+| `docker/docker-compose.kafka.yml` | Apache Kafka, for benchmark comparison |
 
 ### Monitoring
 
@@ -44,30 +52,51 @@ Deployment configurations for Surgewave in production environments.
 
 ```bash
 # Install a 3-broker cluster
-helm install surgewave deploy/helm/surgewave \
+helm install surgewave deployments/helm/surgewave \
   --namespace surgewave \
   --create-namespace
 
 # Custom values
-helm install surgewave deploy/helm/surgewave -f custom-values.yaml
+helm install surgewave deployments/helm/surgewave -f custom-values.yaml
 
 # Upgrade
-helm upgrade surgewave deploy/helm/surgewave
+helm upgrade surgewave deployments/helm/surgewave
 
 # Or use the convenience scripts
-./deploy/scripts/install.sh --replicas 3 --namespace surgewave
-./deploy/scripts/upgrade.sh --set broker.replicaCount=5
-./deploy/scripts/uninstall.sh --delete-pvcs
+./deployments/scripts/install.sh --replicas 3 --namespace surgewave
+./deployments/scripts/uninstall.sh --delete-pvcs
 ```
 
 ### Kubernetes (Direct)
 
 ```bash
-# Apply configurations
+# Three brokers, in any namespace
 kubectl apply -f kubernetes/surgewave-configmap.yaml
 kubectl apply -f kubernetes/surgewave-service.yaml
 kubectl apply -f kubernetes/surgewave-statefulset.yaml
+kubectl rollout status statefulset/surgewave
 ```
+
+### Docker Compose
+
+```bash
+# Single broker
+docker compose -f docker/docker-compose.yml up -d --wait surgewave-broker
+
+# Three brokers
+docker compose -f docker/docker-compose.cluster.yml up -d --wait
+```
+
+### A broker is ready only with a quorum
+
+A broker reports ready (`/health/ready`, the Compose health check, the readiness probe) only once it
+has caught up with the metadata log, which takes a majority of the brokers. All three deployments
+therefore start the brokers together and let none of them wait for another one's readiness: the
+StatefulSets use `podManagementPolicy: Parallel` and a headless service with
+`publishNotReadyAddresses: true`, liveness is `/health/live`, which never fails for want of a
+quorum, and no Compose broker depends on another broker's health. `scripts/ci/compose-cluster-smoke.sh`
+and `scripts/ci/kubernetes-cluster-smoke.sh` bring the deployments up and check them;
+`.github/workflows/deployments.yml` runs both.
 
 ### Kubernetes Operator
 

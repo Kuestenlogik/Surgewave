@@ -7,7 +7,12 @@ metadata:
 spec:
   serviceName: {{ include "surgewave.fullname" . }}-headless
   replicas: {{ .Values.broker.replicaCount }}
+  # All brokers start together: a broker is ready only with a quorum, so the first one would
+  # never become ready alone and OrderedReady would never start the second.
   podManagementPolicy: Parallel
+  # One broker at a time, each only after the one before is ready again.
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       {{- include "surgewave.selectorLabels" . | nindent 6 }}
@@ -55,7 +60,7 @@ spec:
       {{- end }}
       containers:
         - name: surgewave-broker
-          image: "{{ .Values.broker.image.repository }}:{{ .Values.broker.image.tag }}"
+          image: "{{ .Values.broker.image.repository }}:{{ .Values.broker.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.broker.image.pullPolicy }}
           ports:
             - name: kafka
@@ -84,22 +89,30 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # The pod's ordinal, which the StatefulSet controller sets as a label (Kubernetes 1.28+).
             - name: Surgewave__BrokerId
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.name
-            - name: Surgewave__ClusterNodes
-              value: {{ include "surgewave.clusterNodes" . | quote }}
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            # The pod's stable DNS name: what clients and the other brokers are told.
+            - name: Surgewave__Host
+              value: "$(POD_NAME).{{ include "surgewave.podDomain" . }}"
             {{- with .Values.broker.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           resources:
             {{- toYaml .Values.broker.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: grpc
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /health/live
               port: grpc
-            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
@@ -107,7 +120,6 @@ spec:
             httpGet:
               path: /health/ready
               port: grpc
-            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.readinessProbe.failureThreshold }}

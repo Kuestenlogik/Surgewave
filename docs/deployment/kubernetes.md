@@ -2,189 +2,174 @@
 
 Deploy Surgewave on Kubernetes.
 
+The manifests under `deployments/kubernetes/` bring up three brokers; the [Helm chart](helm.md)
+generates the same for any number. This page explains what they contain and why. Kubernetes 1.28 or
+later is required.
+
 ## Quick Start
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/Kuestenlogik/Surgewave/main/deploy/kubernetes/
+kubectl create namespace surgewave
+kubectl apply -n surgewave \
+  -f deployments/kubernetes/surgewave-configmap.yaml \
+  -f deployments/kubernetes/surgewave-service.yaml \
+  -f deployments/kubernetes/surgewave-statefulset.yaml
+kubectl rollout status -n surgewave statefulset/surgewave
 ```
 
-## Components
+The manifests work in any namespace.
 
-### StatefulSet
+## What a broker cluster needs from Kubernetes
 
-3-replica Surgewave cluster:
+A broker is ready — `/health/ready` answers 200, clients are answered — only once it has caught up
+with the metadata log. That takes a leader, and a leader takes a majority of the controller voters:
+of three brokers, the first one alone is live and not ready; as soon as a second one runs, both are
+ready; the third starts or rejoins at any time. Everything below follows from that.
+
+### Parallel pod management
 
 ```yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: surgewave
 spec:
-  serviceName: surgewave-headless
-  replicas: 3
-  selector:
-    matchLabels:
-      app: surgewave
-  template:
-    spec:
-      containers:
-      - name: surgewave
-        image: kuestenlogik/surgewave:latest
-        ports:
-        - containerPort: 9092
-          name: kafka
-        - containerPort: 9093
-          name: grpc
-        - containerPort: 10092
-          name: replication
-        env:
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: Surgewave__BrokerId
-          value: "$(POD_NAME##*-)"
-        - name: Surgewave__Host
-          value: "$(POD_NAME).surgewave-headless"
-        - name: Surgewave__ClusterNodes
-          value: "surgewave-0.surgewave-headless:9092,surgewave-1.surgewave-headless:9092,surgewave-2.surgewave-headless:9092"
-        volumeMounts:
-        - name: data
-          mountPath: /data
-        resources:
-          requests:
-            memory: "2Gi"
-            cpu: "1"
-          limits:
-            memory: "4Gi"
-            cpu: "2"
-        livenessProbe:
-          tcpSocket:
-            port: 9092
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          tcpSocket:
-            port: 9092
-          initialDelaySeconds: 5
-          periodSeconds: 5
-  volumeClaimTemplates:
-  - metadata:
-      name: data
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      storageClassName: fast-ssd
-      resources:
-        requests:
-          storage: 100Gi
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
 ```
 
-### Services
+The default, `OrderedReady`, starts a pod only when the one before it is ready. The first broker never
+becomes ready alone, so the second would never start. `Parallel` starts all pods together.
+`podManagementPolicy` applies to scaling and to replacing deleted pods only: an update of the pod
+template still replaces one pod at a time, highest ordinal first, each only after the one before is
+ready again.
+
+### A headless service that publishes not-ready addresses
 
 ```yaml
-# Headless service for StatefulSet
 apiVersion: v1
 kind: Service
 metadata:
   name: surgewave-headless
 spec:
   clusterIP: None
-  selector:
-    app: surgewave
-  ports:
-  - name: kafka
-    port: 9092
-  - name: grpc
-    port: 9093
-  - name: replication
-    port: 10092
+  publishNotReadyAddresses: true
+```
 
----
-# Client service
-apiVersion: v1
-kind: Service
+The brokers find each other by their pod DNS names. Without `publishNotReadyAddresses` a pod's name
+resolves only once the pod is ready — and the brokers only become ready once they have found each
+other. The client service (`surgewave`, ClusterIP) does not set it: it routes to ready brokers only.
+
+### A stable identity per pod
+
+```yaml
+env:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+  - name: POD_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+  # The broker id is the pod's ordinal: 0, 1, 2.
+  - name: Surgewave__BrokerId
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+  # What clients and the other brokers are told: the pod's stable DNS name.
+  - name: Surgewave__Host
+    value: "$(POD_NAME).surgewave-headless.$(POD_NAMESPACE).svc"
+  - name: Surgewave__ClusterNodes
+    value: "0:surgewave-0.surgewave-headless.$(POD_NAMESPACE).svc:9092:10092,1:surgewave-1.surgewave-headless.$(POD_NAMESPACE).svc:9092:10092,2:surgewave-2.surgewave-headless.$(POD_NAMESPACE).svc:9092:10092"
+  - name: Surgewave__ControllerQuorumVoters
+    value: "0@surgewave-0.surgewave-headless.$(POD_NAMESPACE).svc:10092,1@surgewave-1.surgewave-headless.$(POD_NAMESPACE).svc:10092,2@surgewave-2.surgewave-headless.$(POD_NAMESPACE).svc:10092"
+```
+
+- `Surgewave__BrokerId` is a number. The StatefulSet controller labels every pod with its ordinal
+  (`apps.kubernetes.io/pod-index`, Kubernetes 1.28+), and the downward API hands the label to the
+  broker; no init container or shell is involved.
+- `Surgewave__Host` is the name the broker tells clients and the other brokers. The client listener
+  binds every interface (`"BindAddress": "0.0.0.0"` in the ConfigMap), because a name cannot be bound.
+- `ClusterNodes` (`id:host:port:replicationPort`) and `ControllerQuorumVoters`
+  (`id@host:replicationPort`) are the same on every broker and name all three. Changing `replicas`
+  means changing both lists.
+
+### Probes
+
+```yaml
+startupProbe:
+  httpGet: { path: /health/live, port: grpc }
+  periodSeconds: 5
+  failureThreshold: 60
+livenessProbe:
+  httpGet: { path: /health/live, port: grpc }
+  periodSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  httpGet: { path: /health/ready, port: grpc }
+  periodSeconds: 5
+  failureThreshold: 3
+```
+
+| Probe | Endpoint | Meaning |
+|-------|----------|---------|
+| startup | `/health/live` | The HTTP endpoint is bound. Holds the other two back until then. |
+| liveness | `/health/live` | The process answers. Never fails for want of a quorum, so a broker that waits for its peers is not restarted. |
+| readiness | `/health/ready` | The broker has caught up with the metadata log. A broker without a quorum is taken out of the client service. |
+
+A broker that finds no peer when it starts waits for one (`RaftPeerDiscoveryTimeoutSeconds`, 30 s)
+before it binds the HTTP endpoint, and every broker of a new cluster starts that way. The startup
+probe's `periodSeconds × failureThreshold` has to cover that wait plus the start itself on the CPU
+the pod is given.
+
+### PodDisruptionBudget
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
 metadata:
   name: surgewave
 spec:
-  type: ClusterIP
+  maxUnavailable: 1
   selector:
-    app: surgewave
-  ports:
-  - name: kafka
-    port: 9092
-  - name: grpc
-    port: 9093
+    matchLabels:
+      app: surgewave
 ```
 
-### ConfigMap
+Two of three brokers keep the quorum; a node drain may take one.
 
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: surgewave-config
-data:
-  appsettings.json: |
-    {
-      "Surgewave": {
-        "StorageMode": "File",
-        "DataDirectory": "/data",
-        "LogSegmentBytes": 1073741824,
-        "LogRetentionHours": 168,
-        "AutoCreateTopics": true,
-        "DefaultNumPartitions": 6,
-        "DefaultReplicationFactor": 3,
-        "MinInSyncReplicas": 2
-      }
-    }
-```
+### Configuration
 
-## Scaling
+The ConfigMap replaces the image's `appsettings.json`. It binds gRPC, REST, `/health` and `/metrics`
+in cleartext on port 9093 (the image's own file binds them over HTTPS, which needs a certificate;
+see [TLS](tls.md)) and leaves the embedded Connect worker off: with it on, a broker that does not
+lead the partition of the worker's pipeline store topic does not finish starting.
+
+### Storage
+
+The volume claim names no storage class and gets the cluster's default one. Name one in
+`volumeClaimTemplates` for production.
+
+## Clients
+
+Inside the cluster, clients bootstrap from the client service `surgewave:9092` and are then told the
+brokers' pod names (`surgewave-0.surgewave-headless.<namespace>.svc:9092`, …).
+
+The `surgewave-external` LoadBalancer service reaches a broker from outside, but the broker still
+tells the client those in-cluster names. A client outside the cluster has to be able to resolve and
+reach them; a broker has one advertised name.
+
+## Operations
 
 ```bash
-# Scale to 5 brokers
-kubectl scale statefulset surgewave --replicas=5
+# Replace one broker; it rejoins and becomes ready again
+kubectl delete pod -n surgewave surgewave-1
+kubectl rollout status -n surgewave statefulset/surgewave
 
-# Scale down (careful - move partitions first)
-kubectl scale statefulset surgewave --replicas=3
+# Rolling restart, one broker at a time
+kubectl rollout restart -n surgewave statefulset/surgewave
 ```
 
-## External Access
-
-### LoadBalancer
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: surgewave-external
-spec:
-  type: LoadBalancer
-  selector:
-    app: surgewave
-  ports:
-  - name: kafka
-    port: 9092
-  - name: grpc
-    port: 9093
-```
-
-### NodePort
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: surgewave-nodeport
-spec:
-  type: NodePort
-  selector:
-    app: surgewave
-  ports:
-  - name: kafka
-    port: 9092
-    nodePort: 30092
-```
+`kubectl scale` alone does not add a broker to the cluster: the new pod is not in `ClusterNodes` and
+`ControllerQuorumVoters` of the others.
 
 ## Resource Requirements
 
@@ -193,20 +178,6 @@ spec:
 | Small | 1 | 2Gi | 50Gi |
 | Medium | 2 | 4Gi | 100Gi |
 | Large | 4 | 8Gi | 500Gi |
-
-## Pod Disruption Budget
-
-```yaml
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: surgewave-pdb
-spec:
-  minAvailable: 2
-  selector:
-    matchLabels:
-      app: surgewave
-```
 
 ## Monitoring
 
@@ -226,6 +197,8 @@ spec:
     path: /metrics
     interval: 30s
 ```
+
+`/metrics` answers whether or not the broker is ready.
 
 ## Next Steps
 

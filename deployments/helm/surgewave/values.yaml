@@ -3,10 +3,15 @@
 # ─── Broker ───────────────────────────────────────────────────────────────────
 
 broker:
+  # Every broker votes on metadata. A broker is ready only once it has caught up with the
+  # metadata log, which takes a majority of the brokers: one of three alone is never ready.
+  # The number is part of every broker's configuration (cluster nodes, quorum voters);
+  # changing it restarts all brokers with a new quorum.
   replicaCount: 3
   image:
-    repository: surgewave/surgewave-broker
-    tag: "0.1.0"
+    repository: ghcr.io/kuestenlogik/surgewave-broker
+    # Defaults to the chart's appVersion.
+    tag: ""
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -32,7 +37,6 @@ broker:
     logSegmentBytes: 1073741824
     maxConnectionsPerIp: 100
     maxRequestSize: 104857600
-    useRaft: true
     minInsyncReplicas: 2
   # Extra environment variables for broker pods
   extraEnv: []
@@ -45,8 +49,9 @@ control:
   enabled: true
   replicaCount: 1
   image:
-    repository: surgewave/surgewave-control
-    tag: "0.1.0"
+    repository: ghcr.io/kuestenlogik/surgewave-control
+    # Defaults to the chart's appVersion.
+    tag: ""
     pullPolicy: IfNotPresent
   port: 5050
   resources:
@@ -75,6 +80,9 @@ schemaRegistry:
 
 # ─── Kafka Connect ────────────────────────────────────────────────────────────
 
+# The Connect worker embedded in each broker. Leave it off with more than one broker: a broker
+# that does not lead the partition of the worker's pipeline store topic does not finish
+# starting and never becomes ready.
 connect:
   enabled: false
   groupId: surgewave-connect
@@ -97,7 +105,6 @@ tieredStorage:
     container: ""
   gcp:
     bucket: ""
-    projectId: ""
 
 # ─── Features ─────────────────────────────────────────────────────────────────
 
@@ -149,6 +156,10 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# The cluster's DNS domain. The brokers tell clients and each other their pod's name under it:
+# <pod>.<release>-headless.<namespace>.svc.<clusterDomain>
+clusterDomain: cluster.local
+
 podSecurityContext:
   runAsUser: 1000
   fsGroup: 1000
@@ -161,15 +172,29 @@ tolerations: []
 # Anti-affinity: "soft" (preferred) or "hard" (required)
 antiAffinity: soft
 
-# Health checks
+# Health checks, all on the gRPC / REST port.
+#
+# /health/live answers as soon as the broker's HTTP endpoint is bound, whether or not the broker
+# has a quorum. /health/ready answers 200 only once the broker has caught up with the metadata
+# log, which takes a leader and therefore a majority of the brokers.
+#
+# The startup probe holds the other two back until the endpoint is bound. A broker that finds no
+# peer when it starts waits for one (RaftPeerDiscoveryTimeoutSeconds, 30 s) before it binds the
+# endpoint, and all brokers of a new cluster start that way; periodSeconds * failureThreshold
+# has to cover that wait and the start itself on the CPU the pod is given.
+startupProbe:
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 60
+
+# Restarts a broker whose process no longer answers. Never fails for want of a quorum.
 livenessProbe:
-  initialDelaySeconds: 30
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 3
 
+# Takes a broker without a quorum out of the client Service; it is not restarted.
 readinessProbe:
-  initialDelaySeconds: 10
   periodSeconds: 5
   timeoutSeconds: 3
   failureThreshold: 3

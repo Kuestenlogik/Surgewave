@@ -19,7 +19,8 @@ Surgewave uses `appsettings.json` for configuration:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `BrokerId` | int | 1 | Unique broker identifier |
-| `Host` | string | "localhost" | Bind address |
+| `Host` | string | "localhost" | Name or address clients and the other brokers are told; also the address bound, unless `BindAddress` is set |
+| `BindAddress` | string | unset | Address the client listener binds where `Host` is a DNS name (`0.0.0.0` for every interface) |
 | `Port` | int | 9092 | Kafka protocol port |
 | `GrpcPort` | int | 9093 | gRPC API port |
 | `DataDirectory` | string | "./data" | Data storage path |
@@ -132,7 +133,8 @@ Ephemeral topics store messages in a fixed-size ring buffer. When full, oldest m
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `ClusterNodes` | string | "" | Comma-separated broker endpoints |
+| `ClusterNodes` | string | "" | The brokers of the cluster, comma-separated, each `id:host:port:replicationPort` |
+| `ControllerQuorumVoters` | string | "" | The brokers that vote on metadata, each `id@host:replicationPort`; required with `ClusterNodes` |
 | `ClusterId` | string | generated | Cluster identifier. Unset, the first controller generates one and every broker persists it in `cluster.id` |
 | `Rack` | string | null | Rack awareness identifier |
 

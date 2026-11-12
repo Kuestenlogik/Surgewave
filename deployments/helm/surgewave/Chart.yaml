@@ -2,17 +2,17 @@ apiVersion: v2
 name: surgewave
 description: Kuestenlogik.Surgewave - High-performance event streaming platform
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.6.0"
 keywords:
   - streaming
   - kafka
   - event-driven
   - messaging
   - surgewave
-home: https://github.com/your-org/surgewave
+home: https://github.com/Kuestenlogik/Surgewave
 sources:
-  - https://github.com/your-org/surgewave
+  - https://github.com/Kuestenlogik/Surgewave
 maintainers:
   - name: Surgewave Team
     email: surgewave@example.com

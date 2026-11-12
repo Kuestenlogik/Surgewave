@@ -1,79 +1,91 @@
 # Helm Chart
 
-Deploy Surgewave using Helm package manager.
+Deploy Surgewave using the Helm chart in `deployments/helm/surgewave`.
 
 ## Installation
 
 ```bash
-# Add repository (future)
-helm repo add surgewave https://charts.surgewave.io
-helm install surgewave surgewave/surgewave
-
-# From local chart
-helm install surgewave ./deploy/helm/surgewave
+helm install surgewave ./deployments/helm/surgewave \
+  --namespace surgewave --create-namespace
+kubectl rollout status -n surgewave statefulset/surgewave
 ```
+
+This installs three brokers and the Control UI. Kubernetes 1.28 or later is required: the broker id
+is the pod's ordinal, which the chart reads from the `apps.kubernetes.io/pod-index` label.
+
+## What the chart sets up
+
+- A **StatefulSet** with `podManagementPolicy: Parallel`. A broker is ready only once it has caught
+  up with the metadata log, which takes a majority of the brokers; with the default `OrderedReady` the
+  first pod would never become ready and the second would never start. Updates still replace one pod
+  at a time.
+- A **headless service** with `publishNotReadyAddresses: true`, through which the brokers find each
+  other before they are ready, and a **client service** that routes to ready brokers only.
+- Per pod: `Surgewave__BrokerId` (the ordinal) and `Surgewave__Host`, the pod's DNS name
+  `<pod>.<release>-headless.<namespace>.svc.<clusterDomain>`, which clients and the other brokers are
+  told.
+- For all pods: `ClusterNodes` and `ControllerQuorumVoters`, generated for `broker.replicaCount`
+  brokers. Every broker votes.
+- A **startup probe** and a **liveness probe** on `/health/live`, a **readiness probe** on
+  `/health/ready`. Liveness never fails for want of a quorum; a broker that waits for its peers is not
+  restarted.
+- A **PodDisruptionBudget** with `maxUnavailable: 1`.
+- The **Control UI**, pointed at the brokers' REST endpoint through the client service.
+
+[Kubernetes Deployment](kubernetes.md) explains each of these.
 
 ## Configuration
 
-### values.yaml
+The values that matter for a cluster; `values.yaml` lists all of them.
 
 ```yaml
-replicaCount: 3
+broker:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/kuestenlogik/surgewave-broker
+    tag: ""            # the chart's appVersion
+  storage:
+    size: 10Gi
+    storageClassName: ""   # the cluster's default
+  ports:
+    kafka: 9092
+    grpc: 9093
+    replication: 10092
+  config:
+    defaultPartitions: 3
+    defaultReplicationFactor: 3
+    minInsyncReplicas: 2
 
-image:
-  repository: kuestenlogik/surgewave
-  tag: latest
-  pullPolicy: IfNotPresent
+clusterDomain: cluster.local
 
-service:
-  type: ClusterIP
-  kafka:
-    port: 9092
-  grpc:
-    port: 9093
-  external:
-    enabled: false
-    type: LoadBalancer
-
-persistence:
-  enabled: true
-  storageClass: fast-ssd
-  size: 100Gi
-
-resources:
-  requests:
-    memory: 2Gi
-    cpu: 1
-  limits:
-    memory: 4Gi
-    cpu: 2
-
-surgewave:
-  storageMode: File
-  autoCreateTopics: true
-  defaultNumPartitions: 6
-  defaultReplicationFactor: 3
-  minInSyncReplicas: 2
-  useRaftConsensus: true
-
-security:
-  enabled: false
-  sasl:
-    enabled: false
-    mechanism: SCRAM-SHA-256
-  tls:
-    enabled: false
-
-metrics:
-  enabled: true
-  serviceMonitor:
-    enabled: false
-    interval: 30s
+startupProbe:
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 60
 
 podDisruptionBudget:
   enabled: true
-  minAvailable: 2
+  maxUnavailable: 1
 ```
+
+### Startup probe
+
+A broker that finds no peer when it starts waits for one for 30 s before it binds its HTTP endpoint,
+and every broker of a new cluster starts that way. `startupProbe.periodSeconds × failureThreshold`
+(five minutes by default) has to cover that wait plus the start itself. Raise it for pods with a
+small CPU limit rather than lowering it.
+
+### Number of brokers
+
+`broker.replicaCount` is written into every broker's `ClusterNodes` and `ControllerQuorumVoters`.
+Changing it on an installed release changes the quorum of a running cluster and restarts every
+broker; use an odd number.
+
+### Kafka Connect
+
+`connect.enabled` turns on the Connect worker embedded in each broker. Leave it off with more than one
+broker: a broker that does not lead the partition of the worker's pipeline store topic does not
+finish starting and never becomes ready.
 
 ## Custom Values
 
@@ -81,117 +93,90 @@ podDisruptionBudget:
 
 ```yaml
 # prod-values.yaml
-replicaCount: 5
+broker:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  storage:
+    size: 100Gi
+    storageClassName: fast-ssd
 
-resources:
-  requests:
-    memory: 8Gi
-    cpu: 4
-  limits:
-    memory: 16Gi
-    cpu: 8
+antiAffinity: hard
 
-persistence:
-  size: 500Gi
-  storageClass: fast-ssd
-
-surgewave:
-  defaultReplicationFactor: 3
-  minInSyncReplicas: 2
-
-security:
-  enabled: true
-  sasl:
-    enabled: true
-    mechanism: SCRAM-SHA-256
-  tls:
-    enabled: true
-
-metrics:
-  enabled: true
+monitoring:
   serviceMonitor:
     enabled: true
 ```
 
 ```bash
-helm install surgewave ./deploy/helm/surgewave -f prod-values.yaml
+helm install surgewave ./deployments/helm/surgewave -f prod-values.yaml \
+  --namespace surgewave --create-namespace
 ```
 
 ### Development
 
 ```yaml
 # dev-values.yaml
-replicaCount: 1
+broker:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  storage:
+    size: 5Gi
+  config:
+    defaultReplicationFactor: 1
+    minInsyncReplicas: 1
 
-resources:
-  requests:
-    memory: 512Mi
-    cpu: 250m
-
-persistence:
-  size: 10Gi
-
-surgewave:
-  defaultReplicationFactor: 1
+podDisruptionBudget:
+  enabled: false
 ```
+
+A single broker is its own quorum and is ready alone.
 
 ## Upgrade
 
 ```bash
 # Upgrade with new values
-helm upgrade surgewave ./deploy/helm/surgewave -f prod-values.yaml
+helm upgrade surgewave ./deployments/helm/surgewave -f prod-values.yaml -n surgewave
 
-# Upgrade to new version
-helm upgrade surgewave ./deploy/helm/surgewave --set image.tag=v2.0.0
-```
-
-## Common Operations
-
-### Scale
-
-```bash
-helm upgrade surgewave ./deploy/helm/surgewave --set replicaCount=5
-```
-
-### Enable Security
-
-```bash
-helm upgrade surgewave ./deploy/helm/surgewave \
-    --set security.enabled=true \
-    --set security.sasl.enabled=true
-```
-
-### Enable Monitoring
-
-```bash
-helm upgrade surgewave ./deploy/helm/surgewave \
-    --set metrics.enabled=true \
-    --set metrics.serviceMonitor.enabled=true
+# Another broker version: one pod at a time, each ready before the next
+helm upgrade surgewave ./deployments/helm/surgewave --set broker.image.tag=0.6.1 -n surgewave
+kubectl rollout status -n surgewave statefulset/surgewave
 ```
 
 ## Uninstall
 
 ```bash
-helm uninstall surgewave
+helm uninstall surgewave -n surgewave
 
-# Keep PVCs
-helm uninstall surgewave --keep-history
-
-# Delete PVCs
-kubectl delete pvc -l app.kubernetes.io/name=surgewave
+# The volume claims stay; delete them to delete the data
+kubectl delete pvc -n surgewave -l app.kubernetes.io/name=surgewave
 ```
 
 ## Chart Structure
 
 ```
 surgewave/
-├── Chart.yaml          # Chart metadata
-├── values.yaml         # Default values
+├── Chart.yaml
+├── values.yaml
 ├── templates/
-│   ├── _helpers.tpl    # Template helpers
-│   ├── statefulset.yaml
-│   ├── service.yaml
+│   ├── _helpers.tpl
+│   ├── broker-configmap.yaml
+│   ├── broker-service.yaml
+│   ├── broker-statefulset.yaml
+│   ├── control-deployment.yaml
+│   ├── control-ingress.yaml
+│   ├── control-service.yaml
 │   ├── pdb.yaml
+│   ├── rbac.yaml
+│   ├── serviceaccount.yaml
 │   └── servicemonitor.yaml
 └── README.md
 ```

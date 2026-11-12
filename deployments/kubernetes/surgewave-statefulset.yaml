@@ -8,8 +8,15 @@ metadata:
     app.kubernetes.io/component: broker
 spec:
   serviceName: surgewave-headless
+  # Three brokers, all of which vote on metadata. The number is written into ClusterNodes and
+  # ControllerQuorumVoters below; change all three together.
   replicas: 3
+  # All brokers start together: a broker is ready only with a quorum, so the first one would
+  # never become ready alone and OrderedReady would never start the second.
   podManagementPolicy: Parallel
+  # One broker at a time, each only after the one before is ready again.
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       app: surgewave
@@ -26,7 +33,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: surgewave
-          image: surgewave:latest
+          image: ghcr.io/kuestenlogik/surgewave-broker:0.6.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: kafka
@@ -43,24 +50,24 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: Surgewave_BROKER_ID
+            - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.name
+                  fieldPath: metadata.namespace
+            # The pod's ordinal, which the StatefulSet controller sets as a label (Kubernetes 1.28+).
             - name: Surgewave__BrokerId
-              value: "$(POD_NAME)"
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            # The pod's stable DNS name: what clients and the other brokers are told.
             - name: Surgewave__Host
-              value: "0.0.0.0"
-            - name: Surgewave__Port
-              value: "9092"
-            - name: Surgewave__GrpcPort
-              value: "9093"
-            - name: Surgewave__DataDirectory
-              value: "/data"
-            - name: Surgewave__UseRaftConsensus
-              value: "true"
+              value: "$(POD_NAME).surgewave-headless.$(POD_NAMESPACE).svc"
+            # Who exists (id:host:port:replicationPort) and who votes on metadata
+            # (id@host:replicationPort), identical on every broker.
             - name: Surgewave__ClusterNodes
-              value: "surgewave-0:surgewave-0.surgewave-headless:10092,surgewave-1:surgewave-1.surgewave-headless:10092,surgewave-2:surgewave-2.surgewave-headless:10092"
+              value: "0:surgewave-0.surgewave-headless.$(POD_NAMESPACE).svc:9092:10092,1:surgewave-1.surgewave-headless.$(POD_NAMESPACE).svc:9092:10092,2:surgewave-2.surgewave-headless.$(POD_NAMESPACE).svc:9092:10092"
+            - name: Surgewave__ControllerQuorumVoters
+              value: "0@surgewave-0.surgewave-headless.$(POD_NAMESPACE).svc:10092,1@surgewave-1.surgewave-headless.$(POD_NAMESPACE).svc:10092,2@surgewave-2.surgewave-headless.$(POD_NAMESPACE).svc:10092"
           resources:
             requests:
               cpu: "500m"
@@ -68,19 +75,31 @@ spec:
             limits:
               cpu: "2000m"
               memory: "4Gi"
+          # Holds the other probes back until the HTTP endpoint is bound. A broker that finds no
+          # peer when it starts waits for one (30 s) before it binds the endpoint, and all
+          # brokers of a new cluster start that way.
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: grpc
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          # Restarts a broker whose process no longer answers. Never fails for want of a quorum.
           livenessProbe:
             httpGet:
               path: /health/live
               port: grpc
-            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          # Ready only once the broker has caught up with the metadata log, which takes a
+          # majority of the brokers. A broker without a quorum is taken out of the client
+          # service and not restarted.
           readinessProbe:
             httpGet:
               path: /health/ready
               port: grpc
-            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
@@ -99,7 +118,21 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: standard
         resources:
           requests:
             storage: 10Gi
+---
+# At most one broker down at a time through a voluntary disruption (node drain, upgrade): two
+# of three keep the quorum.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: surgewave
+  labels:
+    app: surgewave
+    app.kubernetes.io/name: surgewave
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: surgewave

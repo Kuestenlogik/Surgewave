@@ -57,6 +57,11 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
+// `surgewave-broker health [ready|live]` asks the broker already running in this container and exits: what a
+// container health check runs, the image holding no HTTP client.
+if (args is [Kuestenlogik.Surgewave.Broker.Health.HealthProbe.Verb, ..])
+    return await Kuestenlogik.Surgewave.Broker.Health.HealthProbe.RunAsync(args[1..], Console.Out);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // --- Plugin defaults layering ---

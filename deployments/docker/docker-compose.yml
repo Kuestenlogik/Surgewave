@@ -37,8 +37,26 @@ services:
       - surgewave-plugins:/app/plugins
     environment:
       - DOTNET_RUNNING_IN_CONTAINER=true
-      - Surgewave__Broker__AdvertisedListeners=PLAINTEXT://surgewave-broker:9092
+      # Host is the name clients are told, here the service name; the listener binds every
+      # interface.
+      - Surgewave__Host=surgewave-broker
+      - Surgewave__BindAddress=0.0.0.0
+      # gRPC, REST, /health and /metrics in cleartext. The image's appsettings.json turns TLS
+      # on and binds both endpoints over HTTPS, which needs a certificate; the second one
+      # stays on loopback.
+      - Surgewave__GrpcUseTls=false
+      - Kestrel__Endpoints__Grpc__Url=http://*:9093
+      - Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094
+      - Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2
       - Surgewave__PluginsDirectory=/app/plugins
+    healthcheck:
+      # The image holds no curl; the broker executable asks its own /health/ready, on the
+      # endpoint it is configured with. A single broker is its own quorum and ready alone.
+      test: ["CMD", "dotnet", "/app/surgewave-broker.dll", "health", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     networks:
       - surgewave-network
@@ -86,9 +104,11 @@ services:
     environment:
       - DOTNET_RUNNING_IN_CONTAINER=true
       - ASPNETCORE_URLS=http://+:5050
-      - Surgewave__Broker__BootstrapServers=surgewave-broker:9092
+      # The broker's gRPC / REST endpoint.
+      - Broker__ApiUrl=http://surgewave-broker:9093
     depends_on:
-      - surgewave-broker
+      surgewave-broker:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - surgewave-network

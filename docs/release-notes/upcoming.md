@@ -715,8 +715,25 @@ partitions that gives it. Until then
 - the line "Surgewave broker ready to accept connections" is not logged.
 
 A broker that reaches no quorum stays in that state for as long as it lasts, as a Kafka broker in KRaft mode does,
-and logs every election it loses. Brokers of one cluster therefore have to be started together, not each after the
-one before reports ready; the Helm chart and the Kubernetes manifest already do (`podManagementPolicy: Parallel`).
+and logs every election it loses. Ready therefore takes a majority of the controller voters: of three brokers the
+first one alone is live and not ready, both are ready as soon as a second one runs, and the third starts or
+rejoins at any time. The brokers do not have to start at the same moment. What cannot work is an orchestrator that
+waits for one broker to be ready before it starts the next:
+
+- **Kubernetes:** a StatefulSet of brokers needs `podManagementPolicy: Parallel`; the default `OrderedReady` waits
+  for the first pod, which never becomes ready alone. The headless service the brokers find each other through
+  needs `publishNotReadyAddresses: true`, or the names of brokers that are not ready yet do not resolve and no
+  quorum forms.
+- **Liveness and readiness are different questions.** `/health/live` says the process runs and never fails for want
+  of a quorum; it is the liveness probe. `/health/ready` is the readiness probe; a broker that fails it is taken
+  out of the client service and must not be restarted for it. The HTTP endpoint is bound only after the broker has
+  looked for a peer, for up to `RaftPeerDiscoveryTimeoutSeconds` (30 s) where none answers — as on every broker of
+  a cluster started from nothing — so `/health/live` needs a startup probe, or thresholds, that cover that wait.
+- **Docker Compose:** no broker may depend on another broker's `service_healthy`. Services that use the cluster may
+  wait for a healthy broker.
+
+The Helm chart, the Kubernetes manifests and `docker-compose.cluster.yml` are set up this way; see "The cluster
+deployment manifests bring up a cluster" below.
 
 An embedded broker (`SurgewaveRuntime`) that is its whole quorum is returned from `StartAsync` caught up. One that
 is part of a larger quorum is returned as before, because the brokers of an embedding host are started one after
@@ -741,6 +758,44 @@ cluster id, without the topics, its entries numbered from 1 again behind the one
   answered as not accepted, a vote is not granted.
 - A metadata log that exists and cannot be opened or read fails the broker's start with the I/O error. Truncating
   a follower's log, which reads it first, fails in the same way instead of rewriting it empty.
+
+### The cluster deployment manifests bring up a cluster (#265)
+
+None of the three cluster deployments under `deployments/` started a broker: the Helm chart did not render (its
+templates included helpers under a name the chart did not define), the Kubernetes StatefulSet and the chart set
+the broker id to the pod name, which is not a number, and `docker-compose.cluster.yml` built from a Dockerfile
+that does not exist. Behind those, all three named `ClusterNodes` in a form the broker does not read and no
+`ControllerQuorumVoters`, which the broker refuses; none overrode the HTTPS endpoints the image binds without a
+certificate; the Compose file and the chart told clients a name the listener could not bind or the wildcard
+`0.0.0.0`; and the health checks called `curl`, which the image does not hold. They are repaired and were brought
+up, each with three brokers:
+
+- **Helm chart** (`deployments/helm/surgewave`): the broker id is the pod's ordinal (the `pod-index` label,
+  Kubernetes 1.28+), `Host` the pod's DNS name under the headless service, `ClusterNodes` and
+  `ControllerQuorumVoters` are generated for `broker.replicaCount` brokers, all of which vote. A startup probe on
+  `/health/live` holds liveness and readiness back until the endpoint is bound. Byte-sized values no longer render
+  as `1.048576e+08`. The Control UI is given the brokers' REST endpoint (`Broker__ApiUrl`), the setting it reads.
+- **Kubernetes manifests** (`deployments/kubernetes`): the same, written out for three brokers and independent of
+  the namespace; the headless service publishes not-ready addresses, a PodDisruptionBudget allows one broker to be
+  down, and the volume claim uses the cluster's default storage class.
+- **`docker-compose.cluster.yml`**: the released image, the health check on `/health/ready`, the brokers started
+  together. `docker-compose.yml` gets the same listener and endpoint settings and a health check for its single
+  broker; the Control UI waits for it.
+
+Two additions to the broker carry this:
+
+- `Surgewave:BindAddress` — the address the client listener binds where that is not `Host`. `Host` was both the
+  address bound and the name clients and the other brokers are told, so a broker in a container, which is known by
+  a DNS name and binds no fixed address, could be configured for one or the other. With `BindAddress` set
+  (`0.0.0.0`), `Host` is only the name. Without it nothing changes, except that a name in `Host` is now a
+  configuration error that says so instead of "An invalid IP address was specified".
+- `surgewave-broker health [ready|live]` — the broker executable asks the health endpoint of the broker running in
+  the same container and exits 0 or 1. It is what a container health check runs, the image holding no HTTP
+  client; the endpoint is taken from the broker's own configuration.
+
+The embedded Connect worker (`Surgewave:Connect:Enabled`) stays off in the cluster deployments: a broker that does
+not lead the partition of the worker's pipeline store topic does not finish starting. `.github/workflows/deployments.yml`
+lints, renders and validates the manifests and brings each of them up on every change to them.
 
 ## Also in this release
 
@@ -923,3 +978,20 @@ offline log directories, so a broker of this release and one of an earlier
 release cannot heartbeat each other natively. Upgrade the brokers of a
 cluster together. `BrokerHeartbeatInput` gains the required
 `OfflineLogDirs`, and `ClusterMembershipHandler` no longer takes a logger.
+
+### Helm chart values removed and renamed (#265)
+
+The chart's values changed with its repair; there are no aliases.
+
+- `broker.config.useRaft` is gone, as the setting it rendered is (see above).
+- `tieredStorage.gcp.projectId` is gone; the broker has no such setting.
+- `livenessProbe.initialDelaySeconds` and `readinessProbe.initialDelaySeconds` are gone. The new `startupProbe`
+  (`periodSeconds`, `timeoutSeconds`, `failureThreshold`) holds both probes back until the broker's endpoint is
+  bound.
+- `broker.image.repository` and `control.image.repository` default to the released images,
+  `ghcr.io/kuestenlogik/surgewave-broker` and `ghcr.io/kuestenlogik/surgewave-control`; an empty `tag` is the
+  chart's `appVersion`.
+- `clusterDomain` is new (`cluster.local`): the brokers are told their names under it.
+
+In the ConfigMap the tiered-storage keys carry the names the broker reads: `S3BucketName`, `S3Region`,
+`AzureContainerName`, `GcpBucketName`.

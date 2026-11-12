@@ -22,7 +22,7 @@ spec:
       {{- end }}
       containers:
         - name: surgewave-control
-          image: "{{ .Values.control.image.repository }}:{{ .Values.control.image.tag }}"
+          image: "{{ .Values.control.image.repository }}:{{ .Values.control.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.control.image.pullPolicy }}
           ports:
             - name: http
@@ -31,8 +31,9 @@ spec:
           env:
             - name: ASPNETCORE_URLS
               value: "http://+:{{ .Values.control.port }}"
-            - name: Surgewave__BootstrapServers
-              value: {{ include "surgewave.bootstrapServers" . | quote }}
+            # The brokers' gRPC / REST endpoint, through the client Service: a ready broker.
+            - name: Broker__ApiUrl
+              value: "http://{{ include "surgewave.fullname" . }}:{{ .Values.broker.ports.grpc }}"
           resources:
             {{- toYaml .Values.control.resources | nindent 12 }}
           livenessProbe:

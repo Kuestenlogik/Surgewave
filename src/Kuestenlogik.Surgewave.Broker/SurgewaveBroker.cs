@@ -116,8 +116,16 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
                 return totalSize;
             }));
 
-        // Create listener - use dual-stack for localhost if enabled
-        if (_config.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        // Create listener - on BindAddress where one is set, Host then being only what clients are told;
+        // otherwise on Host, dual-stack for localhost if enabled
+        if (!string.IsNullOrEmpty(_config.BindAddress))
+        {
+            var address = IPAddress.Parse(_config.BindAddress);
+            _listener = new TcpListener(address, _config.Port);
+            if (address.Equals(IPAddress.IPv6Any))
+                _listener.Server.DualMode = _config.EnableDualMode;
+        }
+        else if (_config.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
         {
             if (_config.EnableDualMode)
             {

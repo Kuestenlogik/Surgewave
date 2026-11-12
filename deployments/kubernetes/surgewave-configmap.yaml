@@ -6,6 +6,8 @@ metadata:
     app: surgewave
     app.kubernetes.io/name: surgewave
 data:
+  # Replaces the image's appsettings.json. What differs per pod or depends on the namespace —
+  # BrokerId, Host, ClusterNodes, ControllerQuorumVoters — is set on the StatefulSet.
   appsettings.json: |
     {
       "Logging": {
@@ -14,9 +16,16 @@ data:
           "Microsoft.AspNetCore": "Warning"
         }
       },
+      "Kestrel": {
+        "Endpoints": {
+          "Grpc": {
+            "Url": "http://*:9093",
+            "Protocols": "Http1AndHttp2"
+          }
+        }
+      },
       "Surgewave": {
-        "BrokerId": 0,
-        "Host": "0.0.0.0",
+        "BindAddress": "0.0.0.0",
         "Port": 9092,
         "GrpcPort": 9093,
         "DataDirectory": "/data",
@@ -24,7 +33,6 @@ data:
         "AutoCreateTopics": true,
         "DefaultReplicationFactor": 3,
         "DefaultNumPartitions": 3,
-        "UseRaftConsensus": true,
         "RaftDataDirectory": "/data/raft",
         "LogRetentionHours": 168,
         "TieredStorage": {

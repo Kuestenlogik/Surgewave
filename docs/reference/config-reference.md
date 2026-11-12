@@ -14,7 +14,8 @@ Section: `Surgewave`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `BrokerId` | int | `0` | Unique broker ID in a cluster |
-| `Host` | string | `localhost` | Bind address |
+| `Host` | string | `localhost` | Name or address clients and the other brokers are told. Also the address the client listener binds, unless `BindAddress` is set |
+| `BindAddress` | string | *(unset)* | Address the client listener binds where that is not `Host`: an IP address, `0.0.0.0` or `::`. Needed when `Host` is a DNS name, as in a container or a pod |
 | `Port` | int | `9092` | Kafka protocol port |
 | `GrpcPort` | int | `9099` | gRPC API port |
 | `DataDirectory` | string | `./data` | Log segment storage path |
@@ -56,7 +57,7 @@ Section: `Surgewave`
 | `ChannelWriteBatchSize` | int | `100` | Messages per channel batch |
 | `ChannelWriteBatchDelayMs` | int | `10` | Max wait to fill a channel batch |
 | `ShutdownTimeoutSeconds` | int | `30` | Graceful shutdown timeout |
-| `ClusterNodes` | string | `""` | Comma-separated broker endpoints for clustering |
+| `ClusterNodes` | string | `""` | The brokers of the cluster, comma-separated, each `id:host:port:replicationPort` |
 | `Rack` | string | `null` | Rack identifier for rack-aware replication |
 | `ClusterId` | string | `null` | Override cluster ID |
 | `AllowAutoLeaderRebalance` | bool | `true` | Automatic preferred leader election |

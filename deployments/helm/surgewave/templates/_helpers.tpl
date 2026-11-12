@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "storm.name" -}}
+{{- define "surgewave.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "storm.fullname" -}}
+{{- define "surgewave.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,16 +24,16 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "storm.chart" -}}
+{{- define "surgewave.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "storm.labels" -}}
-helm.sh/chart: {{ include "storm.chart" . }}
-{{ include "storm.selectorLabels" . }}
+{{- define "surgewave.labels" -}}
+helm.sh/chart: {{ include "surgewave.chart" . }}
+{{ include "surgewave.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -43,8 +43,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels for broker
 */}}
-{{- define "storm.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "storm.name" . }}
+{{- define "surgewave.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "surgewave.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: broker
 {{- end }}
@@ -52,8 +52,8 @@ app.kubernetes.io/component: broker
 {{/*
 Selector labels for Control UI
 */}}
-{{- define "storm.control.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "storm.name" . }}-control
+{{- define "surgewave.control.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "surgewave.name" . }}-control
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: control-ui
 {{- end }}
@@ -61,9 +61,9 @@ app.kubernetes.io/component: control-ui
 {{/*
 Control UI labels
 */}}
-{{- define "storm.control.labels" -}}
-helm.sh/chart: {{ include "storm.chart" . }}
-{{ include "storm.control.selectorLabels" . }}
+{{- define "surgewave.control.labels" -}}
+helm.sh/chart: {{ include "surgewave.chart" . }}
+{{ include "surgewave.control.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -73,36 +73,46 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "storm.serviceAccountName" -}}
-{{- include "storm.fullname" . }}
+{{- define "surgewave.serviceAccountName" -}}
+{{- include "surgewave.fullname" . }}
 {{- end }}
 
 {{/*
-Generate cluster nodes string for Raft consensus.
-Format: <pod-name>:<pod-fqdn>:<replication-port>
+The DNS suffix of the broker pods: every pod is <pod>.<this>, the name it tells clients and
+the other brokers (Surgewave:Host).
 */}}
-{{- define "storm.clusterNodes" -}}
-{{- $fullname := include "storm.fullname" . -}}
-{{- $replicaCount := int .Values.broker.replicaCount -}}
+{{- define "surgewave.podDomain" -}}
+{{- printf "%s-headless.%s.svc.%s" (include "surgewave.fullname" .) .Release.Namespace .Values.clusterDomain -}}
+{{- end }}
+
+{{/*
+The brokers of the cluster, Surgewave:ClusterNodes.
+Format: <broker-id>:<pod-fqdn>:<client-port>:<replication-port>
+The broker id is the pod's ordinal.
+*/}}
+{{- define "surgewave.clusterNodes" -}}
+{{- $fullname := include "surgewave.fullname" . -}}
+{{- $domain := include "surgewave.podDomain" . -}}
+{{- $clientPort := int .Values.broker.ports.kafka -}}
 {{- $replicationPort := int .Values.broker.ports.replication -}}
 {{- $nodes := list -}}
-{{- range $i := until $replicaCount -}}
-{{- $nodes = append $nodes (printf "%s-%d:%s-%d.%s-headless:%d" $fullname $i $fullname $i $fullname $replicationPort) -}}
+{{- range $i := until (int .Values.broker.replicaCount) -}}
+{{- $nodes = append $nodes (printf "%d:%s-%d.%s:%d:%d" $i $fullname $i $domain $clientPort $replicationPort) -}}
 {{- end -}}
 {{- join "," $nodes -}}
 {{- end }}
 
 {{/*
-Generate bootstrap servers string for client connections.
-Format: <pod-fqdn>:<kafka-port>
+The brokers that vote on metadata, Surgewave:ControllerQuorumVoters: all of them.
+Format: <broker-id>@<pod-fqdn>:<replication-port>
 */}}
-{{- define "storm.bootstrapServers" -}}
-{{- $fullname := include "storm.fullname" . -}}
-{{- $replicaCount := int .Values.broker.replicaCount -}}
-{{- $kafkaPort := int .Values.broker.ports.kafka -}}
-{{- $servers := list -}}
-{{- range $i := until $replicaCount -}}
-{{- $servers = append $servers (printf "%s-%d.%s-headless:%d" $fullname $i $fullname $kafkaPort) -}}
+{{- define "surgewave.controllerQuorumVoters" -}}
+{{- $fullname := include "surgewave.fullname" . -}}
+{{- $domain := include "surgewave.podDomain" . -}}
+{{- $replicationPort := int .Values.broker.ports.replication -}}
+{{- $voters := list -}}
+{{- range $i := until (int .Values.broker.replicaCount) -}}
+{{- $voters = append $voters (printf "%d@%s-%d.%s:%d" $i $fullname $i $domain $replicationPort) -}}
 {{- end -}}
-{{- join "," $servers -}}
+{{- join "," $voters -}}
 {{- end }}

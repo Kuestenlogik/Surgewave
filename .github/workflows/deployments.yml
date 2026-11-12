@@ -1,0 +1,245 @@
+name: Deployments
+
+# Keeps the deployment manifests under deployments/ honest: statically on every change to
+# them, and by bringing them up — Compose and Kubernetes, three brokers each — with the broker
+# built from the same commit.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployments/**'
+      - 'scripts/ci/compose-cluster-smoke.sh'
+      - 'scripts/ci/kubernetes-cluster-smoke.sh'
+      - '.github/workflows/deployments.yml'
+      - 'src/Kuestenlogik.Surgewave.Broker.App/**'
+      - 'src/Kuestenlogik.Surgewave.Broker/BrokerConfig.cs'
+      - 'src/Kuestenlogik.Surgewave.Clustering/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deployments/**'
+      - 'scripts/ci/compose-cluster-smoke.sh'
+      - 'scripts/ci/kubernetes-cluster-smoke.sh'
+      - '.github/workflows/deployments.yml'
+      - 'src/Kuestenlogik.Surgewave.Broker.App/**'
+      - 'src/Kuestenlogik.Surgewave.Broker/BrokerConfig.cs'
+      - 'src/Kuestenlogik.Surgewave.Clustering/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+  # Schema validation of rendered and plain manifests. Pinned by digest: v0.6.7.
+  KUBECONFORM: ghcr.io/yannh/kubeconform@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c
+  # The oldest Kubernetes the manifests support: the broker id is the pod-index label.
+  KUBERNETES_VERSION: 1.28.0
+  BROKER_IMAGE: surgewave-broker:ci
+  CLI_IMAGE: surgewave-cli:ci
+
+permissions:
+  contents: read
+
+jobs:
+  # ================================================================
+  # static: lint, render, validate against the Kubernetes schemas
+  # ================================================================
+  static:
+    name: Lint and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # helm, kubectl and docker compose come with the runner image.
+      - name: Helm lint
+        run: helm lint deployments/helm/surgewave --strict
+
+      - name: Render the chart, defaults
+        run: helm template surgewave deployments/helm/surgewave --namespace surgewave > "$RUNNER_TEMP/chart-defaults.yaml"
+
+      # Every optional template and every branch of the ConfigMap once.
+      - name: Render the chart, everything switched on
+        run: |
+          for provider in s3 azure gcp; do
+            helm template surgewave deployments/helm/surgewave --namespace surgewave \
+              --set control.ingress.enabled=true \
+              --set service.external.enabled=true \
+              --set monitoring.serviceMonitor.enabled=true \
+              --set connect.enabled=true \
+              --set features.mqtt.enabled=true \
+              --set tieredStorage.enabled=true \
+              --set tieredStorage.provider=$provider \
+              --set antiAffinity=hard \
+              --set broker.replicaCount=5 \
+              > "$RUNNER_TEMP/chart-all-$provider.yaml"
+          done
+
+      # A single broker is its own quorum. With ClusterNodes set, even to itself alone, it waits
+      # for peers and never becomes ready.
+      - name: Render the chart, single broker
+        run: |
+          helm template surgewave deployments/helm/surgewave --namespace surgewave \
+            --set broker.replicaCount=1 > "$RUNNER_TEMP/chart-single.yaml"
+          if grep -n "Surgewave__ClusterNodes\|Surgewave__ControllerQuorumVoters" "$RUNNER_TEMP/chart-single.yaml"; then
+            echo "::error::a single broker must not be given ClusterNodes or ControllerQuorumVoters"
+            exit 1
+          fi
+
+      - name: Validate the rendered chart
+        run: |
+          for rendered in "$RUNNER_TEMP"/chart-*.yaml; do
+            docker run --rm -i "$KUBECONFORM" -strict -summary -ignore-missing-schemas \
+              -kubernetes-version "$KUBERNETES_VERSION" - < "$rendered"
+          done
+
+      - name: Validate the plain manifests
+        run: |
+          docker run --rm -v "$PWD/deployments/kubernetes:/manifests:ro" "$KUBECONFORM" \
+            -strict -summary -kubernetes-version "$KUBERNETES_VERSION" \
+            /manifests/surgewave-configmap.yaml /manifests/surgewave-service.yaml /manifests/surgewave-statefulset.yaml
+
+      # The SurgewaveCluster resources and the kustomization have no published schema.
+      - name: Validate the operator manifests
+        run: |
+          docker run --rm -v "$PWD/deployments/kubernetes/operator:/manifests:ro" "$KUBECONFORM" \
+            -strict -summary -ignore-missing-schemas -kubernetes-version "$KUBERNETES_VERSION" /manifests
+
+      - name: Validate the Compose files
+        run: |
+          for file in deployments/docker/docker-compose*.yml; do
+            docker compose -f "$file" config --quiet
+          done
+
+      # A broker is ready only with a quorum: an orchestrator that waits for one broker's
+      # readiness before it starts the next never gets a cluster.
+      - name: Brokers do not wait for each other's readiness
+        run: |
+          if grep -n "OrderedReady" -r deployments/helm deployments/kubernetes; then
+            echo "::error::a StatefulSet of brokers needs podManagementPolicy: Parallel"
+            exit 1
+          fi
+          for rendered in "$RUNNER_TEMP/chart-defaults.yaml" deployments/kubernetes/surgewave-statefulset.yaml; do
+            grep -q "podManagementPolicy: Parallel" "$rendered" \
+              || { echo "::error file=$rendered::podManagementPolicy: Parallel is missing"; exit 1; }
+          done
+          for rendered in "$RUNNER_TEMP/chart-defaults.yaml" deployments/kubernetes/surgewave-service.yaml; do
+            grep -q "publishNotReadyAddresses: true" "$rendered" \
+              || { echo "::error file=$rendered::the headless service must publish not-ready addresses"; exit 1; }
+          done
+
+  # ================================================================
+  # images: broker and CLI from this commit, for both smoke jobs
+  # ================================================================
+  images:
+    name: Build broker and CLI images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # As release.yml publishes them, into the local Docker daemon instead of a registry.
+      - name: Build the broker image
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release -t:PublishContainer \
+            -p:GeneratePackageOnBuild=false \
+            -p:ContainerRepository=surgewave-broker -p:ContainerImageTags=ci
+
+      - name: Build the CLI image
+        run: |
+          dotnet publish src/Kuestenlogik.Surgewave.Tool -c Release -t:PublishContainer \
+            -p:GeneratePackageOnBuild=false \
+            -p:ContainerRepository=surgewave-cli -p:ContainerImageTag=ci
+
+      - name: Save the images
+        run: docker save "$BROKER_IMAGE" "$CLI_IMAGE" | gzip > "$RUNNER_TEMP/images.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deployment-images
+          path: ${{ runner.temp }}/images.tar.gz
+          retention-days: 1
+
+  # ================================================================
+  # compose: docker-compose.cluster.yml as a running cluster
+  # ================================================================
+  compose:
+    name: Compose cluster
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: deployment-images
+          path: ${{ runner.temp }}
+
+      - name: Load the images
+        run: docker load < "$RUNNER_TEMP/images.tar.gz"
+
+      - name: Bring the cluster up, stagger it, restart it
+        env:
+          SURGEWAVE_BROKER_IMAGE: ${{ env.BROKER_IMAGE }}
+          SURGEWAVE_CLI_IMAGE: ${{ env.CLI_IMAGE }}
+        run: scripts/ci/compose-cluster-smoke.sh together restart-one restart-all alone late-1 late-3
+
+  # ================================================================
+  # kubernetes: the Helm chart and the plain manifests on kind
+  # ================================================================
+  kubernetes:
+    name: Kubernetes cluster (${{ matrix.manifests }})
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        manifests: [helm, plain]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: deployment-images
+          path: ${{ runner.temp }}
+
+      # kind comes with the runner image.
+      - name: Create a cluster and load the images
+        run: |
+          kind create cluster --name surgewave --wait 120s
+          docker load < "$RUNNER_TEMP/images.tar.gz"
+          kind load docker-image --name surgewave "$BROKER_IMAGE" "$CLI_IMAGE"
+          kubectl create namespace surgewave-smoke
+
+      - name: Install the Helm chart
+        if: matrix.manifests == 'helm'
+        run: |
+          helm install surgewave deployments/helm/surgewave --namespace surgewave-smoke \
+            --set broker.image.repository=surgewave-broker --set broker.image.tag=ci \
+            --set control.enabled=false
+          echo "STATEFULSET=surgewave" >> "$GITHUB_ENV"
+          echo "HEADLESS_SERVICE=surgewave-headless" >> "$GITHUB_ENV"
+
+      - name: Apply the plain manifests
+        if: matrix.manifests == 'plain'
+        run: |
+          for manifest in surgewave-configmap.yaml surgewave-service.yaml surgewave-statefulset.yaml; do
+            sed "s#image: ghcr.io/kuestenlogik/surgewave-broker:.*#image: $BROKER_IMAGE#" "deployments/kubernetes/$manifest" \
+              | kubectl apply --namespace surgewave-smoke -f -
+          done
+          echo "STATEFULSET=surgewave" >> "$GITHUB_ENV"
+          echo "HEADLESS_SERVICE=surgewave-headless" >> "$GITHUB_ENV"
+
+      - name: Roll out, delete pods, restart
+        env:
+          SURGEWAVE_CLI_IMAGE: ${{ env.CLI_IMAGE }}
+        run: scripts/ci/kubernetes-cluster-smoke.sh surgewave-smoke "$STATEFULSET" "$HEADLESS_SERVICE"

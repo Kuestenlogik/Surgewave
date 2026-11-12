@@ -5,15 +5,30 @@ metadata:
   labels:
     {{- include "surgewave.labels" . | nindent 4 }}
 data:
-  # Core broker settings
-  Surgewave__Host: "0.0.0.0"
+  # Core broker settings. Surgewave__Host and Surgewave__BrokerId are the pod's own and set on
+  # the StatefulSet: the host is the name clients and the other brokers are told, the listener
+  # binds every interface.
+  Surgewave__BindAddress: "0.0.0.0"
   Surgewave__Port: {{ .Values.broker.ports.kafka | quote }}
   Surgewave__GrpcPort: {{ .Values.broker.ports.grpc | quote }}
+  Surgewave__ReplicationPort: {{ .Values.broker.ports.replication | quote }}
   Surgewave__DataDirectory: "/data"
   Surgewave__LogDirectory: "/data/logs"
 
-  # Cluster settings
-  Surgewave__UseRaftConsensus: {{ .Values.broker.config.useRaft | quote }}
+  # gRPC, REST, /health and /metrics in cleartext on the gRPC port. The image's
+  # appsettings.json turns TLS on and binds two endpoints over HTTPS, which needs a
+  # certificate; the second endpoint stays on loopback.
+  Surgewave__GrpcUseTls: "false"
+  Kestrel__Endpoints__Grpc__Url: "http://*:{{ .Values.broker.ports.grpc }}"
+  Kestrel__Endpoints__GrpcHttp3__Url: "http://localhost:9094"
+  Kestrel__Endpoints__GrpcHttp3__Protocols: "Http1AndHttp2"
+
+  # Cluster settings: who exists and who votes on metadata, identical on every broker. A single
+  # broker is its own quorum and names nobody: with ClusterNodes set it would wait for peers.
+  {{- if gt (int .Values.broker.replicaCount) 1 }}
+  Surgewave__ClusterNodes: {{ include "surgewave.clusterNodes" . | quote }}
+  Surgewave__ControllerQuorumVoters: {{ include "surgewave.controllerQuorumVoters" . | quote }}
+  {{- end }}
   Surgewave__MinInsyncReplicas: {{ .Values.broker.config.minInsyncReplicas | quote }}
 
   # Topic defaults
@@ -23,12 +38,12 @@ data:
 
   # Retention settings
   Surgewave__LogRetentionHours: {{ .Values.broker.config.logRetentionHours | quote }}
-  Surgewave__LogRetentionBytes: {{ .Values.broker.config.logRetentionBytes | quote }}
-  Surgewave__LogSegmentBytes: {{ .Values.broker.config.logSegmentBytes | quote }}
+  Surgewave__LogRetentionBytes: {{ .Values.broker.config.logRetentionBytes | int64 | quote }}
+  Surgewave__LogSegmentBytes: {{ .Values.broker.config.logSegmentBytes | int64 | quote }}
 
   # Network settings
   Surgewave__MaxConnectionsPerIp: {{ .Values.broker.config.maxConnectionsPerIp | quote }}
-  Surgewave__MaxRequestSize: {{ .Values.broker.config.maxRequestSize | quote }}
+  Surgewave__MaxRequestSize: {{ .Values.broker.config.maxRequestSize | int64 | quote }}
 
   # Schema Registry
   Surgewave__SchemaRegistry__Enabled: {{ .Values.schemaRegistry.enabled | quote }}
@@ -58,15 +73,14 @@ data:
   {{- if .Values.tieredStorage.enabled }}
   Surgewave__TieredStorage__Provider: {{ .Values.tieredStorage.provider | quote }}
   {{- if eq .Values.tieredStorage.provider "s3" }}
-  Surgewave__TieredStorage__S3__Bucket: {{ .Values.tieredStorage.s3.bucket | quote }}
-  Surgewave__TieredStorage__S3__Region: {{ .Values.tieredStorage.s3.region | quote }}
+  Surgewave__TieredStorage__S3BucketName: {{ .Values.tieredStorage.s3.bucket | quote }}
+  Surgewave__TieredStorage__S3Region: {{ .Values.tieredStorage.s3.region | quote }}
   {{- end }}
   {{- if eq .Values.tieredStorage.provider "azure" }}
-  Surgewave__TieredStorage__Azure__Container: {{ .Values.tieredStorage.azure.container | quote }}
+  Surgewave__TieredStorage__AzureContainerName: {{ .Values.tieredStorage.azure.container | quote }}
   {{- end }}
   {{- if eq .Values.tieredStorage.provider "gcp" }}
-  Surgewave__TieredStorage__Gcp__Bucket: {{ .Values.tieredStorage.gcp.bucket | quote }}
-  Surgewave__TieredStorage__Gcp__ProjectId: {{ .Values.tieredStorage.gcp.projectId | quote }}
+  Surgewave__TieredStorage__GcpBucketName: {{ .Values.tieredStorage.gcp.bucket | quote }}
   {{- end }}
   {{- end }}
 

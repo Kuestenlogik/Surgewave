@@ -10,12 +10,12 @@ Surgewave has been deployed successfully!
     {{ $fullname }}:{{ .Values.broker.ports.kafka }}
 
   Headless DNS:
-    {{ $fullname }}-headless.{{ .Release.Namespace }}.svc.cluster.local
+    {{ include "surgewave.podDomain" . }}
 
   Individual brokers:
 {{- $replicaCount := int .Values.broker.replicaCount }}
 {{- range $i := until $replicaCount }}
-    {{ $fullname }}-{{ $i }}.{{ $fullname }}-headless.{{ $.Release.Namespace }}.svc.cluster.local:{{ $.Values.broker.ports.kafka }}
+    {{ $fullname }}-{{ $i }}.{{ include "surgewave.podDomain" $ }}:{{ $.Values.broker.ports.kafka }}
 {{- end }}
 
   Ports:
@@ -47,23 +47,18 @@ Surgewave has been deployed successfully!
     kubectl get svc {{ $fullname }}-external -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 {{- end }}
 
-== Quick Start ==
+== Readiness ==
 
-  # Produce a test message
-  kubectl run surgewave-test --rm -it --image=surgewave:latest --restart=Never -- \
-    surgewave-cli produce --bootstrap {{ $fullname }}:{{ .Values.broker.ports.kafka }} --topic test-topic --message "hello surgewave"
+  A broker is ready only once it has caught up with the metadata log, which takes a majority
+  of the brokers. A fresh install takes about half a minute:
 
-  # Consume messages
-  kubectl run surgewave-test --rm -it --image=surgewave:latest --restart=Never -- \
-    surgewave-cli consume --bootstrap {{ $fullname }}:{{ .Values.broker.ports.kafka }} --topic test-topic --from-beginning
+    kubectl rollout status statefulset/{{ $fullname }} -n {{ .Release.Namespace }}
 
-== Scaling ==
+== Number of brokers ==
 
-  # Scale brokers
-  kubectl scale statefulset {{ $fullname }} --replicas=5 -n {{ .Release.Namespace }}
-
-  # Or use Helm
-  helm upgrade {{ .Release.Name }} deploy/helm/surgewave --set broker.replicaCount=5
+  broker.replicaCount is part of every broker's configuration (cluster nodes, quorum voters).
+  Changing it restarts all brokers with a new quorum; kubectl scale alone does not add a
+  broker to the cluster.
 
 == Features ==
 

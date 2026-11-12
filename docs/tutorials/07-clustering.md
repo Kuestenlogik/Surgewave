@@ -17,7 +17,12 @@ A 3-node Surgewave cluster that:
 
 ## Step 1: Configure Three Brokers
 
-Each broker needs a unique `BrokerId` and must know about all cluster members.
+Each broker needs a unique `BrokerId` and must know about all cluster members: `ClusterNodes` lists
+them as `id:host:port:replicationPort`, `ControllerQuorumVoters` lists the ones that vote on metadata
+as `id@host:replicationPort`. Both lists are the same on every broker.
+
+A broker reports ready only once two of the three run: the first one you start waits, logging the
+elections it loses, until the second one is up.
 
 ### Broker 1
 
@@ -31,7 +36,8 @@ Create `broker1/appsettings.json`:
     "Port": 9092,
     "GrpcPort": 9093,
     "DataDirectory": "./data/broker1",
-    "ClusterNodes": "localhost:9092,localhost:9094,localhost:9096",
+    "ClusterNodes": "1:localhost:9092:10092,2:localhost:9094:10094,3:localhost:9096:10096",
+    "ControllerQuorumVoters": "1@localhost:10092,2@localhost:10094,3@localhost:10096",
     "ClusterId": "surgewave-tutorial-cluster",
     "ReplicationPort": 10092,
     "DefaultReplicationFactor": 3,
@@ -52,7 +58,8 @@ Create `broker2/appsettings.json`:
     "Port": 9094,
     "GrpcPort": 9095,
     "DataDirectory": "./data/broker2",
-    "ClusterNodes": "localhost:9092,localhost:9094,localhost:9096",
+    "ClusterNodes": "1:localhost:9092:10092,2:localhost:9094:10094,3:localhost:9096:10096",
+    "ControllerQuorumVoters": "1@localhost:10092,2@localhost:10094,3@localhost:10096",
     "ClusterId": "surgewave-tutorial-cluster",
     "ReplicationPort": 10094,
     "DefaultReplicationFactor": 3,
@@ -73,7 +80,8 @@ Create `broker3/appsettings.json`:
     "Port": 9096,
     "GrpcPort": 9097,
     "DataDirectory": "./data/broker3",
-    "ClusterNodes": "localhost:9092,localhost:9094,localhost:9096",
+    "ClusterNodes": "1:localhost:9092:10092,2:localhost:9094:10094,3:localhost:9096:10096",
+    "ControllerQuorumVoters": "1@localhost:10092,2@localhost:10094,3@localhost:10096",
     "ClusterId": "surgewave-tutorial-cluster",
     "ReplicationPort": 10096,
     "DefaultReplicationFactor": 3,
@@ -106,46 +114,14 @@ dotnet run --project src/Kuestenlogik.Surgewave.Broker.App -- --config broker3/a
 
 ### Using Docker Compose
 
-Alternatively, create a `docker-compose.yml`:
-
-```yaml
-services:
-  broker1:
-    image: kuestenlogik/surgewave
-    ports:
-      - "9092:9092"
-      - "9093:9093"
-    environment:
-      Surgewave__BrokerId: 1
-      Surgewave__Port: 9092
-      Surgewave__ClusterNodes: broker1:9092,broker2:9092,broker3:9092
-      Surgewave__DefaultReplicationFactor: 3
-      Surgewave__MinInSyncReplicas: 2
-
-  broker2:
-    image: kuestenlogik/surgewave
-    ports:
-      - "9094:9092"
-      - "9095:9093"
-    environment:
-      Surgewave__BrokerId: 2
-      Surgewave__Port: 9092
-      Surgewave__ClusterNodes: broker1:9092,broker2:9092,broker3:9092
-
-  broker3:
-    image: kuestenlogik/surgewave
-    ports:
-      - "9096:9092"
-      - "9097:9093"
-    environment:
-      Surgewave__BrokerId: 3
-      Surgewave__Port: 9092
-      Surgewave__ClusterNodes: broker1:9092,broker2:9092,broker3:9092
-```
+Alternatively, use the Compose file in the repository, which starts the same three brokers in
+containers:
 
 ```bash
-docker compose up -d
+docker compose -f deployments/docker/docker-compose.cluster.yml up -d --wait
 ```
+
+See [Docker Deployment](../deployment/docker.md) for what it sets.
 
 ## Step 3: Verify the Cluster
 
@@ -289,7 +265,8 @@ All three brokers should be back online with full ISR membership.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `ClusterNodes` | "" | All broker endpoints, comma-separated |
+| `ClusterNodes` | "" | All brokers, comma-separated, each `id:host:port:replicationPort` |
+| `ControllerQuorumVoters` | "" | The brokers that vote on metadata, each `id@host:replicationPort` |
 | `ClusterId` | generated | Unique cluster identifier; unset, the cluster generates one once |
 | `ReplicationPort` | 10092 | Port for inter-broker replication traffic |
 | `DefaultReplicationFactor` | 1 | Default replication for new topics |

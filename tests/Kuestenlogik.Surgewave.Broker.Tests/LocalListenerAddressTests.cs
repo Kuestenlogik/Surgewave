@@ -23,4 +23,15 @@ public sealed class LocalListenerAddressTests
 
         Assert.Equal(expected, config.LocalListenerAddress());
     }
+
+    [Theory]
+    [InlineData("0.0.0.0", "localhost:19092")]
+    [InlineData("::", "localhost:19092")]
+    [InlineData("10.1.2.3", "10.1.2.3:19092")]
+    public void IsTheBindAddress_WhereTheHostIsOnlyTheNameClientsAreTold(string bindAddress, string expected)
+    {
+        var config = new BrokerConfig { Host = "broker-1.brokers.example", BindAddress = bindAddress, Port = 19092 };
+
+        Assert.Equal(expected, config.LocalListenerAddress());
+    }
 }

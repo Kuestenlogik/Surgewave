@@ -15,20 +15,28 @@ Production deployment options for Surgewave.
 ### Docker
 
 ```bash
-docker run -d -p 9092:9092 -p 9093:9093 kuestenlogik/surgewave
+docker compose -f deployments/docker/docker-compose.cluster.yml up -d --wait
 ```
 
 ### Kubernetes
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/Kuestenlogik/Surgewave/main/deploy/kubernetes/
+kubectl apply -f deployments/kubernetes/surgewave-configmap.yaml \
+  -f deployments/kubernetes/surgewave-service.yaml \
+  -f deployments/kubernetes/surgewave-statefulset.yaml
 ```
 
 ### Helm
 
 ```bash
-helm install surgewave ./deploy/helm/surgewave
+helm install surgewave ./deployments/helm/surgewave
 ```
+
+## A broker is ready only with a quorum
+
+A broker reports ready only once it has caught up with the metadata log, which takes a majority of
+the brokers. Whatever starts the brokers must start them together and must not wait for one to be
+ready before it starts the next; see [Kubernetes](kubernetes.md) and [Docker](docker.md).
 
 ## Production Checklist
 

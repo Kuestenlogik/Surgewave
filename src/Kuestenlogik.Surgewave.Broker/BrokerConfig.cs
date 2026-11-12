@@ -37,17 +37,30 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int Port { get; set; } = KafkaConstants.Ports.Kafka;
 
     /// <summary>
-    /// The address a component inside the broker process connects to the broker's own listener on:
-    /// <see cref="Host"/> where it names one address, loopback where it is a wildcard. With
-    /// <see cref="Host"/> set to an interface address the listener binds there only, so a fixed
+    /// The address the client listener binds, where that is not <see cref="Host"/>: an IP address, <c>0.0.0.0</c> or
+    /// <c>::</c> for every interface. Kafka's <c>listeners</c> next to <c>advertised.listeners</c>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Host"/> is what clients and the other brokers are told to connect to. Unset, the listener binds
+    /// <see cref="Host"/> itself, which therefore has to be <c>localhost</c> or an IP address. A broker in a container
+    /// or a pod is known by a DNS name and has no fixed address to bind: it sets <see cref="Host"/> to the name and
+    /// this to a wildcard.
+    /// </remarks>
+    public string? BindAddress { get; set; }
+
+    /// <summary>
+    /// The address a component inside the broker process connects to the broker's own listener on: the address the
+    /// listener binds — <see cref="BindAddress"/>, or <see cref="Host"/> without one — where it names one address,
+    /// loopback where it is a wildcard. With the listener bound to an interface address only, a fixed
     /// <c>localhost</c> is refused.
     /// </summary>
     public string LocalListenerAddress()
     {
-        var host = System.Net.IPAddress.TryParse(Host, out var address)
+        var bound = string.IsNullOrEmpty(BindAddress) ? Host : BindAddress;
+        var host = System.Net.IPAddress.TryParse(bound, out var address)
             && (address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any))
                 ? "localhost"
-                : Host;
+                : bound;
         return host.Contains(':', StringComparison.Ordinal) ? $"[{host}]:{Port}" : $"{host}:{Port}";
     }
 
@@ -467,6 +480,25 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
             errors.Add($"{nameof(Port)} and {nameof(ReplicationPort)} must be different (both {Port}).");
         if (GrpcPort == ReplicationPort)
             errors.Add($"{nameof(GrpcPort)} and {nameof(ReplicationPort)} must be different (both {GrpcPort}).");
+
+        // The client listener binds an address, never a name. A name in Host is what a container or a pod is known
+        // by, and it then says separately what to bind.
+        if (string.IsNullOrEmpty(BindAddress))
+        {
+            if (!string.IsNullOrEmpty(Host)
+                && !Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                && !System.Net.IPAddress.TryParse(Host, out _))
+            {
+                errors.Add(
+                    $"{nameof(Host)} '{Host}' is a name and {nameof(BindAddress)} is empty. The client listener binds "
+                    + $"an address: set {nameof(BindAddress)} to it (0.0.0.0 for every interface) and keep {nameof(Host)} "
+                    + "as the name clients and the other brokers are told.");
+            }
+        }
+        else if (!System.Net.IPAddress.TryParse(BindAddress, out _))
+        {
+            errors.Add($"{nameof(BindAddress)} '{BindAddress}' is not an IP address.");
+        }
 
         // TLS cert configuration: when a path is supplied, the file must exist. A missing
         // cert path with GrpcUseTls=true is allowed (falls back to the .NET dev cert),

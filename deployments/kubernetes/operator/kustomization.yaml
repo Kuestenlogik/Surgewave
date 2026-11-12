@@ -8,5 +8,7 @@ resources:
   - rbac.yaml
   - deployment.yaml
 
-commonLabels:
-  app.kubernetes.io/managed-by: surgewave-operator
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: surgewave-operator
+    includeSelectors: true
