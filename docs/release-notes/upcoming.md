@@ -797,6 +797,31 @@ The embedded Connect worker (`Surgewave:Connect:Enabled`) stays off in the clust
 not lead the partition of the worker's pipeline store topic does not finish starting. `.github/workflows/deployments.yml`
 lints, renders and validates the manifests and brings each of them up on every change to them.
 
+### Two controller voters that split the vote elect a leader while a third one is down
+
+Two brokers of a three-voter quorum, started together while the third was down, could go on without a leader: each
+won the pre-vote, voted for itself and lost the election, term after term — ten terms in 55 seconds in the run
+that showed it — and since a broker is ready only with a leader (#250), neither became ready.
+
+A split vote is what Raft's randomised election timeout resolves: each candidate waits out its own and starts the
+next election, and the one whose timeout is shorter asks first and wins. The node did not end the election at its
+timeout. With one vote each, the third voter could still have decided the round, so both candidates waited for
+its answer, and a voter that is down answers when the connect attempts to it give up: seconds later, and the same
+seconds for both. Both then started the next election on their next tick, in step again, and the timeouts they had
+drawn never came into it. The first election had no timeout of its own either: the timer ran from the node's
+construction, so two brokers that had waited out the peer discovery together campaigned on their first tick.
+
+- An election ends with its election timeout, and so does a pre-vote round. The node stays a candidate and starts
+  the next election a newly drawn timeout later; requests still out are not waited for and their answers are not
+  counted.
+- The timeout is drawn anew each time the election timer restarts — on a leader's AppendEntries, on a vote
+  granted, on each campaign — and the first election comes an election timeout after elections were enabled. A
+  broker that is its whole quorum elects itself as early as before.
+- A campaign whose pre-vote was refused is repeated an election timeout later, not on the next 50 ms tick.
+- A voter that does not answer has one pre-vote and one vote request out at a time: it is not asked again while
+  the earlier request is under way, and a voter with too few peers left to ask for a majority starts no round
+  until one of them has answered or its connect attempts have given up — at the pace it campaigned at before.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

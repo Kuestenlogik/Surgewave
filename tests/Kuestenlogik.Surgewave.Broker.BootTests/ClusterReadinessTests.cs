@@ -22,10 +22,10 @@ namespace Kuestenlogik.Surgewave.Broker.BootTests;
 /// the other brokers by the first answer and ask whichever it likes.
 /// </para>
 /// <para>
-/// Known to fail, 1 run of 20 under load, where two brokers are started together and the third voter is down:
-/// "Broker did not reach 'Surgewave broker ready to accept connections' within 90s", with the broker's Raft node
-/// winning the pre-vote 2/2 and then losing the election, term after term (ten terms in 55 s). No leader, so no
-/// broker catches up; the product does that, not the test, and the wait is not raised to hide it.
+/// Two brokers started together with the third voter down are the case that found the election livelock: 1 run of
+/// 20 under load ended with "Broker did not reach 'Surgewave broker ready to accept connections' within 90s", each
+/// broker's Raft node winning the pre-vote 2/2 and then losing the election, term after term (ten terms in 55 s).
+/// <c>RaftSplitVoteTests</c> holds the node to it.
 /// </para>
 /// <para>
 /// Not in the BrokerBoot collection: each broker is on ports reserved for it and in a directory of its own, so the

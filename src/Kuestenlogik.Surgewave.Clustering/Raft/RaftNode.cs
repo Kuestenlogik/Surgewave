@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 
 namespace Kuestenlogik.Surgewave.Clustering.Raft;
@@ -53,7 +54,18 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     // Timing
     private DateTimeOffset _lastHeartbeat = DateTimeOffset.UtcNow;
+
+    // The election timer: when it was last restarted (a Stopwatch timestamp) and the timeout drawn for it then, both
+    // under _lock. Restarted by a leader's AppendEntries, by a vote granted and by each campaign this node starts,
+    // with a newly drawn timeout every time: the draw is what keeps two voters from campaigning in step.
+    private long _electionTimerStarted;
     private int _electionTimeoutMs;
+
+    // The pre-vote and the vote request a peer still has under way from an earlier round. A round ends with its
+    // election timeout and leaves the requests nobody answered behind; the next one does not ask those peers again,
+    // so a voter that is down has one request of each kind out, not one per round. Touched by the election loop only.
+    private readonly Dictionary<int, Task> _preVoteInFlight = [];
+    private readonly Dictionary<int, Task> _voteInFlight = [];
 
     // Shutdown state
     private volatile bool _isShuttingDown;
@@ -224,7 +236,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         // which is what this cluster did before the setting existed (#168).
         _voterSet = voterSet ?? BuildVoterSet(config, transport);
 
-        ResetElectionTimeout();
+        RestartElectionTimer();
     }
 
     /// <summary>
@@ -465,6 +477,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             {
                 _votedFor = request.CandidateId;
                 _lastHeartbeat = DateTimeOffset.UtcNow;
+                RestartElectionTimer();
                 stateChanged = true;
                 LogVotedFor(NodeId, request.CandidateId, _currentTerm);
             }
@@ -526,6 +539,7 @@ public sealed partial class RaftNode : IAsyncDisposable
 
             // Reset election timeout (we heard from the leader)
             _lastHeartbeat = DateTimeOffset.UtcNow;
+            RestartElectionTimer();
 
             stateChanged = false;
 
@@ -851,6 +865,18 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     private async Task ElectionTimeoutLoopAsync(CancellationToken ct)
     {
+        // The first election comes an election timeout after elections were enabled, as every later one comes an
+        // election timeout after the last sign of a leader. The timer used to run from the node's construction, so
+        // voters that had waited out the peer discovery together all campaigned on their first tick, in step. A node
+        // that is its whole quorum has nobody to be in step with and elects itself as early as it did.
+        if (PeerIds.Count > 0)
+        {
+            lock (_lock)
+            {
+                RestartElectionTimer();
+            }
+        }
+
         while (!ct.IsCancellationRequested)
         {
             try
@@ -870,8 +896,7 @@ public sealed partial class RaftNode : IAsyncDisposable
                 if (!IsVoter)
                     continue;
 
-                var elapsed = (DateTimeOffset.UtcNow - _lastHeartbeat).TotalMilliseconds;
-                if (elapsed >= _electionTimeoutMs)
+                if (ElectionTimeoutElapsed())
                 {
                     await StartElectionAsync(ct);
                 }
@@ -923,10 +948,27 @@ public sealed partial class RaftNode : IAsyncDisposable
         var majority = _voterSet.Majority;
         var proposedTerm = _currentTerm + 1;
 
+        // A campaign's round lasts one election timeout at most, and the next campaign starts a newly drawn timeout
+        // after this one started, whatever became of it: lost, refused or not answered.
+        TimeSpan preVoteTimeout;
+        lock (_lock)
+        {
+            preVoteTimeout = RestartElectionTimer();
+        }
+
         // Split-brain prevention: Don't start election when peers are expected but not yet discovered.
         if (peers.Count == 0 && ExpectsClusterPeers())
         {
             LogWaitingForPeerDiscovery(_currentTerm);
+            return;
+        }
+
+        // No round that is lost before it is asked. A peer still busy with the request of an earlier round is not asked
+        // again, and where the peers left to ask are short of a majority with this node — a voter alone, every peer
+        // down — the next round waits for the connect attempts under way to give up.
+        if (!CanDecide(_preVoteInFlight, peers, majority) || !CanDecide(_voteInFlight, peers, majority))
+        {
+            LogCampaignAwaitsAnswers(proposedTerm);
             return;
         }
 
@@ -942,8 +984,8 @@ public sealed partial class RaftNode : IAsyncDisposable
         var preVoteStarted = DateTimeOffset.UtcNow;
         var preVotes = 1; // Pre-vote for self
         var preVoteResults = await CollectUntilDecidedAsync(
-            peers, peerId => _transport.SendPreVoteAsync(peerId, preVoteRequest, ct),
-            r => r.VoteGranted, r => r.Term > proposedTerm - 1, majority);
+            peers, _preVoteInFlight, peerId => _transport.SendPreVoteAsync(peerId, preVoteRequest, ct),
+            r => r.VoteGranted, r => r.Term > proposedTerm - 1, majority, preVoteTimeout, ct).ConfigureAwait(false);
 
         lock (_lock)
         {
@@ -996,6 +1038,7 @@ public sealed partial class RaftNode : IAsyncDisposable
 
         int termToSave;
         int votedForToSave;
+        TimeSpan electionTimeout;
 
         lock (_lock)
         {
@@ -1010,7 +1053,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             _currentTerm++;
             _votedFor = NodeId;
             _lastHeartbeat = DateTimeOffset.UtcNow;
-            ResetElectionTimeout();
+            electionTimeout = RestartElectionTimer();
 
             termToSave = _currentTerm;
             votedForToSave = NodeId;
@@ -1030,9 +1073,11 @@ public sealed partial class RaftNode : IAsyncDisposable
             LastLogTerm
         );
 
+        // Without a majority by its election timeout the election is over (Raft §5.2): this node stays a candidate and
+        // the loop starts the next election, for the next term and with a timeout of its own.
         var results = await CollectUntilDecidedAsync(
-            peers, peerId => _transport.SendRequestVoteAsync(peerId, request, ct),
-            r => r.VoteGranted, r => r.Term > request.Term, majority);
+            peers, _voteInFlight, peerId => _transport.SendRequestVoteAsync(peerId, request, ct),
+            r => r.VoteGranted, r => r.Term > request.Term, majority, electionTimeout, ct).ConfigureAwait(false);
 
         lock (_lock)
         {
@@ -1066,45 +1111,98 @@ public sealed partial class RaftNode : IAsyncDisposable
     }
 
     /// <summary>
-    /// Asks every peer and returns the answers that decided the round (#225): once this node and the grants are a
-    /// majority, once the peers still to answer could no longer make one, or once an answer names a newer term. A peer
-    /// that cannot be reached answers only when its connect attempts gave up — seconds — and waiting for it, as the
-    /// round did, kept the voters that were up campaigning in step, each for itself, round after round.
+    /// Asks the peers and returns the answers that decided the round (#225): once this node and the grants are a
+    /// majority, once the peers still to answer could no longer make one, or once an answer names a newer term — and
+    /// the answers there are when <paramref name="timeout"/>, the election timeout drawn for this round, is over.
     /// </summary>
-    /// <remarks>The peers still asked when the round is decided go on; their answers are not counted.</remarks>
+    /// <remarks>
+    /// <para>
+    /// A peer that cannot be reached answers only when its connect attempts gave up, seconds later, and that is the
+    /// same number of seconds for every voter that asks it. A round that waited for it — with two of three voters up
+    /// and each voting for itself, the third could still have decided the round — ended for both voters at that
+    /// moment, long past either one's election timeout, so both started the next election on their next tick: in step
+    /// again, each for itself, term after term, and the timeouts they had drawn never came into it.
+    /// </para>
+    /// <para>
+    /// The requests still out when the round ends go on and their answers are not counted. A peer whose request from
+    /// an earlier round is still under way is not asked again: it has not answered that one.
+    /// </para>
+    /// </remarks>
     private static async Task<List<(int PeerId, TResponse? Response)>> CollectUntilDecidedAsync<TResponse>(
-        IReadOnlyList<int> peers, Func<int, Task<TResponse>> send, Func<TResponse, bool> granted,
-        Func<TResponse, bool> newerTerm, int majority)
+        IReadOnlyList<int> peers, Dictionary<int, Task> inFlight, Func<int, Task<TResponse>> send,
+        Func<TResponse, bool> granted, Func<TResponse, bool> newerTerm, int majority, TimeSpan timeout,
+        CancellationToken ct)
         where TResponse : class
     {
-        var pending = peers.Select(async peerId =>
+        var pending = new List<Task<(int PeerId, TResponse? Response)>>(peers.Count);
+        foreach (var peerId in peers)
         {
-            try
-            {
-                return (peerId, (TResponse?)await send(peerId).ConfigureAwait(false));
-            }
-            catch
-            {
-                return (peerId, (TResponse?)null);
-            }
-        }).ToList();
+            if (inFlight.TryGetValue(peerId, out var underWay) && !underWay.IsCompleted)
+                continue;
+
+            var ask = AskAsync(peerId, send);
+            inFlight[peerId] = ask;
+            pending.Add(ask);
+        }
 
         var answers = new List<(int PeerId, TResponse? Response)>(pending.Count);
         var grants = 1; // this node's own
-        while (pending.Count > 0 && grants < majority && grants + pending.Count >= majority)
+
+        // The round's election timer, stopped when the round is decided before it runs out.
+        using var timer = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var timedOut = Task.Delay(timeout, timer.Token);
+        try
         {
-            var done = await Task.WhenAny(pending).ConfigureAwait(false);
-            pending.Remove(done);
-            var answer = await done.ConfigureAwait(false);
-            answers.Add(answer);
-            if (answer.Item2 is not { } response)
-                continue;
-            if (newerTerm(response))
-                break;
-            if (granted(response))
-                grants++;
+            while (pending.Count > 0 && grants < majority && grants + pending.Count >= majority)
+            {
+                var answered = Task.WhenAny(pending);
+                if (await Task.WhenAny(answered, timedOut).ConfigureAwait(false) == timedOut)
+                    break;
+
+                var done = await answered.ConfigureAwait(false);
+                pending.Remove(done);
+                var answer = await done.ConfigureAwait(false);
+                answers.Add(answer);
+                if (answer.Response is not { } response)
+                    continue;
+                if (newerTerm(response))
+                    break;
+                if (granted(response))
+                    grants++;
+            }
+        }
+        finally
+        {
+            await timer.CancelAsync().ConfigureAwait(false);
         }
         return answers;
+    }
+
+    // Whether this node and the peers a round would ask — those with no request of that kind under way — are a majority.
+    private static bool CanDecide(Dictionary<int, Task> inFlight, IReadOnlyList<int> peers, int majority)
+    {
+        var votes = 1; // this node's own
+        foreach (var peerId in peers)
+        {
+            if (!inFlight.TryGetValue(peerId, out var underWay) || underWay.IsCompleted)
+                votes++;
+        }
+        return votes >= majority;
+    }
+
+    // One peer's answer, or none if the request failed.
+    private static async Task<(int PeerId, TResponse? Response)> AskAsync<TResponse>(
+        int peerId, Func<int, Task<TResponse>> send)
+        where TResponse : class
+    {
+        try
+        {
+            return (peerId, await send(peerId).ConfigureAwait(false));
+        }
+        catch
+        {
+            return (peerId, null);
+        }
     }
 
     /// <summary>
@@ -1650,12 +1748,24 @@ public sealed partial class RaftNode : IAsyncDisposable
         }
     }
 
-    private void ResetElectionTimeout()
+    // Under _lock, or before the node is started. Restarts the election timer with a newly drawn timeout and returns
+    // that timeout.
+    private TimeSpan RestartElectionTimer()
     {
+        _electionTimerStarted = Stopwatch.GetTimestamp();
         _electionTimeoutMs = _random.Next(
             _config.RaftElectionTimeoutMinMs,
             _config.RaftElectionTimeoutMaxMs
         );
+        return TimeSpan.FromMilliseconds(_electionTimeoutMs);
+    }
+
+    private bool ElectionTimeoutElapsed()
+    {
+        lock (_lock)
+        {
+            return Stopwatch.GetElapsedTime(_electionTimerStarted).TotalMilliseconds >= _electionTimeoutMs;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Warning,
@@ -1710,6 +1820,9 @@ public sealed partial class RaftNode : IAsyncDisposable
     // Pre-Vote logging
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting pre-vote for proposed term {ProposedTerm}")]
     private partial void LogStartingPreVote(int proposedTerm);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "No campaign for term {ProposedTerm} yet: too few peers have answered the last one for a majority to be asked")]
+    private partial void LogCampaignAwaitsAnswers(int proposedTerm);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Election safety violated: this node leads term {Term} and node {OtherLeader} claims to lead it too; following it")]
     private partial void LogElectionSafetyViolation(int term, int otherLeader);
