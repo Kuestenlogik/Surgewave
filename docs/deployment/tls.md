@@ -58,6 +58,49 @@ Password-free production alternatives:
 - **Public CA** — a DigiCert / Sectigo / GlobalSign cert in PFX form works identically to
   the above.
 
+## In the container image
+
+The container image serves the endpoint in cleartext. `appsettings.json` turns TLS on and relies on
+the ASP.NET Core development certificate, which a workstation has and an image does not, so the
+image sets four environment variables that undo it:
+
+```
+Surgewave__GrpcUseTls=false
+Kestrel__Endpoints__Grpc__Url=http://*:9093
+Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094
+Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2
+```
+
+The broker says so in a warning at every start:
+
+```
+gRPC, REST, /health and /metrics are served without TLS on port 9093. To serve them over HTTPS set
+Surgewave:GrpcUseTls=true and Surgewave:GrpcCertificatePath (docs/deployment/tls.md).
+```
+
+To serve the endpoint over HTTPS, mount a certificate and name it, as environment variables: an
+environment variable wins over a mounted `appsettings.json`, so the same settings in a file lose
+to the image's own.
+
+```yaml
+services:
+  surgewave-broker:
+    image: ghcr.io/kuestenlogik/surgewave-broker:0.6.0
+    environment:
+      - Surgewave__GrpcUseTls=true
+      - Surgewave__GrpcCertificatePath=/certs/broker.pfx
+      - Surgewave__GrpcCertificatePassword=changeit
+    volumes:
+      - ./certs:/certs:ro
+      - surgewave-data:/app/data
+```
+
+The certificate file has to be readable for uid 1654, the user the image runs as. The HTTP/3
+endpoint on port 9094 stays on loopback; to serve it as well, set
+`Kestrel__Endpoints__GrpcHttp3__Url=https://*:9094`,
+`Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2AndHttp3` and
+`Kestrel__Endpoints__GrpcHttp3__Certificate__Path` (and `__Password`).
+
 ## Behaviour differences vs. cleartext mode
 
 | Aspect | `GrpcUseTls=false` (default) | `GrpcUseTls=true` |

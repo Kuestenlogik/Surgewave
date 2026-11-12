@@ -2,7 +2,7 @@ name: Deployments
 
 # Keeps the deployment manifests under deployments/ honest: statically on every change to
 # them, and by bringing them up — Compose and Kubernetes, three brokers each — with the broker
-# built from the same commit.
+# built from the same commit. The broker image itself is started with no configuration.
 
 on:
   push:
@@ -11,7 +11,10 @@ on:
       - 'deployments/**'
       - 'scripts/ci/compose-cluster-smoke.sh'
       - 'scripts/ci/kubernetes-cluster-smoke.sh'
+      - 'scripts/ci/image-smoke.sh'
+      - 'scripts/ci/image-smoke.compose.yml'
       - '.github/workflows/deployments.yml'
+      - 'Directory.Build.targets'
       - 'src/Kuestenlogik.Surgewave.Broker.App/**'
       - 'src/Kuestenlogik.Surgewave.Broker/BrokerConfig.cs'
       - 'src/Kuestenlogik.Surgewave.Clustering/**'
@@ -21,7 +24,10 @@ on:
       - 'deployments/**'
       - 'scripts/ci/compose-cluster-smoke.sh'
       - 'scripts/ci/kubernetes-cluster-smoke.sh'
+      - 'scripts/ci/image-smoke.sh'
+      - 'scripts/ci/image-smoke.compose.yml'
       - '.github/workflows/deployments.yml'
+      - 'Directory.Build.targets'
       - 'src/Kuestenlogik.Surgewave.Broker.App/**'
       - 'src/Kuestenlogik.Surgewave.Broker/BrokerConfig.cs'
       - 'src/Kuestenlogik.Surgewave.Clustering/**'
@@ -166,6 +172,33 @@ jobs:
           name: deployment-images
           path: ${{ runner.temp }}/images.tar.gz
           retention-days: 1
+
+  # ================================================================
+  # image: the broker image as it comes, with no configuration
+  # ================================================================
+  image:
+    name: Broker image, no configuration
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: deployment-images
+          path: ${{ runner.temp }}
+
+      - name: Load the images
+        run: docker load < "$RUNNER_TEMP/images.tar.gz"
+
+      # No environment, no user, a fresh named volume: healthy, not root, one record over the
+      # Kafka wire protocol and one over the native protocol, both still there after a restart.
+      - name: Start it, produce and consume, restart it
+        env:
+          SURGEWAVE_BROKER_IMAGE: ${{ env.BROKER_IMAGE }}
+          SURGEWAVE_CLI_IMAGE: ${{ env.CLI_IMAGE }}
+        run: scripts/ci/image-smoke.sh
 
   # ================================================================
   # compose: docker-compose.cluster.yml as a running cluster

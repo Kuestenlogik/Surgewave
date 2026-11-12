@@ -1,0 +1,20 @@
+# The broker image as it comes: no environment, no user, no command. Used by image-smoke.sh.
+#
+# The health check is what `docker compose up --wait` waits for; the image carries none,
+# because the SDK that builds it writes none into an image. The data mount is a fresh named
+# volume unless SURGEWAVE_DATA_MOUNT names a host directory.
+
+services:
+  broker:
+    image: ${SURGEWAVE_BROKER_IMAGE:?set SURGEWAVE_BROKER_IMAGE to the broker image under test}
+    volumes:
+      - ${SURGEWAVE_DATA_MOUNT:-data}:/app/data
+    healthcheck:
+      test: ["CMD", "dotnet", "/app/surgewave-broker.dll", "health", "ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  data:

@@ -822,6 +822,42 @@ construction, so two brokers that had waited out the peer discovery together cam
   the earlier request is under way, and a voter with too few peers left to ask for a majority starts no round
   until one of them has answered or its connect attempts have given up — at the pace it campaigned at before.
 
+### The broker image starts with no configuration and speaks Kafka (#269)
+
+`docker run ghcr.io/kuestenlogik/surgewave-broker` did not give a broker, in 0.5.2 as before: without a volume
+and on a fresh named volume it ended with "Access to the path '/app/data' is denied", because the image runs as
+an unprivileged user and held no directory that user may write to; on a writable data directory it ended with
+"Unable to configure HTTPS endpoint", because `appsettings.json` binds gRPC and REST over HTTPS with the ASP.NET
+Core development certificate, which an image does not hold; and it had found no Kafka protocol plugin, so it
+would have closed every Kafka client. The deployment manifests worked around the first two by running the broker
+as root and overriding the endpoints.
+
+- **The published broker carries the Kafka protocol plugin**, in `plugins/kuestenlogik.surgewave.protocol.kafka/`
+  next to the executable, where the broker looks first. That holds for every `dotnet publish` of the broker, so
+  for the container image, the self-contained archives, the Windows installer and the Linux packages alike; none
+  of them held the plugin since it left the broker's own assemblies. A publish that finds no build of the plugin
+  fails.
+- **The image owns its data directories.** `/app/data`, `/app/data/raft`, `/app/data/plugins` and `/app/logs` exist
+  in the image and belong to uid 1654, the user it runs as, and a fresh named volume mounted on one of them takes
+  that owner. The image names that user itself, which makes the files under `/app` that user's as well.
+- **The image serves gRPC, REST, `/health` and `/metrics` in cleartext**, through four environment variables that
+  undo what `appsettings.json` sets, and the broker says in a warning at every start that the endpoint is served
+  without TLS and how to change that. [TLS in the container image](../deployment/tls.md#in-the-container-image)
+  describes serving it over HTTPS.
+- The image no longer sets `Surgewave__Storage__DataDirectory` and `Surgewave__Storage__LogDirectory`, which
+  nothing read.
+- **The linux-x64 and the linux-arm64 image are each built from their own files.** The release builds both in one
+  publish, which built the broker for both architectures at the same time in the same directories: the build
+  could fail on a file the other one was writing, and an image could hold files of the other architecture — the
+  0.5.2 linux-arm64 image holds an x86-64 `surgewave-broker` executable next to the assembly it starts. The two
+  are now built one after the other, each in directories of its own.
+
+The Compose files no longer run the broker as root or override the endpoints, the Helm chart no longer overrides
+what the image now sets, and `docker-compose.yml` mounts its plugin volume on `/app/data/plugins` instead of over
+the directory the image ships its plugin in. `.github/workflows/deployments.yml` starts the image with no
+configuration on a fresh named volume, waits for its health check and produces and consumes a record over the
+Kafka wire protocol and over the native protocol (`scripts/ci/image-smoke.sh`).
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages
@@ -1020,3 +1056,18 @@ The chart's values changed with its repair; there are no aliases.
 
 In the ConfigMap the tiered-storage keys carry the names the broker reads: `S3BucketName`, `S3Region`,
 `AzureContainerName`, `GcpBucketName`.
+
+### The broker image: its user, its endpoints and its plugin directory (#269)
+
+- The image runs as uid 1654 as before, and the files under `/app` now belong to that user instead of root. A
+  container that set `user: "0:0"` to write to a named volume no longer needs it; a named volume it wrote as root
+  is not writable for uid 1654 until it is given to that user (`chown -R 1654 /app/data`, once, as root).
+- The image sets `Surgewave__GrpcUseTls=false`, `Kestrel__Endpoints__Grpc__Url=http://*:9093`,
+  `Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094` and `Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2`.
+  Environment variables win over a mounted `appsettings.json`: a deployment that turned TLS on in a mounted file
+  sets it as environment variables now.
+- The environment variables `Surgewave__Storage__DataDirectory` and `Surgewave__Storage__LogDirectory` are gone
+  from the image. They were never read; the data directory is `Surgewave__DataDirectory`.
+- `/app/plugins` holds the Kafka protocol plugin. A volume mounted over it hides the plugin, or keeps the one of
+  the image the volume was first filled from: mount plugin volumes on `/app/data/plugins` and do not set
+  `Surgewave__PluginsDirectory`, which makes the broker search that one directory only.

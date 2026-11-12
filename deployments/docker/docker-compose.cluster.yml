@@ -27,8 +27,6 @@
 
 x-surgewave-broker: &surgewave-broker
   image: ${SURGEWAVE_BROKER_IMAGE:-ghcr.io/kuestenlogik/surgewave-broker:0.6.0}
-  # The image runs as an unprivileged user that cannot write to a fresh named volume.
-  user: "0:0"
   restart: unless-stopped
   networks:
     - surgewave-cluster
@@ -48,13 +46,9 @@ x-surgewave-broker-environment: &surgewave-broker-environment
   Surgewave__Port: 9092
   Surgewave__GrpcPort: 9095
   Surgewave__ReplicationPort: 10092
-  # gRPC, REST, /health and /metrics in cleartext. The image's appsettings.json turns TLS on
-  # and binds both endpoints over HTTPS, which needs a certificate; the second one stays on
-  # loopback.
-  Surgewave__GrpcUseTls: "false"
+  # gRPC, REST, /health and /metrics on the gRPC port set above, in cleartext as the image
+  # binds them; the image's own endpoint names port 9093.
   Kestrel__Endpoints__Grpc__Url: http://*:9095
-  Kestrel__Endpoints__GrpcHttp3__Url: http://localhost:9094
-  Kestrel__Endpoints__GrpcHttp3__Protocols: Http1AndHttp2
   Surgewave__DataDirectory: /app/data
   Surgewave__RaftDataDirectory: /app/data/raft
   # Who exists (id:host:port:replicationPort) and who votes on metadata (id@host:replicationPort).

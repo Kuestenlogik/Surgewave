@@ -15,6 +15,13 @@ docker compose -f deployments/docker/docker-compose.yml up -d --wait surgewave-b
 docker compose -f deployments/docker/docker-compose.cluster.yml up -d --wait
 ```
 
+The image also starts on its own, without any configuration: one broker that speaks the Kafka wire
+protocol and the native protocol on port 9092, and gRPC and REST in cleartext on port 9093.
+
+```bash
+docker run -d -p 9092:9092 -p 9093:9093 -v surgewave-data:/app/data ghcr.io/kuestenlogik/surgewave-broker:0.6.0
+```
+
 ## Docker Compose
 
 ### Single Broker
@@ -23,21 +30,13 @@ docker compose -f deployments/docker/docker-compose.cluster.yml up -d --wait
 services:
   surgewave-broker:
     image: ghcr.io/kuestenlogik/surgewave-broker:0.6.0
-    # The image runs as an unprivileged user that cannot write to a fresh named volume.
-    user: "0:0"
     ports:
       - "9092:9092"
       - "9093:9093"
     environment:
-      # The name clients are told; the listener binds every interface.
+      # The name clients in this network are told; the listener binds every interface.
       - Surgewave__Host=surgewave-broker
       - Surgewave__BindAddress=0.0.0.0
-      # gRPC, REST, /health and /metrics in cleartext; the image binds them over HTTPS,
-      # which needs a certificate.
-      - Surgewave__GrpcUseTls=false
-      - Kestrel__Endpoints__Grpc__Url=http://*:9093
-      - Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094
-      - Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2
     volumes:
       - surgewave-data:/app/data
     healthcheck:
@@ -119,7 +118,12 @@ docker build -t my-surgewave .
 |------|---------|
 | `/app/data` | Topic data, offsets and the metadata log |
 | `/app/logs` | Log files |
-| `/app/plugins` | Installed plugins |
+| `/app/data/plugins` | Installed plugins; part of the data volume, or a volume of its own |
+
+The image runs as uid 1654. These directories exist in the image and belong to that user, so a
+fresh named volume mounted on one of them is writable; a bind-mounted host directory has to be
+writable for uid 1654. `/app/plugins` holds what the image ships, the Kafka protocol plugin: do
+not mount a volume over it.
 
 ## Health Checks
 

@@ -15,13 +15,9 @@ data:
   Surgewave__DataDirectory: "/data"
   Surgewave__LogDirectory: "/data/logs"
 
-  # gRPC, REST, /health and /metrics in cleartext on the gRPC port. The image's
-  # appsettings.json turns TLS on and binds two endpoints over HTTPS, which needs a
-  # certificate; the second endpoint stays on loopback.
-  Surgewave__GrpcUseTls: "false"
+  # gRPC, REST, /health and /metrics on the gRPC port, in cleartext as the image binds them;
+  # the image's own endpoint names port 9093.
   Kestrel__Endpoints__Grpc__Url: "http://*:{{ .Values.broker.ports.grpc }}"
-  Kestrel__Endpoints__GrpcHttp3__Url: "http://localhost:9094"
-  Kestrel__Endpoints__GrpcHttp3__Protocols: "Http1AndHttp2"
 
   # Cluster settings: who exists and who votes on metadata, identical on every broker. A single
   # broker is its own quorum and names nobody: with ClusterNodes set it would wait for peers.

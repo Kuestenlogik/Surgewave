@@ -6,17 +6,34 @@ The broker image is `ghcr.io/kuestenlogik/surgewave-broker` (also `kuestenlogik/
 Docker Hub). The Compose files under `deployments/docker/` are the reference; this page explains what
 they set and why.
 
-## What a broker in a container needs
+## What the image starts with
 
-The image's `appsettings.json` is written for a workstation. Four things have to be said for a
-container:
+The image starts without any configuration:
 
-| Setting | Value in a container | Why |
-|---------|----------------------|-----|
+```bash
+docker run -d -p 9092:9092 -p 9093:9093 -v surgewave-data:/app/data ghcr.io/kuestenlogik/surgewave-broker:0.6.0
+```
+
+That is one broker, its own quorum, which a client on the Docker host reaches on `localhost:9092`
+over the Kafka wire protocol and the native protocol, and on `http://localhost:9093` over gRPC and
+REST.
+
+| The image | What it means |
+|-----------|---------------|
+| holds the Kafka protocol plugin in `/app/plugins` | The broker speaks Kafka and the native protocol on port 9092. `/app/plugins` is what the image ships and is replaced with it; do not mount a volume over it. Plugins you install go to `/app/data/plugins`, which the broker searches after it. |
+| runs as uid 1654, the unprivileged user of the .NET images | No `user:` is needed. `/app/data`, `/app/data/raft`, `/app/data/plugins` and `/app/logs` exist in the image and belong to that user, and a fresh named volume mounted on one of them takes that owner. A volume mounted on any other path belongs to root, and a bind-mounted host directory keeps the owner it has on the host: make it writable for uid 1654. |
+| sets `Surgewave__GrpcUseTls=false`, `Kestrel__Endpoints__Grpc__Url=http://*:9093`, `Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094` and `Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2` | gRPC, REST, `/health` and `/metrics` are served in cleartext on port 9093, and the broker says so in a warning at every start. `appsettings.json` binds them over HTTPS with the ASP.NET Core development certificate, which an image does not hold. To serve them over HTTPS, see [TLS in the container image](tls.md#in-the-container-image). These are environment variables of the image, and an environment variable wins over a mounted `appsettings.json`: change them as environment variables. |
+| keeps `Surgewave__Host` at `localhost` | The listener binds every interface, and clients are told `localhost:9092`. That suits a client on the Docker host with the port published. |
+
+## What a broker in a network of containers needs
+
+A client in another container is told `localhost` too and then looks for the broker in its own
+container. A broker that other containers use says its name:
+
+| Setting | Value | Why |
+|---------|-------|-----|
 | `Surgewave__Host` | the container's DNS name, e.g. `surgewave-1` | The name clients and the other brokers are told to connect to. |
 | `Surgewave__BindAddress` | `0.0.0.0` | The address the client listener binds. Without it the listener binds `Host`, which then has to be an IP address or `localhost`. |
-| `Surgewave__GrpcUseTls`, `Kestrel__Endpoints__Grpc__Url`, `Kestrel__Endpoints__GrpcHttp3__Url`, `Kestrel__Endpoints__GrpcHttp3__Protocols` | `false`, `http://*:9093`, `http://localhost:9094`, `Http1AndHttp2` | The image binds gRPC, REST, `/health` and `/metrics` over HTTPS, which needs a certificate. These bind them in cleartext; see [TLS](tls.md) to keep HTTPS. |
-| a writable data directory | a volume on `/app/data`, and `user: "0:0"` for a named volume | The image runs as an unprivileged user, and a fresh named volume belongs to root. |
 
 ## Single broker
 

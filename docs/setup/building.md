@@ -313,8 +313,6 @@ services:
       - "9092:9092"   # Kafka protocol
       - "9093:9093"   # gRPC
     environment:
-      - Surgewave__Storage__DataDirectory=/app/data
-      - Surgewave__Storage__LogDirectory=/app/logs
       - DOTNET_RUNNING_IN_CONTAINER=true
     volumes:
       - surgewave-data:/app/data

@@ -23,7 +23,6 @@ services:
   surgewave-broker:
     image: surgewave/surgewave-broker:0.1.0
     container_name: surgewave-broker
-    user: "0:0"
     ports:
       - "9092:9092"   # Kafka protocol
       - "9093:9093"   # gRPC
@@ -34,21 +33,16 @@ services:
       # Shared plugin volume. Plugins installed via 'surgewave plugins install' land here
       # along with their pluginsettings.json defaults. The broker layers these defaults
       # into IConfiguration at startup (lowest priority — appsettings.json wins).
-      - surgewave-plugins:/app/plugins
+      # Mounted on the plugin directory of the data directory, which the broker searches after
+      # /app/plugins: that one holds what the image ships, the Kafka protocol plugin, and a
+      # volume mounted over it would keep the plugin of the image it was first filled from.
+      - surgewave-plugins:/app/data/plugins
     environment:
       - DOTNET_RUNNING_IN_CONTAINER=true
       # Host is the name clients are told, here the service name; the listener binds every
       # interface.
       - Surgewave__Host=surgewave-broker
       - Surgewave__BindAddress=0.0.0.0
-      # gRPC, REST, /health and /metrics in cleartext. The image's appsettings.json turns TLS
-      # on and binds both endpoints over HTTPS, which needs a certificate; the second one
-      # stays on loopback.
-      - Surgewave__GrpcUseTls=false
-      - Kestrel__Endpoints__Grpc__Url=http://*:9093
-      - Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094
-      - Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2
-      - Surgewave__PluginsDirectory=/app/plugins
     healthcheck:
       # The image holds no curl; the broker executable asks its own /health/ready, on the
       # endpoint it is configured with. A single broker is its own quorum and ready alone.

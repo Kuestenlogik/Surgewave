@@ -48,6 +48,26 @@
     <ContainerRepository>kuestenlogik/surgewave-broker</ContainerRepository>
     <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>
     <ContainerFamily>jammy</ContainerFamily>
+    <!-- The unprivileged user of the .NET images (APP_UID), named here and not left to the base image's USER:
+         only with a numeric ContainerUser does the SDK give the application layer to that user, and only a
+         directory the user owns in the image is writable on a fresh named volume, which Docker creates with
+         the owner of the directory it is mounted on (#269). -->
+    <ContainerUser>1654</ContainerUser>
+  </PropertyGroup>
+
+  <!-- A multi-architecture publish (release.yml: ContainerRuntimeIdentifiers="linux-x64;linux-arm64") builds this
+       project once per architecture, by default at the same time, and Directory.Build.props gives every build of
+       a project the same obj, bin and publish directory whatever its runtime: the two builds wrote the same
+       files ("surgewave-broker.deps.json ... is being used by another process", MSB4018) and each image was
+       made from the one publish directory both had filled - the linux-arm64 image built here held the x86-64
+       libe_sqlite3.so and libwasmtime.so (#269). They run one after the other, and each in directories of its own. -->
+  <PropertyGroup>
+    <ContainerPublishInParallel>false</ContainerPublishInParallel>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ContainerRuntimeIdentifier)' != ''">
+    <IntermediateOutputPath>$(IntermediateOutputPath)$(ContainerRuntimeIdentifier)\</IntermediateOutputPath>
+    <OutputPath>$(OutputPath)$(ContainerRuntimeIdentifier)\</OutputPath>
+    <PublishDir>$(PublishDir)$(ContainerRuntimeIdentifier)\</PublishDir>
   </PropertyGroup>
 
   <ItemGroup Label="Container Ports">
@@ -60,9 +80,43 @@
 
   <ItemGroup Label="Container Environment">
     <ContainerEnvironmentVariable Include="DOTNET_RUNNING_IN_CONTAINER" Value="true" />
-    <ContainerEnvironmentVariable Include="Surgewave__Storage__DataDirectory" Value="/app/data" />
-    <ContainerEnvironmentVariable Include="Surgewave__Storage__LogDirectory" Value="/app/logs" />
+    <!-- gRPC, REST, /health and /metrics in cleartext (#269). appsettings.json binds both endpoints over HTTPS
+         with the ASP.NET Core development certificate, which a workstation has and an image does not: the
+         broker ended with "Unable to configure HTTPS endpoint". The second endpoint is HTTP/3, which needs
+         TLS, so it stays on loopback without it. With a certificate: Surgewave__GrpcUseTls=true and
+         Surgewave__GrpcCertificatePath, see docs/deployment/tls.md. The broker says at startup which it is. -->
+    <ContainerEnvironmentVariable Include="Surgewave__GrpcUseTls" Value="false" />
+    <ContainerEnvironmentVariable Include="Kestrel__Endpoints__Grpc__Url" Value="http://*:9093" />
+    <ContainerEnvironmentVariable Include="Kestrel__Endpoints__GrpcHttp3__Url" Value="http://localhost:9094" />
+    <ContainerEnvironmentVariable Include="Kestrel__Endpoints__GrpcHttp3__Protocols" Value="Http1AndHttp2" />
   </ItemGroup>
+
+  <!-- The SDK hands the image's environment variables to the per-architecture builds of a multi-architecture
+       publish as name:value and takes them apart again at every colon (_ParseItemsForPublishingSingleContainer in
+       Microsoft.NET.Build.Containers.targets), which cut "http://*:9093" down to "http": the image built as
+       release.yml builds it, for linux-x64 and linux-arm64, ended with "Invalid url: 'http'". The items declared
+       above are whole in those builds as well, so they replace what was taken apart, and a build whose image
+       would not carry every one of them as declared fails. -->
+  <Target Name="RestoreContainerEnvironmentVariables" BeforeTargets="_PublishSingleContainer">
+    <ItemGroup>
+      <ContainerEnvironmentVariables Remove="@(ContainerEnvironmentVariable)" />
+      <ContainerEnvironmentVariables Include="@(ContainerEnvironmentVariable)" />
+      <_DeclaredContainerEnvironment Include="@(ContainerEnvironmentVariable->'%(Identity)=%(Value)')" />
+      <_ImageContainerEnvironment Include="@(ContainerEnvironmentVariables->'%(Identity)=%(Value)')" />
+      <_LostContainerEnvironment Include="@(_DeclaredContainerEnvironment)" Exclude="@(_ImageContainerEnvironment)" />
+    </ItemGroup>
+    <Error Text="The container image would not carry these environment variables as declared: @(_LostContainerEnvironment, ', ')."
+           Condition="'@(_LostContainerEnvironment)' != ''" />
+  </Target>
+
+  <!-- The directories the broker writes to, in the image and owned by its user (#269): appsettings.json names
+       ./data and ./logs, the image's working directory is /app, the metadata log is data/raft and plugins an
+       operator installs are read from data/plugins. A named volume mounted on one of them takes its owner
+       from the image; mounted on a path the image does not hold it belongs to root, and the broker ended with
+       "Access to the path '/app/data' is denied". -->
+  <Target Name="CreateContainerDataDirectories" BeforeTargets="_PublishSingleContainer">
+    <MakeDir Directories="$(PublishDir)data/raft;$(PublishDir)data/plugins;$(PublishDir)logs" />
+  </Target>
 
   <!-- Publish-specific settings for optimized builds -->
   <!-- Use: dotnet publish -c Release -p:Optimized=true -r win-x64 -->

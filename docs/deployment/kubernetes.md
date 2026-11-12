@@ -139,8 +139,9 @@ Two of three brokers keep the quorum; a node drain may take one.
 ### Configuration
 
 The ConfigMap replaces the image's `appsettings.json`. It binds gRPC, REST, `/health` and `/metrics`
-in cleartext on port 9093 (the image's own file binds them over HTTPS, which needs a certificate;
-see [TLS](tls.md)) and leaves the embedded Connect worker off: with it on, a broker that does not
+in cleartext on port 9093, as the image's environment does (see
+[TLS in the container image](tls.md#in-the-container-image) to serve them over HTTPS), and leaves the
+embedded Connect worker off: with it on, a broker that does not
 lead the partition of the worker's pipeline store topic does not finish starting.
 
 ### Storage

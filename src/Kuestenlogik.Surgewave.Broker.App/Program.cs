@@ -2089,6 +2089,17 @@ app.MapGet("/sd-targets", () =>
 
 logger.LogInformation("gRPC server started on port {GrpcPort}", config.GrpcPort);
 
+// Cleartext is said at every start (#269): the container image binds this endpoint without TLS, having no
+// certificate to bind it with, and that is to be a choice the operator has seen.
+var grpcEndpointUrl = app.Configuration["Kestrel:Endpoints:Grpc:Url"];
+if (grpcEndpointUrl is null || !grpcEndpointUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+{
+    logger.LogWarning(
+        "gRPC, REST, /health and /metrics are served without TLS on port {GrpcPort}. To serve them over HTTPS set "
+        + "Surgewave:GrpcUseTls=true and Surgewave:GrpcCertificatePath (docs/deployment/tls.md).",
+        config.GrpcPort);
+}
+
 // Ready is said from here, after every plugin is configured — a plugin that fails on the way never gets this far —
 // and once the broker accepts its clients, which it does when it has caught up with the metadata log (#250).
 // Not awaited: the HTTP port below comes up meanwhile, with the liveness probe and the metrics on it.

@@ -96,7 +96,9 @@ StatefulSets use `podManagementPolicy: Parallel` and a headless service with
 `publishNotReadyAddresses: true`, liveness is `/health/live`, which never fails for want of a
 quorum, and no Compose broker depends on another broker's health. `scripts/ci/compose-cluster-smoke.sh`
 and `scripts/ci/kubernetes-cluster-smoke.sh` bring the deployments up and check them;
-`.github/workflows/deployments.yml` runs both.
+`.github/workflows/deployments.yml` runs both, and `scripts/ci/image-smoke.sh`, which starts the broker
+image with no configuration on a fresh named volume and produces and consumes a record over the Kafka
+wire protocol and over the native protocol.
 
 ### Kubernetes Operator
 

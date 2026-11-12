@@ -188,8 +188,7 @@
     (ReferenceOutputAssembly=false) makes sure the plugin is built first; the broker stays Kafka-free,
     which Broker.BootTests' KafkaFreeBrokerTests holds.
   -->
-  <Target Name="CopyKafkaPluginForDevRun"
-          AfterTargets="Build"
+  <Target Name="CollectKafkaPluginFiles"
           Condition="'$(MSBuildProjectName)' == 'Kuestenlogik.Surgewave.Broker.App'">
     <PropertyGroup>
       <_KafkaPluginId>kuestenlogik.surgewave.protocol.kafka</_KafkaPluginId>
@@ -197,12 +196,19 @@
       <_KafkaPluginDir>$(OutputPath)plugins\$(_KafkaPluginId)\</_KafkaPluginDir>
     </PropertyGroup>
     <ItemGroup Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll')">
+      <_KafkaPluginFiles Remove="@(_KafkaPluginFiles)" />
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll" />
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json" Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json')" />
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)plugin.json" Condition="Exists('$(_KafkaPluginOut)plugin.json')" />
       <!-- The plugin's private external dependencies, without the host's shared assemblies. -->
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)*.dll" Exclude="$(_KafkaPluginOut)Kuestenlogik.Surgewave.*.dll" />
     </ItemGroup>
+  </Target>
+
+  <Target Name="CopyKafkaPluginForDevRun"
+          AfterTargets="Build"
+          DependsOnTargets="CollectKafkaPluginFiles"
+          Condition="'$(MSBuildProjectName)' == 'Kuestenlogik.Surgewave.Broker.App'">
     <Warning Text="CopyKafkaPluginForDevRun: no Kafka plugin build output at $(_KafkaPluginOut) — the broker runs native-only."
              Condition="'@(_KafkaPluginFiles)' == ''" />
     <Copy SourceFiles="@(_KafkaPluginFiles)"
@@ -212,6 +218,31 @@
     <Message Text="#59 b6: staged the Kafka plugin into $(_KafkaPluginDir) for dev-run"
              Importance="normal"
              Condition="'@(_KafkaPluginFiles)' != ''" />
+  </Target>
+
+  <!--
+    #269 — the published broker carries the Kafka plugin.
+    What the dev run gets staged, every `dotnet publish` of the broker host gets published: the same files
+    under plugins/<plugin id>/ in the publish directory, which is the installation scope the broker searches
+    first (SurgewavePluginDirectories.Installation). The container image, the self-contained archives and the
+    installers are all made from that directory, and none of them held the plugin: release.yml publishes the
+    broker with a plain `dotnet publish`, not with scripts/publish.ps1, which packs and installs the protocol
+    plugins itself. A published broker without the plugin closes every Kafka client, so a publish that finds
+    no plugin build output fails instead of producing one. The files stay outside a single-file bundle: the
+    broker loads them from the directory.
+  -->
+  <Target Name="PublishKafkaPlugin"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          DependsOnTargets="CollectKafkaPluginFiles"
+          Condition="'$(MSBuildProjectName)' == 'Kuestenlogik.Surgewave.Broker.App'">
+    <Error Text="PublishKafkaPlugin: no Kafka plugin build output at $(_KafkaPluginOut) — the published broker would close every Kafka client. Build Kuestenlogik.Surgewave.Protocol.Kafka in the same configuration first."
+           Condition="'@(_KafkaPluginFiles)' == ''" />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(_KafkaPluginFiles)"
+                             RelativePath="plugins\$(_KafkaPluginId)\%(Filename)%(Extension)"
+                             CopyToPublishDirectory="PreserveNewest"
+                             ExcludeFromSingleFile="true" />
+    </ItemGroup>
   </Target>
 
 </Project>
