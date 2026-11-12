@@ -39,8 +39,13 @@ spec:
             - name: kafka
               containerPort: 9092
               protocol: TCP
+            # REST, /health and /metrics; with TLS gRPC as well.
             - name: grpc
               containerPort: 9093
+              protocol: TCP
+            # gRPC over HTTP/2; with TLS REST as well.
+            - name: grpc-http2
+              containerPort: 9094
               protocol: TCP
             - name: replication
               containerPort: 10092

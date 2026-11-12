@@ -41,6 +41,11 @@ itself; raise it for pods with a small CPU limit.
 Clients in the cluster bootstrap from the client service (`<release>:9092`) and are then told the
 pod names.
 
+The broker's two HTTP endpoints are on the headless, the client and the external service as well.
+They are served without TLS, and a cleartext endpoint serves HTTP/2, which gRPC needs, or HTTP/1.1:
+gRPC is on `<release>:9094` (`broker.ports.grpcHttp2`), and REST, `/health` and `/metrics` are on
+`<release>:9093` (`broker.ports.grpc`), which the probes, the ServiceMonitor and the Control UI use.
+
 ## Configuration
 
 All configuration is done via `values.yaml` or `--set` flags.
@@ -59,7 +64,8 @@ All configuration is done via `values.yaml` or `--set` flags.
 | `broker.storage.size` | PVC size per broker | `10Gi` |
 | `broker.storage.storageClassName` | Storage class (empty = default) | `""` |
 | `broker.ports.kafka` | Client port (native protocol, Kafka with the plugin) | `9092` |
-| `broker.ports.grpc` | gRPC / REST port; also `/health` and `/metrics` | `9093` |
+| `broker.ports.grpc` | REST port; also `/health` and `/metrics`, and gRPC with TLS | `9093` |
+| `broker.ports.grpcHttp2` | gRPC port (HTTP/2); also REST with TLS | `9094` |
 | `broker.ports.replication` | Inter-broker port | `10092` |
 | `broker.ports.mqtt` | MQTT protocol port | `1883` |
 | `broker.config.autoTopicCreation` | Auto-create topics | `true` |

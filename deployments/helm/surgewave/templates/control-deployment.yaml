@@ -31,7 +31,8 @@ spec:
           env:
             - name: ASPNETCORE_URLS
               value: "http://+:{{ .Values.control.port }}"
-            # The brokers' gRPC / REST endpoint, through the client Service: a ready broker.
+            # The brokers' REST endpoint, through the client Service: a ready broker. The Control
+            # UI speaks REST to the broker, which is on this port with and without TLS.
             - name: Broker__ApiUrl
               value: "http://{{ include "surgewave.fullname" . }}:{{ .Values.broker.ports.grpc }}"
           resources:

@@ -20,7 +20,8 @@ is the pod's ordinal, which the chart reads from the `apps.kubernetes.io/pod-ind
   first pod would never become ready and the second would never start. Updates still replace one pod
   at a time.
 - A **headless service** with `publishNotReadyAddresses: true`, through which the brokers find each
-  other before they are ready, and a **client service** that routes to ready brokers only.
+  other before they are ready, and a **client service** that routes to ready brokers only. Both
+  carry the client port and the broker's two HTTP ports, see [Ports](#ports).
 - Per pod: `Surgewave__BrokerId` (the ordinal) and `Surgewave__Host`, the pod's DNS name
   `<pod>.<release>-headless.<namespace>.svc.<clusterDomain>`, which clients and the other brokers are
   told.
@@ -49,7 +50,8 @@ broker:
     storageClassName: ""   # the cluster's default
   ports:
     kafka: 9092
-    grpc: 9093
+    grpc: 9093         # REST, /health, /metrics; with TLS gRPC as well
+    grpcHttp2: 9094    # gRPC; with TLS REST as well
     replication: 10092
   config:
     defaultPartitions: 3
@@ -67,6 +69,24 @@ podDisruptionBudget:
   enabled: true
   maxUnavailable: 1
 ```
+
+### Ports
+
+The broker has two HTTP endpoints, and the chart binds both, names both as container ports and
+carries both on the headless service, the client service and, with `service.external.enabled`, the
+external one.
+
+| Value | Port name | Default | Without TLS, as installed | With TLS |
+|-------|-----------|---------|---------------------------|----------|
+| `broker.ports.grpc` | `grpc` | 9093 | REST, `/health`, `/metrics` over HTTP/1.1 | gRPC and REST over HTTPS |
+| `broker.ports.grpcHttp2` | `grpc-http2` | 9094 | gRPC over HTTP/2 | gRPC and REST over HTTPS |
+
+A cleartext endpoint serves HTTP/2, which gRPC needs, or HTTP/1.1, so without TLS the two are two
+ports: a gRPC client in the cluster connects to `http://<release>:9094`, and REST clients, the
+probes, the ServiceMonitor and the Control UI use port 9093.
+
+The chart has no value that switches the endpoints to TLS, and its probes ask over HTTP; see
+[TLS on Kubernetes](tls.md#on-kubernetes).
 
 ### Startup probe
 

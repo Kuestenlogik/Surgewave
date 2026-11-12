@@ -61,7 +61,9 @@ container. A broker that other containers use says its name:
 docker compose -f deployments/docker/docker-compose.yml up -d --wait surgewave-broker
 ```
 
-A single broker is its own quorum and is ready alone.
+A single broker is its own quorum and is ready alone. The file publishes the image's ports as they
+are: 9092 for the Kafka wire protocol and the native protocol, 9093 for REST, `/health` and
+`/metrics`, 9094 for gRPC.
 
 ## 3-node cluster
 
@@ -86,6 +88,31 @@ environment:
 
 `ClusterNodes` without `ControllerQuorumVoters` is a startup error, and an entry of `ClusterNodes`
 without the leading broker id is not read.
+
+### Ports
+
+Ports 9093 and 9094 of the Docker host are the client ports of brokers 2 and 3, so the brokers of
+this file bind their two HTTP endpoints elsewhere, REST on 9095 and gRPC on 9098:
+
+```yaml
+environment:
+  Surgewave__GrpcPort: 9095
+  Kestrel__Endpoints__Grpc__Url: http://*:9095
+  Kestrel__Endpoints__GrpcHttp3__Url: http://*:9098
+```
+
+| Broker | Kafka and native protocol | REST, `/health`, `/metrics` | gRPC | Replication |
+|--------|---------------------------|-----------------------------|------|-------------|
+| `surgewave-1` | 9092 | 9095 | 9098 | 10092 |
+| `surgewave-2` | 9093 | 9096 | 9099 | 10093 |
+| `surgewave-3` | 9094 | 9097 | 9100 | 10094 |
+
+These are the ports on the Docker host. Inside the Compose network every broker is reached under
+its name on the ports it binds: `surgewave-2:9092`, `http://surgewave-2:9095`, and
+`http://surgewave-2:9098` for gRPC. A cleartext endpoint serves HTTP/2, which gRPC needs, or
+HTTP/1.1, which is why REST and gRPC are two ports; a gRPC call to the REST port ends with
+`HTTP_1_1_REQUIRED`. With [TLS](tls.md#in-the-container-image) both ports of a broker serve gRPC and
+REST over HTTPS, on the same host ports.
 
 ### Ready takes a quorum
 
@@ -158,7 +185,8 @@ the [configuration reference](../reference/config-reference.md).
 | `Surgewave__Host` | localhost | Name or address clients and brokers are told |
 | `Surgewave__BindAddress` | - | Address the client listener binds; `Host` when unset |
 | `Surgewave__Port` | 9092 | Client port (native protocol, Kafka with the plugin) |
-| `Surgewave__GrpcPort` | 9093 | gRPC / REST port |
+| `Surgewave__GrpcPort` | 9093 | REST port, and a gRPC port with TLS |
+| `Kestrel__Endpoints__GrpcHttp3__Url` | `https://*:9094` | The second HTTP endpoint: gRPC without TLS, gRPC and REST with it. The scheme follows `Surgewave__GrpcUseTls` |
 | `Surgewave__ReplicationPort` | 10092 | Inter-broker port |
 | `Surgewave__DataDirectory` | ./data | Data path (`/app/data` in the image) |
 | `Surgewave__AutoCreateTopics` | true | Auto-create topics |

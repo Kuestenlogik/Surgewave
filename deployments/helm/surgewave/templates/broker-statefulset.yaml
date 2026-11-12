@@ -66,8 +66,13 @@ spec:
             - name: kafka
               containerPort: {{ .Values.broker.ports.kafka }}
               protocol: TCP
+            # REST, /health and /metrics; with TLS gRPC as well.
             - name: grpc
               containerPort: {{ .Values.broker.ports.grpc }}
+              protocol: TCP
+            # gRPC over HTTP/2; with TLS REST as well.
+            - name: grpc-http2
+              containerPort: {{ .Values.broker.ports.grpcHttp2 }}
               protocol: TCP
             - name: replication
               containerPort: {{ .Values.broker.ports.replication }}

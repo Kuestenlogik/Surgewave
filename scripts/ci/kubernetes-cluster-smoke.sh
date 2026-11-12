@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks that a Surgewave StatefulSet already applied to a Kubernetes cluster is a broker
 # cluster: every pod ready, a topic replicated to every broker created through one broker and
-# read through the others, a deleted pod that rejoins, all pods deleted at once, a rolling
+# read through the others, the topic listed over gRPC and over REST by every broker and
+# through the client service, a deleted pod that rejoins, all pods deleted at once, a rolling
 # restart.
 #
 #   scripts/ci/kubernetes-cluster-smoke.sh <namespace> <statefulset> <headless-service> [scenario ...]
@@ -19,7 +20,12 @@
 #   SURGEWAVE_CLI_IMAGE        image of the surgewave CLI the cluster can run, required
 #   SURGEWAVE_CLI_PULL_POLICY  its pull policy (default: IfNotPresent)
 #   SURGEWAVE_CLIENT_PORT      the brokers' client port (default: 9092)
-#   ROLLOUT_TIMEOUT            how long a rollout may take (default: 300s)
+#   SURGEWAVE_REST_PORT        the brokers' REST port (default: 9093)
+#   SURGEWAVE_GRPC_PORT        the brokers' gRPC port (default: 9094)
+#   SURGEWAVE_CLIENT_SERVICE   the client service (default: the StatefulSet's name)
+#   GRPCURL_IMAGE              image of grpcurl the cluster can pull, for the gRPC and REST
+#                              calls (default: pinned below)
+#   ROLLOUT_TIMEOUT           how long a rollout may take (default: 300s)
 #
 # Nothing here sleeps or polls: `kubectl rollout status` returns when the pods' readiness
 # probes pass.
@@ -34,6 +40,11 @@ shift 3
 : "${SURGEWAVE_CLI_IMAGE:?set SURGEWAVE_CLI_IMAGE to the surgewave CLI image}"
 pull_policy="${SURGEWAVE_CLI_PULL_POLICY:-IfNotPresent}"
 port="${SURGEWAVE_CLIENT_PORT:-9092}"
+rest_port="${SURGEWAVE_REST_PORT:-9093}"
+grpc_port="${SURGEWAVE_GRPC_PORT:-9094}"
+client_service="${SURGEWAVE_CLIENT_SERVICE:-$statefulset}"
+# Pinned by digest: fullstorydev/grpcurl:v1.9.3-alpine, which holds grpcurl and BusyBox.
+grpcurl_image="${GRPCURL_IMAGE:-fullstorydev/grpcurl@sha256:4614424ed58e9b9837c48b6b8eadb9ef40491d5af3499bcc8b378e9c64a9e4a9}"
 timeout="${ROLLOUT_TIMEOUT:-300s}"
 
 k() { kubectl --namespace "$namespace" "$@"; }
@@ -44,6 +55,7 @@ for ((i = 0; i < replicas; i++)); do
     pods+=("$statefulset-$i")
 done
 client="surgewave-smoke-cli"
+http_client="surgewave-smoke-grpcurl"
 # Topics are named per run, so a cluster can be checked more than once.
 run_id="$(date +%s)"
 
@@ -60,15 +72,19 @@ fail() {
 # The address a broker tells its clients: the pod's stable DNS name.
 address() { echo "$1.$service.$namespace.svc:$port"; }
 
-# One pod with the CLI for the whole run; the commands are executed in it, which returns their
-# output and exit code as they are.
+# One pod with the CLI and one with grpcurl for the whole run; the commands are executed in
+# them, which returns their output and exit code as they are.
 start_client() {
     k run "$client" --restart=Never --image="$SURGEWAVE_CLI_IMAGE" --image-pull-policy="$pull_policy" \
         --command -- sleep infinity
+    k run "$http_client" --restart=Never --image="$grpcurl_image" --command -- sleep infinity
     k wait --for=condition=Ready "pod/$client" --timeout="$timeout" || fail "the CLI pod did not start"
+    k wait --for=condition=Ready "pod/$http_client" --timeout="$timeout" || fail "the grpcurl pod did not start"
 }
 
 cli() { k exec "$client" -- dotnet surgewave.dll "$@"; }
+grpc() { k exec "$http_client" -- grpcurl -plaintext "$@"; }
+rest() { k exec "$http_client" -- wget -q -O - "$1"; }
 
 rolled_out() { k rollout status "statefulset/$statefulset" --timeout="$timeout" || fail "rollout of $statefulset: $*"; }
 
@@ -102,6 +118,28 @@ check_topic() {
     [[ -n "$leader" ]] || fail "no broker accepted a record for $topic-0"
     check_record "$1"
     echo "ok: $topic created through ${pods[0]}, led by $leader, read from all $replicas brokers"
+    check_http "$1"
+}
+
+# The topic is listed over gRPC and over REST by every broker, under its pod's name, and
+# through the client service, which is how a client in the cluster reaches a ready broker.
+# Without TLS they are two ports: a cleartext endpoint serves HTTP/2, which gRPC needs, or
+# HTTP/1.1, and a service that carries the REST port alone has no gRPC (HTTP_1_1_REQUIRED).
+check_http() {
+    local topic="smoke-$1-$run_id" pod host listed
+    local hosts=("$client_service.$namespace.svc")
+    for pod in "${pods[@]}"; do
+        hosts+=("$pod.$service.$namespace.svc")
+    done
+    for host in "${hosts[@]}"; do
+        listed="$(grpc "$host:$grpc_port" klsurgewave.TopicService/ListTopics)" \
+            || fail "$host:$grpc_port did not answer a gRPC call"
+        [[ "$listed" == *"\"$topic\""* ]] || fail "$host does not list $topic over gRPC: $listed"
+        listed="$(rest "http://$host:$rest_port/v3/topics")" \
+            || fail "$host:$rest_port did not answer a REST call"
+        [[ "$listed" == *"\"$topic\""* ]] || fail "$host does not list $topic over REST: $listed"
+    done
+    echo "ok: $topic listed over gRPC and over REST by all $replicas brokers and through the service $client_service"
 }
 
 # A record written through the partition's leader is read from every broker: a follower
@@ -126,6 +164,7 @@ run_delete_one() {
     for pod in "${pods[@]}"; do
         replace_pods "$pod"
         check_record delete-one
+        check_http delete-one
         echo "ok: $pod rejoined and is ready"
     done
 }
@@ -134,6 +173,7 @@ run_delete_all() {
     check_topic delete-all
     replace_pods "${pods[@]}"
     check_record delete-all
+    check_http delete-all
     check_topic after-delete-all
 }
 
@@ -142,6 +182,7 @@ run_rolling_restart() {
     k rollout restart "statefulset/$statefulset"
     rolled_out "rolling restart"
     check_record rolling-restart
+    check_http rolling-restart
     echo "ok: rolling restart, one pod at a time"
 }
 
@@ -149,7 +190,7 @@ scenarios=("$@")
 if [[ ${#scenarios[@]} -eq 0 ]]; then
     scenarios=(ready delete-one delete-all rolling-restart)
 fi
-trap 'k delete pod "$client" --ignore-not-found --wait=false > /dev/null 2>&1 || true' EXIT
+trap 'k delete pod "$client" "$http_client" --ignore-not-found --wait=false > /dev/null 2>&1 || true' EXIT
 start_client
 for scenario in "${scenarios[@]}"; do
     echo "== $scenario"

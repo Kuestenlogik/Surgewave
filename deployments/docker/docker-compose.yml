@@ -25,7 +25,8 @@ services:
     container_name: surgewave-broker
     ports:
       - "9092:9092"   # Kafka protocol
-      - "9093:9093"   # gRPC
+      - "9093:9093"   # REST, health, metrics
+      - "9094:9094"   # gRPC
       - "1883:1883"   # MQTT
     volumes:
       - surgewave-data:/app/data
@@ -98,7 +99,7 @@ services:
     environment:
       - DOTNET_RUNNING_IN_CONTAINER=true
       - ASPNETCORE_URLS=http://+:5050
-      # The broker's gRPC / REST endpoint.
+      # The broker's REST endpoint.
       - Broker__ApiUrl=http://surgewave-broker:9093
     depends_on:
       surgewave-broker:

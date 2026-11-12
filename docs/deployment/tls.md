@@ -24,6 +24,11 @@ the two.
 Without TLS a gRPC client therefore connects to `http://broker:9094`, and a REST client, a health
 check and the Control UI to `http://broker:9093`. With TLS both use `https://broker:9093`.
 
+The deployments under `deployments/` publish both ports, so gRPC is reachable in either mode. The
+ports are the image's except in `docker-compose.cluster.yml`, whose brokers bind `9095` and `9098`
+in their place; see [Docker](docker.md#ports), [Kubernetes](kubernetes.md#ports) and
+[Helm](helm.md#ports).
+
 `appsettings.json` sets `GrpcUseTls` to `false`. In the `Development` environment — `dotnet run`,
 `scripts/stack.ps1` — `appsettings.Development.json` sets it to `true`, and the broker uses the
 ASP.NET Core development certificate. Without the setting at all the `Kestrel` section stands as it
@@ -137,6 +142,50 @@ The health check of the Compose files, `surgewave-broker health ready`, asks the
 then and accepts a certificate whose name differs, not one whose chain it cannot verify: with a
 self-signed certificate or a private CA the container reports unhealthy while the broker serves
 its clients, unless the CA is in the image's trust store.
+
+With the three settings on every broker of `docker-compose.cluster.yml`, each broker serves gRPC and
+REST over HTTPS on both of its published ports — `9095` and `9098` for `surgewave-1` — and no
+mapping changes.
+
+## On Kubernetes
+
+The manifests under `deployments/kubernetes/` and the Helm chart serve both endpoints in cleartext
+and carry both ports, `9093` and `9094`, on their services. With TLS the ports stay as they are and
+each serves gRPC and REST over HTTPS. For the manifests that takes three changes to the
+StatefulSet:
+
+```yaml
+containers:
+  - name: surgewave
+    env:
+      - name: Surgewave__GrpcUseTls
+        value: "true"
+      - name: Surgewave__GrpcCertificatePath
+        value: /certs/broker.pfx
+      - name: Surgewave__GrpcCertificatePassword
+        valueFrom:
+          secretKeyRef: { name: surgewave-tls-password, key: password }
+    volumeMounts:
+      - name: tls
+        mountPath: /certs
+        readOnly: true
+    # All three probes: the kubelet asks over HTTP unless it is told otherwise, and an HTTPS
+    # endpoint answers that with a closed connection, so the pod never becomes ready.
+    startupProbe:
+      httpGet: { path: /health/live, port: grpc, scheme: HTTPS }
+volumes:
+  - name: tls
+    secret:
+      secretName: surgewave-tls
+```
+
+The environment variables lie over the ConfigMap's `"GrpcUseTls": false`. The kubelet does not
+verify the certificate of an HTTPS probe. A ServiceMonitor needs `scheme: https` as well.
+
+The Helm chart takes the environment variables and the volume through `broker.extraEnv`,
+`extraVolumes` and `extraVolumeMounts`, but it has no value for the scheme of the probes, of the
+ServiceMonitor and of the Control UI's `Broker__ApiUrl`: a release switched to TLS that way does
+not become ready. `security.tls.enabled` is another setting, `Surgewave:Security:TlsEnabled`.
 
 ## Behaviour differences vs. cleartext mode
 

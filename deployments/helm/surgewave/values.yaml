@@ -23,9 +23,14 @@ broker:
   storage:
     size: 10Gi
     storageClassName: ""
+  # The broker has two HTTP endpoints. Without TLS, as the image serves them, `grpc` answers
+  # REST, /health and /metrics over HTTP/1.1 and `grpcHttp2` answers gRPC over HTTP/2: a
+  # cleartext endpoint serves one of the two. With TLS (Surgewave__GrpcUseTls and a
+  # certificate) both answer gRPC and REST over HTTPS.
   ports:
     kafka: 9092
     grpc: 9093
+    grpcHttp2: 9094
     mqtt: 1883
     replication: 10092
   config:
@@ -172,7 +177,7 @@ tolerations: []
 # Anti-affinity: "soft" (preferred) or "hard" (required)
 antiAffinity: soft
 
-# Health checks, all on the gRPC / REST port.
+# Health checks, all on the REST port (broker.ports.grpc).
 #
 # /health/live answers as soon as the broker's HTTP endpoint is bound, whether or not the broker
 # has a quorum. /health/ready answers 200 only once the broker has caught up with the metadata

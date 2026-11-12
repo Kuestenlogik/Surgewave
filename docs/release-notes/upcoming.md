@@ -1019,6 +1019,31 @@ Control UI from it; it now starts the broker image and the Control image. The Do
 [Docker Setup](../setup/docker.md) started an assembly that does not exist and is replaced by the command that
 builds the image, and the TLS guide describes the endpoints as they are.
 
+### The deployment manifests carry the gRPC port (#265, #276)
+
+Without TLS, as every deployment under `deployments/` serves the broker, gRPC is on the second HTTP endpoint,
+and no deployment carried it. A gRPC call to the port the manifests named `grpc` ended with `HTTP_1_1_REQUIRED`,
+that port serving REST over HTTP/1.1, and the port that answers gRPC was not published: the Compose files and
+the Helm chart had it bound in the container and on no host port and no service, and the Kubernetes manifests
+replace the image's `appsettings.json` with one that named the first endpoint alone, so their brokers served no
+gRPC on any port. Each was run that way first.
+
+- **Helm chart**: the new value `broker.ports.grpcHttp2` (`9094`) is the second endpoint's port. The chart binds
+  the endpoint to it, names it as the container port `grpc-http2` and carries it on the headless, the client and
+  the external service. `broker.ports.grpc` is what it was: REST, `/health` and `/metrics`, which the probes, the
+  ServiceMonitor and the Control UI use.
+- **Kubernetes manifests**: the ConfigMap names both endpoints and sets `GrpcUseTls` to `false`, and port `9094`
+  is on the StatefulSet and on the three services as `grpc-http2`.
+- **`docker-compose.yml`** publishes port `9094`. **`docker-compose.cluster.yml`** binds the second endpoint to
+  port `9098` in every broker and publishes it on the host ports `9098`, `9099` and `9100`; the host ports it
+  published before are unchanged.
+
+With TLS switched on, both ports of each deployment serve gRPC and REST over HTTPS. On Kubernetes the probes
+then have to ask over HTTPS, which the manifests take as an edit and the chart has no value for;
+[the TLS guide](../deployment/tls.md#on-kubernetes) says what a deployment needs.
+`scripts/ci/compose-cluster-smoke.sh` and `scripts/ci/kubernetes-cluster-smoke.sh` ask every broker for its
+topics over gRPC and over REST, through the published ports and through the services, in every scenario.
+
 ## Also in this release
 
 ### .NET 10.0.14 servicing packages

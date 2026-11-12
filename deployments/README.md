@@ -87,6 +87,20 @@ docker compose -f docker/docker-compose.yml up -d --wait surgewave-broker
 docker compose -f docker/docker-compose.cluster.yml up -d --wait
 ```
 
+### Ports
+
+The broker serves the Kafka wire protocol and the native protocol on one port and has two HTTP
+endpoints. Without TLS, as every deployment here serves them, a cleartext endpoint serves HTTP/2,
+which gRPC needs, or HTTP/1.1, so REST and gRPC are on two ports:
+
+| Deployment | Kafka and native protocol | REST, `/health`, `/metrics` | gRPC |
+|------------|---------------------------|-----------------------------|------|
+| Helm chart, services `<release>` and `<release>-headless` | 9092 | 9093 (`broker.ports.grpc`) | 9094 (`broker.ports.grpcHttp2`) |
+| Kubernetes manifests, services `surgewave` and `surgewave-headless` | 9092 | 9093 | 9094 |
+| `docker-compose.yml`, on the Docker host | 9092 | 9093 | 9094 |
+| `docker-compose.cluster.yml`, on the Docker host, brokers 1 / 2 / 3 | 9092 / 9093 / 9094 | 9095 / 9096 / 9097 | 9098 / 9099 / 9100 |
+| `docker-compose.cluster.yml`, inside its network, every broker | 9092 | 9095 | 9098 |
+
 ### A broker is ready only with a quorum
 
 A broker reports ready (`/health/ready`, the Compose health check, the readiness probe) only once it
@@ -95,7 +109,8 @@ therefore start the brokers together and let none of them wait for another one's
 StatefulSets use `podManagementPolicy: Parallel` and a headless service with
 `publishNotReadyAddresses: true`, liveness is `/health/live`, which never fails for want of a
 quorum, and no Compose broker depends on another broker's health. `scripts/ci/compose-cluster-smoke.sh`
-and `scripts/ci/kubernetes-cluster-smoke.sh` bring the deployments up and check them;
+and `scripts/ci/kubernetes-cluster-smoke.sh` bring the deployments up and check them, with a gRPC and
+a REST call to every broker through the published ports and through the services;
 `.github/workflows/deployments.yml` runs both, and `scripts/ci/image-smoke.sh`, which starts the broker
 image with no configuration on a fresh named volume and produces and consumes a record over the Kafka
 wire protocol and over the native protocol.
@@ -120,7 +135,7 @@ The Helm chart deploys:
 
 - **Broker StatefulSet** with PersistentVolumeClaims, anti-affinity rules, and health probes
 - **Headless Service** for stable pod DNS and inter-broker communication
-- **Client Service** (ClusterIP) for Kafka/gRPC access
+- **Client Service** (ClusterIP) for Kafka, REST and gRPC access
 - **Control UI Deployment** (optional) with Service and Ingress
 - **ConfigMap** with all broker configuration mapped to environment variables
 - **ServiceAccount + RBAC** for pod-level permissions

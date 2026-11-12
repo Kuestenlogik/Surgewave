@@ -57,6 +57,21 @@ The brokers find each other by their pod DNS names. Without `publishNotReadyAddr
 resolves only once the pod is ready — and the brokers only become ready once they have found each
 other. The client service (`surgewave`, ClusterIP) does not set it: it routes to ready brokers only.
 
+### Ports
+
+| Port | Name | Serves |
+|------|------|--------|
+| 9092 | `kafka` | Kafka wire protocol and native protocol |
+| 9093 | `grpc` | REST, `/health` and `/metrics` over HTTP/1.1; the probes and a ServiceMonitor use it |
+| 9094 | `grpc-http2` | gRPC over HTTP/2 |
+| 10092 | `replication` | Between the brokers; on the headless service only |
+
+The broker has two HTTP endpoints, and the manifests serve them without TLS: a cleartext endpoint
+serves HTTP/2, which gRPC needs, or HTTP/1.1, so REST and gRPC are two ports. All three services
+carry both: a gRPC client in the cluster connects to `http://surgewave:9094`, a REST client to
+`http://surgewave:9093`. With TLS both ports serve gRPC and REST over HTTPS, and the probes need
+`scheme: HTTPS`; see [TLS on Kubernetes](tls.md#on-kubernetes).
+
 ### A stable identity per pod
 
 ```yaml
@@ -137,9 +152,9 @@ Two of three brokers keep the quorum; a node drain may take one.
 
 ### Configuration
 
-The ConfigMap replaces the image's `appsettings.json`. It binds REST, `/health` and `/metrics`
-in cleartext on port 9093 (see [TLS](tls.md) to serve them over HTTPS; the ConfigMap names no second
-endpoint, so the brokers of these manifests serve no gRPC), and leaves the
+The ConfigMap replaces the image's `appsettings.json`. It names the image's two HTTP endpoints and
+sets `GrpcUseTls` to `false`, which binds REST, `/health` and `/metrics` on port 9093 and gRPC on
+port 9094, both in cleartext (see [TLS](tls.md#on-kubernetes) to serve them over HTTPS), and leaves the
 embedded Connect worker off. With it on, each broker runs a
 worker that reads and writes its stores through its own broker, and only the one on the broker
 that leads the stores' partitions has the stored connectors and pipelines.

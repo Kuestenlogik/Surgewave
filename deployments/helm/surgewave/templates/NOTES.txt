@@ -20,8 +20,12 @@ Surgewave has been deployed successfully!
 
   Ports:
     Kafka:       {{ .Values.broker.ports.kafka }}
-    gRPC:        {{ .Values.broker.ports.grpc }}
+    REST:        {{ .Values.broker.ports.grpc }} (also /health and /metrics)
+    gRPC:        {{ .Values.broker.ports.grpcHttp2 }}
     Replication: {{ .Values.broker.ports.replication }}
+
+  The chart serves the two HTTP ports without TLS, and a cleartext port serves HTTP/2, which
+  gRPC needs, or HTTP/1.1: gRPC clients use {{ $fullname }}:{{ .Values.broker.ports.grpcHttp2 }}, REST clients {{ $fullname }}:{{ .Values.broker.ports.grpc }}.
 {{- if .Values.features.mqtt.enabled }}
     MQTT:        {{ .Values.broker.ports.mqtt }}
 {{- end }}

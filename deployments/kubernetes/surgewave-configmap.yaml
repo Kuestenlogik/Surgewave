@@ -8,6 +8,11 @@ metadata:
 data:
   # Replaces the image's appsettings.json. What differs per pod or depends on the namespace —
   # BrokerId, Host, ClusterNodes, ControllerQuorumVoters — is set on the StatefulSet.
+  #
+  # The two Kestrel endpoints are the image's. GrpcUseTls decides what they serve: false, REST,
+  # /health and /metrics over HTTP/1.1 on port 9093 and gRPC over HTTP/2 on port 9094, a
+  # cleartext endpoint serving one of the two; true, with a certificate, gRPC and REST over
+  # HTTPS on both.
   appsettings.json: |
     {
       "Logging": {
@@ -21,6 +26,10 @@ data:
           "Grpc": {
             "Url": "http://*:9093",
             "Protocols": "Http1AndHttp2"
+          },
+          "GrpcHttp3": {
+            "Url": "http://*:9094",
+            "Protocols": "Http1AndHttp2AndHttp3"
           }
         }
       },
@@ -28,6 +37,7 @@ data:
         "BindAddress": "0.0.0.0",
         "Port": 9092,
         "GrpcPort": 9093,
+        "GrpcUseTls": false,
         "DataDirectory": "/data",
         "LogDirectory": "/data/logs",
         "AutoCreateTopics": true,

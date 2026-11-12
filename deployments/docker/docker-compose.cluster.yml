@@ -12,7 +12,9 @@
 # This creates a 3-node cluster with:
 #   - Raft consensus for controller election and metadata replication
 #   - Automatic leader election and failover
-#   - External client ports: 9092 (surgewave-1), 9093 (surgewave-2), 9094 (surgewave-3)
+#   - Client ports on the Docker host: 9092 (surgewave-1), 9093 (surgewave-2), 9094 (surgewave-3)
+#   - REST, /health and /metrics on the Docker host: 9095, 9096, 9097
+#   - gRPC on the Docker host: 9098, 9099, 9100
 #
 # A broker is ready, and healthy here, only once it has caught up with the metadata log, which
 # takes a leader and therefore two of the three brokers. The brokers start together and none of
@@ -46,9 +48,13 @@ x-surgewave-broker-environment: &surgewave-broker-environment
   Surgewave__Port: 9092
   Surgewave__GrpcPort: 9095
   Surgewave__ReplicationPort: 10092
-  # REST, /health and /metrics on the gRPC port set above, in cleartext as the image serves
-  # them; the image's own endpoint names port 9093.
+  # The broker's two HTTP endpoints, in cleartext as the image serves them: REST, /health and
+  # /metrics over HTTP/1.1 on the gRPC port set above, gRPC over HTTP/2 on the second one. The
+  # image's own endpoints name ports 9093 and 9094, which are the client ports of brokers 2
+  # and 3 on the Docker host. With Surgewave__GrpcUseTls=true and a certificate both endpoints
+  # serve gRPC and REST over HTTPS, on the same ports.
   Kestrel__Endpoints__Grpc__Url: http://*:9095
+  Kestrel__Endpoints__GrpcHttp3__Url: http://*:9098
   Surgewave__DataDirectory: /app/data
   Surgewave__RaftDataDirectory: /app/data/raft
   # Who exists (id:host:port:replicationPort) and who votes on metadata (id@host:replicationPort).
@@ -67,7 +73,8 @@ services:
     hostname: surgewave-1
     ports:
       - "9092:9092"      # Client protocol
-      - "9095:9095"      # gRPC API, REST, health, metrics
+      - "9095:9095"      # REST, health, metrics
+      - "9098:9098"      # gRPC
       - "10092:10092"    # Replication port
     volumes:
       - surgewave-1-data:/app/data
@@ -84,7 +91,8 @@ services:
     hostname: surgewave-2
     ports:
       - "9093:9092"      # Client protocol (external 9093)
-      - "9096:9095"      # gRPC API, REST, health, metrics
+      - "9096:9095"      # REST, health, metrics
+      - "9099:9098"      # gRPC
       - "10093:10092"    # Replication port
     volumes:
       - surgewave-2-data:/app/data
@@ -104,7 +112,8 @@ services:
     hostname: surgewave-3
     ports:
       - "9094:9092"      # Client protocol (external 9094)
-      - "9097:9095"      # gRPC API, REST, health, metrics
+      - "9097:9095"      # REST, health, metrics
+      - "9100:9098"      # gRPC
       - "10094:10092"    # Replication port
     volumes:
       - surgewave-3-data:/app/data

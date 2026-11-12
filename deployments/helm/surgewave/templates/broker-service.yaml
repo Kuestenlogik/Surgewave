@@ -19,6 +19,9 @@ spec:
     - name: grpc
       port: {{ .Values.broker.ports.grpc }}
       targetPort: grpc
+    - name: grpc-http2
+      port: {{ .Values.broker.ports.grpcHttp2 }}
+      targetPort: grpc-http2
     - name: replication
       port: {{ .Values.broker.ports.replication }}
       targetPort: replication
@@ -47,6 +50,9 @@ spec:
     - name: grpc
       port: {{ .Values.broker.ports.grpc }}
       targetPort: grpc
+    - name: grpc-http2
+      port: {{ .Values.broker.ports.grpcHttp2 }}
+      targetPort: grpc-http2
     {{- if .Values.features.mqtt.enabled }}
     - name: mqtt
       port: {{ .Values.broker.ports.mqtt }}
@@ -77,6 +83,9 @@ spec:
     - name: grpc
       port: {{ .Values.broker.ports.grpc }}
       targetPort: grpc
+    - name: grpc-http2
+      port: {{ .Values.broker.ports.grpcHttp2 }}
+      targetPort: grpc-http2
     {{- if .Values.features.mqtt.enabled }}
     - name: mqtt
       port: {{ .Values.broker.ports.mqtt }}
