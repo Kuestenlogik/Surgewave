@@ -22,11 +22,16 @@ internal sealed class BrokerProcess : IAsyncDisposable
     // The cluster controller's word that the metadata log is applied and acted on; precedes ReadyLine.
     public const string CaughtUpLine = "has caught up with the metadata log";
 
+    // The host's word, at the start of the wait, that it has not caught up yet and lets no client in until it has
+    // (#250): what a broker says that waits for a quorum, and all it says about it until the quorum is there.
+    public const string CatchingUpLine = "Catching up with the metadata log; clients on";
+
     // Fires only once app.RunAsync() actually binds Kestrel — also catches a TLS/dev-cert bind failure.
     public const string AppStartedLine = "Application started. Press Ctrl+C to shut down.";
 
     private readonly Process _process;
     private readonly StringBuilder _log = new();
+    private readonly List<(string Text, TaskCompletionSource Seen)> _awaitedLines = []; // under the lock of _log
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _appStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<int> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -55,7 +60,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
 
     /// <summary>
     /// Starts the broker on fresh ports with its data in <paramref name="dataDir"/> and waits until it is ready and
-    /// Kestrel is bound. Fails the test if it exits first or does not get there in time.
+    /// Kestrel is bound; see <see cref="WaitUntilReadyAsync"/>.
     /// </summary>
     public static Task<BrokerProcess> StartAsync(string dataDir, CancellationToken cancellationToken, params string[] extraArgs)
         => StartAsync(dataDir, BrokerPorts.Reserve(), cancellationToken, extraArgs);
@@ -65,6 +70,26 @@ internal sealed class BrokerProcess : IAsyncDisposable
     /// their configuration before any of them starts.
     /// </summary>
     public static async Task<BrokerProcess> StartAsync(string dataDir, BrokerPorts ports, CancellationToken cancellationToken, params string[] extraArgs)
+    {
+        var broker = Launch(dataDir, ports, extraArgs);
+        try
+        {
+            await broker.WaitUntilReadyAsync(cancellationToken);
+            return broker;
+        }
+        catch
+        {
+            await broker.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Starts the broker process on <paramref name="ports"/> and returns without waiting for it: a broker of a cluster
+    /// is ready only once a majority of the controller voters is up, so the first one is launched, the next one too,
+    /// and then <see cref="WaitUntilReadyAsync"/> is awaited on both.
+    /// </summary>
+    public static BrokerProcess Launch(string dataDir, BrokerPorts ports, params string[] extraArgs)
     {
         var brokerDll = ResolveBrokerDll();
         var (kafkaPort, grpcPort, http3Port, replPort) = (ports.Kafka, ports.Grpc, ports.Http3, ports.Replication);
@@ -113,28 +138,60 @@ internal sealed class BrokerProcess : IAsyncDisposable
             Assert.True(broker._process.Start(), "Failed to start the broker process.");
             broker._process.BeginOutputReadLine();
             broker._process.BeginErrorReadLine();
-
-            // Race readiness against an early crash and a hard timeout. An early exit is the
-            // failure the boot tests exist to catch (a plugin blew up before the broker was ready).
-            var timeout = Task.Delay(TimeSpan.FromSeconds(90), cancellationToken);
-            var first = await Task.WhenAny(broker._ready.Task, broker._exited.Task, timeout);
-            if (first == broker._exited.Task)
-                Assert.Fail($"Broker exited with code {await broker._exited.Task} before reaching readiness.\n{broker.Dump()}");
-            if (first == timeout)
-                Assert.Fail($"Broker did not reach '{ReadyLine}' within 90s.\n{broker.Dump()}");
-
-            // Readiness reached; require the host to actually bind Kestrel shortly after.
-            await Task.WhenAny(broker._appStarted.Task, broker._exited.Task, Task.Delay(TimeSpan.FromSeconds(20), cancellationToken));
-            Assert.True(broker._appStarted.Task.IsCompletedSuccessfully,
-                $"Broker reached readiness but Kestrel did not bind ('{AppStartedLine}' never appeared).\n{broker.Dump()}");
             return broker;
         }
         catch
         {
-            await broker.DisposeAsync();
+            broker._process.Dispose();
             throw;
         }
     }
+
+    /// <summary>
+    /// Waits until the broker is ready and Kestrel is bound. Fails the test if it exits first or does not get there in
+    /// time.
+    /// </summary>
+    public async Task WaitUntilReadyAsync(CancellationToken cancellationToken)
+    {
+        // Race readiness against an early crash and a hard timeout. An early exit is the
+        // failure the boot tests exist to catch (a plugin blew up before the broker was ready).
+        var timeout = Task.Delay(TimeSpan.FromSeconds(90), cancellationToken);
+        var first = await Task.WhenAny(_ready.Task, _exited.Task, timeout);
+        if (first == _exited.Task)
+            Assert.Fail($"Broker exited with code {await _exited.Task} before reaching readiness.\n{Dump()}");
+        if (first == timeout)
+            Assert.Fail($"Broker did not reach '{ReadyLine}' within 90s.\n{Dump()}");
+
+        // Readiness reached; require the host to actually bind Kestrel shortly after.
+        await Task.WhenAny(_appStarted.Task, _exited.Task, Task.Delay(TimeSpan.FromSeconds(20), cancellationToken));
+        Assert.True(_appStarted.Task.IsCompletedSuccessfully,
+            $"Broker reached readiness but Kestrel did not bind ('{AppStartedLine}' never appeared).\n{Dump()}");
+    }
+
+    /// <summary>
+    /// Waits until the broker has written a line that contains <paramref name="text"/>: at once if it already has.
+    /// Fails the test if the broker exits first or does not say it in time.
+    /// </summary>
+    public async Task WaitForLineAsync(string text, CancellationToken cancellationToken)
+    {
+        var seen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_log)
+        {
+            if (_log.ToString().Contains(text, StringComparison.Ordinal))
+                return;
+            _awaitedLines.Add((text, seen));
+        }
+
+        var timeout = Task.Delay(TimeSpan.FromSeconds(90), cancellationToken);
+        var first = await Task.WhenAny(seen.Task, _exited.Task, timeout);
+        if (first == _exited.Task)
+            Assert.Fail($"Broker exited with code {await _exited.Task} before it said '{text}'.\n{Dump()}");
+        if (first == timeout)
+            Assert.Fail($"Broker did not say '{text}' within 90s.\n{Dump()}");
+    }
+
+    /// <summary>Whether the broker has said it is ready.</summary>
+    public bool HasReportedReady => _ready.Task.IsCompletedSuccessfully;
 
     /// <summary>The broker output with a header, for a failure message.</summary>
     public string Dump() => "--- broker output ---\n" + Log;
@@ -142,7 +199,17 @@ internal sealed class BrokerProcess : IAsyncDisposable
     private void OnLine(string? line)
     {
         if (line is null) return;
-        lock (_log) _log.AppendLine(line);
+        lock (_log)
+        {
+            _log.AppendLine(line);
+            for (var i = _awaitedLines.Count - 1; i >= 0; i--)
+            {
+                if (!line.Contains(_awaitedLines[i].Text, StringComparison.Ordinal))
+                    continue;
+                _awaitedLines[i].Seen.TrySetResult();
+                _awaitedLines.RemoveAt(i);
+            }
+        }
         if (line.Contains(ReadyLine, StringComparison.Ordinal)) _ready.TrySetResult();
         if (line.Contains(AppStartedLine, StringComparison.Ordinal)) _appStarted.TrySetResult();
     }

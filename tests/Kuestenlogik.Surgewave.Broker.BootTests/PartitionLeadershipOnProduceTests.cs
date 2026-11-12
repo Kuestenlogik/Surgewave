@@ -1,9 +1,10 @@
 using System.Buffers.Binary;
-using System.Net.Sockets;
 using System.Text;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
 using Xunit;
+
+using static Kuestenlogik.Surgewave.Broker.BootTests.KafkaWire;
 
 namespace Kuestenlogik.Surgewave.Broker.BootTests;
 
@@ -74,87 +75,13 @@ public sealed class PartitionLeadershipOnProduceTests
         timeout.CancelAfter(TimeSpan.FromSeconds(60));
         while (true)
         {
-            var leaders = await LeadersAsync(port, topic, timeout.Token);
+            var leaders = (await MetadataAsync(port, topic, timeout.Token)).Leaders;
             if (leaders.Count == 2 && leaders.Values.All(l => l > 0))
                 return Assert.Single(leaders, kv => kv.Value == leader).Key;
             // The metadata log reaches the broker in its own time, and nothing tells a client when; the next request
             // asks again.
             await Task.Delay(TimeSpan.FromMilliseconds(200), timeout.Token);
         }
-    }
-
-    /// <summary>One Metadata v1 request for the topic to <paramref name="port"/>; each partition's leader.</summary>
-    private static async Task<Dictionary<int, int>> LeadersAsync(int port, string topic, CancellationToken ct)
-    {
-        var body = new List<byte>();
-        Int16(body, 3); // api key: Metadata
-        Int16(body, 1); // version
-        Int32(body, 1); // correlation id
-        String(body, "boot-test");
-        Int32(body, 1); // topics
-        String(body, topic);
-        var response = await ExchangeAsync(port, body, ct);
-
-        var at = 4; // correlation id
-        var brokers = ReadInt32(response, ref at);
-        for (var b = 0; b < brokers; b++)
-        {
-            at += 4; // node id
-            SkipString(response, ref at); // host
-            at += 4; // port
-            SkipString(response, ref at); // rack
-        }
-        at += 4; // controller id
-        var leaders = new Dictionary<int, int>();
-        var topics = ReadInt32(response, ref at);
-        for (var t = 0; t < topics; t++)
-        {
-            at += 2; // error
-            SkipString(response, ref at); // name
-            at += 1; // is internal
-            var partitions = ReadInt32(response, ref at);
-            for (var p = 0; p < partitions; p++)
-            {
-                at += 2; // error
-                var index = ReadInt32(response, ref at);
-                leaders[index] = ReadInt32(response, ref at);
-                var replicas = ReadInt32(response, ref at);
-                at += 4 * replicas;
-                var isr = ReadInt32(response, ref at);
-                at += 4 * isr;
-            }
-        }
-        return leaders;
-    }
-
-    private static async Task<byte[]> ExchangeAsync(int port, List<byte> body, CancellationToken ct)
-    {
-        using var client = new TcpClient();
-        await client.ConnectAsync("127.0.0.1", port, ct);
-        var stream = client.GetStream();
-        var request = new List<byte>();
-        Int32(request, body.Count);
-        request.AddRange(body);
-        await stream.WriteAsync(request.ToArray(), ct);
-
-        var size = new byte[4];
-        await stream.ReadExactlyAsync(size, ct);
-        var response = new byte[BinaryPrimitives.ReadInt32BigEndian(size)];
-        await stream.ReadExactlyAsync(response, ct);
-        return response;
-    }
-
-    private static int ReadInt32(byte[] from, ref int at)
-    {
-        var value = BinaryPrimitives.ReadInt32BigEndian(from.AsSpan(at));
-        at += 4;
-        return value;
-    }
-
-    private static void SkipString(byte[] from, ref int at)
-    {
-        var length = BinaryPrimitives.ReadInt16BigEndian(from.AsSpan(at));
-        at += 2 + Math.Max(0, (int)length);
     }
 
     /// <summary>One Produce v3 request with one record batch, sent to <paramref name="port"/>; its partition's error.</summary>
@@ -214,18 +141,5 @@ public sealed class PartitionLeadershipOnProduceTests
         Int32(batch, afterLength.Count);
         batch.AddRange(afterLength);
         return [.. batch];
-    }
-
-    private static void Int16(List<byte> to, short value) { var b = new byte[2]; BinaryPrimitives.WriteInt16BigEndian(b, value); to.AddRange(b); }
-
-    private static void Int32(List<byte> to, int value) { var b = new byte[4]; BinaryPrimitives.WriteInt32BigEndian(b, value); to.AddRange(b); }
-
-    private static void Int64(List<byte> to, long value) { var b = new byte[8]; BinaryPrimitives.WriteInt64BigEndian(b, value); to.AddRange(b); }
-
-    private static void String(List<byte> to, string value)
-    {
-        var bytes = Encoding.UTF8.GetBytes(value);
-        Int16(to, (short)bytes.Length);
-        to.AddRange(bytes);
     }
 }

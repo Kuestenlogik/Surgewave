@@ -41,10 +41,15 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
     }
 
     /// <summary>
-    /// Sets the cluster state, so a topic's configs are described by a broker that hosts none of its replicas too:
-    /// the configs are in the metadata log, and a Kafka admin client asks any broker (#240).
+    /// Sets the cluster state, so a topic's configs are described and changed by a broker that hosts none of its
+    /// replicas too: the configs are in the metadata log, and a Kafka admin client asks any broker (#240).
     /// </summary>
     public void SetClusterState(ClusterState clusterState) => _clusterState = clusterState;
+
+    // The topic as the cluster's metadata log has it, or, without a cluster, as this broker has it. Never this broker's
+    // copy alone: it has one only of a topic it hosts a replica of, and a Kafka admin client asks any broker — to
+    // describe a topic's configs (#240) and to change them.
+    private TopicMetadata? KnownTopic(string topic) => _clusterState?.GetTopic(topic) ?? _logManager.GetTopicMetadata(topic);
 
     public async Task<KafkaResponse> HandleAsync(KafkaRequest request, RequestContext context, CancellationToken cancellationToken)
     {
@@ -84,7 +89,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
 
             if (resource.ResourceType == ConfigResourceType.Topic)
             {
-                var metadata = _clusterState?.GetTopic(resource.ResourceName) ?? _logManager.GetTopicMetadata(resource.ResourceName);
+                var metadata = KnownTopic(resource.ResourceName);
                 if (metadata == null)
                 {
                     results.Add(new DescribeConfigsResponse.DescribeConfigsResult { ErrorCode = ErrorCode.UnknownTopicOrPartition, ErrorMessage = $"Topic '{resource.ResourceName}' does not exist", ResourceType = resource.ResourceType, ResourceName = resource.ResourceName, Configs = [] });
@@ -116,7 +121,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
         {
             if (resource.ResourceType == ConfigResourceType.Topic)
             {
-                var metadata = _logManager.GetTopicMetadata(resource.ResourceName);
+                var metadata = KnownTopic(resource.ResourceName);
                 if (metadata == null)
                 {
                     results.Add(new AlterConfigsResponse.AlterConfigsResult { ErrorCode = ErrorCode.UnknownTopicOrPartition, ErrorMessage = $"Topic '{resource.ResourceName}' does not exist", ResourceType = resource.ResourceType, ResourceName = resource.ResourceName });
@@ -397,7 +402,7 @@ public sealed class ConfigApiHandler : IKafkaRequestHandler
 
             if (resourceType == ConfigResourceType.Topic)
             {
-                var metadata = _logManager.GetTopicMetadata(resource.ResourceName);
+                var metadata = KnownTopic(resource.ResourceName);
                 if (metadata == null)
                 {
                     responses.Add(new IncrementalAlterConfigsResponse.AlterConfigsResourceResponse

@@ -424,6 +424,14 @@ change. A change that no controller takes now is a retriable error
 value in IncrementalAlterConfigs' DELETE now removes the config. Before, it
 set the config to an empty string.
 
+Any broker takes the change, as a Kafka admin client asks any. AlterConfigs
+and IncrementalAlterConfigs answered `UNKNOWN_TOPIC_OR_PARTITION` ("Topic
+does not exist") on a broker that hosts no replica of the topic, because
+they looked the topic up in that broker's own logs: with fewer replicas
+than brokers a change failed or not depending on the broker the client
+picked. They look it up in the cluster's metadata now, as DescribeConfigs
+does (#240).
+
 ### A commit after an abort is visible to read-committed consumers
 
 An aborted transaction hid every later batch of its producer from
