@@ -11,19 +11,37 @@ they set and why.
 The image starts without any configuration:
 
 ```bash
-docker run -d -p 9092:9092 -p 9093:9093 -v surgewave-data:/app/data ghcr.io/kuestenlogik/surgewave-broker:0.6.0
+docker run -d -p 9092:9092 -p 9093:9093 -p 9094:9094 -v surgewave-data:/app/data ghcr.io/kuestenlogik/surgewave-broker:0.6.0
 ```
 
 That is one broker, its own quorum, which a client on the Docker host reaches on `localhost:9092`
-over the Kafka wire protocol and the native protocol, and on `http://localhost:9093` over gRPC and
-REST.
+over the Kafka wire protocol and the native protocol, on `http://localhost:9093` over REST and on
+`http://localhost:9094` over gRPC.
 
 | The image | What it means |
 |-----------|---------------|
 | holds the Kafka protocol plugin in `/app/plugins` | The broker speaks Kafka and the native protocol on port 9092. `/app/plugins` is what the image ships and is replaced with it; do not mount a volume over it. Plugins you install go to `/app/data/plugins`, which the broker searches after it. |
-| runs as uid 1654, the unprivileged user of the .NET images | No `user:` is needed. `/app/data`, `/app/data/raft`, `/app/data/plugins` and `/app/logs` exist in the image and belong to that user, and a fresh named volume mounted on one of them takes that owner. A volume mounted on any other path belongs to root, and a bind-mounted host directory keeps the owner it has on the host: make it writable for uid 1654. |
-| sets `Surgewave__GrpcUseTls=false`, `Kestrel__Endpoints__Grpc__Url=http://*:9093`, `Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094` and `Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2` | gRPC, REST, `/health` and `/metrics` are served in cleartext on port 9093, and the broker says so in a warning at every start. `appsettings.json` binds them over HTTPS with the ASP.NET Core development certificate, which an image does not hold. To serve them over HTTPS, see [TLS in the container image](tls.md#in-the-container-image). These are environment variables of the image, and an environment variable wins over a mounted `appsettings.json`: change them as environment variables. |
+| runs as uid 1654, the unprivileged user of the .NET images | No `user:` is needed. `/app/data`, `/app/data/raft`, `/app/data/plugins` and `/app/logs` exist in the image and belong to that user, and a fresh named volume mounted on one of them takes that owner. A volume mounted on any other path belongs to root, and a bind-mounted host directory keeps the owner it has on the host: make it writable for uid 1654. A volume an earlier deployment wrote as root is given to that user once, see [A volume written as root](#a-volume-written-as-root). |
+| sets nothing about TLS | `appsettings.json` switches TLS off (`Surgewave:GrpcUseTls`), which an image without a certificate needs: REST, `/health` and `/metrics` are served in cleartext on port 9093 and gRPC on port 9094, and the broker says so in a warning at every start. To serve them over HTTPS, set `Surgewave__GrpcUseTls=true` and a certificate, as environment variables or in a mounted `appsettings.Production.json`: see [TLS in the container image](tls.md#in-the-container-image). |
 | keeps `Surgewave__Host` at `localhost` | The listener binds every interface, and clients are told `localhost:9092`. That suits a client on the Docker host with the port published. |
+
+## A volume written as root
+
+Before 0.6.0 the Compose files ran the broker as root (`user: "0:0"`), and a named volume written
+that way belongs to root. The image's user cannot write to it, and the broker ends its start with
+
+```
+The data directory '/app/data' is not writable for user 'app': Access to the path '/app/data/.write-probe-…' is denied. …
+```
+
+Give the volume to uid 1654 once, with the broker stopped. The image holds `chown`:
+
+```bash
+docker run --rm --user 0 --entrypoint chown -v surgewave-data:/app/data \
+  ghcr.io/kuestenlogik/surgewave-broker:0.6.0 -R 1654 /app/data
+```
+
+A volume mounted on `/app/logs` is given the same way.
 
 ## What a broker in a network of containers needs
 

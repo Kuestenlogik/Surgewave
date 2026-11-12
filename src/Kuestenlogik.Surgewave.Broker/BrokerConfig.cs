@@ -68,13 +68,14 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int GrpcPort { get; set; } = KafkaConstants.Ports.Grpc;
 
     /// <summary>
-    /// Whether the gRPC / REST endpoint on <see cref="GrpcPort"/> binds over HTTPS instead of
-    /// cleartext HTTP. When <c>true</c>, broker startup overrides
-    /// <c>Kestrel:Endpoints:Grpc:Url</c> to <c>https://*:{GrpcPort}</c> and, if
-    /// <see cref="GrpcCertificatePath"/> is set, configures the cert path and password for the
-    /// endpoint. When unset, falls back to the ASP.NET Core development certificate
-    /// (<c>dotnet dev-certs https --trust</c>). Default <c>false</c> keeps the existing cleartext
-    /// binding so the toggle is additive.
+    /// Whether the broker's two HTTP endpoints are served over HTTPS, whatever scheme their URLs in the
+    /// <c>Kestrel</c> section are written with. When <c>true</c>, the endpoint on <see cref="GrpcPort"/> binds
+    /// <c>https://*:{GrpcPort}</c> and both endpoints use the certificate of <see cref="GrpcCertificatePath"/>,
+    /// or the ASP.NET Core development certificate (<c>dotnet dev-certs https --trust</c>) when none is named.
+    /// When <c>false</c>, both are cleartext: the endpoint on <see cref="GrpcPort"/> serves REST, health and
+    /// metrics over HTTP/1.1 and the second one gRPC over HTTP/2 with prior knowledge. The shipped
+    /// <c>appsettings.json</c> sets <c>false</c> and <c>appsettings.Development.json</c> sets <c>true</c>; a
+    /// configuration without the setting leaves the <c>Kestrel</c> section as written.
     /// </summary>
     public bool GrpcUseTls { get; set; }
 

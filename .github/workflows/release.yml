@@ -260,60 +260,25 @@ jobs:
       # ----------------------------------------------------------
       # Multi-arch container → GHCR (always) + Docker Hub (optional)
       # ----------------------------------------------------------
-      # `ContainerRuntimeIdentifiers` turns one `dotnet publish` call
-      # into several arch-specific image builds in one go and
-      # publishes them as a multi-arch manifest. The pre-restore needs
-      # the same RID list, otherwise the container publish fails with
-      # `NETSDK1047: Assets file ... doesn't have a target for
-      # 'net10.0/linux-arm64'`.
+      # scripts/ci/build-images.sh publishes the Broker and the Control image,
+      # each for linux-x64 and linux-arm64 as one image index
+      # (ContainerRuntimeIdentifiers), with the restore for both runtimes the
+      # publish needs. It is the script deployments.yml builds the images with
+      # (job release-images), where the image of each architecture is checked
+      # for binaries of the other one and the linux-arm64 broker is started:
+      # what is published here is built the way that is tested there.
       #
-      # `ContainerImageTags="$V;latest"` tags the images twice.
-      # The inner quoting form is needed so that MSBuild sees the ';' as
-      # part of the property value instead of an argument separator.
-      #
-      # ContainerRegistry takes only the host ("ghcr.io"); the org/image
-      # path goes via ContainerRepository. Combining both
-      # ("ghcr.io/<owner>") triggers CONTAINER2012 "could not recognise
-      # registry" because the SDK takes it as a literal host.
-      - name: Pre-restore Broker (multi-RID)
-        run: |
-          dotnet restore src/Kuestenlogik.Surgewave.Broker.App \
-            "-p:RuntimeIdentifiers=\"linux-x64;linux-arm64\""
-
-      - name: Pre-restore Control (multi-RID)
-        run: |
-          dotnet restore src/Kuestenlogik.Surgewave.Control \
-            "-p:RuntimeIdentifiers=\"linux-x64;linux-arm64\""
-
-      - name: Push Broker container to GHCR (multi-arch)
+      # IMAGE_REGISTRY takes only the host ("ghcr.io"); the org goes into
+      # IMAGE_NAMESPACE. Combining both ("ghcr.io/<owner>") triggers
+      # CONTAINER2012 "could not recognise registry" because the SDK takes it
+      # as a literal host.
+      - name: Push Broker and Control containers to GHCR (multi-arch)
         env:
-          V: ${{ steps.version.outputs.VERSION }}
-        run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Broker.App \
-            -c Release \
-            -t:PublishContainer \
-            --no-restore \
-            -p:Version=$V \
-            -p:GeneratePackageOnBuild=false \
-            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
-            "-p:ContainerImageTags=\"$V;latest\"" \
-            -p:ContainerRegistry=ghcr.io \
-            -p:ContainerRepository=${{ steps.ghcr.outputs.owner }}/surgewave-broker
-
-      - name: Push Control container to GHCR (multi-arch)
-        env:
-          V: ${{ steps.version.outputs.VERSION }}
-        run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Control \
-            -c Release \
-            -t:PublishContainer \
-            --no-restore \
-            -p:Version=$V \
-            -p:GeneratePackageOnBuild=false \
-            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
-            "-p:ContainerImageTags=\"$V;latest\"" \
-            -p:ContainerRegistry=ghcr.io \
-            -p:ContainerRepository=${{ steps.ghcr.outputs.owner }}/surgewave-control
+          IMAGE_REGISTRY: ghcr.io
+          IMAGE_NAMESPACE: ${{ steps.ghcr.outputs.owner }}/
+          IMAGE_VERSION: ${{ steps.version.outputs.VERSION }}
+          IMAGE_TAGS: ${{ steps.version.outputs.VERSION }};latest
+        run: scripts/ci/build-images.sh
 
       # Docker Hub is gated: without DOCKERHUB_TOKEN + DOCKERHUB_USERNAME
       # the steps skip without failing; the GHCR image is the official
@@ -325,44 +290,18 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
-      # The GHCR steps above have already built the multi-RID assets,
-      # `--no-restore` reuses the cache. The only additional effort
-      # is the registry push itself — the image is byte-identical to GHCR.
-      # The namespace is fixed to `kuestenlogik` — the org namespace on
-      # Docker Hub. DOCKERHUB_USERNAME is only the login user (can be a
-      # user account with push rights on the org), not the
-      # repository namespace.
-      - name: Push Broker container to Docker Hub (multi-arch)
+      # The same build again, pushed to the second registry. The namespace is
+      # fixed to `kuestenlogik` — the org namespace on Docker Hub.
+      # DOCKERHUB_USERNAME is only the login user (can be a user account with
+      # push rights on the org), not the repository namespace.
+      - name: Push Broker and Control containers to Docker Hub (multi-arch)
         if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
         env:
-          V: ${{ steps.version.outputs.VERSION }}
-        run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Broker.App \
-            -c Release \
-            -t:PublishContainer \
-            --no-restore \
-            -p:Version=$V \
-            -p:GeneratePackageOnBuild=false \
-            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
-            "-p:ContainerImageTags=\"$V;latest\"" \
-            -p:ContainerRegistry=docker.io \
-            -p:ContainerRepository=kuestenlogik/surgewave-broker
-
-      - name: Push Control container to Docker Hub (multi-arch)
-        if: ${{ env.DOCKERHUB_TOKEN != '' && env.DOCKERHUB_USERNAME != '' }}
-        env:
-          V: ${{ steps.version.outputs.VERSION }}
-        run: |
-          dotnet publish src/Kuestenlogik.Surgewave.Control \
-            -c Release \
-            -t:PublishContainer \
-            --no-restore \
-            -p:Version=$V \
-            -p:GeneratePackageOnBuild=false \
-            "-p:ContainerRuntimeIdentifiers=\"linux-x64;linux-arm64\"" \
-            "-p:ContainerImageTags=\"$V;latest\"" \
-            -p:ContainerRegistry=docker.io \
-            -p:ContainerRepository=kuestenlogik/surgewave-control
+          IMAGE_REGISTRY: docker.io
+          IMAGE_NAMESPACE: kuestenlogik/
+          IMAGE_VERSION: ${{ steps.version.outputs.VERSION }}
+          IMAGE_TAGS: ${{ steps.version.outputs.VERSION }};latest
+        run: scripts/ci/build-images.sh
 
       # Self-contained Broker binaries (no .NET SDK needed on target)
       - name: Publish Broker binaries

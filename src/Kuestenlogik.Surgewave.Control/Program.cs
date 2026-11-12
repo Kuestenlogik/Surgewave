@@ -115,8 +115,9 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 // Configure HTTP client for Gateway/Broker API.
-// Default matches the broker's default Kestrel binding (https on :9093). Override via
-// Broker:ApiUrl in appsettings when the broker runs with Surgewave:GrpcUseTls=false.
+// Broker:ApiUrl is the broker's REST endpoint. appsettings.json names the one of a broker with its shipped
+// settings, http on :9093; appsettings.Development.json the one of a broker in the Development environment,
+// https on :9093 with the development certificate (the broker's Surgewave:GrpcUseTls).
 var brokerApiUrl = builder.Configuration["Broker:ApiUrl"] ?? "https://localhost:9093";
 
 void ConfigureHttpClient(HttpClient client, int timeoutSeconds = 30)

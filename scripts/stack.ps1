@@ -266,10 +266,19 @@ function Get-StackLayout([int] $At, [int] $Count) {
     foreach ($key in 'Host', 'Port', 'GrpcPort', 'ReplicationPort') {
         if ($null -eq $surgewave.$key) { throw "$brokerFile names no Surgewave:$key; the stack takes it from there." }
     }
-    # The broker serves gRPC and REST on GrpcPort, over https while GrpcUseTls is on (its Program.cs then binds the
-    # Grpc endpoint to https://*:GrpcPort), else as its Kestrel Grpc endpoint says.
+    # The broker serves REST on GrpcPort, over https while GrpcUseTls is on and over http while it is off, whatever
+    # scheme its Kestrel Grpc endpoint is written with (BrokerEndpoints); only without the setting does the endpoint
+    # say it. The parts run in the Development environment (scripts/stack/settings.ps1), so the setting is the one
+    # of appsettings.Development.json where that file names it: the shipped appsettings.json switches TLS off, and
+    # the Development one switches it on, with the development certificate.
     $endpoints = $broker.Kestrel.Endpoints
-    $restScheme = if ($surgewave.GrpcUseTls) { 'https' } elseif ($endpoints.Grpc.Url) { (Split-EndpointUrl $endpoints.Grpc.Url "$brokerFile, Kestrel:Endpoints:Grpc:Url").Scheme } else { 'http' }
+    $useTls = $surgewave.GrpcUseTls
+    $developmentFile = Join-Path $Programs.broker.Output 'appsettings.Development.json'
+    if (Test-Path -LiteralPath $developmentFile) {
+        $development = (Read-JsonFile $developmentFile).Surgewave
+        if ($null -ne $development.GrpcUseTls) { $useTls = $development.GrpcUseTls }
+    }
+    $restScheme = if ($null -ne $useTls) { if ($useTls) { 'https' } else { 'http' } } elseif ($endpoints.Grpc.Url) { (Split-EndpointUrl $endpoints.Grpc.Url "$brokerFile, Kestrel:Endpoints:Grpc:Url").Scheme } else { 'http' }
     # The PostgreSQL wire listener opens only when the configuration switches it on; then its port moves too.
     $postgreSql = if ($surgewave.PostgreSql.Enabled) {
         if ($null -eq $surgewave.PostgreSql.Port) { throw "$brokerFile switches Surgewave:PostgreSql on and names no Surgewave:PostgreSql:Port." }

@@ -897,10 +897,9 @@ as root and overriding the endpoints.
 - **The image owns its data directories.** `/app/data`, `/app/data/raft`, `/app/data/plugins` and `/app/logs` exist
   in the image and belong to uid 1654, the user it runs as, and a fresh named volume mounted on one of them takes
   that owner. The image names that user itself, which makes the files under `/app` that user's as well.
-- **The image serves gRPC, REST, `/health` and `/metrics` in cleartext**, through four environment variables that
-  undo what `appsettings.json` sets, and the broker says in a warning at every start that the endpoint is served
-  without TLS and how to change that. [TLS in the container image](../deployment/tls.md#in-the-container-image)
-  describes serving it over HTTPS.
+- **The image serves its HTTP endpoints in cleartext**, as every published broker does now (see the next entry),
+  and the broker says in a warning at every start that they are served without TLS and how to change that.
+  [TLS in the container image](../deployment/tls.md#in-the-container-image) describes serving them over HTTPS.
 - The image no longer sets `Surgewave__Storage__DataDirectory` and `Surgewave__Storage__LogDirectory`, which
   nothing read.
 - **The linux-x64 and the linux-arm64 image are each built from their own files.** The release builds both in one
@@ -914,6 +913,75 @@ what the image now sets, and `docker-compose.yml` mounts its plugin volume on `/
 the directory the image ships its plugin in. `.github/workflows/deployments.yml` starts the image with no
 configuration on a fresh named volume, waits for its health check and produces and consumes a record over the
 Kafka wire protocol and over the native protocol (`scripts/ci/image-smoke.sh`).
+
+### A published broker starts without a certificate, and serves gRPC without TLS (#276)
+
+`appsettings.json` switched TLS on for the broker's two HTTP endpoints and relied on the ASP.NET Core development
+certificate. Only a developer's machine holds one, so every published broker ended its start with "Unable to
+configure HTTPS endpoint": the image, which 0.5.2 worked around in the manifests, and the self-contained archive
+alike, run here with no configuration in a clean container. And where the manifests switched to cleartext, gRPC
+did not work: without TLS, Kestrel serves HTTP/1.1 on an endpoint that names HTTP/1.1 and HTTP/2, so REST and
+`/health` answered and every gRPC call ended with `HTTP_1_1_REQUIRED`.
+
+- **`Surgewave:GrpcUseTls` is the one switch**, and `appsettings.json` sets it to `false`. It decides the scheme of
+  both endpoints whatever scheme their URLs are written with, so `false` alone yields cleartext, as
+  [the TLS guide](../deployment/tls.md) always said, and no image, manifest or test rewrites the endpoints to
+  change it. `appsettings.Development.json` sets it to `true`: `dotnet run` and `scripts/stack.ps1` serve HTTPS
+  with the development certificate as before.
+- **Without TLS the second endpoint, port 9094, serves gRPC** over HTTP/2 with prior knowledge, which HTTP/3, its
+  purpose with TLS, cannot be served without; port 9093 serves REST, `/health` and `/metrics` over HTTP/1.1. The
+  broker names both ports in its warning and in its ready banner.
+- **With TLS, `Surgewave:GrpcCertificatePath` is the certificate of both endpoints.** It was given to the first
+  one only, so a broker with a certificate and the second endpoint on HTTPS ended with "Unable to configure
+  HTTPS endpoint" as well.
+- The image sets no environment variable about TLS any more, so TLS is switched on by an environment variable or
+  by a mounted `appsettings.Production.json`, whichever a deployment prefers.
+- The Control UI's `Broker:ApiUrl` comes from its `appsettings.json` (`http://localhost:9093`) and, in the
+  Development environment, from `appsettings.Development.json` (`https://localhost:9093`).
+
+### Every image and archive of a release holds the binaries of its own architecture (#276)
+
+Every build of a project wrote to one obj, one bin and one publish directory whatever runtime it was for, and a
+release builds several runtimes of the same project. What the broker image got in the previous entry held for
+the rest:
+
+- **The Control image.** The 0.5.2 linux-arm64 image holds the x86-64 `surgewave-control` executable; built here
+  as the release builds it, the linux-x64 image held the aarch64 one.
+- **The CLI archives.** `surgewave-cli-linux-arm64`, `-osx-x64` and `-osx-arm64` of 0.5.2 hold the linux-x64
+  `surgewave` executable, so the CLI of those three archives does not start. The broker archives were right.
+- **Image labels and environment values.** The SDK cut every value at its first colon on the way into the build
+  of each architecture: the 0.5.2 images carry `org.opencontainers.image.source: https`, a creation time
+  `2026-10-20T18`, and the Control image `ASPNETCORE_URLS=http`. They are whole now, for every image of the
+  repository, and a build that would lose one fails.
+
+A build for a runtime now has directories of its own (`artifacts/{obj,bin,pub}/<project>/<configuration>/<runtime>/`).
+The release publishes the images with `scripts/ci/build-images.sh`, and `.github/workflows/deployments.yml` builds
+them with the same script for both architectures, checks every native binary of each image against the image's
+architecture (`scripts/ci/image-architecture.sh`), and starts the linux-arm64 broker under emulation until it
+reports ready.
+
+### A data directory the broker may not write to is said at the start (#276)
+
+A broker on a data directory it could not write to ended with the stack trace of the first component that wrote
+("Access to the path '/app/data/meta.properties.tmp' is denied") and exit code 139; where the directory was
+writable and its contents were not, it logged a failed transition for every partition and never became ready.
+It now ends its start with one line that names the directory, the user and the `chown` that mends it. The usual
+cause is a named volume that a deployment before 0.6.0 wrote as root; [Docker Deployment](../deployment/docker.md#a-volume-written-as-root)
+has the command, which was run here on a volume written by the 0.5.2 image as root: the broker started on it
+and served the record written before.
+
+### The Kafka plugin in the broker carries the release's version (#276)
+
+The plugin's manifest in `plugins/kuestenlogik.surgewave.protocol.kafka/` said `0.1.0` in every release, the
+version written by hand into `plugin.json`. The copy a broker carries now says the version of the build, as the
+plugin's `.swpkg` already did.
+
+### Quick start and Docker documentation (#276)
+
+The README's quick start named an image that does not exist (`ghcr.io/kuestenlogik/surgewave`) and promised the
+Control UI from it; it now starts the broker image and the Control image. The Dockerfile in
+[Docker Setup](../setup/docker.md) started an assembly that does not exist and is replaced by the command that
+builds the image, and the TLS guide describes the endpoints as they are.
 
 ## Also in this release
 
@@ -1119,12 +1187,33 @@ In the ConfigMap the tiered-storage keys carry the names the broker reads: `S3Bu
 - The image runs as uid 1654 as before, and the files under `/app` now belong to that user instead of root. A
   container that set `user: "0:0"` to write to a named volume no longer needs it; a named volume it wrote as root
   is not writable for uid 1654 until it is given to that user (`chown -R 1654 /app/data`, once, as root).
-- The image sets `Surgewave__GrpcUseTls=false`, `Kestrel__Endpoints__Grpc__Url=http://*:9093`,
-  `Kestrel__Endpoints__GrpcHttp3__Url=http://localhost:9094` and `Kestrel__Endpoints__GrpcHttp3__Protocols=Http1AndHttp2`.
-  Environment variables win over a mounted `appsettings.json`: a deployment that turned TLS on in a mounted file
-  sets it as environment variables now.
+- The image serves its HTTP endpoints in cleartext until it is given a certificate; see the next entry.
 - The environment variables `Surgewave__Storage__DataDirectory` and `Surgewave__Storage__LogDirectory` are gone
   from the image. They were never read; the data directory is `Surgewave__DataDirectory`.
 - `/app/plugins` holds the Kafka protocol plugin. A volume mounted over it hides the plugin, or keeps the one of
   the image the volume was first filled from: mount plugin volumes on `/app/data/plugins` and do not set
   `Surgewave__PluginsDirectory`, which makes the broker search that one directory only.
+
+### TLS is off outside the Development environment, and gRPC without TLS is on port 9094 (#276)
+
+- `Surgewave:GrpcUseTls` is `false` in `appsettings.json` and `true` in `appsettings.Development.json`. A broker
+  started outside the Development environment without the setting served HTTPS with the development certificate
+  where the machine held one; it serves cleartext now and says so. Set `Surgewave:GrpcUseTls=true` and
+  `Surgewave:GrpcCertificatePath` to keep HTTPS.
+- `Surgewave:GrpcUseTls=false` yields cleartext on both endpoints even where their `Kestrel` URLs say `https`,
+  and `true` yields HTTPS on both even where they say `http`. A configuration that named `https` URLs and a
+  certificate in the `Kestrel` section and set `GrpcUseTls=false` beside them was served over HTTPS and is not
+  any more; without the setting the `Kestrel` section stands as written.
+- Without TLS, port 9093 serves HTTP/1.1 only (REST, `/health`, `/metrics`) and port 9094 serves gRPC over
+  HTTP/2 with prior knowledge on every interface. Port 9094 served nothing a client could use without TLS before.
+  With TLS nothing moves: gRPC and REST are on port 9093, and port 9094 adds HTTP/3.
+- With TLS and `Surgewave:GrpcCertificatePath`, the second endpoint uses that certificate unless it names one of
+  its own under `Kestrel:Endpoints:GrpcHttp3:Certificate`.
+- The Control UI's `Broker:ApiUrl` is `http://localhost:9093` unless it is set, `https://localhost:9093` in the
+  Development environment. It was `https://localhost:9093` in every environment.
+
+### Build output of a runtime-specific build moved (#276)
+
+`dotnet build` and `dotnet publish` with `-r <runtime>` write to `artifacts/obj`, `artifacts/bin` and
+`artifacts/pub` under `<project>/<configuration>/<runtime>/`, no longer to `<project>/<configuration>/`. A publish
+with `-o` goes where it is told, as before.

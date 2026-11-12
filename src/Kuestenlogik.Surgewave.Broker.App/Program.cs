@@ -157,32 +157,9 @@ builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTel
 builder.Services.AddSingleton<Kuestenlogik.Surgewave.Broker.Telemetry.ITelemetryIngestor>(sp =>
     sp.GetRequiredService<Kuestenlogik.Surgewave.Broker.Telemetry.LoggingTelemetryIngestor>());
 
-// Optional: flip the gRPC / REST endpoint from cleartext HTTP to HTTPS without editing the
-// Kestrel section manually. When Surgewave:GrpcUseTls=true, override the Grpc endpoint URL to
-// https://*:{GrpcPort} and (if supplied) wire up the cert path / password. Falling back to
-// the .NET dev certificate when no path is given keeps the toggle one-line for development.
-// The existing Kestrel log-level suppression is lifted when TLS is on, since the HTTP/2-
-// without-ALPN warning that motivated it no longer applies once ALPN is in use.
-var grpcUseTls = builder.Configuration.GetValue("Surgewave:GrpcUseTls", defaultValue: false);
-if (grpcUseTls)
-{
-    var grpcPort = builder.Configuration.GetValue("Surgewave:GrpcPort", defaultValue: 9093);
-    builder.Configuration["Kestrel:Endpoints:Grpc:Url"] = $"https://*:{grpcPort}";
-
-    var certPath = builder.Configuration["Surgewave:GrpcCertificatePath"];
-    if (!string.IsNullOrEmpty(certPath))
-    {
-        builder.Configuration["Kestrel:Endpoints:Grpc:Certificate:Path"] = certPath;
-        var certPassword = builder.Configuration["Surgewave:GrpcCertificatePassword"];
-        if (!string.IsNullOrEmpty(certPassword))
-            builder.Configuration["Kestrel:Endpoints:Grpc:Certificate:Password"] = certPassword;
-    }
-
-    // HTTP/2 needs ALPN, which only works over TLS. The suppression in appsettings.json
-    // was needed to silence Kestrel's cleartext-HTTP/2 warning; with HTTPS we want normal
-    // Kestrel logging back.
-    builder.Configuration["Logging:LogLevel:Microsoft.AspNetCore.Server.Kestrel"] = "Warning";
-}
+// Surgewave:GrpcUseTls decides the scheme and the protocols of the two Kestrel endpoints, whatever their URLs are
+// written with: false alone yields cleartext, true HTTPS with Surgewave:GrpcCertificatePath on both (#276).
+Kuestenlogik.Surgewave.Broker.Hosting.BrokerEndpoints.Apply(builder.Configuration);
 
 // Register BrokerConfig as singleton for direct injection
 builder.Services.AddSingleton(sp =>
@@ -965,6 +942,16 @@ var app = builder.Build();
 // Get dependencies
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var config = app.Services.GetRequiredService<BrokerConfig>();
+
+// A data directory this process may not write to ends the start by saying so and how to mend it (#276), before
+// the first component that writes to it ends it with an access-denied stack trace.
+if (DataDirectoryAccess.Problem(config.DataDirectory) is { } dataDirectoryProblem)
+{
+    logger.LogCritical("{Problem}", dataDirectoryProblem);
+    await app.DisposeAsync();
+    return 1;
+}
+
 var logManager = app.Services.GetRequiredService<LogManager>();
 
 // REST auth gate must sit ahead of the endpoint mappings below (#37).
@@ -2094,15 +2081,20 @@ app.MapGet("/sd-targets", () =>
 
 logger.LogInformation("gRPC server started on port {GrpcPort}", config.GrpcPort);
 
-// Cleartext is said at every start (#269): the container image binds this endpoint without TLS, having no
-// certificate to bind it with, and that is to be a choice the operator has seen.
-var grpcEndpointUrl = app.Configuration["Kestrel:Endpoints:Grpc:Url"];
+// Cleartext is said at every start (#269): a broker without a certificate serves this endpoint without TLS, and
+// that is to be a choice the operator has seen. gRPC needs HTTP/2, which a cleartext endpoint serves only alone,
+// so it is on the second endpoint then (#276).
+var grpcEndpointUrl = app.Configuration[Kuestenlogik.Surgewave.Broker.Hosting.BrokerEndpoints.GrpcUrlKey];
+var cleartextGrpcPort = Kuestenlogik.Surgewave.Broker.Hosting.BrokerEndpoints.CleartextGrpcPort(app.Configuration);
 if (grpcEndpointUrl is null || !grpcEndpointUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
 {
     logger.LogWarning(
-        "gRPC, REST, /health and /metrics are served without TLS on port {GrpcPort}. To serve them over HTTPS set "
-        + "Surgewave:GrpcUseTls=true and Surgewave:GrpcCertificatePath (docs/deployment/tls.md).",
-        config.GrpcPort);
+        "REST, /health and /metrics are served without TLS on port {GrpcPort}, gRPC {CleartextGrpc}. To serve them "
+        + "over HTTPS set Surgewave:GrpcUseTls=true and Surgewave:GrpcCertificatePath (docs/deployment/tls.md).",
+        config.GrpcPort,
+        cleartextGrpcPort is { } port
+            ? $"over HTTP/2 without TLS on port {port}"
+            : "is not served: no endpoint is set to HTTP/2 alone");
 }
 
 // Ready is said from here, after every plugin is configured — a plugin that fails on the way never gets this far —
@@ -2131,7 +2123,8 @@ async Task AnnounceReadyAsync()
         logger.LogInformation("  - Kafka wire protocol: {Host}:{Port}", config.Host, config.Port);
     else
         logger.LogInformation("  - Native protocol only: {Host}:{Port} (Kafka wire disabled)", config.Host, config.Port);
-    logger.LogInformation("  - gRPC API:            {Host}:{GrpcPort}", config.Host, config.GrpcPort);
+    logger.LogInformation("  - gRPC API:            {Host}:{GrpcPort}", config.Host, cleartextGrpcPort ?? config.GrpcPort);
+    logger.LogInformation("  - REST API:            {Host}:{GrpcPort}", config.Host, config.GrpcPort);
     logger.LogInformation("  - Metrics:             {Host}:{GrpcPort}/metrics", config.Host, config.GrpcPort);
     foreach (var proto in activatedProtocols)
         logger.LogInformation("  - {Protocol}:  port {Port}", proto.DisplayName, proto.DefaultPort > 0 ? proto.DefaultPort : "shared");

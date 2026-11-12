@@ -12,9 +12,11 @@ services:
     healthcheck:
       test: ["CMD", "dotnet", "/app/surgewave-broker.dll", "health", "ready"]
       interval: 5s
-      timeout: 5s
+      # Both longer for an architecture that runs under emulation (image-architecture.sh), where the
+      # probe, a process of its own, takes longer to start than the five seconds it has here.
+      timeout: ${SURGEWAVE_HEALTH_TIMEOUT:-5s}
       retries: 12
-      start_period: 30s
+      start_period: ${SURGEWAVE_HEALTH_START_PERIOD:-30s}
 
 volumes:
   data:

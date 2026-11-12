@@ -46,8 +46,8 @@ x-surgewave-broker-environment: &surgewave-broker-environment
   Surgewave__Port: 9092
   Surgewave__GrpcPort: 9095
   Surgewave__ReplicationPort: 10092
-  # gRPC, REST, /health and /metrics on the gRPC port set above, in cleartext as the image
-  # binds them; the image's own endpoint names port 9093.
+  # REST, /health and /metrics on the gRPC port set above, in cleartext as the image serves
+  # them; the image's own endpoint names port 9093.
   Kestrel__Endpoints__Grpc__Url: http://*:9095
   Surgewave__DataDirectory: /app/data
   Surgewave__RaftDataDirectory: /app/data/raft

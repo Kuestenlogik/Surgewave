@@ -36,18 +36,28 @@ internal sealed class BrokerProcess : IAsyncDisposable
     private readonly TaskCompletionSource _appStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<int> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private BrokerProcess(Process process, int kafkaPort, int restPort)
+    private BrokerProcess(Process process, BrokerPorts ports)
     {
         _process = process;
-        KafkaPort = kafkaPort;
-        RestPort = restPort;
+        KafkaPort = ports.Kafka;
+        RestPort = ports.Grpc;
+        SecondEndpointPort = ports.Http3;
     }
 
     /// <summary>The port the broker's Kafka listener binds.</summary>
     public int KafkaPort { get; }
 
-    /// <summary>The plaintext HTTP/1.1 and HTTP/2 port that serves the transcoded REST API.</summary>
+    /// <summary>
+    /// The port of the broker's <c>Grpc</c> endpoint: the transcoded REST API, <c>/health</c> and <c>/metrics</c>,
+    /// over HTTP/1.1 while the broker runs without TLS, as it does unless a test switches TLS on.
+    /// </summary>
     public int RestPort { get; }
+
+    /// <summary>
+    /// The port of the broker's second endpoint: gRPC over HTTP/2 with prior knowledge without TLS, everything over
+    /// HTTPS with it.
+    /// </summary>
+    public int SecondEndpointPort { get; }
 
     /// <summary>Bootstrap servers for a Kafka client.</summary>
     public string BootstrapServers => $"127.0.0.1:{KafkaPort}";
@@ -112,14 +122,11 @@ internal sealed class BrokerProcess : IAsyncDisposable
             $"--Surgewave:Port={kafkaPort}",
             $"--Surgewave:GrpcPort={grpcPort}",
             $"--Surgewave:ReplicationPort={replPort}",
-            "--Surgewave:GrpcUseTls=false",
-            // appsettings.json pins the two admin/gRPC Kestrel endpoints to https, which a
-            // dev-cert-less CI runner cannot bind. GrpcUseTls=false alone does not undo that, so
-            // override both endpoint URLs to plaintext http and drop HTTP/3 (which requires TLS).
-            // Readiness is a stdout line, never an HTTP probe, so http is sufficient.
+            // The two HTTP endpoints on this broker's own ports, on loopback. Their scheme and protocols are the
+            // shipped ones: Surgewave:GrpcUseTls of appsettings.json is false outside the Development environment,
+            // which alone yields cleartext (#276), and a test that wants TLS adds the setting.
             $"--Kestrel:Endpoints:Grpc:Url=http://127.0.0.1:{grpcPort}",
             $"--Kestrel:Endpoints:GrpcHttp3:Url=http://127.0.0.1:{http3Port}",
-            "--Kestrel:Endpoints:GrpcHttp3:Protocols=Http1AndHttp2", // also the REST port of the tests
             $"--Surgewave:DataDirectory={dataDir}",
             $"--Surgewave:LogDirectory={Path.Combine(dataDir, "logs")}",
             "--Surgewave:Kafka:Enabled=true",
@@ -128,7 +135,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
         ];
         foreach (var a in args) psi.ArgumentList.Add(a);
 
-        var broker = new BrokerProcess(new Process { StartInfo = psi, EnableRaisingEvents = true }, kafkaPort, http3Port);
+        var broker = new BrokerProcess(new Process { StartInfo = psi, EnableRaisingEvents = true }, ports);
         broker._process.OutputDataReceived += (_, e) => broker.OnLine(e.Data);
         broker._process.ErrorDataReceived += (_, e) => broker.OnLine(e.Data);
         broker._process.Exited += (_, _) => broker._exited.TrySetResult(broker._process.ExitCode);
@@ -262,6 +269,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
             .Where(p => !p.Contains("Tests", StringComparison.OrdinalIgnoreCase))
             .Where(p => File.Exists(Path.Combine(Path.GetDirectoryName(p)!, "surgewave-broker.runtimeconfig.json")))
             .OrderByDescending(p => p.Contains($"{sep}{config}{sep}", StringComparison.OrdinalIgnoreCase)) // prefer our config
+            .ThenBy(p => p.Length) // the build without a runtime, not one for a runtime in a directory below it
             .ToList();
         Assert.True(matches.Count > 0,
             $"surgewave-broker.dll not found under '{artifacts}'. Was Kuestenlogik.Surgewave.Broker built?");
@@ -289,7 +297,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
 }
 
 /// <summary>
-/// The four ports a broker binds — Kafka, gRPC, HTTP/3 (the REST port of the tests) and replication — distinct, as
+/// The four ports a broker binds — Kafka, gRPC and REST, the second HTTP endpoint and replication — distinct, as
 /// BrokerConfig requires, and ephemeral, as fixed defaults would collide across runs.
 /// </summary>
 internal sealed record BrokerPorts(int Kafka, int Grpc, int Http3, int Replication)

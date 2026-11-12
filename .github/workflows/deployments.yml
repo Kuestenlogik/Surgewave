@@ -2,7 +2,8 @@ name: Deployments
 
 # Keeps the deployment manifests under deployments/ honest: statically on every change to
 # them, and by bringing them up — Compose and Kubernetes, three brokers each — with the broker
-# built from the same commit. The broker image itself is started with no configuration.
+# built from the same commit. The broker image itself is started with no configuration, and the
+# images of a release are built as the release builds them and checked for each architecture.
 
 on:
   push:
@@ -13,8 +14,14 @@ on:
       - 'scripts/ci/kubernetes-cluster-smoke.sh'
       - 'scripts/ci/image-smoke.sh'
       - 'scripts/ci/image-smoke.compose.yml'
+      - 'scripts/ci/build-images.sh'
+      - 'scripts/ci/image-architecture.sh'
+      - 'scripts/ci/elf-architecture.mjs'
       - '.github/workflows/deployments.yml'
+      - '.github/workflows/release.yml'
+      - 'Directory.Build.props'
       - 'Directory.Build.targets'
+      - 'src/Kuestenlogik.Surgewave.Control/Kuestenlogik.Surgewave.Control.csproj'
       - 'src/Kuestenlogik.Surgewave.Broker.App/**'
       - 'src/Kuestenlogik.Surgewave.Broker/BrokerConfig.cs'
       - 'src/Kuestenlogik.Surgewave.Clustering/**'
@@ -26,8 +33,14 @@ on:
       - 'scripts/ci/kubernetes-cluster-smoke.sh'
       - 'scripts/ci/image-smoke.sh'
       - 'scripts/ci/image-smoke.compose.yml'
+      - 'scripts/ci/build-images.sh'
+      - 'scripts/ci/image-architecture.sh'
+      - 'scripts/ci/elf-architecture.mjs'
       - '.github/workflows/deployments.yml'
+      - '.github/workflows/release.yml'
+      - 'Directory.Build.props'
       - 'Directory.Build.targets'
+      - 'src/Kuestenlogik.Surgewave.Control/Kuestenlogik.Surgewave.Control.csproj'
       - 'src/Kuestenlogik.Surgewave.Broker.App/**'
       - 'src/Kuestenlogik.Surgewave.Broker/BrokerConfig.cs'
       - 'src/Kuestenlogik.Surgewave.Clustering/**'
@@ -47,6 +60,10 @@ env:
   KUBERNETES_VERSION: 1.28.0
   BROKER_IMAGE: surgewave-broker:ci
   CLI_IMAGE: surgewave-cli:ci
+  CONTROL_IMAGE: surgewave-control:ci
+  # Registers QEMU for linux/arm64 with the kernel (binfmt_misc). Pinned by digest:
+  # tonistiigi/binfmt:latest of 2026-11-12.
+  BINFMT: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
 
 permissions:
   contents: read
@@ -199,6 +216,55 @@ jobs:
           SURGEWAVE_BROKER_IMAGE: ${{ env.BROKER_IMAGE }}
           SURGEWAVE_CLI_IMAGE: ${{ env.CLI_IMAGE }}
         run: scripts/ci/image-smoke.sh
+
+  # ================================================================
+  # release-images: broker and Control as release.yml publishes them
+  # ================================================================
+  # One image index for linux-x64 and linux-arm64 each, built by the script release.yml pushes
+  # them with. The jobs above use an image for the runner's architecture alone, and a release
+  # was the first time the other path ran: the 0.5.2 linux-arm64 images hold the x86-64
+  # executable, and their labels end at the first colon (#269, #276).
+  release-images:
+    name: Images of a release, per architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # The classic image store of the Docker daemon holds one architecture of an image; the
+      # containerd one holds the index the SDK loads.
+      - name: Use the containerd image store
+        run: |
+          if docker info --format '{{.DriverStatus}}' | grep -q 'io.containerd.snapshotter'; then
+            echo "the daemon uses the containerd image store"
+          else
+            sudo mkdir -p /etc/docker
+            [ -s /etc/docker/daemon.json ] || echo '{}' | sudo tee /etc/docker/daemon.json > /dev/null
+            sudo jq '.features["containerd-snapshotter"] = true' /etc/docker/daemon.json > "$RUNNER_TEMP/daemon.json"
+            sudo cp "$RUNNER_TEMP/daemon.json" /etc/docker/daemon.json
+            sudo systemctl restart docker
+            docker info --format '{{.DriverStatus}}' | grep -q 'io.containerd.snapshotter'
+          fi
+
+      - name: Register emulation for linux/arm64
+        run: docker run --privileged --rm "$BINFMT" --install arm64
+
+      - name: Build the broker and the Control image for both architectures
+        env:
+          IMAGE_TAGS: ci
+        run: scripts/ci/build-images.sh
+
+      # Every native binary of each image is of the image's architecture, the labels are whole,
+      # and the linux-arm64 broker starts and reports ready, emulated.
+      - name: Check each architecture, start the linux-arm64 broker
+        env:
+          SURGEWAVE_BROKER_IMAGE: ${{ env.BROKER_IMAGE }}
+          SURGEWAVE_CONTROL_IMAGE: ${{ env.CONTROL_IMAGE }}
+        run: scripts/ci/image-architecture.sh
 
   # ================================================================
   # compose: docker-compose.cluster.yml as a running cluster

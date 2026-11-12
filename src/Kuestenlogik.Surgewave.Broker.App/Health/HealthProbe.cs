@@ -1,4 +1,5 @@
 using System.Net.Security;
+using Kuestenlogik.Surgewave.Broker.Hosting;
 using Microsoft.Extensions.Configuration;
 
 namespace Kuestenlogik.Surgewave.Broker.Health;
@@ -78,11 +79,11 @@ public static class HealthProbe
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        // As the broker decides it: Surgewave:GrpcUseTls sets the scheme of the endpoint it is configured with.
         var grpcPort = configuration.GetValue("Surgewave:GrpcPort", defaultValue: 9093);
-        // As the broker decides it: GrpcUseTls replaces the configured endpoint with https on GrpcPort.
-        var url = configuration.GetValue("Surgewave:GrpcUseTls", defaultValue: false)
-            ? $"https://*:{grpcPort}"
-            : configuration["Kestrel:Endpoints:Grpc:Url"] ?? $"http://*:{grpcPort}";
+        var url = BrokerEndpoints.Resolve(configuration).GetValueOrDefault(BrokerEndpoints.GrpcUrlKey)
+            ?? configuration[BrokerEndpoints.GrpcUrlKey]
+            ?? $"http://*:{grpcPort}";
 
         // Kestrel's wildcards are no host a URI can carry.
         var bound = new Uri(url.Replace("://*", "://localhost", StringComparison.Ordinal)

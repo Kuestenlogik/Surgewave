@@ -16,10 +16,11 @@ docker compose -f deployments/docker/docker-compose.cluster.yml up -d --wait
 ```
 
 The image also starts on its own, without any configuration: one broker that speaks the Kafka wire
-protocol and the native protocol on port 9092, and gRPC and REST in cleartext on port 9093.
+protocol and the native protocol on port 9092, and in cleartext REST on port 9093 and gRPC on port
+9094.
 
 ```bash
-docker run -d -p 9092:9092 -p 9093:9093 -v surgewave-data:/app/data ghcr.io/kuestenlogik/surgewave-broker:0.6.0
+docker run -d -p 9092:9092 -p 9093:9093 -p 9094:9094 -v surgewave-data:/app/data ghcr.io/kuestenlogik/surgewave-broker:0.6.0
 ```
 
 ## Docker Compose
@@ -72,30 +73,23 @@ environment:
 A broker is ready only once it has a quorum, so no broker may wait for another broker's health.
 [Docker Deployment](../deployment/docker.md) explains the settings and the start order.
 
-## Building Custom Image
+## Building the Image from Source
 
-### Dockerfile
-
-```dockerfile
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
-WORKDIR /app
-EXPOSE 9092 9093
-
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-WORKDIR /src
-COPY . .
-RUN dotnet publish src/Kuestenlogik.Surgewave.Broker.App/Kuestenlogik.Surgewave.Broker.App.csproj \
-    -c Release -o /app/publish
-
-FROM base AS final
-WORKDIR /app
-COPY --from=build /app/publish .
-ENTRYPOINT ["dotnet", "Kuestenlogik.Surgewave.Broker.dll"]
-```
+The images are built by the .NET SDK, without a Dockerfile. From a clone of the repository, with the
+.NET 10 SDK and a running Docker daemon:
 
 ```bash
-docker build -t my-surgewave .
+dotnet publish src/Kuestenlogik.Surgewave.Broker.App -c Release /t:PublishContainer \
+  -p:ContainerRepository=my-surgewave -p:ContainerImageTags=dev
 ```
+
+That loads `my-surgewave:dev` into the local Docker daemon, for the architecture the SDK picks for
+the build machine: the image a release publishes, with the Kafka protocol plugin in `/app/plugins`, the
+data directories owned by its user and `dotnet /app/surgewave-broker.dll` as its entry point.
+
+`scripts/ci/build-images.sh` builds the broker and the Control image for linux-x64 and linux-arm64 in
+one image index each, as a release does; the local Docker daemon needs the containerd image store to
+hold such an image.
 
 ## Environment Variables
 
@@ -105,7 +99,8 @@ docker build -t my-surgewave .
 | `Surgewave__Host` | Name or address clients and brokers are told | localhost |
 | `Surgewave__BindAddress` | Address the client listener binds; `Host` when unset | - |
 | `Surgewave__Port` | Client port | 9092 |
-| `Surgewave__GrpcPort` | gRPC / REST port | 9093 |
+| `Surgewave__GrpcPort` | REST port, and the gRPC port with TLS | 9093 |
+| `Surgewave__GrpcUseTls` | Serve gRPC and REST over HTTPS; see [TLS](../deployment/tls.md) | false |
 | `Surgewave__ReplicationPort` | Inter-broker port | 10092 |
 | `Surgewave__DataDirectory` | Data storage path | ./data (`/app/data` in the image) |
 | `Surgewave__AutoCreateTopics` | Auto-create topics | true |

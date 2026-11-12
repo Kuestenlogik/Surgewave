@@ -44,9 +44,11 @@ Surgewave connects your services, devices, and data in real time. It distributes
 
 ## Quick Start
 
-**Start the broker:**
+**Start the broker and the Control UI:**
 ```bash
-docker run -p 9092:9092 -p 5050:5050 ghcr.io/kuestenlogik/surgewave
+docker network create surgewave
+docker run -d --name surgewave-broker --network surgewave -p 9092:9092 -p 9093:9093 ghcr.io/kuestenlogik/surgewave-broker
+docker run -d --name surgewave-control --network surgewave -p 5050:5050 -e Broker__ApiUrl=http://surgewave-broker:9093 ghcr.io/kuestenlogik/surgewave-control
 ```
 
 Open the **Control UI** at [localhost:5050](http://localhost:5050). See the [Control UI guide](docs/quickstart/) for a walkthrough.

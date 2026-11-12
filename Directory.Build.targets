@@ -175,6 +175,60 @@
   </Target>
 
   <!--
+    #269, #276 — image labels and environment values that hold a colon.
+    A container image for several architectures (ContainerRuntimeIdentifiers) is built by one build per
+    architecture, and the SDK hands the image's labels and environment variables to each of them as name:value
+    entries, which it takes apart again at every colon, keeping the first two parts
+    (_ParseItemsForPublishingSingleContainer in Microsoft.NET.Build.Containers.targets). A value with a colon in
+    it lost everything from that colon on: the released images carry org.opencontainers.image.source "https" and
+    a creation time "2026-10-20T18", the Control image ASPNETCORE_URLS=http, and a broker image built with
+    "http://*:9093" in its environment ended with "Invalid url: 'http'". Here every entry is taken apart at its
+    first colon only, and the items made that way replace the cut ones. A build whose image would not carry
+    every label and every environment variable whole fails. An image for one architecture is not built this way
+    and never lost anything.
+  -->
+  <Target Name="RestoreContainerItemsCutAtAColon"
+          BeforeTargets="_PublishSingleContainer"
+          Condition="'$(_ContainerLabel)' != '' or '$(_ContainerEnvironmentVariables)' != ''">
+    <ItemGroup>
+      <_ContainerLabelEntry Include="$(_ContainerLabel)" Condition="'$(_ContainerLabel)' != ':'" />
+      <_ContainerEnvironmentEntry Include="$(_ContainerEnvironmentVariables)" Condition="'$(_ContainerEnvironmentVariables)' != ':'" />
+      <_ContainerLabelEntry>
+        <Colon>$([System.String]::Copy('%(Identity)').IndexOf(':'))</Colon>
+      </_ContainerLabelEntry>
+      <_ContainerEnvironmentEntry>
+        <Colon>$([System.String]::Copy('%(Identity)').IndexOf(':'))</Colon>
+      </_ContainerEnvironmentEntry>
+      <_ContainerLabelEntry>
+        <Name>$([System.String]::Copy('%(Identity)').Substring(0, %(Colon)))</Name>
+        <Value>$([System.String]::Copy('%(Identity)').Substring($([MSBuild]::Add(%(Colon), 1))))</Value>
+      </_ContainerLabelEntry>
+      <_ContainerEnvironmentEntry>
+        <Name>$([System.String]::Copy('%(Identity)').Substring(0, %(Colon)))</Name>
+        <Value>$([System.String]::Copy('%(Identity)').Substring($([MSBuild]::Add(%(Colon), 1))))</Value>
+      </_ContainerEnvironmentEntry>
+
+      <ContainerLabel Remove="@(_ContainerLabelEntry->'%(Name)')" />
+      <ContainerLabel Include="@(_ContainerLabelEntry->'%(Name)')" />
+      <ContainerEnvironmentVariables Remove="@(_ContainerEnvironmentEntry->'%(Name)')" />
+      <ContainerEnvironmentVariables Include="@(_ContainerEnvironmentEntry->'%(Name)')" />
+
+      <!-- What the image is to carry: every entry handed in, and every environment variable the project declares. -->
+      <_ExpectedContainerLabel Include="@(_ContainerLabelEntry->'%(Name)=%(Value)')" />
+      <_ExpectedContainerEnvironment Include="@(_ContainerEnvironmentEntry->'%(Name)=%(Value)')" />
+      <_ExpectedContainerEnvironment Include="@(ContainerEnvironmentVariable->'%(Identity)=%(Value)')" />
+      <_ImageContainerLabel Include="@(ContainerLabel->'%(Identity)=%(Value)')" />
+      <_ImageContainerEnvironment Include="@(ContainerEnvironmentVariables->'%(Identity)=%(Value)')" />
+      <_LostContainerLabel Include="@(_ExpectedContainerLabel)" Exclude="@(_ImageContainerLabel)" />
+      <_LostContainerEnvironment Include="@(_ExpectedContainerEnvironment)" Exclude="@(_ImageContainerEnvironment)" />
+    </ItemGroup>
+    <Error Text="The container image would not carry these labels whole: @(_LostContainerLabel, ', ')."
+           Condition="'@(_LostContainerLabel)' != ''" />
+    <Error Text="The container image would not carry these environment variables whole: @(_LostContainerEnvironment, ', ')."
+           Condition="'@(_LostContainerEnvironment)' != ''" />
+  </Target>
+
+  <!--
     #59 b6 — dev-mode Kafka plugin discovery.
     The broker does not reference Protocol.Kafka (#59): the Kafka wire protocol is a plugin, and a
     published broker gets it as a .swpkg (scripts/publish.ps1). Run from source (`dotnet run`, F5), the
@@ -199,9 +253,28 @@
       <_KafkaPluginFiles Remove="@(_KafkaPluginFiles)" />
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.dll" />
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json" Condition="Exists('$(_KafkaPluginOut)Kuestenlogik.Surgewave.Protocol.Kafka.deps.json')" />
-      <_KafkaPluginFiles Include="$(_KafkaPluginOut)plugin.json" Condition="Exists('$(_KafkaPluginOut)plugin.json')" />
       <!-- The plugin's private external dependencies, without the host's shared assemblies. -->
       <_KafkaPluginFiles Include="$(_KafkaPluginOut)*.dll" Exclude="$(_KafkaPluginOut)Kuestenlogik.Surgewave.*.dll" />
+    </ItemGroup>
+
+    <!-- The manifest with the version of this build (#276). plugin.json carries a version written by hand,
+         "0.1.0", and that is what the plugin in the broker of every release said it was; the .swpkg of the same
+         plugin takes the build's version (SurgewavePackPlugin), and so does the copy the broker carries. -->
+    <PropertyGroup Condition="Exists('$(_KafkaPluginOut)plugin.json')">
+      <_KafkaPluginManifestFile>$(IntermediateOutputPath)kafka-plugin\plugin.json</_KafkaPluginManifestFile>
+      <_KafkaPluginManifest>$([System.IO.File]::ReadAllText('$(_KafkaPluginOut)plugin.json'))</_KafkaPluginManifest>
+      <_KafkaPluginManifestVersion>"version": "$(Version)"</_KafkaPluginManifestVersion>
+      <_KafkaPluginManifest>$([System.Text.RegularExpressions.Regex]::Replace($(_KafkaPluginManifest), '"version"\s*:\s*"[^"]*"', $(_KafkaPluginManifestVersion)))</_KafkaPluginManifest>
+    </PropertyGroup>
+    <Error Text="CollectKafkaPluginFiles: $(_KafkaPluginOut)plugin.json names no version to replace with $(Version)."
+           Condition="'$(_KafkaPluginManifestFile)' != '' and !$(_KafkaPluginManifest.Contains($(_KafkaPluginManifestVersion)))" />
+    <WriteLinesToFile File="$(_KafkaPluginManifestFile)"
+                      Lines="$(_KafkaPluginManifest)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true"
+                      Condition="'$(_KafkaPluginManifestFile)' != ''" />
+    <ItemGroup Condition="'$(_KafkaPluginManifestFile)' != ''">
+      <_KafkaPluginFiles Include="$(_KafkaPluginManifestFile)" />
     </ItemGroup>
   </Target>
 

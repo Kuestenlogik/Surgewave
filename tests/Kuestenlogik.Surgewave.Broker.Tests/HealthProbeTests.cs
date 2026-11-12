@@ -39,6 +39,16 @@ public sealed class HealthProbeTests
     }
 
     [Fact]
+    public void WithoutGrpcUseTls_AsksOverHttp_WhateverSchemeTheEndpointIsWrittenWith()
+    {
+        var configuration = Configuration(
+            ("Kestrel:Endpoints:Grpc:Url", "https://*:9093"),
+            ("Surgewave:GrpcUseTls", "false"));
+
+        Assert.Equal("http://localhost:9093/", HealthProbe.Endpoint(configuration).ToString());
+    }
+
+    [Fact]
     public void WithoutAnEndpoint_AsksTheGrpcPort()
     {
         var configuration = Configuration(("Surgewave:GrpcPort", "9555"));

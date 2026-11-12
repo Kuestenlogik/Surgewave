@@ -46,6 +46,28 @@
     <PublishDir>$(ArtifactsPath)pub\$(MSBuildProjectName)\$(Configuration)\</PublishDir>
   </PropertyGroup>
 
+  <!-- A build for a runtime (`-r`, or one architecture of a container image) gets directories of its own (#276).
+       The paths above are the same for every build of a project, and the SDK, which appends the runtime to the
+       obj and bin paths it computes itself, leaves paths alone that are set (and ArtifactsPath switches its
+       artifacts layout on, in which it does not append either). So every build of a project shared one obj, one
+       bin and one publish directory whatever its runtime, and the build for one runtime took the files another
+       one had left there, or wrote over them: the linux-arm64 images of 0.5.2 hold the x86-64 executable (broker and
+       Control), a Control image built here for linux-x64 held the aarch64 one, and the 0.5.2 CLI archives for
+       linux-arm64, osx-x64 and osx-arm64 hold the linux-x64 one. The runtime of such a build is a global
+       property, known here. A build without a runtime, which is every build of the solution and of the tests,
+       keeps the paths above. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <IntermediateOutputPath>$(IntermediateOutputPath)$(RuntimeIdentifier)\</IntermediateOutputPath>
+    <OutputPath>$(OutputPath)$(RuntimeIdentifier)\</OutputPath>
+    <PublishDir>$(PublishDir)$(RuntimeIdentifier)\</PublishDir>
+  </PropertyGroup>
+
+  <!-- The builds for the architectures of one container image run one after the other: each of them also builds
+       every referenced library, under its own global properties and into that library's one output directory. -->
+  <PropertyGroup>
+    <ContainerPublishInParallel>false</ContainerPublishInParallel>
+  </PropertyGroup>
+
   <!-- What belongs on nuget.org?
        A project is packable as long as it is something someone can REFERENCE. That is
        the default, and it is right: libraries, plugins and the dotnet tool all ship through

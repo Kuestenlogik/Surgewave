@@ -15,8 +15,8 @@ data:
   Surgewave__DataDirectory: "/data"
   Surgewave__LogDirectory: "/data/logs"
 
-  # gRPC, REST, /health and /metrics on the gRPC port, in cleartext as the image binds them;
-  # the image's own endpoint names port 9093.
+  # REST, /health and /metrics on the gRPC port, in cleartext as the image serves them. The
+  # image's own endpoint names port 9093, so a different port is said here as well.
   Kestrel__Endpoints__Grpc__Url: "http://*:{{ .Values.broker.ports.grpc }}"
 
   # Cluster settings: who exists and who votes on metadata, identical on every broker. A single

@@ -6,7 +6,7 @@ namespace Kuestenlogik.Surgewave.Control.Services;
 
 /// <summary>
 /// HttpClient-backed implementation that talks to the broker at the URL
-/// configured via <c>Broker:ApiUrl</c> (default https://localhost:9093).
+/// configured via <c>Broker:ApiUrl</c>.
 /// The HttpClient's <c>BaseAddress</c> is set by <c>ConfigureHttpClient</c>
 /// in Program.cs alongside the other broker-API clients; this class uses
 /// relative paths so a single config knob retargets every client. The
