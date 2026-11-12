@@ -142,7 +142,8 @@ jobs:
       # readiness before it starts the next never gets a cluster.
       - name: Brokers do not wait for each other's readiness
         run: |
-          if grep -n "OrderedReady" -r deployments/helm deployments/kubernetes; then
+          # The setting, not the word: comments and the chart's README explain why it must not be used.
+          if grep -nE "^[[:space:]]*podManagementPolicy:[[:space:]]*OrderedReady" -r deployments/helm deployments/kubernetes "$RUNNER_TEMP/chart-defaults.yaml"; then
             echo "::error::a StatefulSet of brokers needs podManagementPolicy: Parallel"
             exit 1
           fi
