@@ -139,13 +139,15 @@ public sealed class LossyTcpProxy : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // The accept loop ends on the cancellation, and only then is the listener stopped: a loop that had not
+        // reached its accept yet found a stopped listener ("Not listening") and failed the dispose with it.
         await _cts.CancelAsync();
-        _listener.Stop();
-        _listener.Dispose();
         if (_acceptTask is not null)
         {
-            try { await _acceptTask; } catch (OperationCanceledException) { } catch (ObjectDisposedException) { }
+            await _acceptTask;
         }
+        _listener.Stop();
+        _listener.Dispose();
         _cts.Dispose();
     }
 }

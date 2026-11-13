@@ -9,6 +9,22 @@ namespace Kuestenlogik.Surgewave.Transport.Tests;
 
 public class LossyTcpProxyTests
 {
+    /// <summary>
+    /// A proxy disposed before its accept loop has made its first call stops without an error. The loop was started
+    /// on the thread pool and the dispose stopped the listener under it, so a loop that got to its accept only then
+    /// found a listener that was not listening, and the dispose rethrew that.
+    /// </summary>
+    [Fact]
+    public async Task AProxyDisposedRightAfterItsStart_StopsWithoutAnError()
+    {
+        for (var i = 0; i < 2000; i++)
+        {
+            var proxy = new LossyTcpProxy(listenPort: 0, upstreamPort: 1, latencyMs: 0);
+            await proxy.Start();
+            await proxy.DisposeAsync();
+        }
+    }
+
     [Fact]
     public async Task Proxy_ForwardsBytes_BothDirections()
     {
