@@ -105,7 +105,7 @@ public sealed class MetadataLogAfterStopTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var config = NewConfig();
         var persistence = new RaftPersistence(NullLogger<RaftPersistence>.Instance, config);
-        await persistence.AppendEntriesAsync([Noop(index: 1, term: 1), Noop(index: 2, term: 1)], ct);
+        await persistence.AppendEntriesAsync([Noop(index: 1, term: 1), Noop(index: 2, term: 1)]);
         var node = NewNode(config);
 
         // Held as a writer holds it while it appends.

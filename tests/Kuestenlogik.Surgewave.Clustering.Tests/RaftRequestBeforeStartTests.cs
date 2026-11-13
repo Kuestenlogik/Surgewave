@@ -106,7 +106,7 @@ public sealed class RaftRequestBeforeStartTests : IAsyncDisposable
         [
             new RaftLogEntry { Term = 4, Index = 1, CommandType = MetadataCommandType.Noop, Data = [] },
             new RaftLogEntry { Term = 5, Index = 2, CommandType = MetadataCommandType.Noop, Data = [] },
-        ], ct);
+        ]);
 
         var node = new RaftNode(
             NullLogger<RaftNode>.Instance,

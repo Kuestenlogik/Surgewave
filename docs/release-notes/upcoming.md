@@ -28,14 +28,35 @@ host sets `127.0.0.1` and is then not reachable on that port from outside. The e
 test or on a developer's machine no longer listens on every interface, which on Windows raised a firewall prompt
 for each new checkout.
 
+### Acknowledged metadata survives a power loss (#260, #261, #262)
+
+The metadata log and the Raft state file were written and left in the operating system's cache. A topic a client
+had been told was created survived the broker process and not a power loss, and neither did the vote a controller
+had cast. Both are now flushed to disk before they count: a follower answers the leader once the entries are on its
+disk, a vote is answered once it is, and a leader counts and sends only entries it has on its own disk. Writes that
+arrive while a flush is under way share the next one, so a burst costs one flush rather than one each. Measured on
+an NVMe disk under Windows, one metadata change written alone takes about 3.3 ms instead of 0.7 ms, and 5000 made
+at once take the same time as before; the data path is not touched.
+
+Every log entry carries a checksum. A write the last run did not complete is cut off the end of the log when the
+broker starts, with a warning that says how many bytes. A log that is damaged anywhere else, a state file or a
+snapshot that cannot be read is an error that names the file, and the broker does not start: it used to skip the
+entry, or start with term 0 and no vote, on which a node votes a second time in a term it has voted in. Nothing is
+repaired by itself.
+
+Proposals made at the same time could reach the log file in the opposite order to their indexes. They are written
+in the order of their indexes now.
+
 ## Breaking changes
 
-<Only when real. Each change has been on a back-compat ramp through the
-prior minor and is removed in this release.>
+### The metadata log has a new format on disk (#261)
 
-### <Title of the breaking change> (#issue)
+`raft-log.bin` starts with the name of its format and holds a length and a checksum before each entry. A log
+written by 0.6.0 has neither and is refused at start with an error that says so; it is not converted. A cluster
+keeps its metadata only if it is created anew with this release. `raft-state.json` is unchanged.
 
-<What changed on the wire / API / package surface, what to do to migrate.>
+`RaftPersistence.AppendEntriesAsync` and `TruncateLogAsync` no longer take a cancellation token: the write is
+queued when the call returns and completes when it is on disk.
 
 ## Acknowledgements
 

@@ -26,6 +26,10 @@ public sealed partial class RaftNode : IAsyncDisposable
 
     // Volatile state on all servers
     private long _commitIndex;
+
+    // The highest index this node has on disk, with every entry before it. Behind LastLogIndex while a write is
+    // under way; what a leader counts as its own part of a majority.
+    private long _persistedIndex;
     private long _lastApplied;
     private RaftState _state = RaftState.Follower;
     private int? _leaderId;
@@ -328,6 +332,7 @@ public sealed partial class RaftNode : IAsyncDisposable
             _currentTerm = state.CurrentTerm;
             _votedFor = state.VotedFor;
             _log.AddRange(entries);
+            _persistedIndex = LastLogIndex;
         }
     }
 
@@ -607,6 +612,7 @@ public sealed partial class RaftNode : IAsyncDisposable
         int termToSave;
         int? votedForToSave;
         List<RaftLogEntry> entriesToPersist = [];
+        Task logWritten;
         AppendEntriesResponse response;
 
         lock (_lock)
@@ -654,6 +660,7 @@ public sealed partial class RaftNode : IAsyncDisposable
                     // Log doesn't contain matching entry
                     response = new AppendEntriesResponse(_currentTerm, false, 0);
                     logChanged = false;
+                    logWritten = _persistence.LogWritten;
                     goto PersistAndReturn;
                 }
             }
@@ -694,6 +701,20 @@ public sealed partial class RaftNode : IAsyncDisposable
                 NoteCommitIndexMoved();
             }
 
+            // Asked for under the lock, so that the file takes the changes in the order the log took them (#262),
+            // and waited for outside it.
+            if (logTruncated)
+            {
+                _ = _persistence.TruncateLogAsync(truncateFromIndex);
+            }
+            if (logChanged && entriesToPersist.Count > 0)
+            {
+                _ = _persistence.AppendEntriesAsync(entriesToPersist);
+            }
+
+            // Every write asked for so far, not only this request's: the answer says how far this node's log
+            // matches the leader's, and that may be the entries of a request still being written.
+            logWritten = _persistence.LogWritten;
             response = new AppendEntriesResponse(_currentTerm, true, LastLogIndex);
         }
 
@@ -706,14 +727,11 @@ public sealed partial class RaftNode : IAsyncDisposable
             await _persistence.SaveStateAsync(termToSave, votedForToSave, ct);
         }
 
-        // Persist log changes
-        if (logTruncated)
+        // On disk before the leader is told so: it counts this node's answer towards the commit (#260).
+        await logWritten.ConfigureAwait(false);
+        if (entriesToPersist.Count > 0)
         {
-            await _persistence.TruncateLogAsync(truncateFromIndex, ct);
-        }
-        if (logChanged && entriesToPersist.Count > 0)
-        {
-            await _persistence.AppendEntriesAsync(entriesToPersist, ct);
+            NotePersisted(entriesToPersist[^1]);
         }
 
         SignalCaughtUp();
@@ -726,7 +744,8 @@ public sealed partial class RaftNode : IAsyncDisposable
     /// </summary>
     public async Task<long> ProposeAsync(MetadataCommandType commandType, byte[] data, CancellationToken ct)
     {
-        RaftLogEntry? entryToSave;
+        RaftLogEntry entryToSave;
+        Task written;
         long resultIndex;
 
         lock (_lock)
@@ -750,17 +769,23 @@ public sealed partial class RaftNode : IAsyncDisposable
             entryToSave = entry;
             resultIndex = entry.Index;
             LogEntryProposed(entry.Index, commandType);
+
+            // Asked for under the lock that gave the entry its index: two proposals made at once reached the file
+            // in either order while the write was asked for after the lock was let go (#262).
+            written = _persistence.AppendEntriesAsync([entry]);
         }
 
         try
         {
             // Persist log entry before considering it proposed (Raft correctness requirement)
-            await _persistence.AppendEntriesAsync([entryToSave], ct);
+            await written.ConfigureAwait(false);
         }
         finally
         {
             _writes.Exit();
         }
+
+        NotePersisted(entryToSave);
 
         // Commit what is already on a majority, here rather than on the next heartbeat tick
         // (#177). For a single-voter quorum this entry IS on a majority the moment it is
@@ -1651,7 +1676,9 @@ public sealed partial class RaftNode : IAsyncDisposable
             if (_state != RaftState.Leader)
                 return;
 
-            var matchIndices = new List<long>(voters.Count + 1) { LastLogIndex };
+            // The leader's own part is what it has on disk, not what it holds: an entry in its memory and on one
+            // follower's disk is on one disk, and a majority of two does not have it (#260).
+            var matchIndices = new List<long>(voters.Count + 1) { _persistedIndex };
             foreach (var voterId in voters)
             {
                 matchIndices.Add(_matchIndex.TryGetValue(voterId, out var match) ? match : 0);
@@ -1725,7 +1752,10 @@ public sealed partial class RaftNode : IAsyncDisposable
                 var prevEntry = GetLogEntry(prevLogIndex);
                 prevLogTerm = prevEntry?.Term ?? 0;
 
-                entries = _log.Where(e => e.Index >= nextIndex).ToArray();
+                // What this node has on disk, and no further. An entry still being written would reach the peer
+                // ahead of its commit — a lone voter commits it when its own write is done — and the peer would
+                // store it and not act on it (#177); and a peer would hold an entry its leader may yet lose (#260).
+                entries = _log.Where(e => e.Index >= nextIndex && e.Index <= _persistedIndex).ToArray();
             }
 
             var request = new AppendEntriesRequest(
@@ -1797,6 +1827,24 @@ public sealed partial class RaftNode : IAsyncDisposable
     private void TruncateLogFrom(long index)
     {
         _log.RemoveAll(e => e.Index >= index);
+        _persistedIndex = Math.Min(_persistedIndex, index - 1);
+    }
+
+    /// <summary>
+    /// Notes that <paramref name="entry"/>, and with it every entry before it, is on disk.
+    /// </summary>
+    /// <remarks>
+    /// The writes reach the file in the order of the log, so an entry on disk has its predecessors there. An entry
+    /// that was cut off the log while its write was under way says nothing: the entry that took its index is
+    /// another one, and has a write of its own.
+    /// </remarks>
+    private void NotePersisted(RaftLogEntry entry)
+    {
+        lock (_lock)
+        {
+            if (entry.Index > _persistedIndex && ReferenceEquals(GetLogEntry(entry.Index), entry))
+                _persistedIndex = entry.Index;
+        }
     }
 
     private bool IsLogUpToDate(long lastLogIndex, int lastLogTerm)

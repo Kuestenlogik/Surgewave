@@ -51,7 +51,7 @@ public sealed class MetadataCatchUpTests : IAsyncDisposable
             Noop(index: 1, term: 1),
             TopicCreated(index: 2, term: 1, "payments", replicas: [5]),
             ConfigChanged(index: 3, term: 1, "payments", "retention.ms", "987654321"),
-        ], ct);
+        ]);
 
         var broker = NewBroker(config, new SingleNodeRaftTransport());
         var leadership = new List<RaftLeadership>();

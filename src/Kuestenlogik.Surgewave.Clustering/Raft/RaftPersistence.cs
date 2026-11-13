@@ -6,16 +6,23 @@ namespace Kuestenlogik.Surgewave.Clustering.Raft;
 
 /// <summary>
 /// Persists Raft state (currentTerm, votedFor, log, snapshots) to disk.
-/// Ensures durability of the Raft protocol.
 /// </summary>
+/// <remarks>
+/// What this says is saved is on disk, not in the operating system's cache: a vote is answered and an entry counts
+/// for a commit on the strength of it, and a node that comes back from a power loss without the vote it cast or the
+/// entry it acknowledged breaks what Raft rests on (#260). What it loads is what was saved or an error: a state
+/// file, a log or a snapshot that cannot be read is not taken for one that was never written (#261).
+/// </remarks>
 public sealed partial class RaftPersistence
 {
+    private const int SnapshotHeaderSize = 16;
+
     private readonly ILogger<RaftPersistence> _logger;
     private readonly string _dataDirectory;
     private readonly string _stateFile;
-    private readonly string _logFile;
     private readonly string _snapshotDirectory;
-    private readonly object _lock = new();
+    private readonly RaftLogFile _log;
+    private readonly Action<FileStream> _flushToDisk;
 
     // Term and vote are saved from several paths (own election, granting a vote, following a new leader),
     // concurrently. Unserialised, two saves wrote the same .tmp file at once ("being used by another
@@ -25,12 +32,22 @@ public sealed partial class RaftPersistence
     private int? _savedVotedFor;
 
     public RaftPersistence(ILogger<RaftPersistence> logger, ClusteringConfig config)
+        : this(logger, config, DurableFile.FlushToDisk)
+    {
+    }
+
+    /// <summary>
+    /// As the public constructor, with the flush to disk handed in — test-only (via InternalsVisibleTo), so a test
+    /// can hold a write at the point where it is written and not yet durable.
+    /// </summary>
+    internal RaftPersistence(ILogger<RaftPersistence> logger, ClusteringConfig config, Action<FileStream> flushToDisk)
     {
         _logger = logger;
+        _flushToDisk = flushToDisk;
         _dataDirectory = config.ResolvedRaftDataDirectory;
         _stateFile = Path.Combine(_dataDirectory, "raft-state.json");
-        _logFile = Path.Combine(_dataDirectory, "raft-log.bin");
         _snapshotDirectory = Path.Combine(_dataDirectory, "snapshots");
+        _log = new RaftLogFile(logger, Path.Combine(_dataDirectory, "raft-log.bin"), flushToDisk);
     }
 
     /// <summary>
@@ -48,6 +65,11 @@ public sealed partial class RaftPersistence
     /// <summary>
     /// Load persistent state (currentTerm, votedFor).
     /// </summary>
+    /// <remarks>
+    /// No state file is the state of a node that never ran. One that is there and cannot be read is an
+    /// <see cref="InvalidDataException"/>: it used to be answered with term 0 and no vote, and a node that starts on
+    /// that votes again in a term it has voted in.
+    /// </remarks>
     public async Task<RaftPersistentState> LoadStateAsync(CancellationToken ct)
     {
         EnsureDirectoryExists();
@@ -57,30 +79,38 @@ public sealed partial class RaftPersistence
             return new RaftPersistentState(0, null);
         }
 
+        var json = await File.ReadAllTextAsync(_stateFile, ct).ConfigureAwait(false);
+
+        RaftPersistentState? state;
         try
         {
-            var json = await File.ReadAllTextAsync(_stateFile, ct);
-            var state = JsonSerializer.Deserialize(json, ClusteringJsonContext.Default.RaftPersistentState);
-            if (state is not null)
-            {
-                lock (_stateLock)
-                {
-                    _savedTerm = state.CurrentTerm;
-                    _savedVotedFor = state.VotedFor;
-                }
-            }
-            LogStateLoaded(state?.CurrentTerm ?? 0, state?.VotedFor);
-            return state ?? new RaftPersistentState(0, null);
+            state = JsonSerializer.Deserialize(json, ClusteringJsonContext.Default.RaftPersistentState);
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
-            LogStateLoadError(ex);
-            return new RaftPersistentState(0, null);
+            throw UnreadableState(ex);
         }
+
+        if (state is null)
+            throw UnreadableState(null);
+
+        lock (_stateLock)
+        {
+            _savedTerm = state.CurrentTerm;
+            _savedVotedFor = state.VotedFor;
+        }
+
+        LogStateLoaded(state.CurrentTerm, state.VotedFor);
+        return state;
     }
 
+    private InvalidDataException UnreadableState(Exception? inner) => new(
+        $"The Raft state file '{_stateFile}' cannot be read. It holds the term this node is in and the vote it cast in it; " +
+        "starting without them would let the node vote a second time in that term, so it does not start.",
+        inner);
+
     /// <summary>
-    /// Save persistent state (currentTerm, votedFor).
+    /// Save persistent state (currentTerm, votedFor). On disk when this returns.
     /// </summary>
     /// <remarks>
     /// One save at a time, and never backwards: a state older than the one on disk — a lower term, or the same
@@ -98,12 +128,18 @@ public sealed partial class RaftPersistence
                 return Task.CompletedTask;
 
             var state = new RaftPersistentState(currentTerm, votedFor);
-            var json = JsonSerializer.Serialize(state, ClusteringJsonContext.Default.RaftPersistentState);
+            var json = JsonSerializer.SerializeToUtf8Bytes(state, ClusteringJsonContext.Default.RaftPersistentState);
 
-            // Write to temp file then rename for atomicity
+            // Written beside the state file and put in its place, so that a crash leaves the old state or the new
+            // one; flushed before and written through after, so that a power loss does too.
             var tempFile = _stateFile + ".tmp";
-            File.WriteAllText(tempFile, json);
-            File.Move(tempFile, _stateFile, overwrite: true);
+            using (var file = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                file.Write(json);
+                _flushToDisk(file);
+            }
+
+            DurableFile.Replace(tempFile, _stateFile);
 
             _savedTerm = currentTerm;
             _savedVotedFor = votedFor;
@@ -117,87 +153,52 @@ public sealed partial class RaftPersistence
     /// Load log entries from disk.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A log that cannot be opened or read is an error, and the caller's: it used to be logged and answered with no
     /// entries, which a node takes for the log of a broker that never ran. That node then led a new cluster — a new
     /// cluster id, none of the topics — and appended its entries, numbered from 1 again, behind the ones it could
-    /// not read; and <see cref="TruncateLogAsync"/>, which reads the log to rewrite it, rewrote it empty.
+    /// not read.
+    /// </para>
+    /// <para>
+    /// A write the last run did not complete is cut off the end of the file. A log that is damaged elsewhere is an
+    /// <see cref="InvalidDataException"/>; <see cref="RaftLogFile"/> says what tells the two apart.
+    /// </para>
     /// </remarks>
-    public async Task<List<RaftLogEntry>> LoadLogAsync(CancellationToken ct)
+    public Task<List<RaftLogEntry>> LoadLogAsync(CancellationToken ct)
     {
         EnsureDirectoryExists();
-
-        var entries = new List<RaftLogEntry>();
-
-        if (!File.Exists(_logFile))
-        {
-            return entries;
-        }
-
-        await using var stream = new FileStream(_logFile, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var reader = new BinaryReader(stream);
-
-        while (stream.Position < stream.Length)
-        {
-            var entry = ReadLogEntry(reader);
-            if (entry != null)
-            {
-                entries.Add(entry);
-            }
-        }
-
-        LogEntriesLoaded(entries.Count);
-        return entries;
+        return Task.Run(_log.Load, ct);
     }
 
     /// <summary>
-    /// Append entries to the log file.
+    /// Appends entries to the log file, behind every write asked for before this call. The task completes when
+    /// they are on disk.
     /// </summary>
-    public async Task AppendEntriesAsync(IEnumerable<RaftLogEntry> entries, CancellationToken ct)
+    /// <remarks>
+    /// The write is queued before this returns, so a caller that calls under a lock has its writes on disk in the
+    /// order it took the lock in, and waits for the task outside it (#262). Not cancellable: the caller already
+    /// holds the entries in its own log.
+    /// </remarks>
+    public Task AppendEntriesAsync(IEnumerable<RaftLogEntry> entries)
     {
         EnsureDirectoryExists();
-
-        lock (_lock)
-        {
-            using var stream = new FileStream(_logFile, FileMode.Append, FileAccess.Write, FileShare.None);
-            using var writer = new BinaryWriter(stream);
-
-            foreach (var entry in entries)
-            {
-                WriteLogEntry(writer, entry);
-            }
-
-            stream.Flush();
-        }
+        return _log.Append([.. entries]);
     }
 
     /// <summary>
-    /// Truncate log from the given index (delete index and all following).
+    /// Removes the entry with <paramref name="fromIndex"/> and all following ones from the log file, behind every
+    /// write asked for before this call. The task completes when that is on disk.
     /// </summary>
-    public async Task TruncateLogAsync(long fromIndex, CancellationToken ct)
+    public Task TruncateLogAsync(long fromIndex)
     {
-        if (!File.Exists(_logFile))
-            return;
-
-        // Read all entries, filter, and rewrite
-        var entries = await LoadLogAsync(ct);
-        var remaining = entries.Where(e => e.Index < fromIndex).ToList();
-
-        lock (_lock)
-        {
-            // Rewrite log file
-            using var stream = new FileStream(_logFile, FileMode.Create, FileAccess.Write, FileShare.None);
-            using var writer = new BinaryWriter(stream);
-
-            foreach (var entry in remaining)
-            {
-                WriteLogEntry(writer, entry);
-            }
-
-            stream.Flush();
-        }
-
-        LogLogTruncated(fromIndex, entries.Count - remaining.Count);
+        EnsureDirectoryExists();
+        return _log.TruncateFrom(fromIndex);
     }
+
+    /// <summary>
+    /// Completes when every log write asked for so far is on disk, and fails if one of them failed.
+    /// </summary>
+    public Task LogWritten => _log.Written;
 
     /// <summary>
     /// Save a snapshot to disk.
@@ -211,22 +212,25 @@ public sealed partial class RaftPersistence
         var tempFile = filepath + ".tmp";
 
         // Write snapshot: [endOffset:8][epoch:4][dataLength:4][data:N]
+        var header = new byte[SnapshotHeaderSize];
+        BinaryPrimitives.WriteInt64LittleEndian(header, snapshot.EndOffset);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8), snapshot.Epoch);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12), snapshot.Data.Length);
+
         await using (var stream = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None))
-        await using (var writer = new BinaryWriter(stream))
         {
-            writer.Write(snapshot.EndOffset);
-            writer.Write(snapshot.Epoch);
-            writer.Write(snapshot.Data.Length);
-            writer.Write(snapshot.Data);
-            await stream.FlushAsync(ct);
+            await stream.WriteAsync(header, ct).ConfigureAwait(false);
+            await stream.WriteAsync(snapshot.Data, ct).ConfigureAwait(false);
+            _flushToDisk(stream);
         }
 
-        File.Move(tempFile, filepath, overwrite: true);
+        DurableFile.Replace(tempFile, filepath);
         LogSnapshotSaved(snapshot.EndOffset, snapshot.Epoch, snapshot.Data.Length);
     }
 
     /// <summary>
-    /// Load a snapshot from disk by endOffset and epoch.
+    /// Load a snapshot from disk by endOffset and epoch. Null if there is none; an
+    /// <see cref="InvalidDataException"/> if there is one that cannot be read.
     /// </summary>
     public async Task<RaftSnapshot?> LoadSnapshotAsync(long endOffset, int epoch, CancellationToken ct)
     {
@@ -238,58 +242,24 @@ public sealed partial class RaftPersistence
             return null;
         }
 
-        try
-        {
-            await using var stream = new FileStream(filepath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var reader = new BinaryReader(stream);
-
-            var readEndOffset = reader.ReadInt64();
-            var readEpoch = reader.ReadInt32();
-            var dataLength = reader.ReadInt32();
-            var data = reader.ReadBytes(dataLength);
-
-            LogSnapshotLoaded(readEndOffset, readEpoch, dataLength);
-
-            return new RaftSnapshot(readEndOffset, readEpoch, data);
-        }
-        catch (Exception ex)
-        {
-            LogSnapshotLoadError(endOffset, epoch, ex);
-            return null;
-        }
+        var snapshot = ReadSnapshot(filepath, await File.ReadAllBytesAsync(filepath, ct).ConfigureAwait(false));
+        LogSnapshotLoaded(snapshot.EndOffset, snapshot.Epoch, snapshot.Data.Length);
+        return snapshot;
     }
 
     /// <summary>
-    /// Get the latest snapshot info if one exists.
+    /// Get the latest snapshot if one exists. An <see cref="InvalidDataException"/> if it cannot be read.
     /// </summary>
     public RaftSnapshot? GetLatestSnapshotInfo()
     {
         if (!Directory.Exists(_snapshotDirectory))
             return null;
 
-        var files = Directory.GetFiles(_snapshotDirectory, "snapshot-*.bin")
+        var latest = Directory.GetFiles(_snapshotDirectory, "snapshot-*.bin")
             .OrderByDescending(f => f)
             .FirstOrDefault();
 
-        if (files == null)
-            return null;
-
-        try
-        {
-            using var stream = new FileStream(files, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var reader = new BinaryReader(stream);
-
-            var endOffset = reader.ReadInt64();
-            var epoch = reader.ReadInt32();
-            var dataLength = reader.ReadInt32();
-            var data = reader.ReadBytes(dataLength);
-
-            return new RaftSnapshot(endOffset, epoch, data);
-        }
-        catch
-        {
-            return null;
-        }
+        return latest is null ? null : ReadSnapshot(latest, File.ReadAllBytes(latest));
     }
 
     /// <summary>
@@ -332,40 +302,19 @@ public sealed partial class RaftPersistence
         return $"snapshot-{endOffset:D20}-{epoch:D10}.bin";
     }
 
-    private static RaftLogEntry? ReadLogEntry(BinaryReader reader)
+    private static RaftSnapshot ReadSnapshot(string path, ReadOnlySpan<byte> bytes)
     {
-        try
+        if (bytes.Length < SnapshotHeaderSize ||
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[12..]) != bytes.Length - SnapshotHeaderSize)
         {
-            var term = reader.ReadInt32();
-            var index = reader.ReadInt64();
-            var commandType = (MetadataCommandType)reader.ReadInt32();
-            var timestamp = reader.ReadInt64();
-            var dataLength = reader.ReadInt32();
-            var data = reader.ReadBytes(dataLength);
-
-            return new RaftLogEntry
-            {
-                Term = term,
-                Index = index,
-                CommandType = commandType,
-                Timestamp = timestamp,
-                Data = data
-            };
+            throw new InvalidDataException(
+                $"The snapshot '{path}' cannot be read: its {bytes.Length} bytes are not the header and the data the header announces.");
         }
-        catch
-        {
-            return null;
-        }
-    }
 
-    private static void WriteLogEntry(BinaryWriter writer, RaftLogEntry entry)
-    {
-        writer.Write(entry.Term);
-        writer.Write(entry.Index);
-        writer.Write((int)entry.CommandType);
-        writer.Write(entry.Timestamp);
-        writer.Write(entry.Data.Length);
-        writer.Write(entry.Data);
+        return new RaftSnapshot(
+            BinaryPrimitives.ReadInt64LittleEndian(bytes),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[8..]),
+            bytes[SnapshotHeaderSize..].ToArray());
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created Raft data directory: {Directory}")]
@@ -374,26 +323,14 @@ public sealed partial class RaftPersistence
     [LoggerMessage(Level = LogLevel.Information, Message = "Loaded Raft state: term={Term}, votedFor={VotedFor}")]
     private partial void LogStateLoaded(int term, int? votedFor);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error loading Raft state")]
-    private partial void LogStateLoadError(Exception ex);
-
     [LoggerMessage(Level = LogLevel.Debug, Message = "Saved Raft state: term={Term}, votedFor={VotedFor}")]
     private partial void LogStateSaved(int term, int? votedFor);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Loaded {Count} Raft log entries")]
-    private partial void LogEntriesLoaded(int count);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Truncated log from index {FromIndex}, removed {Count} entries")]
-    private partial void LogLogTruncated(long fromIndex, int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Saved snapshot: endOffset={EndOffset}, epoch={Epoch}, size={Size} bytes")]
     private partial void LogSnapshotSaved(long endOffset, int epoch, int size);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Loaded snapshot: endOffset={EndOffset}, epoch={Epoch}, size={Size} bytes")]
     private partial void LogSnapshotLoaded(long endOffset, int epoch, int size);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error loading snapshot: endOffset={EndOffset}, epoch={Epoch}")]
-    private partial void LogSnapshotLoadError(long endOffset, int epoch, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Deleted old snapshot: {Filename}")]
     private partial void LogSnapshotDeleted(string filename);

@@ -31,7 +31,7 @@ public sealed class ClusterStartOrderTests : IAsyncDisposable
         var config = NewConfig();
         var before = new RaftPersistence(NullLogger<RaftPersistence>.Instance, config);
         await before.SaveStateAsync(5, 2, ct);
-        await before.AppendEntriesAsync([new RaftLogEntry { Term = 5, Index = 1, CommandType = MetadataCommandType.Noop, Data = [] }], ct);
+        await before.AppendEntriesAsync([new RaftLogEntry { Term = 5, Index = 1, CommandType = MetadataCommandType.Noop, Data = [] }]);
         var state = new ClusterState();
         var (controller, node) = NewController(config, state);
 
@@ -72,7 +72,7 @@ public sealed class ClusterStartOrderTests : IAsyncDisposable
         var ct = TestContext.Current.CancellationToken;
         var config = NewConfig();
         var before = new RaftPersistence(NullLogger<RaftPersistence>.Instance, config);
-        await before.AppendEntriesAsync([new RaftLogEntry { Term = 1, Index = 1, CommandType = MetadataCommandType.Noop, Data = [] }], ct);
+        await before.AppendEntriesAsync([new RaftLogEntry { Term = 1, Index = 1, CommandType = MetadataCommandType.Noop, Data = [] }]);
         var (controller, _) = NewController(config, new ClusterState());
 
         // Held as a writer holds it while it appends.

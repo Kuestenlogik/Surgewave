@@ -44,7 +44,7 @@ public sealed class MetadataCatchUpOnStartTests
                         new TopicCreatedCommand("payments", Guid.NewGuid(), 1, 1, [], [new PartitionAssignment(0, [0], 1)]),
                         CommandJson),
                 },
-            ], ct);
+            ]);
 
             await using var broker = await SurgewaveRuntime.CreateBuilder()
                 .WithBrokerId(0)
