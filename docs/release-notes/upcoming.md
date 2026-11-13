@@ -47,6 +47,26 @@ repaired by itself.
 Proposals made at the same time could reach the log file in the opposite order to their indexes. They are written
 in the order of their indexes now.
 
+### Live brokers are no longer reported failed while one peer does not answer (#251)
+
+A broker sent its heartbeats in rounds and began the next round when every peer had answered or failed. One peer
+that did not answer — a host that drops packets instead of refusing the connection, a broker that accepts and stays
+silent — held the round, and the peers that had answered got their next heartbeat later than the timeout they are
+given. They were reported failed, and the controller took live brokers out of the ISRs and moved their
+leaderships. Each peer now has its own heartbeat; no setting changes.
+
+### A new controller handles the brokers that failed before it took office (#252)
+
+A broker failure is reported once, and only the controller acts on it. A broker that noticed the old controller's
+failure before it was elected itself had let the report go by then, and the dead broker stayed in every ISR and
+kept its leaderships. A controller now looks at the peers it holds as failed when it takes office.
+
+### A broker runs one controller loop, and only while it is the controller (#250)
+
+The loop that looks at the leader balance and the cluster balance was started with each election a broker won and
+never stopped when it lost the office, so a broker ran one more with every re-election, and went on rebalancing as
+a controller it no longer was.
+
 ## Breaking changes
 
 ### The metadata log has a new format on disk (#261)
