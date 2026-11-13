@@ -123,6 +123,51 @@ public sealed class ControllerFollowsRaftLeadershipTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheControllerLoopEndsWithTheReign_AndEachReignHasOne()
+    {
+        // The loop that looks at the balance was started with each office won and never stopped with an office lost
+        // (#250): a broker in its fifth reign ran five of them, four as a controller it no longer was.
+        var ct = TestContext.Current.CancellationToken;
+        var config = NewConfig(brokerId: 1);
+        var state = new ClusterState();
+        var node = TestRaftNode.ForSingleNode(config, state, TestRaftNode.NewMembership(config, state));
+        _disposables.Add(node);
+        var controller = NewController(config, state, node, out _);
+
+        // Completed by each term the node leads, after the controller has followed it: subscribed after it.
+        var leads = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await controller.LoadAsync(ct);
+        node.LeadershipChanged += leadership =>
+        {
+            if (leadership.IsLeader)
+                Volatile.Read(ref leads).TrySetResult();
+        };
+        await controller.StartAsync(ct);
+        await Volatile.Read(ref leads).Task.WaitAsync(Timeout, ct);
+
+        for (var reign = 1; reign <= 5; reign++)
+        {
+            var loop = controller.ControllerLoop;
+            Assert.NotNull(loop);
+            Assert.False(loop.IsCompleted, $"the loop of reign {reign} ended while the broker was the controller");
+
+            var next = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Volatile.Write(ref leads, next);
+            await node.StepDownAsync();
+
+            // The loop of the reign that is over ends with it, and is not waited out: it looks every five seconds.
+            // Ended or never begun: a reign that ends before its loop has run cancels it.
+            await Task.WhenAny(loop).WaitAsync(Timeout, ct);
+
+            // The node is its own majority and wins the next term.
+            await next.Task.WaitAsync(Timeout, ct);
+            Assert.True(controller.IsController);
+            Assert.NotSame(loop, controller.ControllerLoop);
+            Assert.InRange(controller.ControllerLoopsRunning, 0, 1);
+        }
+    }
+
+    [Fact]
     public async Task ABrokerIsTheControllerBeforeItsFirstHeartbeatLeaves()
     {
         // A follower names the leader it hears from, and a client sends its admin requests there. The broker that

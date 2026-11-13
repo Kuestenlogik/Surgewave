@@ -102,6 +102,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private readonly object _leadershipLock = new();
     private RaftLeadership _followedLeadership;
 
+    // Ends with the reign it was made for, and with this controller: what a controller does because it is in office
+    // runs under it. The loop that looks at the balance ran under the controller's lifetime instead, so it went on
+    // after the office was lost, and each office won again started another beside it (#250).
+    private CancellationTokenSource? _reign;
+    private int _controllerLoopsRunning;
+
     // Notified each time the controller has followed a change of the node's leadership, after the role and the
     // controller id are set: what a topic creation that found the office changing hands waits on (#268).
     private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _leadershipFollowed = new();
@@ -123,6 +129,22 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     private PartitionReassignmentManager? _reassignmentManager;
 
     public bool IsController => _isController;
+
+    /// <summary>
+    /// The loop of the reign this controller is in or was in last — test-only (via InternalsVisibleTo), so a test
+    /// can wait for it to end with the reign.
+    /// </summary>
+    internal Task? ControllerLoop
+    {
+        get
+        {
+            lock (_leadershipLock)
+                return _controllerTask;
+        }
+    }
+
+    /// <summary>How many controller loops are running — test-only (via InternalsVisibleTo).</summary>
+    internal int ControllerLoopsRunning => Volatile.Read(ref _controllerLoopsRunning);
 
     /// <summary>
     /// Returns true if Raft consensus is enabled and this broker is the Raft leader.
@@ -348,10 +370,16 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
 
             try
             {
+                // The reign followed until now is over, whatever follows it: a term lost and the next one won may be
+                // read here as one change, from leader to leader.
+                if (was.IsLeader)
+                    EndReign();
+
                 if (now.IsLeader)
                 {
                     // Became Raft leader = became controller (locked bump, shares the push fence).
-                    var ct = _lifetime;
+                    _reign = CancellationTokenSource.CreateLinkedTokenSource(_lifetime);
+                    var ct = _reign.Token;
                     _isController = true;
                     var epoch = _clusterState.BecomeController(_config.BrokerId);
                     LogBecameRaftLeader(_config.BrokerId, epoch);
@@ -390,6 +418,14 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                 _leadershipFollowed.Notify();
             }
         }
+    }
+
+    // Under _leadershipLock. Cancelled before it is disposed, so whoever still holds its token finds it cancelled.
+    private void EndReign()
+    {
+        _reign?.Cancel();
+        _reign?.Dispose();
+        _reign = null;
     }
 
     // The leadership this controller acts on, read under the lock it is followed under: the role and the controller
@@ -631,6 +667,13 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             _raftNode.LeadershipChanged -= HandleRaftLeadershipChanged;
         }
 
+        lock (_leadershipLock)
+        {
+            _reign?.Cancel();
+            _reign?.Dispose();
+            _reign = null;
+        }
+
         _cts?.Dispose();
         _cts = null;
     }
@@ -684,32 +727,40 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         var checkInterval = TimeSpan.FromSeconds(
             Math.Max(5, _config.RebalanceCheckIntervalSeconds));
 
-        while (!ct.IsCancellationRequested)
+        Interlocked.Increment(ref _controllerLoopsRunning);
+        try
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(checkInterval, ct);
-
-                // Step 1: Preferred leader elections (fast, no data movement)
-                if (_config.AllowAutoLeaderRebalance)
+                try
                 {
-                    await CheckLeaderBalanceAsync(ct);
-                }
+                    await Task.Delay(checkInterval, ct);
 
-                // Step 2: Full cluster rebalancing (replica redistribution)
-                if (_config.AutoRebalanceEnabled)
+                    // Step 1: Preferred leader elections (fast, no data movement)
+                    if (_config.AllowAutoLeaderRebalance)
+                    {
+                        await CheckLeaderBalanceAsync(ct);
+                    }
+
+                    // Step 2: Full cluster rebalancing (replica redistribution)
+                    if (_config.AutoRebalanceEnabled)
+                    {
+                        await MaybeRebalanceClusterAsync(ct);
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    await MaybeRebalanceClusterAsync(ct);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogControllerLoopError(ex);
                 }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogControllerLoopError(ex);
-            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _controllerLoopsRunning);
         }
     }
 
