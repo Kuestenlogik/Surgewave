@@ -53,7 +53,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
     private static OAuthBearerBrokerFixture? _instance;
 
     public static string BootstrapServers => _instance != null
-        ? $"localhost:{_instance._brokerPort}"
+        ? $"127.0.0.1:{_instance._brokerPort}"
         : throw new InvalidOperationException("OAUTHBEARER broker not started");
 
     public string JwksUri => $"http://localhost:{_jwksPort}/jwks";
@@ -226,7 +226,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
     {
         var config = new BrokerConfig
         {
-            Host = "localhost",
+            Host = "127.0.0.1",
             Port = port,
             DataDirectory = _dataDirectory!,
             AutoCreateTopics = true,
@@ -338,8 +338,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
 
     private static int FindAvailablePort()
     {
-        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.IPv6Any, 0);
-        listener.Server.DualMode = true;
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
         listener.Start();
         var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
@@ -353,7 +352,7 @@ public sealed class OAuthBearerBrokerFixture : IAsyncLifetime, IDisposable
             try
             {
                 using var client = new System.Net.Sockets.TcpClient();
-                await client.ConnectAsync("localhost", port);
+                await client.ConnectAsync("127.0.0.1", port);
                 return;
             }
             catch { await Task.Delay(100); }

@@ -492,7 +492,8 @@ builder.Services.AddSingleton(sp =>
         transactionStateLogNumPartitions: c.TransactionStateLogNumPartitions,
         transactionStateLogReplicationFactor: c.TransactionStateLogReplicationFactor,
         shareStateTopicNumPartitions: c.ShareStateTopicNumPartitions,
-        shareStateTopicReplicationFactor: c.ShareStateTopicReplicationFactor);
+        shareStateTopicReplicationFactor: c.ShareStateTopicReplicationFactor,
+        replicationBindAddress: c.ReplicationBindAddress);
 });
 // Inter-broker transport (TCP by default, QUIC when Surgewave:InterBrokerTransport=quic).
 // Explicitly invoke both registrations so the module initializers run even if no

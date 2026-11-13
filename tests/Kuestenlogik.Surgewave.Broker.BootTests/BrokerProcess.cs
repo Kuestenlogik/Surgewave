@@ -47,6 +47,7 @@ internal sealed class BrokerProcess : IAsyncDisposable
         KafkaPort = ports.Kafka;
         RestPort = ports.Grpc;
         SecondEndpointPort = ports.Http3;
+        ReplicationPort = ports.Replication;
     }
 
     /// <summary>The port the broker's Kafka listener binds.</summary>
@@ -63,6 +64,9 @@ internal sealed class BrokerProcess : IAsyncDisposable
     /// HTTPS with it.
     /// </summary>
     public int SecondEndpointPort { get; }
+
+    /// <summary>The port the broker's replication listener binds.</summary>
+    public int ReplicationPort { get; }
 
     /// <summary>Bootstrap servers for a Kafka client.</summary>
     public string BootstrapServers => $"127.0.0.1:{KafkaPort}";
@@ -127,6 +131,9 @@ internal sealed class BrokerProcess : IAsyncDisposable
             $"--Surgewave:Port={kafkaPort}",
             $"--Surgewave:GrpcPort={grpcPort}",
             $"--Surgewave:ReplicationPort={replPort}",
+            // Its peers, where a test starts a cluster, are on this host too: without this the replication listener
+            // binds every interface, which nothing here needs.
+            "--Surgewave:ReplicationBindAddress=127.0.0.1",
             // The two HTTP endpoints on this broker's own ports, on loopback. Their scheme and protocols are the
             // shipped ones: Surgewave:GrpcUseTls of appsettings.json is false outside the Development environment,
             // which alone yields cleartext (#276), and a test that wants TLS adds the setting.
@@ -280,10 +287,13 @@ internal sealed class BrokerProcess : IAsyncDisposable
         var artifacts = FindArtifactsRoot();
         var config = new DirectoryInfo(AppContext.BaseDirectory).Name; // Debug / Release
         var sep = Path.DirectorySeparatorChar;
+        // The path below the artifacts root is what says which build a file is of: the checkout's own path may hold
+        // any of these words, and a checkout in a directory named "...-tests" then had no broker.
+        string Below(string path) => sep + Path.GetRelativePath(artifacts, path);
         var matches = Directory.GetFiles(artifacts, "surgewave-broker.dll", SearchOption.AllDirectories)
-            .Where(p => p.Contains($"{sep}bin{sep}", StringComparison.OrdinalIgnoreCase))          // not the obj/ copy
-            .Where(p => p.Contains("Kuestenlogik.Surgewave.Broker", StringComparison.OrdinalIgnoreCase))
-            .Where(p => !p.Contains("Tests", StringComparison.OrdinalIgnoreCase))
+            .Where(p => Below(p).Contains($"{sep}bin{sep}", StringComparison.OrdinalIgnoreCase))   // not the obj/ copy
+            .Where(p => Below(p).Contains("Kuestenlogik.Surgewave.Broker", StringComparison.OrdinalIgnoreCase))
+            .Where(p => !Below(p).Contains("Tests", StringComparison.OrdinalIgnoreCase))
             .Where(p => File.Exists(Path.Combine(Path.GetDirectoryName(p)!, "surgewave-broker.runtimeconfig.json")))
             .OrderByDescending(p => p.Contains($"{sep}{config}{sep}", StringComparison.OrdinalIgnoreCase)) // prefer our config
             .ThenBy(p => p.Length) // the build without a runtime, not one for a runtime in a directory below it

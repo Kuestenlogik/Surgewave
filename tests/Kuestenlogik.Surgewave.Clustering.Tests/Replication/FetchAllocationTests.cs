@@ -43,7 +43,7 @@ public sealed class FetchAllocationTests
         // ---- Leader: seed ~2 MB of batches into one memory segment, mark leader, start on an ephemeral port.
         var state = new ClusterState();
         state.AddBroker(new BrokerNode { BrokerId = 0, Host = "127.0.0.1", Port = 9092 });
-        var cfg = new ClusteringConfig { BrokerId = 0, Host = "127.0.0.1", Port = 9092, ReplicationPort = 0 };
+        var cfg = new ClusteringConfig { BrokerId = 0, Host = "127.0.0.1", Port = 9092, ReplicationPort = 0, ReplicationBindAddress = "127.0.0.1" };
         var logs = new LogManager(
             Path.Combine(Path.GetTempPath(), $"sw-fetchalloc-{Guid.NewGuid():N}"),
             new MemoryLogSegmentFactory());

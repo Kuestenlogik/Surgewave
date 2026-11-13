@@ -15,6 +15,56 @@ dotnet test
 dotnet build -c Release && dotnet test -c Release --no-build
 ```
 
+## Test tiers: what a test may listen on
+
+A test belongs to one of three tiers. The tier says what the test may reach and, above all, what may reach the
+test.
+
+| Tier | Where | What it may do |
+|------|-------|----------------|
+| Unit | every project under `tests/` except `Kuestenlogik.Surgewave.IntegrationTests` | Runs in its own process, and may start child processes on the same host (`Broker.BootTests` starts the built broker, `Cli.IntegrationTests` the built CLI). Listens on **loopback only**: `127.0.0.1` or `::1`. Needs no Docker and nothing outside the host. |
+| Integration | `tests/Kuestenlogik.Surgewave.IntegrationTests` | Several brokers, real clients, Docker. Listens on loopback too, unless something outside the host has to reach the test: a Java client or a Kafka command-line tool in a container that connects back to a broker on the host. That broker binds the host's outbound address, which `ContainerReachableHost.OutboundIPv4Address()` gives; `JavaClientFixture` and `JavaClusterFixture` are the two that do. |
+| End-to-end | `scripts/ci/*-smoke.sh`, run by the `Deployments` workflow | The shipped images and manifests, brought up with Compose and Kubernetes. Brokers run in containers and listen on every interface, as a deployment does. |
+
+A test that has to be reached from outside the host is an integration or an end-to-end test. It is moved there, or
+its client is run so that it reaches loopback; it does not stay a unit test with a wider listener.
+
+### Why loopback
+
+On Windows a process that listens on every interface raises a firewall prompt, once per executable path. Every
+worktree and every clean clone is a new path, so a test run from a fresh checkout waits for a person to click, and
+connections that do not come over loopback are blocked until someone does. Loopback is never filtered.
+
+### How a test gets it
+
+- `SurgewaveRuntime.CreateBuilder()` binds `127.0.0.1` unless a host is named, with both listeners: the client
+  listener and, for a broker of a cluster (`WithCluster`), the replication listener.
+- `BrokerProcess` of `Broker.BootTests` starts the broker with its Kafka, HTTP and replication listeners on
+  `127.0.0.1`.
+- `LossyTcpProxy` and `LossyUdpProxy` listen on loopback.
+- A listener a test creates itself names loopback: `new TcpListener(IPAddress.Loopback, 0)`, a Kestrel URL
+  `http://127.0.0.1:{port}`, `ReplicationBindAddress = "127.0.0.1"` for a `ReplicationServer`. A UDP socket is bound
+  to loopback before its first send; the send binds an unbound one to every interface.
+- A product type may bind every interface by its own default, as a deployment needs: `BrokerConfig` with
+  `Host = "localhost"` and `EnableDualMode` left on, a `HostInfo("localhost", port)` for interactive queries, a
+  `ReplicationServer` without `ReplicationBindAddress`. A test names `127.0.0.1`.
+
+### The guard
+
+`LoopbackListenerGuardTests` (in `Kuestenlogik.Surgewave.Runtime.Tests`) reads the sources of every test project
+and of the test helper projects (`src/Kuestenlogik.Surgewave.Testing*`) and fails, with file and line, on a wildcard
+address: `IPAddress.Any`, `IPAddress.IPv6Any`, `0.0.0.0`, `::`, a URL with the host `*` or `+`, dual mode switched
+on. A file in which the wildcard is only a value that nothing binds is listed in the guard with its reason. A
+listener that has to be reached from outside the host may be listed only for the integration tier.
+
+The guard reads what a test writes. A listener that a product type binds by its default is not in the test's source;
+`EmbeddedBrokerListenerTests` and `LoopbackListenersTests` hold it for the embedded broker and for the broker of the
+boot tests by asking the machine what their ports are bound to.
+
+One thing the tests cannot choose: a QUIC listener told to listen on `127.0.0.1` takes connections on loopback
+only, but on Windows its UDP socket is bound to `[::]`. The QUIC tests and the broker's HTTP/3 endpoint under TLS
+are bound that way.
+
 ## Test Types
 
 ### 1. Unit Tests

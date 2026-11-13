@@ -37,7 +37,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
     /// The actual bootstrap servers string (dynamically assigned port).
     /// </summary>
     public static string BootstrapServers => _instance != null
-        ? $"localhost:{_instance._actualPort}"
+        ? $"127.0.0.1:{_instance._actualPort}"
         : throw new InvalidOperationException("SASL Broker not started");
 
     public int Port => _actualPort;
@@ -61,7 +61,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
 
         var config = new BrokerConfig
         {
-            Host = "localhost",
+            Host = "127.0.0.1",
             Port = _actualPort,
             DataDirectory = _dataDirectory,
             AutoCreateTopics = true,
@@ -166,8 +166,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
 
     private static int FindAvailablePort()
     {
-        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.IPv6Any, 0);
-        listener.Server.DualMode = true;
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
         listener.Start();
         var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
@@ -181,7 +180,7 @@ public sealed class SaslBrokerFixture : IAsyncLifetime, IDisposable
             try
             {
                 using var client = new System.Net.Sockets.TcpClient();
-                await client.ConnectAsync("localhost", _actualPort);
+                await client.ConnectAsync("127.0.0.1", _actualPort);
                 return; // Connected successfully
             }
             catch

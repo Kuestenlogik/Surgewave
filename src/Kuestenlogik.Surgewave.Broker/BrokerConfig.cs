@@ -255,6 +255,13 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
     public int ReplicationPort { get; set; } = KafkaConstants.Ports.Replication;
 
     /// <summary>
+    /// The address the replication listener binds: an IP address. Unset, it binds every IPv4 interface, which is
+    /// what a broker of a cluster on several hosts needs. <c>127.0.0.1</c> keeps a broker whose peers all run on
+    /// its own host off the network.
+    /// </summary>
+    public string? ReplicationBindAddress { get; set; }
+
+    /// <summary>
     /// Transport protocol for inter-broker traffic (Raft RPC, partition
     /// replication, geo-replication). Allowed: "tcp" (default) or "quic".
     /// QUIC requires msquic on all brokers.
@@ -500,6 +507,9 @@ public sealed class BrokerConfig : IValidatableConfig, IBrokerConfigView
         {
             errors.Add($"{nameof(BindAddress)} '{BindAddress}' is not an IP address.");
         }
+
+        if (!string.IsNullOrEmpty(ReplicationBindAddress) && !System.Net.IPAddress.TryParse(ReplicationBindAddress, out _))
+            errors.Add($"{nameof(ReplicationBindAddress)} '{ReplicationBindAddress}' is not an IP address.");
 
         // TLS cert configuration: when a path is supplied, the file must exist. A missing
         // cert path with GrpcUseTls=true is allowed (falls back to the .NET dev cert),

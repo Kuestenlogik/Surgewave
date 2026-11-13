@@ -289,6 +289,7 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             ShutdownTimeoutSeconds = _options.ShutdownTimeoutSeconds,
             // Cluster settings
             ReplicationPort = _actualReplicationPort,
+            ReplicationBindAddress = LoopbackReplicationBindAddress(_options),
             ClusterNodes = clusterNodesStr,
             ProcessRoles = _options.ProcessRoles,
             ControllerQuorumVoters = _options.ControllerQuorumVoters,
@@ -527,7 +528,8 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
             transactionStateLogNumPartitions: config.TransactionStateLogNumPartitions,
             transactionStateLogReplicationFactor: config.TransactionStateLogReplicationFactor,
             shareStateTopicNumPartitions: config.ShareStateTopicNumPartitions,
-            shareStateTopicReplicationFactor: config.ShareStateTopicReplicationFactor
+            shareStateTopicReplicationFactor: config.ShareStateTopicReplicationFactor,
+            replicationBindAddress: config.ReplicationBindAddress
         );
 
         // #170 — an invalid configuration stops the runtime here rather than surfacing later as a
@@ -895,6 +897,21 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         allNodes.AddRange(_options.ClusterNodes);
 
         return string.Join(",", allNodes.Distinct());
+    }
+
+    /// <summary>
+    /// The address the replication listener binds where the client listener binds loopback: the same loopback
+    /// address, so an embedded broker that only its own host reaches listens on nothing else. Null, and with it
+    /// every interface, where the client listener is reachable from outside the host — a host that is not a
+    /// loopback address, or dual mode — since the other brokers of such a cluster may be on other hosts.
+    /// </summary>
+    private static string? LoopbackReplicationBindAddress(SurgewaveRuntimeOptions options)
+    {
+        if (options.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            return options.EnableDualMode ? null : IPAddress.Loopback.ToString();
+        return IPAddress.TryParse(options.Host, out var address) && IPAddress.IsLoopback(address)
+            ? address.ToString()
+            : null;
     }
 
     /// <summary>

@@ -60,6 +60,8 @@ public class LossyUdpProxyTests
 
         // Client: send datagrams through the proxy, count how many echoes come back
         using var client = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        // Bound before the first send: an unbound socket is bound to every interface by it.
+        client.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         client.ReceiveTimeout = 500;
         var proxyEndpoint = new IPEndPoint(IPAddress.Loopback, proxyPort);
         var payload = new byte[] { 0x42 };
@@ -113,6 +115,8 @@ public class LossyUdpProxyTests
 
         // Send 10 datagrams, collect them all on upstream
         using var client = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        // Bound before the first send: an unbound socket is bound to every interface by it.
+        client.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         var proxyEp = new IPEndPoint(IPAddress.Loopback, proxyPort);
         var payload = new byte[] { 0x01 };
 

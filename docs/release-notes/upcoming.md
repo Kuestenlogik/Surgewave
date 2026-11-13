@@ -19,9 +19,14 @@ look in the docs / settings.>
 
 ## Fixes
 
-### <Grouped fix headline> (#issue, #issue)
+### The replication listener binds the address you name (#285)
 
-<1-3 sentences per group.>
+`Surgewave:ReplicationBindAddress` says which address the replication listener binds. Unset it is every IPv4
+interface, as before, which is what a cluster on several hosts needs. A broker whose peers all run on its own
+host sets `127.0.0.1` and is then not reachable on that port from outside. The embedded broker
+(`SurgewaveRuntime`) does this by itself whenever its client listener is on loopback, so a cluster started in a
+test or on a developer's machine no longer listens on every interface, which on Windows raised a firewall prompt
+for each new checkout.
 
 ## Breaking changes
 

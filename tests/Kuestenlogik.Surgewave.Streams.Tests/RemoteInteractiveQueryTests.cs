@@ -170,7 +170,7 @@ public sealed class RemoteInteractiveQueryTests : IDisposable
     public async Task RemoteQueryServer_ServesMetadata()
     {
         var port = GetFreePort();
-        var hostInfo = new HostInfo("localhost", port);
+        var hostInfo = new HostInfo("127.0.0.1", port);
 
         var store = new InMemoryKeyValueStore<string, int>("test-store");
         var metrics = new StreamsMetrics();
@@ -208,7 +208,7 @@ public sealed class RemoteInteractiveQueryTests : IDisposable
     public async Task RemoteQueryServer_ServesKeyValueGet()
     {
         var port = GetFreePort();
-        var hostInfo = new HostInfo("localhost", port);
+        var hostInfo = new HostInfo("127.0.0.1", port);
 
         var store = new InMemoryKeyValueStore<string, int>("counts");
         var metrics = new StreamsMetrics();
@@ -256,7 +256,7 @@ public sealed class RemoteInteractiveQueryTests : IDisposable
     public async Task RemoteQueryServer_ServesKeyValueCount()
     {
         var port = GetFreePort();
-        var hostInfo = new HostInfo("localhost", port);
+        var hostInfo = new HostInfo("127.0.0.1", port);
 
         var store = new InMemoryKeyValueStore<string, int>("counts");
         var metrics = new StreamsMetrics();
@@ -293,8 +293,8 @@ public sealed class RemoteInteractiveQueryTests : IDisposable
     {
         var port1 = GetFreePort();
         var port2 = GetFreePort();
-        var host1 = new HostInfo("localhost", port1);
-        var host2 = new HostInfo("localhost", port2);
+        var host1 = new HostInfo("127.0.0.1", port1);
+        var host2 = new HostInfo("127.0.0.1", port2);
 
         // Setup instance 2 with a remote store (server)
         var remoteStore = new InMemoryKeyValueStore<string, int>("counts");

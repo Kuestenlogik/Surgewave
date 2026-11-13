@@ -46,9 +46,12 @@ dotnet test --collect:"XPlat Code Coverage"
 ## Test Categories
 
 Tests are organized by functionality:
-- Unit tests - Fast, isolated tests
+- Unit tests - Fast, isolated tests; they listen on loopback only
 - Integration tests - Require broker or containers
 - Performance tests - Timing-sensitive tests
+
+What each tier may do, and why a unit test never listens on every interface, is in
+[docs/testing.md](../docs/testing.md#test-tiers-what-a-test-may-listen-on).
 
 ## Test Configuration
 

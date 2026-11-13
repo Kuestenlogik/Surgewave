@@ -63,6 +63,10 @@ Follow conventional commits:
 ### Testing
 - Unit tests with xUnit v3
 - Integration tests in `tests/Kuestenlogik.Surgewave.IntegrationTests/`
+- A unit test listens on loopback only (`127.0.0.1` / `::1`). A test that something outside the host has to
+  reach — a client in a container — is an integration or an end-to-end test. The tiers, and what each may do,
+  are in [docs/testing.md](docs/testing.md#test-tiers-what-a-test-may-listen-on); `LoopbackListenerGuardTests`
+  holds the rule.
 - NSubstitute for mocking
 - Test naming: `MethodName_Scenario_ExpectedResult`
 

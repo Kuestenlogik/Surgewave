@@ -34,6 +34,22 @@ public sealed class ClusteringConfig : IValidatableConfig
     public int ReplicationPort { get; set; } = 9093;
 
     /// <summary>
+    /// The address the replication listener binds: an IP address. Unset, it binds every IPv4 interface, as the
+    /// other brokers of a cluster reach it on <see cref="Host"/> whatever interface that is. A broker whose peers
+    /// are all on its own host names loopback here and is then not reachable from outside the host.
+    /// </summary>
+    public string? ReplicationBindAddress { get; set; }
+
+    /// <summary>
+    /// The endpoint the replication listener binds: <see cref="ReplicationBindAddress"/> where one is set, every
+    /// IPv4 interface otherwise, on <see cref="ReplicationPort"/>.
+    /// </summary>
+    internal System.Net.IPEndPoint ReplicationListenEndPoint() =>
+        new(string.IsNullOrEmpty(ReplicationBindAddress)
+            ? System.Net.IPAddress.Any
+            : System.Net.IPAddress.Parse(ReplicationBindAddress), ReplicationPort);
+
+    /// <summary>
     /// Transport to use for broker-to-broker traffic (Raft RPC, partition
     /// replication, geo-replication). Allowed values: "tcp", "quic".
     /// Default: "tcp". QUIC requires msquic on all brokers in the cluster.
@@ -292,6 +308,9 @@ public sealed class ClusteringConfig : IValidatableConfig
         if (Port == ReplicationPort)
             errors.Add($"{nameof(Port)} and {nameof(ReplicationPort)} must be different (both {Port}).");
 
+        if (!string.IsNullOrEmpty(ReplicationBindAddress) && !System.Net.IPAddress.TryParse(ReplicationBindAddress, out _))
+            errors.Add($"{nameof(ReplicationBindAddress)} '{ReplicationBindAddress}' is not an IP address.");
+
         if (HeartbeatTimeoutMs <= HeartbeatIntervalMs)
             errors.Add($"{nameof(HeartbeatTimeoutMs)} must exceed {nameof(HeartbeatIntervalMs)}.");
 
@@ -366,10 +385,12 @@ public sealed class ClusteringConfig : IValidatableConfig
         int transactionStateLogNumPartitions = 50,
         short transactionStateLogReplicationFactor = 3,
         int shareStateTopicNumPartitions = 50,
-        short shareStateTopicReplicationFactor = 3)
+        short shareStateTopicReplicationFactor = 3,
+        string? replicationBindAddress = null)
     {
         return new ClusteringConfig
         {
+            ReplicationBindAddress = replicationBindAddress,
             OffsetsTopicNumPartitions = offsetsTopicNumPartitions,
             OffsetsTopicReplicationFactor = offsetsTopicReplicationFactor,
             TransactionStateLogNumPartitions = transactionStateLogNumPartitions,

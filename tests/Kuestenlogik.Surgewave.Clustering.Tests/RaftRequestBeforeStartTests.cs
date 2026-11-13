@@ -127,6 +127,7 @@ public sealed class RaftRequestBeforeStartTests : IAsyncDisposable
         Host = "127.0.0.1",
         Port = 9092,
         ReplicationPort = 0,
+        ReplicationBindAddress = "127.0.0.1",
         RaftPeerDiscoveryTimeoutSeconds = 0,
         RaftDataDirectory = _directory,
     };

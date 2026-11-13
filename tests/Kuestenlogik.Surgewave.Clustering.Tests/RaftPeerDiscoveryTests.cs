@@ -152,6 +152,7 @@ public sealed class RaftPeerDiscoveryTests : IAsyncDisposable
         Host = "127.0.0.1",
         Port = 9092,
         ReplicationPort = 0,
+        ReplicationBindAddress = "127.0.0.1",
         ClusterNodes = "1:127.0.0.1:9092:10092,2:127.0.0.1:9093:10093,3:127.0.0.1:9094:10094",
         RaftElectionTimeoutMinMs = 100,
         RaftElectionTimeoutMaxMs = 200,

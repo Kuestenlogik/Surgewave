@@ -41,4 +41,24 @@ public sealed class BindAddressTests
 
         Assert.Contains(config.Validate(), e => e.Contains("'eth0' is not an IP address", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void AReplicationBindAddressThatIsNoAddress_IsRefused()
+    {
+        var config = new BrokerConfig { ReplicationBindAddress = "eth0" };
+
+        var error = Assert.Single(config.Validate(), e => e.Contains(nameof(BrokerConfig.ReplicationBindAddress), StringComparison.Ordinal));
+        Assert.Contains("'eth0' is not an IP address", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("127.0.0.1")]
+    [InlineData("::1")]
+    public void AReplicationBindAddressUnsetOrAnAddress_IsValid(string? address)
+    {
+        var config = new BrokerConfig { ReplicationBindAddress = address };
+
+        Assert.DoesNotContain(config.Validate(), e => e.Contains(nameof(BrokerConfig.ReplicationBindAddress), StringComparison.Ordinal));
+    }
 }

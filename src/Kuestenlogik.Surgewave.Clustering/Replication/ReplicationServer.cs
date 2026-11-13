@@ -91,7 +91,7 @@ public sealed partial class ReplicationServer : IAsyncDisposable
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        _listener = _peerTransport.CreateListener(new IPEndPoint(IPAddress.Any, _config.ReplicationPort));
+        _listener = _peerTransport.CreateListener(_config.ReplicationListenEndPoint());
         await _listener.StartAsync(_cts.Token);
 
         _acceptTask = Task.Run(() => AcceptLoopAsync(_cts.Token), _cts.Token);

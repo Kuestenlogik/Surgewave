@@ -8,6 +8,10 @@ namespace Kuestenlogik.Surgewave.IntegrationTests.Fixtures;
 /// The address a broker binds so a client in a container reaches it: a broker advertises the address it binds, and
 /// loopback inside a container is the container (#195).
 /// </summary>
+/// <remarks>
+/// The one way a test listens on something other than loopback (#285), and only in this tier: every other test
+/// binds 127.0.0.1. See docs/testing.md, "Test tiers: what a test may listen on".
+/// </remarks>
 internal static class ContainerReachableHost
 {
     /// <summary>

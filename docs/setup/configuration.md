@@ -143,6 +143,7 @@ Ephemeral topics store messages in a fixed-size ring buffer. When full, oldest m
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `ReplicationPort` | int | 10092 | Replication port |
+| `ReplicationBindAddress` | string | unset | Address the replication listener binds; unset, every IPv4 interface |
 | `MinInSyncReplicas` | int | 1 | Minimum ISR count |
 | `ReplicaLagTimeMaxMs` | int | 10000 | Max replica lag time |
 | `ReplicaLagMaxMessages` | long | 4000 | Max replica lag messages |

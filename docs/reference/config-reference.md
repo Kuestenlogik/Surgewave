@@ -85,6 +85,7 @@ Section: `Surgewave`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ReplicationPort` | int | `9094` | Inter-broker replication port |
+| `ReplicationBindAddress` | string | *(unset)* | Address the replication listener binds: an IP address. Unset, every IPv4 interface. `127.0.0.1` for a broker whose peers all run on its own host |
 | `MinInSyncReplicas` | int | `1` | Minimum ISR for acks=all |
 | `ReplicaLagTimeMaxMs` | int | `10000` | Max time for replica to be considered in-sync |
 | `ReplicaLagMaxMessages` | long | `10000` | Max message lag before replica removed from ISR |

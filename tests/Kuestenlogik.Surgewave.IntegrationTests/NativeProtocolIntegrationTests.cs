@@ -50,7 +50,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
 
         var config = new BrokerConfig
         {
-            Host = "localhost",
+            Host = "127.0.0.1",
             Port = _port,
             DataDirectory = _dataDir,
             BrokerId = 0,
@@ -135,7 +135,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
             try
             {
                 using var client = new System.Net.Sockets.TcpClient();
-                await client.ConnectAsync("localhost", _port);
+                await client.ConnectAsync("127.0.0.1", _port);
                 return;
             }
             catch
@@ -178,7 +178,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     public async Task NativeClient_CanConnect_And_Ping()
     {
         // Arrange
-        await using var client = new SurgewaveNativeClient("localhost", _port);
+        await using var client = new SurgewaveNativeClient("127.0.0.1", _port);
 
         // Act
         await client.ConnectAsync();
@@ -193,7 +193,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     public async Task NativeClient_CanCreateAndListTopics()
     {
         // Arrange
-        await using var client = new SurgewaveNativeClient("localhost", _port);
+        await using var client = new SurgewaveNativeClient("127.0.0.1", _port);
         await client.ConnectAsync();
 
         var topicName = $"test-native-topic-{Guid.NewGuid():N}";
@@ -215,7 +215,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     public async Task NativeClient_CanProduceAndFetch()
     {
         // Arrange
-        await using var client = new SurgewaveNativeClient("localhost", _port);
+        await using var client = new SurgewaveNativeClient("127.0.0.1", _port);
         await client.ConnectAsync();
 
         var topicName = $"test-produce-fetch-{Guid.NewGuid():N}";
@@ -247,7 +247,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     {
         // Arrange — a topic on the running broker.
         var topicName = $"test-batch-facade-{Guid.NewGuid():N}";
-        await using (var admin = new SurgewaveNativeClient("localhost", _port))
+        await using (var admin = new SurgewaveNativeClient("127.0.0.1", _port))
         {
             await admin.ConnectAsync();
             await admin.Topics.CreateAsync(topicName, 1);
@@ -257,7 +257,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         // SurgewaveBatchingProducer instead of one broker request per message.
         await using var producer = await SurgewaveProducer<string, string>.CreateAsync(opts =>
         {
-            opts.BootstrapServers = $"localhost:{_port}";
+            opts.BootstrapServers = $"127.0.0.1:{_port}";
             opts.EnableBatching = true;
             opts.BatchSize = 8;   // < message count so multiple requests are coalesced
             opts.LingerMs = 5;
@@ -279,7 +279,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
 
         // Read back: every value and its header survive the batching path (order across concurrent
         // producers is not guaranteed, so compare as sets).
-        await using var reader = new SurgewaveNativeClient("localhost", _port);
+        await using var reader = new SurgewaveNativeClient("127.0.0.1", _port);
         await reader.ConnectAsync();
         var recv = await reader.Messaging.ReceiveAsync(topicName, 0, 0, maxBytes: 4 * 1024 * 1024);
 
@@ -305,7 +305,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
     public async Task NativeClient_GetOffsets()
     {
         // Arrange
-        await using var client = new SurgewaveNativeClient("localhost", _port);
+        await using var client = new SurgewaveNativeClient("127.0.0.1", _port);
         await client.ConnectAsync();
 
         var topicName = $"test-offsets-{Guid.NewGuid():N}";
@@ -338,20 +338,20 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var topicName = $"test-kafka-{Guid.NewGuid():N}";
 
         // First create topic using native client (easier)
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicName, 1);
 
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             MessageTimeoutMs = 5000,
             RequestTimeoutMs = 5000
         };
 
         var consumerConfig = new ConsumerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             GroupId = "test-group",
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = false
@@ -391,7 +391,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var topicName = $"test-interop-n2k-{Guid.NewGuid():N}";
 
         // Create topic and produce using native client
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicName, 1);
 
@@ -416,7 +416,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         // Consume using Kafka client - use direct assignment to avoid consumer group overhead
         var consumerConfig = new ConsumerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             GroupId = $"interop-test-group-{Guid.NewGuid():N}",
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = false
@@ -460,14 +460,14 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var topicName = $"test-interop-k2n-{Guid.NewGuid():N}";
 
         // Create topic using native client
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicName, 1);
 
         // Act - Produce using Kafka client
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             MessageTimeoutMs = 5000,
             RequestTimeoutMs = 5000
         };
@@ -507,20 +507,20 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var topicName = $"test-interop-mixed-{Guid.NewGuid():N}";
 
         // Setup
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicName, 1);
 
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             MessageTimeoutMs = 5000,
             RequestTimeoutMs = 5000
         };
 
         var consumerConfig = new ConsumerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             GroupId = $"mixed-test-group-{Guid.NewGuid():N}",
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = false
@@ -598,7 +598,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var messageBytes = Encoding.UTF8.GetBytes(messageValue);
 
         // Create topics
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicNative, 1);
         await nativeClient.Topics.CreateAsync(topicKafka, 1);
@@ -623,7 +623,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         // Benchmark Kafka protocol
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             MessageTimeoutMs = 30000,
             RequestTimeoutMs = 30000,
             LingerMs = 0 // Disable batching for fair comparison
@@ -664,7 +664,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         const int messageCount = 100;
         const int iterations = 10;
 
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicName, 1);
 
@@ -688,7 +688,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         // Benchmark Kafka fetch (using consumer assign to specific offset)
         var consumerConfig = new ConsumerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             GroupId = $"perf-group-{Guid.NewGuid():N}",
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = false,
@@ -731,7 +731,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         var topicKafka = $"perf-rt-kafka-{Guid.NewGuid():N}";
         const int iterations = 100;
 
-        await using var nativeClient = new SurgewaveNativeClient("localhost", _port);
+        await using var nativeClient = new SurgewaveNativeClient("127.0.0.1", _port);
         await nativeClient.ConnectAsync();
         await nativeClient.Topics.CreateAsync(topicNative, 1);
         await nativeClient.Topics.CreateAsync(topicKafka, 1);
@@ -757,7 +757,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
         // Kafka round-trip
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             MessageTimeoutMs = 5000,
             LingerMs = 0,
             Acks = Acks.Leader
@@ -765,7 +765,7 @@ public sealed class NativeProtocolIntegrationTests : IAsyncLifetime
 
         var consumerConfig = new ConsumerConfig
         {
-            BootstrapServers = $"localhost:{_port}",
+            BootstrapServers = $"127.0.0.1:{_port}",
             GroupId = $"perf-rt-group-{Guid.NewGuid():N}",
             EnableAutoCommit = false
         };
