@@ -18,13 +18,39 @@ public sealed partial class ClusterController
     public void SetClusterIdentity(ClusterIdManager clusterIdentity) => _clusterIdentity = clusterIdentity;
 
     // What a new controller writes first: the cluster's id, so that no registration precedes it in the log, then its
-    // own registration.
+    // own registration. With that committed it has applied everything committed before its term, and looks at the
+    // peers that failed before it was in office.
     private async Task TakeOfficeAsync(CancellationToken ct)
     {
         await EnsureClusterIdAsync(ct).ConfigureAwait(false);
         await RegisterBrokerViaRaftAsync(
             _config.BrokerId, _config.Host, _config.Port, _config.Rack,
             _raftSelfIncarnation, InterBrokerProtocolFeature.LocalMaxSupported, _config.ReplicationPort, ct).ConfigureAwait(false);
+        await HandleFailuresFoundOnTakingOfficeAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Handles every peer the failure detector holds as failed (#252).
+    /// </summary>
+    /// <remarks>
+    /// The detector reports a failure once, and <see cref="HandleBrokerFailedAsync"/> leaves it to the controller. A
+    /// broker that saw the old controller fail before it was promoted itself had dropped the report by the time it
+    /// took office: the dead broker stayed in every ISR and kept its leaderships. Handling a failure a second time
+    /// finds the broker in no ISR and leading nothing, so a failure reported while this runs is not handled twice.
+    /// </remarks>
+    private async Task HandleFailuresFoundOnTakingOfficeAsync(CancellationToken ct)
+    {
+        if (_heartbeatManager is not { } heartbeats)
+            return;
+
+        foreach (var (brokerId, health) in heartbeats.AllBrokerHealth)
+        {
+            if (ct.IsCancellationRequested)
+                return;
+
+            if (!health.IsAlive)
+                await HandleBrokerFailedAsync(brokerId).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

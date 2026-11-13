@@ -116,6 +116,10 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     // asking for the same topic at once both find it missing and both write it, under two ids (#268).
     private readonly OneAtATime _topicCreation = new();
 
+    // One broker failure at a time: a failure is handled when it is reported and when the controller takes office
+    // (#252), and two passes over the same broker at once would each move the leaderships the other is moving.
+    private readonly OneAtATime _failureHandling = new();
+
     // Ends when this controller stops, and stays ended: what its background work runs under. Not read from _cts,
     // which the stop disposes and clears.
     private CancellationToken _lifetime;
@@ -1525,8 +1529,21 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     {
         LogBrokerFailureDetected(failedBrokerId);
 
-        // A controller that dies is replaced by a Raft election, which the leader watch
-        // notices; there is nothing for a follower to do about it here.
+        // Not the controller's to handle unless this broker is it. If it becomes the controller while the broker
+        // is still failed, it handles the failure as it takes office (#252).
+        if (!_isController)
+            return;
+
+        await _failureHandling.RunAsync(async () =>
+        {
+            await MoveOffFailedBrokerAsync(failedBrokerId).ConfigureAwait(false);
+            return true;
+        }).ConfigureAwait(false);
+    }
+
+    private async Task MoveOffFailedBrokerAsync(int failedBrokerId)
+    {
+        // Asked again: the office may have been lost while this waited for the failure before it.
         if (!_isController)
             return;
 
