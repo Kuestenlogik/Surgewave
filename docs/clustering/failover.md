@@ -58,12 +58,26 @@ surgewave partitions elect-leader --topic my-topic
 surgewave partitions elect-leader --all
 ```
 
+### When the last in-sync replica fails
+
+A partition whose leader fails is led by another in-sync replica. When the failed broker was the only in-sync
+replica, no other replica is known to hold everything the partition acknowledged, and the controller elects none:
+the partition has no leader, the failed broker stays in its ISR, and clients are answered `LEADER_NOT_AVAILABLE`
+until that broker is back. It is then elected again, with nothing lost. This is what Kafka does.
+
 ### Unclean Leader
 
-Elect non-ISR replica (may lose data):
+An unclean election lets a live replica that is not in sync lead such a partition. What the in-sync replica had
+acknowledged and this replica had not fetched is lost, and the new leader becomes the whole ISR. It happens only
+where it is asked for:
+
+- for a topic, with the topic config `unclean.leader.election.enable=true` (default `false`): the controller then
+  elects a live replica by itself when the last in-sync replica fails;
+- for single partitions, with an `ElectLeaders` request of the unclean election type:
 
 ```bash
-surgewave partitions elect-leader --topic my-topic --unclean
+kafka-leader-election.sh --bootstrap-server localhost:9092 \
+  --election-type unclean --topic my-topic --partition 0
 ```
 
 Only use when availability > consistency.

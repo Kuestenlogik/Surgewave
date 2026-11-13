@@ -537,7 +537,7 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     if (eligibleLeaders.Count > 0)
                     {
                         var newLeader = eligibleLeaders.First();
-                        var elected = await ElectLeaderAtAsync(tp, newLeader, ct);
+                        var elected = await ElectLeaderAtAsync(tp, newLeader, unclean: false, ct);
                         if (elected is null)
                         {
                             // Not "no eligible leader" — the ISR had one. Either this broker is not
@@ -1225,18 +1225,35 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
     #endregion
 
     /// <summary>
-    /// Elect a new leader for a partition.
+    /// Elect a new leader for a partition from its in-sync replicas. False when none of them can lead: the partition
+    /// keeps the leader it has, or none.
     /// </summary>
-    public async Task<bool> ElectLeaderAsync(TopicPartition tp, int? preferredLeader = null, CancellationToken ct = default)
-        => await ElectLeaderAtAsync(tp, preferredLeader, ct).ConfigureAwait(false) is not null;
+    public Task<bool> ElectLeaderAsync(TopicPartition tp, int? preferredLeader = null, CancellationToken ct = default)
+        => ElectLeaderAsync(tp, preferredLeader, unclean: false, ct);
 
     /// <summary>
-    /// As <see cref="ElectLeaderAsync"/>, additionally reporting WHO was elected and WHERE the
-    /// decision sits in the metadata log — what a caller needs to check that the new leader
+    /// Elect a new leader for a partition; with <paramref name="unclean"/>, from any live replica where no in-sync
+    /// replica can lead (#253). That replica is then the whole ISR: what the in-sync replicas had and it has not is no
+    /// longer part of the log.
+    /// </summary>
+    public async Task<bool> ElectLeaderAsync(TopicPartition tp, int? preferredLeader, bool unclean, CancellationToken ct = default)
+        => await ElectLeaderAtAsync(tp, preferredLeader, unclean, ct).ConfigureAwait(false) is not null;
+
+    /// <summary>
+    /// Whether the topic's <c>unclean.leader.election.enable</c> is set: a replica that is not in sync may then lead a
+    /// partition of it whose in-sync replicas are all gone. Unset it is false, as the broker reports it.
+    /// </summary>
+    private bool AllowsUncleanElection(string topic)
+        => _clusterState.GetTopic(topic)?.Config.TryGetValue("unclean.leader.election.enable", out var value) == true
+           && bool.TryParse(value, out var enabled) && enabled;
+
+    /// <summary>
+    /// As <see cref="ElectLeaderAsync(TopicPartition, int?, bool, CancellationToken)"/>, additionally reporting WHO
+    /// was elected and WHERE the decision sits in the metadata log — what a caller needs to check that the new leader
     /// actually received it before this node walks away (#177).
     /// </summary>
     private async Task<(int NewLeader, long Index)?> ElectLeaderAtAsync(
-        TopicPartition tp, int? preferredLeader, CancellationToken ct)
+        TopicPartition tp, int? preferredLeader, bool unclean, CancellationToken ct)
     {
         if (!_isController)
         {
@@ -1269,20 +1286,21 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             // (#124); a broker with a failed log directory likewise (#162).
             newLeader = liveIsrMember;
         }
-        else if (partitionState.Replicas.Count > 0)
+        else if (unclean && partitionState.Replicas.FirstOrDefault(IsEligibleLeader, -1) is var aliveReplica
+                 && aliveReplica >= 0)
         {
             // Unclean election from any alive replica — never one whose log directory is offline (#162), which would
-            // be a leader that serves nothing.
-            var aliveReplica = partitionState.Replicas.FirstOrDefault(IsEligibleLeader, -1);
-
-            if (aliveReplica < 0)
-            {
-                LogNoReplicasAvailable(tp.Topic, tp.Partition);
-                return null;
-            }
-
+            // be a leader that serves nothing. Only where the caller allows it (#253): the replica is not in sync,
+            // and what the in-sync replicas acknowledged and it did not fetch is lost with this. It is the ISR from
+            // here on, as Kafka makes it: the replicas that were in sync have a log this leader does not continue.
             newLeader = aliveReplica;
             LogUncleanLeaderElection(tp.Topic, tp.Partition, newLeader);
+
+            if (!await UpdateIsrViaRaftAsync(tp, [newLeader], ct).ConfigureAwait(false))
+            {
+                LogRaftCommitTimeout("IsrChanged", 0);
+                return null;
+            }
         }
         else
         {
@@ -1567,8 +1585,12 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
             {
                 ct.ThrowIfCancellationRequested();
 
-                var remainingIsr = state.Isr.Where(b => b != failedBrokerId).ToList();
-                if (remainingIsr.Count != state.Isr.Count)
+                var isr = _clusterState.GetIsrSnapshot(tp);
+                var remainingIsr = isr.Where(b => b != failedBrokerId).ToList();
+
+                // The last in-sync replica stays in the ISR (#253): it is the one broker known to hold everything
+                // the partition acknowledged, and an ISR without it would let the next election take anyone.
+                if (remainingIsr.Count != isr.Count && remainingIsr.Count > 0)
                 {
                     if (await UpdateIsrViaRaftAsync(tp, remainingIsr, ct).ConfigureAwait(false))
                     {
@@ -1577,13 +1599,24 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
                     }
                 }
 
-                if (state.LeaderBrokerId == failedBrokerId)
+                if (state.LeaderBrokerId != failedBrokerId)
+                    continue;
+
+                LogLeaderFailedForPartition(tp.Topic, tp.Partition, failedBrokerId);
+
+                // The successor named from the ISR just computed, not read back: the committed ISR change
+                // may not be applied here yet, and the read would still offer the dead broker.
+                var elected = await ElectLeaderAsync(
+                    tp, remainingIsr.Count > 0 ? remainingIsr[0] : null, AllowsUncleanElection(tp.Topic), ct)
+                    .ConfigureAwait(false);
+
+                // Nobody may lead it: it has no leader, said in the log so that every broker stops sending its
+                // clients to the one that failed, until an in-sync replica is back.
+                if (!elected && _clusterState.GetPartitionState(tp) is { } now && now.LeaderBrokerId == failedBrokerId
+                    && await ElectLeaderViaRaftAsync(tp, -1, now.LeaderEpoch + 1, ct).ConfigureAwait(false) >= 0)
                 {
-                    LogLeaderFailedForPartition(tp.Topic, tp.Partition, failedBrokerId);
-                    // The successor named from the ISR just computed, not read back: the committed ISR change
-                    // may not be applied here yet, and the read would still offer the dead broker.
-                    await ElectLeaderAsync(tp, remainingIsr.Count > 0 ? remainingIsr[0] : null, ct)
-                        .ConfigureAwait(false);
+                    affectedPartitions.Add(tp);
+                    LogLeftWithoutLeader(tp.Topic, tp.Partition, failedBrokerId);
                 }
             }
         }
@@ -1613,11 +1646,58 @@ public sealed partial class ClusterController : IAsyncDisposable, IClusterTopicC
         // The broker will need to catch up via replication before rejoining ISR
         // This is handled by ReplicaManager when the broker starts fetching
 
+        // Unless it is the in-sync replica a partition without a leader waits for (#253).
+        if (_isController)
+        {
+            await _failureHandling.RunAsync(async () =>
+            {
+                await ElectLeadersWhereThereIsNoneAsync(_lifetime).ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
+        }
+
         // Trigger automatic rebalance to redistribute partitions to the recovered broker
         if (_isController && _config.AutoRebalanceEnabled && _clusterBalancer != null && _reassignmentManager != null)
         {
             LogTriggeringRebalanceAfterRecovery(recoveredBrokerId);
             await MaybeRebalanceClusterAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Elects a leader for every partition that has none and a replica that may lead it (#253): an in-sync replica
+    /// that is alive, or any live replica where the topic allows an unclean election.
+    /// </summary>
+    /// <remarks>
+    /// A partition is left without a leader when its last in-sync replica fails. It gets one when that replica is
+    /// back, which this controller learns from its heartbeat, or finds when it takes office: the broker may have come
+    /// back while there was no controller to notice.
+    /// </remarks>
+    private async Task ElectLeadersWhereThereIsNoneAsync(CancellationToken ct)
+    {
+        try
+        {
+            foreach (var (tp, state) in _clusterState.PartitionStates)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (!_isController)
+                    return;
+
+                if (state.LeaderBrokerId >= 0)
+                    continue;
+
+                var unclean = AllowsUncleanElection(tp.Topic);
+                if (_clusterState.GetIsrSnapshot(tp).Exists(IsEligibleLeader)
+                    || (unclean && state.Replicas.Exists(IsEligibleLeader)))
+                {
+                    await ElectLeaderAsync(tp, preferredLeader: null, unclean, ct).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // This controller stops; the next one finds the partitions as they are.
         }
     }
 

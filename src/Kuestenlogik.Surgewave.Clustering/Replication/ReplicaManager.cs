@@ -229,6 +229,36 @@ public sealed partial class ReplicaManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Called when a partition this broker replicates is left without a leader (#253): the last in-sync replica
+    /// failed, and this one is not in sync. It stops fetching from the leader it had and leads nothing.
+    /// </summary>
+    public void HaveNoLeader(TopicPartition tp, int leaderEpoch)
+    {
+        if (RefuseTransitionForOfflineLog(tp))
+            return;
+
+        var replica = GetOrCreateLocalReplica(tp);
+
+        lock (replica)
+        {
+            replica.State = ReplicaState.Follower;
+            replica.LeaderEpoch = leaderEpoch;
+            replica.IsInSync = false;
+        }
+
+        _clusterState.UpdatePartitionState(tp, state =>
+        {
+            state.LeaderBrokerId = -1;
+            state.LeaderEpoch = leaderEpoch;
+        });
+
+        _replicaFetcher?.StopFetching(tp);
+
+        LogHasNoLeader(tp.Topic, tp.Partition, leaderEpoch);
+        RaiseLeadershipChanged(tp, isLeader: false);
+    }
+
+    /// <summary>
     /// Called when this broker becomes follower for a partition.
     /// </summary>
     /// <inheritdoc cref="BecomeLeaderAsync" path="/param[@name='topicId']"/>
@@ -831,6 +861,9 @@ public sealed partial class ReplicaManager : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Became leader for {Topic}-{Partition} (epoch={LeaderEpoch})")]
     private partial void LogBecameLeader(string topic, int partition, int leaderEpoch);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Topic}-{Partition} has no leader (epoch={LeaderEpoch}): its last in-sync replica is gone, and this replica is not in sync")]
+    private partial void LogHasNoLeader(string topic, int partition, int leaderEpoch);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Became follower for {Topic}-{Partition} (leader={LeaderId}, epoch={LeaderEpoch})")]
     private partial void LogBecameFollower(string topic, int partition, int leaderId, int leaderEpoch);

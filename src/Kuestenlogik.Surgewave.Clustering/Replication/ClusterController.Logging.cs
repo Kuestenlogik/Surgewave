@@ -43,6 +43,10 @@ public sealed partial class ClusterController
     [LoggerMessage(Level = LogLevel.Warning, Message = "Unclean leader election for {Topic}-{Partition}: new leader {NewLeader}")]
     private partial void LogUncleanLeaderElection(string topic, int partition, int newLeader);
 
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "{Topic}-{Partition} is left without a leader: broker {BrokerId} was its last in-sync replica, and the topic does not allow an unclean election (unclean.leader.election.enable)")]
+    private partial void LogLeftWithoutLeader(string topic, int partition, int brokerId);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "No replicas available for {Topic}-{Partition}")]
     private partial void LogNoReplicasAvailable(string topic, int partition);
 

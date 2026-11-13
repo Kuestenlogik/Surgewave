@@ -46,6 +46,22 @@ public sealed class ReplicationTransitionQueueTests
     }
 
     [Fact]
+    public void APartitionLeftWithoutALeaderRoutesAReplicaToFollowNobody()
+    {
+        // -1 as the leader of a change means there is none (#253). It is also how a transition says "we lead it",
+        // and a replica that took the one for the other would lead a partition its controller left without a leader.
+        var routed = ReplicationTransitionQueue.Route(
+            Tp, leaderBrokerId: -1, leaderEpoch: 6, replicas: [LocalBroker, 2], localBrokerId: LocalBroker);
+
+        Assert.NotNull(routed);
+        Assert.True(routed!.Value.NoLeader);
+        Assert.Equal(6, routed.Value.LeaderEpoch);
+
+        Assert.Null(ReplicationTransitionQueue.Route(
+            Tp, leaderBrokerId: -1, leaderEpoch: 6, replicas: [2, 3], localBrokerId: LocalBroker));
+    }
+
+    [Fact]
     public void BeingAReplicaRoutesToFollowTheNewLeader()
     {
         var routed = ReplicationTransitionQueue.Route(

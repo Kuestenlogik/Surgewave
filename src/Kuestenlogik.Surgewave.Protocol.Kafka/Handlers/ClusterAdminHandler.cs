@@ -63,12 +63,10 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
 
     private async Task<ElectLeadersResponse> HandleElectLeadersAsync(ElectLeadersRequest request, CancellationToken cancellationToken)
     {
-        // ElectionType: 0 = preferred replica election, 1 = unclean. Surgewave's
-        // ClusterController.ElectLeaderAsync chooses preferred-from-ISR or
-        // first-ISR-member by default and only falls back to unclean when
-        // ISR is empty; client-requested unclean (1) takes the same path.
-        // Honouring ElectionType=0 strictly (refuse fallback) would need an
-        // extra param on ClusterController — tracked but not blocking.
+        // ElectionType: 0 = preferred replica election, 1 = unclean. A preferred election chooses among the in-sync
+        // replicas and elects nobody where none can lead; only an unclean one (1) may then take a live replica that
+        // is not in sync (#253).
+        var unclean = request.ElectionType == 1;
 
         if (_controller is null)
         {
@@ -103,7 +101,7 @@ public sealed partial class ClusterAdminHandler : IKafkaRequestHandler
                 string? message;
                 try
                 {
-                    ok = await _controller.ElectLeaderAsync(tp, preferredLeader: null, cancellationToken).ConfigureAwait(false);
+                    ok = await _controller.ElectLeaderAsync(tp, preferredLeader: null, unclean, cancellationToken).ConfigureAwait(false);
                     error = ok ? ErrorCode.None : ErrorCode.PreferredLeaderNotAvailable;
                     message = ok ? null : "Election failed (no eligible replica or not controller)";
                 }

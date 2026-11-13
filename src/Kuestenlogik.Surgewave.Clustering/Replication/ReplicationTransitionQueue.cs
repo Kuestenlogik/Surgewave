@@ -109,6 +109,14 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
         if (leaderBrokerId == localBrokerId)
             return new PendingTransition(partition, LeaderBrokerId: -1, leaderEpoch);
 
+        // No leader (#253): a replica stops following the one it had. Not to be mistaken for the -1 above.
+        if (leaderBrokerId < 0)
+        {
+            return replicas.Contains(localBrokerId)
+                ? new PendingTransition(partition, LeaderBrokerId: -1, leaderEpoch, NoLeader: true)
+                : null;
+        }
+
         // Not the leader and not a replica: the partition is none of this broker's business,
         // which is most of them in a cluster of any size.
         return replicas.Contains(localBrokerId)
@@ -131,6 +139,10 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
                     else if (pending.ConfigOnly)
                     {
                         _replicaManager.ApplyTopicConfig(pending.Partition.Topic);
+                    }
+                    else if (pending.NoLeader)
+                    {
+                        _replicaManager.HaveNoLeader(pending.Partition, pending.LeaderEpoch);
                     }
                     else if (pending.LeaderBrokerId < 0)
                     {
@@ -181,6 +193,8 @@ public sealed class ReplicationTransitionQueue : IAsyncDisposable
 
     /// <param name="LeaderBrokerId">-1 means "we are the leader"; otherwise the leader to follow.</param>
     /// <param name="Reached">Set on a marker, which is no transition: completed when the worker gets to it.</param>
+    /// <param name="NoLeader">The partition has no leader: this broker, a replica, follows nobody.</param>
     internal readonly record struct PendingTransition(
-        TopicPartition Partition, int LeaderBrokerId, int LeaderEpoch, bool ConfigOnly = false, TaskCompletionSource? Reached = null);
+        TopicPartition Partition, int LeaderBrokerId, int LeaderEpoch, bool ConfigOnly = false, TaskCompletionSource? Reached = null,
+        bool NoLeader = false);
 }

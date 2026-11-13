@@ -528,6 +528,21 @@ public sealed class ClusterState
     }
 
     /// <summary>
+    /// Leaves the partition without a leader, in a new leader epoch, and its ISR as it is (#253): what the metadata
+    /// log says when the last in-sync replica has failed and no other replica may take its place.
+    /// </summary>
+    public void ClearLeader(TopicPartition tp)
+    {
+        lock (_stateLock)
+        {
+            var state = GetOrCreatePartitionState(tp);
+            state.LeaderBrokerId = -1;
+            state.LeaderEpoch++;
+        }
+        _partitionsChanged.Notify();
+    }
+
+    /// <summary>
     /// Update ISR for a partition.
     /// </summary>
     public void UpdateIsr(TopicPartition tp, List<int> isr)

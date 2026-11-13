@@ -27,6 +27,13 @@ public sealed partial class ClusterController
             _config.BrokerId, _config.Host, _config.Port, _config.Rack,
             _raftSelfIncarnation, InterBrokerProtocolFeature.LocalMaxSupported, _config.ReplicationPort, ct).ConfigureAwait(false);
         await HandleFailuresFoundOnTakingOfficeAsync(ct).ConfigureAwait(false);
+
+        // And at the partitions the controller before left without a leader, whose in-sync replica may be back.
+        await _failureHandling.RunAsync(async () =>
+        {
+            await ElectLeadersWhereThereIsNoneAsync(ct).ConfigureAwait(false);
+            return true;
+        }).ConfigureAwait(false);
     }
 
     /// <summary>

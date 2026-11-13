@@ -70,7 +70,7 @@ public class LocalBrokerLivenessTests
         await controller.StartAsync(CancellationToken.None);
         await BecomesControllerAsync(controller);
 
-        Assert.True(await controller.ElectLeaderAsync(tp),
+        Assert.True(await controller.ElectLeaderAsync(tp, preferredLeader: null, unclean: true),
             "the election failed although a live replica exists — the local broker was skipped");
         Assert.Equal(LocalBroker, state.GetPartitionState(tp)!.LeaderBrokerId);
     }
@@ -99,7 +99,7 @@ public class LocalBrokerLivenessTests
         await controller.StartAsync(CancellationToken.None);
         await BecomesControllerAsync(controller);
 
-        Assert.True(await controller.ElectLeaderAsync(tp));
+        Assert.True(await controller.ElectLeaderAsync(tp, preferredLeader: null, unclean: true));
         Assert.Equal(LocalBroker, state.GetPartitionState(tp)!.LeaderBrokerId);
     }
 

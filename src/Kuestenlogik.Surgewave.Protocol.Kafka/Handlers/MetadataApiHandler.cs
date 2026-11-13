@@ -318,7 +318,9 @@ public sealed class MetadataApiHandler : IKafkaRequestHandler
                     // a torn read / InvalidOperationException.
                     partitions.Add(new MetadataResponse.MetadataResponsePartition
                     {
-                        ErrorCode = ErrorCode.None,
+                        // A partition whose last in-sync replica is gone has no leader (#253), and says so as Kafka
+                        // does: the client asks again instead of sending to broker -1.
+                        ErrorCode = partitionState.LeaderBrokerId < 0 ? ErrorCode.LeaderNotAvailable : ErrorCode.None,
                         PartitionIndex = i,
                         LeaderId = partitionState.LeaderBrokerId,
                         LeaderEpoch = partitionState.LeaderEpoch,

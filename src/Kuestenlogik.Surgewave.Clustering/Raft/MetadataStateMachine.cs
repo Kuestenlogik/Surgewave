@@ -266,7 +266,13 @@ public sealed partial class MetadataStateMachine : IRaftStateMachine
         if (cmd == null) return;
 
         var tp = new TopicPartition { Topic = cmd.Topic, Partition = cmd.Partition };
-        _clusterState.ElectLeader(tp, cmd.NewLeader);
+
+        // No leader is a decision as any other (#253), not a request to find one: the state's own election would
+        // take the first ISR member, which is the broker that just failed.
+        if (cmd.NewLeader < 0)
+            _clusterState.ClearLeader(tp);
+        else
+            _clusterState.ElectLeader(tp, cmd.NewLeader);
 
         // The half the log apply was missing (#165). Knowing who leads the partition is not
         // the same as acting on it: without this the state is correct on every broker and

@@ -69,6 +69,21 @@ a controller it no longer was.
 
 ## Breaking changes
 
+### A partition whose last in-sync replica fails has no leader (#253)
+
+When the only in-sync replica of a partition failed, the controller emptied the ISR and elected any live replica.
+That replica was not in sync, so what the failed leader had acknowledged and it had not fetched was lost — while
+the broker reported `unclean.leader.election.enable=false`. The controller now does what that setting says, and
+what Kafka does: the failed broker stays in the ISR, the partition has no leader, and Metadata answers
+`LEADER_NOT_AVAILABLE` for it until the broker is back, when it is elected again. A cluster that relied on the
+old behaviour to stay available sets `unclean.leader.election.enable=true` on the topic, or sends an `ElectLeaders`
+request of the unclean type for the partitions it wants back at once; see
+[Failover](../clustering/failover.md). A preferred `ElectLeaders`, a rebalance and a reassignment no longer fall
+back to a replica that is not in sync.
+
+"No leader" is a `LeaderChanged` entry with leader `-1` in the metadata log, which a 0.6.0 broker reads as a
+request to elect the first ISR member; a cluster is upgraded as a whole.
+
 ### The metadata log has a new format on disk (#261)
 
 `raft-log.bin` starts with the name of its format and holds a length and a checksum before each entry. A log
