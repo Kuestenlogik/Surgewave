@@ -36,6 +36,9 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
     private readonly ClusteringConfig _config;
     private readonly ConcurrentDictionary<int, BrokerHealthState> _brokerHealth = new();
     private readonly ConcurrentDictionary<int, TcpClient> _connections = new();
+
+    // The heartbeat under way to each peer, if any: the next one to a peer is sent when this one is done.
+    private readonly ConcurrentDictionary<int, Task> _heartbeatsUnderWay = new();
     private readonly Kuestenlogik.Surgewave.Core.Util.ChangeSignal _healthChanged = new();
 
     private CancellationTokenSource? _cts;
@@ -134,6 +137,9 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
             try { await _monitorTask; } catch (OperationCanceledException) { }
         }
 
+        // Cancelled above; each ends by recording its failure.
+        await Task.WhenAll(_heartbeatsUnderWay.Values).ConfigureAwait(false);
+
         // Close all connections
         foreach (var (_, client) in _connections)
         {
@@ -182,7 +188,7 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
         {
             try
             {
-                await SendHeartbeatsAsync(ct);
+                SendHeartbeats(ct);
                 await Task.Delay(_config.HeartbeatIntervalMs, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -216,20 +222,30 @@ public sealed partial class HeartbeatManager : IAsyncDisposable
         }
     }
 
-    private async Task SendHeartbeatsAsync(CancellationToken ct)
+    /// <summary>
+    /// One round: a heartbeat to every peer that is not still answering its last one. Does not wait for them.
+    /// </summary>
+    /// <remarks>
+    /// Each peer on its own (#251). The round used to end when every peer had answered or failed, and the next one
+    /// began an interval after that: a peer that did not answer — three connect attempts of five seconds to a host
+    /// that drops packets, or the heartbeat timeout on a connection that stays silent — held the round, and the
+    /// peers that had answered at once got their next heartbeat later than the timeout they are given. They were
+    /// reported failed, and the controller took live brokers out of the ISRs and moved their leaderships.
+    /// </remarks>
+    private void SendHeartbeats(CancellationToken ct)
     {
-        var tasks = new List<Task>();
-
         foreach (var (brokerId, broker) in _clusterState.Brokers)
         {
             if (brokerId == _config.BrokerId)
                 continue;
 
             _ = Track(brokerId);
-            tasks.Add(SendHeartbeatToBrokerAsync(brokerId, broker, ct));
-        }
 
-        await Task.WhenAll(tasks);
+            if (_heartbeatsUnderWay.TryGetValue(brokerId, out var underWay) && !underWay.IsCompleted)
+                continue;
+
+            _heartbeatsUnderWay[brokerId] = SendHeartbeatToBrokerAsync(brokerId, broker, ct);
+        }
     }
 
     private async Task SendHeartbeatToBrokerAsync(int brokerId, BrokerNode broker, CancellationToken ct)
