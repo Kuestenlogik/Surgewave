@@ -23,6 +23,9 @@ public sealed class TransportOptionsTests
         Assert.True(options.EnableCompression, "Compression should be enabled by default");
         Assert.Equal(65536, options.SendBufferSize);
         Assert.Equal(65536, options.ReceiveBufferSize);
+        Assert.Equal(TimeSpan.FromSeconds(15), options.KeepAliveTime);
+        Assert.Equal(TimeSpan.FromSeconds(5), options.KeepAliveInterval);
+        Assert.Equal(3, options.KeepAliveRetryCount);
     }
 
     [Fact]

@@ -92,7 +92,33 @@ controller took, as while the office changes hands, was `InternalError` too; it 
 code `NotController` (23), which says that nothing was done and asking again may work. A client that does not
 know the code reads it as an unknown error.
 
+### The native client notices a broker that is gone, and its consumers end with the connection (#289)
+
+A broker that closes its connection says so. A host that loses power, or a network that drops its packets, says
+nothing, and the native client waited on such a connection for as long as it ran. Its connections are now kept
+alive: over TCP the operating system probes a connection that carries nothing, over QUIC the connection has an
+idle timeout and is kept alive while the broker answers. With the defaults a broker that vanished is noticed
+after about 30 seconds; `TransportOptions.KeepAliveTime`, `KeepAliveInterval` and `KeepAliveRetryCount` set the
+times, and `KeepAliveTime = Timeout.InfiniteTimeSpan` turns it off.
+
+`SurgewavePrefetchingConsumer` retried every failed fetch every 100 ms, also on a connection that was lost, and
+`ConsumeAsync` then waited for a message with no end. It hands out what it had fetched and then fails with the
+`IOException` the connection ended with. A streaming consumer no longer drops the records the broker pushes
+before the answer to its Subscribe is read. And with pipelining off, a request cancelled while its answer was
+awaited left that answer for the next request, which failed with "Request ID mismatch" or waited behind it; the
+connection is closed instead, and the next request says so.
+
 ## Breaking changes
+
+### `ISurgewaveTransport.ConnectionEnded` has no default (#289)
+
+A transport says when its connection ends: the member had a default that never completed, on which a streaming
+consumer waited on a lost connection for as long as it lived. A transport outside this repository implements
+`Task<Exception> ConnectionEnded`, completed with what ended the connection.
+
+`SurgewavePrefetchingConsumer.Consume`, `ConsumeAsync`, `ConsumeBatch` and `ConsumeBatchAsync` throw the
+`IOException` the connection ended with once it is lost and what was fetched has been read. They returned `null`
+or did not return.
 
 ### A partition whose last in-sync replica fails has no leader (#253)
 

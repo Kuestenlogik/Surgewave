@@ -117,12 +117,20 @@ internal sealed class FakeSurgewaveTransport : ISurgewaveTransport
     public IReadOnlyList<string> IssuedMemberIds { get { lock (_gate) return _issuedMemberIds.ToList(); } }
     private readonly List<string> _issuedMemberIds = [];
 
+    private TaskCompletionSource<Exception> _connectionEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public SurgewaveTransportType TransportType => SurgewaveTransportType.Tcp;
     public bool IsConnected => _connected;
+
+    /// <summary>Completed by the connection loss <see cref="SimulateConnectionLoss"/> stages, with its exception.</summary>
+    public Task<Exception> ConnectionEnded => Volatile.Read(ref _connectionEnded).Task;
     public bool ServerSupportsCompression => false;
 
     public ValueTask ConnectAsync(CancellationToken cancellationToken = default)
     {
+        // Connected again, as a facade does after a loss: a new connection, which has not ended.
+        if (ConnectionEnded.IsCompleted)
+            Volatile.Write(ref _connectionEnded, new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously));
         _connected = true;
         return ValueTask.CompletedTask;
     }
@@ -206,7 +214,9 @@ internal sealed class FakeSurgewaveTransport : ISurgewaveTransport
             {
                 _failNextRequest = false;
                 _connected = false;
-                throw new IOException("FakeSurgewaveTransport: simulated connection loss");
+                var lost = new IOException("FakeSurgewaveTransport: simulated connection loss");
+                Volatile.Read(ref _connectionEnded).TrySetResult(lost);
+                throw lost;
             }
         }
 

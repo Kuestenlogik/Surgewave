@@ -37,6 +37,7 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
 
     // Total bytes received; used for flow-control acknowledgments
     private long _receivedBytes;
+    private int _stopped;
 
     private const int ChannelCapacity = 4096;
     private static readonly TimeSpan AckInterval = TimeSpan.FromSeconds(5);
@@ -121,6 +122,11 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
             MaxBytesPerPush = maxBytesPerPush
         };
 
+        // The consumer first, and with it the handler for what the broker pushes (#289): the broker starts pushing
+        // when it has taken the subscription, which is before its answer is read here, and a frame that arrived
+        // ahead of the handler was dropped.
+        var consumer = new SurgewaveStreamingConsumer(client, subscriptionId, topic, partitions);
+
         var buffer = ArrayPool<byte>.Shared.Rent(payload.EstimateSize() + 32);
         try
         {
@@ -135,12 +141,18 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
             if (header.ErrorCode != SurgewaveErrorCode.None)
                 throw new ProtocolException(SurgewaveOpCode.Subscribe, header.ErrorCode);
         }
+        catch
+        {
+            // Not subscribed: there is nothing to unsubscribe from.
+            await consumer.StopAsync().ConfigureAwait(false);
+            throw;
+        }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
-        return new SurgewaveStreamingConsumer(client, subscriptionId, topic, partitions);
+        return consumer;
     }
 
     /// <summary>
@@ -250,15 +262,7 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        // Stop the ack loop and channel producer
-        await _cts.CancelAsync();
-        _channel.Writer.TryComplete();
-
-        try { await _ackTask; } catch (OperationCanceledException) { }
-        await _connectionWatch;
-
-        // Deregister the push handler
-        _client.UnregisterPushHandler(SurgewaveOpCode.FetchResponse);
+        await StopAsync().ConfigureAwait(false);
 
         // Best-effort Unsubscribe
         try
@@ -284,6 +288,23 @@ public sealed class SurgewaveStreamingConsumer : IAsyncDisposable
         {
             // Ignore errors on cleanup
         }
+    }
+
+    // Ends the consumer on this side: its tasks, its records and its handler. Once.
+    private async Task StopAsync()
+    {
+        if (Interlocked.Exchange(ref _stopped, 1) != 0)
+            return;
+
+        // Stop the ack loop and channel producer
+        await _cts.CancelAsync().ConfigureAwait(false);
+        _channel.Writer.TryComplete();
+
+        try { await _ackTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
+        await _connectionWatch.ConfigureAwait(false);
+
+        // Deregister the push handler
+        _client.UnregisterPushHandler(SurgewaveOpCode.FetchResponse);
 
         _cts.Dispose();
     }

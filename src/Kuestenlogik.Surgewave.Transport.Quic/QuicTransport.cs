@@ -156,6 +156,15 @@ public sealed class QuicTransport : ISurgewaveTransport
             ClientAuthenticationOptions = clientAuth
         };
 
+        // A broker that vanished is noticed (#289): the connection is kept alive while the broker answers, and
+        // counts as lost once it has carried nothing for as long as the probes of a TCP connection would take.
+        // Neither was set, so a connection whose peer was gone stood for as long as the client ran.
+        if (_options.KeepAliveTime != Timeout.InfiniteTimeSpan)
+        {
+            clientOptions.KeepAliveInterval = _options.KeepAliveInterval;
+            clientOptions.IdleTimeout = _options.KeepAliveTime + (_options.KeepAliveInterval * _options.KeepAliveRetryCount);
+        }
+
         _connection = await QuicConnection.ConnectAsync(clientOptions, cancellationToken).ConfigureAwait(false);
         _stream = await _connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken).ConfigureAwait(false);
 
@@ -414,6 +423,11 @@ public sealed class QuicTransport : ISurgewaveTransport
                 // the requests after this one (#281).
                 throw EndConnection(ConnectionLoss.Describe(ex, _options.Host, _options.Port));
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                AbandonConnection();
+                throw;
+            }
         }
         finally
         {
@@ -595,6 +609,28 @@ public sealed class QuicTransport : ISurgewaveTransport
 
         try { _readerCts?.Cancel(); }
         catch (ObjectDisposedException) { /* disposal already under way */ }
+
+        _stream?.Dispose();
+    }
+
+    /// <summary>
+    /// Ends the connection after a request was cancelled while its answer was awaited, one request at a time (#289).
+    /// </summary>
+    /// <remarks>
+    /// The request is with the broker, and its answer comes, in whole or in the part the cancelled read had not yet
+    /// taken. With one request at a time nothing reads it but the next request, which took it for its own answer
+    /// and failed with "Request ID mismatch", or read the rest of a frame as a header. Nothing tells how far the
+    /// read got, so the stream cannot be put back in step; the next request fails with what is said here and the
+    /// caller connects again. A pipelined connection has a reader of its own and is not affected.
+    /// </remarks>
+    private void AbandonConnection()
+    {
+        if (Interlocked.Exchange(ref _connectionFaulted, 1) != 0)
+            return;
+
+        EndConnection(new IOException(
+            $"The connection to {_options.Host}:{_options.Port} was closed: a request was cancelled while its answer was awaited, " +
+            "and with one request at a time the next request would have read that answer as its own."));
 
         _stream?.Dispose();
     }

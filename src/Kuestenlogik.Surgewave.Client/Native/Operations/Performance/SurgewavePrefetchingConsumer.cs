@@ -8,6 +8,12 @@ namespace Kuestenlogik.Surgewave.Client.Native.Operations.Performance;
 /// Uses batch-based buffering with Channel for lock-free batch passing between fetcher and consumer.
 /// Designed to match or exceed librdkafka consumer performance.
 /// </summary>
+/// <remarks>
+/// When the connection to the broker ends, the consumer ends with it (#289): what was fetched before is handed out,
+/// and the call after that fails with the <see cref="IOException"/> the connection ended with. The fetcher used to
+/// swallow every failure and ask again every 100 ms, on a connection nothing would be answered on any more, and a
+/// caller of <see cref="ConsumeAsync"/> waited for a message with no end.
+/// </remarks>
 public sealed class SurgewavePrefetchingConsumer : IAsyncDisposable
 {
     private readonly SurgewaveNativeClient _client;
@@ -92,7 +98,15 @@ public sealed class SurgewavePrefetchingConsumer : IAsyncDisposable
         }
 
         _currentBatch = null;
+        ThrowIfTheConnectionEnded();
         return null;
+    }
+
+    // Nothing buffered and nothing to come: said with what the connection ended with, not with "no message".
+    private void ThrowIfTheConnectionEnded()
+    {
+        if (_batchChannel.Reader.Completion.IsFaulted)
+            _batchChannel.Reader.Completion.GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -168,6 +182,7 @@ public sealed class SurgewavePrefetchingConsumer : IAsyncDisposable
             return newBatch;
         }
 
+        ThrowIfTheConnectionEnded();
         return null;
     }
 
@@ -250,6 +265,13 @@ public sealed class SurgewavePrefetchingConsumer : IAsyncDisposable
                 }
                 catch (ChannelClosedException)
                 {
+                    break;
+                }
+                catch (Exception) when (_client.ConnectionEnded is { IsCompletedSuccessfully: true, Result: { } why })
+                {
+                    // The connection is gone, and with it every later fetch: the consumer's callers are told why
+                    // once they have read what was fetched before.
+                    _batchChannel.Writer.TryComplete(why);
                     break;
                 }
                 catch (Exception)

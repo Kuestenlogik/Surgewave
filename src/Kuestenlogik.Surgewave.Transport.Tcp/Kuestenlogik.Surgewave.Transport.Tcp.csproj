@@ -4,4 +4,8 @@
     <ProjectReference Include="..\Kuestenlogik.Surgewave.Transport\Kuestenlogik.Surgewave.Transport.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kuestenlogik.Surgewave.Transport.Tests" />
+  </ItemGroup>
+
 </Project>

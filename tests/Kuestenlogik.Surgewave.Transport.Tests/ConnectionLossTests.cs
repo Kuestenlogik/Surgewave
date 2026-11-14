@@ -119,6 +119,37 @@ public sealed class ConnectionLossTests
         }
     }
 
+    /// <summary>
+    /// With one request at a time, a request cancelled while its answer is awaited ends the connection (#289): its
+    /// answer comes all the same, and the next request read it as its own ("Request ID mismatch"), or waited behind
+    /// it. The server here never answers, so the next request waited with no end.
+    /// </summary>
+    [Theory]
+    [InlineData(SurgewaveTransportType.Tcp)]
+    [InlineData(SurgewaveTransportType.Quic)]
+    public async Task ARequestCancelledWhileItsAnswerIsAwaitedEndsAOneAtATimeConnection(SurgewaveTransportType type)
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        SkipWithout(type);
+        var ct = TestContext.Current.CancellationToken;
+        await using var server = await DroppingNativeServer.StartAsync(type, ct);
+        await using var transport = await ConnectAsync(type, server.Port, pipelining: false);
+
+        using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var request = transport.SendRequestAsync(SurgewaveOpCode.Fetch, new byte[64], compress: false, cancelled.Token).AsTask();
+        await server.HasReadAsync(1).WaitAsync(Bound, ct);
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(Bound, ct));
+
+        var next = transport.SendRequestAsync(SurgewaveOpCode.Fetch, new byte[64], compress: false, ct).AsTask();
+
+        var failure = await Assert.ThrowsAnyAsync<IOException>(() => next.WaitAsync(Bound, ct));
+        Assert.Contains("cancelled", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"127.0.0.1:{server.Port}", failure.Message, StringComparison.Ordinal);
+        Assert.False(transport.IsConnected);
+        Assert.IsAssignableFrom<IOException>(await transport.ConnectionEnded.WaitAsync(Bound, ct));
+    }
+
     private static void AssertSaysTheConnectionWent(IOException failure, int port)
     {
         Assert.Contains("connection", failure.Message, StringComparison.OrdinalIgnoreCase);

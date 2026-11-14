@@ -127,6 +127,7 @@ public sealed class TcpTransport : ISurgewaveTransport
         };
 
         await _client.ConnectAsync(_options.Host, _options.Port, cancellationToken);
+        TcpKeepAlive.Apply(_client.Client, _options);
         _stream = _client.GetStream();
 
         // Send magic bytes + version for handshake
@@ -392,6 +393,11 @@ public sealed class TcpTransport : ISurgewaveTransport
                 // the requests after this one (#281).
                 throw EndConnection(ConnectionLoss.Describe(ex, _options.Host, _options.Port));
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                AbandonConnection();
+                throw;
+            }
         }
         finally
         {
@@ -579,6 +585,29 @@ public sealed class TcpTransport : ISurgewaveTransport
         // Stop the reader before the socket goes away; it fails its own pendings if it loses the race.
         try { _readerCts?.Cancel(); }
         catch (ObjectDisposedException) { /* disposal already under way */ }
+
+        _stream?.Dispose();
+        _client?.Dispose();
+    }
+
+    /// <summary>
+    /// Ends the connection after a request was cancelled while its answer was awaited, one request at a time (#289).
+    /// </summary>
+    /// <remarks>
+    /// The request is with the broker, and its answer comes, in whole or in the part the cancelled read had not yet
+    /// taken. With one request at a time nothing reads it but the next request, which took it for its own answer
+    /// and failed with "Request ID mismatch", or read the rest of a frame as a header. Nothing tells how far the
+    /// read got, so the stream cannot be put back in step; the next request fails with what is said here and the
+    /// caller connects again. A pipelined connection has a reader of its own and is not affected.
+    /// </remarks>
+    private void AbandonConnection()
+    {
+        if (Interlocked.Exchange(ref _connectionFaulted, 1) != 0)
+            return;
+
+        EndConnection(new IOException(
+            $"The connection to {_options.Host}:{_options.Port} was closed: a request was cancelled while its answer was awaited, " +
+            "and with one request at a time the next request would have read that answer as its own."));
 
         _stream?.Dispose();
         _client?.Dispose();

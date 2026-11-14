@@ -50,4 +50,42 @@ public class SurgewavePrefetchingConsumerTests
             Assert.Equal(i, msg!.Offset);
         }
     }
+
+    /// <summary>
+    /// The fetcher swallowed every failure and asked again every 100 ms, on a connection nothing would be answered
+    /// on any more, and a caller waited for a message with no end (#289).
+    /// </summary>
+    [Fact]
+    public async Task WhenTheConnectionIsLost_WhatWasFetchedIsHandedOut_AndTheNextCallFailsWithWhy()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fake = new FakeSurgewaveTransport();
+        for (int i = 0; i < 3; i++)
+            fake.Append("t", 0, key: null, new byte[100]);
+
+        // The fetch behind the three messages finds the connection gone.
+        fake.OnFetchAsync = req =>
+        {
+            if (req.Offset >= 3) fake.SimulateConnectionLoss();
+            return Task.CompletedTask;
+        };
+
+        await using var client = new SurgewaveNativeClient(fake);
+        await client.ConnectAsync(ct);
+        await using var consumer = new SurgewavePrefetchingConsumer(client, "t", 0, startOffset: 0);
+
+        for (int i = 0; i < 3; i++)
+        {
+            var msg = await consumer.ConsumeAsync(ct).AsTask().WaitAsync(TestTimeout, ct);
+            Assert.Equal(i, msg!.Offset);
+        }
+
+        var lost = await Assert.ThrowsAsync<IOException>(() => consumer.ConsumeAsync(ct).AsTask().WaitAsync(TestTimeout, ct));
+        Assert.Contains("connection loss", lost.Message, StringComparison.Ordinal);
+
+        // And every call after it, the ones that do not wait as well.
+        Assert.Throws<IOException>(() => consumer.Consume());
+        Assert.Throws<IOException>(() => consumer.ConsumeBatch());
+        await Assert.ThrowsAsync<IOException>(() => consumer.ConsumeBatchAsync(ct).AsTask().WaitAsync(TestTimeout, ct));
+    }
 }

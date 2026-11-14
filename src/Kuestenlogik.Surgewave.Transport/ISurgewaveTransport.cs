@@ -28,10 +28,11 @@ public interface ISurgewaveTransport : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// For what waits on the connection without a request of its own in flight — a streaming consumer waits for
-    /// frames the broker pushes, and has nothing that fails when the connection goes. The transports of this
-    /// repository complete it; the default, for a transport that does not say when its connection ends, never does.
+    /// frames the broker pushes, and has nothing that fails when the connection goes. Every transport says when its
+    /// connection ends (#289): the member had a default that never completed, and a consumer on a transport that
+    /// left it at that waited on a lost connection for as long as it lived.
     /// </remarks>
-    Task<Exception> ConnectionEnded => ConnectionThatDoesNotSay.WhenItEnds;
+    Task<Exception> ConnectionEnded { get; }
 
     /// <summary>
     /// Connect to the broker.
@@ -85,10 +86,4 @@ public interface ISurgewaveTransport : IAsyncDisposable
     /// Remove a previously registered push handler.
     /// </summary>
     void UnregisterPushHandler(SurgewaveOpCode opCode);
-}
-
-/// <summary>What <see cref="ISurgewaveTransport.ConnectionEnded"/> is for a transport that does not implement it.</summary>
-internal static class ConnectionThatDoesNotSay
-{
-    public static Task<Exception> WhenItEnds { get; } = new TaskCompletionSource<Exception>().Task;
 }
