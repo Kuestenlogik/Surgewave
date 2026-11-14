@@ -34,6 +34,12 @@ public enum SurgewaveErrorCode : ushort
     /// </summary>
     InternalError = 22,
 
+    /// <summary>
+    /// The request is the controller's to carry out, and no controller took it now: the office is changing hands
+    /// (#290). Nothing was done, and asking again may find one.
+    /// </summary>
+    NotController = 23,
+
     // Transaction errors
     InvalidProducerEpoch = 30,
     UnknownProducerId = 31,

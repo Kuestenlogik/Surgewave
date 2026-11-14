@@ -88,6 +88,69 @@ public sealed class NativeRequestAnswerTests
     }
 
     /// <summary>
+    /// A payload the handler cannot read is the client's fault and is answered as that (#290). It was answered as
+    /// the broker's failure and logged as an error with a stack trace, once per request: a client that sends what
+    /// cannot be read wrote the broker's log by itself.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public async Task ARequestThatCannotBeReadIsAnsweredInvalidRequestAndIsNotLoggedAsAnError(int payloadLength)
+    {
+        var log = new RecordingLogger();
+        await using var broker = new NativeLoopbackBroker(
+            [
+                // Reads what every request of the opcode starts with: four bytes the payload does not have.
+                new DelegatingHandler(SurgewaveOpCode.CreateTopic, (_, payload, _) =>
+                {
+                    _ = new SurgewavePayloadReader(payload.Span).ReadInt32();
+                    return Task.CompletedTask;
+                }),
+                new DelegatingHandler(SurgewaveOpCode.Ping, (context, _, ct) => context.SendResponseAsync(
+                    context.Header.RequestId, SurgewaveOpCode.Pong, SurgewaveErrorCode.None, ReadOnlyMemory<byte>.Empty, ct)),
+            ],
+            log);
+        await using var client = await ConnectAsync(broker.Port);
+
+        var (header, payload) = await client.SendRequestAsync(SurgewaveOpCode.CreateTopic, new byte[payloadLength])
+            .AsTask().WaitAsync(Bound, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SurgewaveOpCode.Error, header.OpCode);
+        Assert.Equal(SurgewaveErrorCode.InvalidRequest, header.ErrorCode);
+        Assert.Contains("CreateTopic", ReadErrorMessage(payload), StringComparison.Ordinal);
+        Assert.DoesNotContain(log.Entries, e => e.Level >= LogLevel.Warning);
+
+        var (next, _) = await client.SendRequestAsync(SurgewaveOpCode.Ping, ReadOnlyMemory<byte>.Empty)
+            .AsTask().WaitAsync(Bound, TestContext.Current.CancellationToken);
+        Assert.Equal(SurgewaveOpCode.Pong, next.OpCode);
+    }
+
+    /// <summary>
+    /// A topic no controller took is answered as that, on which a client asks again (#290): it was the broker's
+    /// failure, while Kafka answers NOT_CONTROLLER for it and gRPC LeaderNotAvailable.
+    /// </summary>
+    [Fact]
+    public async Task ATopicNoControllerTookIsAnsweredNotController()
+    {
+        var log = new RecordingLogger();
+        await using var broker = new NativeLoopbackBroker(
+            [
+                new DelegatingHandler(SurgewaveOpCode.CreateTopic, (_, _, _) =>
+                    Task.FromException(new Kuestenlogik.Surgewave.Core.Storage.TopicNotCreatedException("orders"))),
+            ],
+            log);
+        await using var client = await ConnectAsync(broker.Port);
+
+        var (header, payload) = await client.SendRequestAsync(SurgewaveOpCode.CreateTopic, ReadOnlyMemory<byte>.Empty)
+            .AsTask().WaitAsync(Bound, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SurgewaveOpCode.Error, header.OpCode);
+        Assert.Equal(SurgewaveErrorCode.NotController, header.ErrorCode);
+        Assert.Contains("orders", ReadErrorMessage(payload), StringComparison.Ordinal);
+        Assert.DoesNotContain(log.Entries, e => e.Level >= LogLevel.Warning);
+    }
+
+    /// <summary>
     /// The three shapes <see cref="OperationExecutor"/> runs, each failing in the step a real operation fails in:
     /// reading the request, and carrying it out.
     /// </summary>

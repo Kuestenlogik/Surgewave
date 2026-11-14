@@ -35,6 +35,7 @@ Enum: `Kuestenlogik.Surgewave.Protocol.Native.SurgewaveErrorCode` (type: `ushort
 | `20` | `NotCoordinator` | This broker is not the group coordinator |
 | `21` | `CoordinatorNotAvailable` | Group coordinator is not yet available |
 | `22` | `InternalError` | The broker failed while carrying out the request in a way the operation does not account for; the message names the request id, under which the broker's log has the cause. The request may or may not have taken effect |
+| `23` | `NotController` | The request is the controller's to carry out and no controller took it now, as while the office changes hands. Nothing was done; ask again |
 
 ### Transaction Errors
 

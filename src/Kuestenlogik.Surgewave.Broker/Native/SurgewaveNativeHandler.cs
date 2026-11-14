@@ -373,6 +373,10 @@ public sealed class SurgewaveNativeHandler
     /// Every request is answered or the connection is closed (#281). Whatever a handler throws that it did not
     /// turn into an answer itself is answered here with <see cref="SurgewaveErrorCode.InternalError"/> and logged
     /// with the request it belongs to; the request's frame was read completely, so the connection goes on. Two
+    /// things a handler throws are not the broker's failure and are answered as what they are (#290): a payload it
+    /// could not read is the client's, <see cref="SurgewaveErrorCode.InvalidRequest"/>, and a topic no controller
+    /// took is nobody's, <see cref="SurgewaveErrorCode.NotController"/>, which a client asks again on. Neither is
+    /// logged as an error: a client that sends what cannot be read would write the broker's log by itself. Two
     /// things end the loop instead, and with it the connection: the broker stopping, which cancels the handlers and
     /// is not answered request by request, and an answer that cannot be written — a client that went while its
     /// request was being carried out is no failed request and is not logged as one.
@@ -413,6 +417,24 @@ public sealed class SurgewaveNativeHandler
                     // The handler failed on writing its answer: the client has gone, or a frame is partly on
                     // the wire. That is the connection's end, which the caller logs, not a failed request.
                     throw;
+                }
+                catch (SurgewavePayloadException ex)
+                {
+                    _logger.LogDebug("Native request {RequestId} ({OpCode}) could not be read and was answered {ErrorCode}: {Reason}",
+                        request.Header.RequestId, request.Header.OpCode, SurgewaveErrorCode.InvalidRequest, ex.Message);
+                    await responder.SendErrorAsync(request.Header.RequestId, request.Header.OpCode,
+                        SurgewaveErrorCode.InvalidRequest,
+                        $"The payload of {request.Header.OpCode} (request {request.Header.RequestId}) could not be read: {ex.Message}",
+                        cancellationToken);
+                    continue;
+                }
+                catch (TopicNotCreatedException ex)
+                {
+                    _logger.LogInformation("Native request {RequestId} ({OpCode}) was answered {ErrorCode}: {Reason}",
+                        request.Header.RequestId, request.Header.OpCode, SurgewaveErrorCode.NotController, ex.Message);
+                    await responder.SendErrorAsync(request.Header.RequestId, request.Header.OpCode,
+                        SurgewaveErrorCode.NotController, ex.Message, cancellationToken);
+                    continue;
                 }
                 catch (Exception ex)
                 {

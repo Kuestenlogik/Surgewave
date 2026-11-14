@@ -83,6 +83,15 @@ under a cluster id made of the broker's own. They answer from the cluster's stat
 the controller and the id of the cluster, every broker with the health the asked broker holds it in, and each
 partition's leader, replicas and in-sync replicas. A broker that runs alone answers as before.
 
+### Native error answers say what went wrong (#290)
+
+A native request whose payload the broker could not read was answered `InternalError`, as if the broker had
+failed, and logged as an error with a stack trace — once per request, so a client could fill the broker's log.
+It is answered `InvalidRequest` with what could not be read, and logged at debug level. A topic creation no
+controller took, as while the office changes hands, was `InternalError` too; it is answered with the new error
+code `NotController` (23), which says that nothing was done and asking again may work. A client that does not
+know the code reads it as an unknown error.
+
 ## Breaking changes
 
 ### A partition whose last in-sync replica fails has no leader (#253)

@@ -397,6 +397,7 @@ the request.
 | 20   | NotCoordinator                  |
 | 21   | CoordinatorNotAvailable         |
 | 22   | InternalError                   |
+| 23   | NotController                   |
 | 30-37 | Transaction errors             |
 | 40-42 | Security errors                |
 | 50-51 | Config errors                  |
