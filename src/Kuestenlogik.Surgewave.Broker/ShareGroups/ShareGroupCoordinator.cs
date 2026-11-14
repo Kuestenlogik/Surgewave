@@ -665,7 +665,7 @@ public sealed class ShareGroupCoordinator : IShareGroupCoordinator, IShareGroupC
     // The leader when another broker leads the partition; null when this one does, or nobody knows another.
     private ShareLeader? NotLeaderHere(TopicPartition tp)
     {
-        if (_leadership?.IsLedByAnotherBroker(tp) != true)
+        if (_leadership?.IsNotLedHere(tp) != true)
             return null;
         _sharePartitions.Drop(tp);
         return LeaderOf(tp);

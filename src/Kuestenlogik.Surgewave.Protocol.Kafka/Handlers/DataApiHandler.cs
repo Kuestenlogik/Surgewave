@@ -436,7 +436,7 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                     //
                     // Only when we positively KNOW someone else leads: a single-broker or
                     // embedded runtime has no partition states at all, and must keep working.
-                    if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true)
+                    if (_partitionLeadership?.IsNotLedHere(topicPartition) == true)
                     {
                         partitionResponses.Add(new ProduceResponse.PartitionProduceResponse
                         {
@@ -1057,6 +1057,23 @@ public sealed partial class DataApiHandler : IKafkaRequestHandler
                             Partition = partitionData.Partition,
                             ErrorCode = ErrorCode.KafkaStorageError,
                             HighWatermark = 0,
+                            RecordSet = ReadOnlyMemory<byte>.Empty
+                        });
+                        continue;
+                    }
+
+                    // A fetch for a partition this broker does not lead is refused (#287), as a produce is (#164). It
+                    // was answered from whatever this broker held of the partition — nothing, where it has no
+                    // replica — without an error, and a consumer with stale metadata went on asking this broker
+                    // with no end. NOT_LEADER_OR_FOLLOWER makes it refresh its metadata, as Kafka answers a
+                    // consumer that names no rack to read from a follower in.
+                    if (_partitionLeadership?.IsNotLedHere(topicPartition) == true)
+                    {
+                        partitionResponses.Add(new FetchResponse.PartitionResponse
+                        {
+                            Partition = partitionData.Partition,
+                            ErrorCode = ErrorCode.NotLeaderForPartition,
+                            HighWatermark = -1,
                             RecordSet = ReadOnlyMemory<byte>.Empty
                         });
                         continue;

@@ -24,7 +24,7 @@ public sealed class ClusterStatePartitionLeadership : IPartitionLeadership
     }
 
     /// <inheritdoc />
-    public bool IsLedByAnotherBroker(TopicPartition partition)
+    public bool IsNotLedHere(TopicPartition partition)
     {
         var state = _clusterState.GetPartitionState(partition);
 
@@ -32,11 +32,8 @@ public sealed class ClusterStatePartitionLeadership : IPartitionLeadership
         // here knows who leads it. Not an answer of "someone else does".
         if (state is null) return false;
 
-        // -1 is "no leader", which is a partition mid-election rather than one led
-        // elsewhere. Refusing there would turn every election into a client-visible
-        // error even for the broker that is about to win it.
-        if (state.LeaderBrokerId < 0) return false;
-
+        // -1 is "no leader" (#253): the partition's last in-sync replica is gone. Nobody appends to it or serves it,
+        // least of all a replica that is not in sync; the client is sent back to the metadata, which says so.
         return state.LeaderBrokerId != _localBrokerId;
     }
 

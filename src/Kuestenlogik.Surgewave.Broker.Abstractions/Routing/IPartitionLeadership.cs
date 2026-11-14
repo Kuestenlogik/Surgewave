@@ -3,7 +3,7 @@ using Kuestenlogik.Surgewave.Core.Models;
 namespace Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
 
 /// <summary>
-/// Answers whether a partition is led by a broker other than this one (#164).
+/// Answers whether this broker knows that it does not lead a partition (#164): another broker does, or none.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,12 +14,18 @@ namespace Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
 /// Without it, stale metadata is not corrected but acted on.
 /// </para>
 /// <para>
-/// Deliberately phrased as the POSITIVE knowledge that someone else leads, not as "am I
-/// the leader". A single-broker or embedded runtime has no cluster state and therefore no
+/// Deliberately phrased as the POSITIVE knowledge that this broker does not lead, not as "am
+/// I the leader". A single-broker or embedded runtime has no cluster state and therefore no
 /// partition states at all — they are written only by the clustering paths (the Raft state
 /// machine, controller pushes, the replica manager). Asking "am I the leader" would answer
-/// no there and refuse every write. Asking "does someone else lead it" answers no, and
+/// no there and refuse every write. Asking "do I know that I do not lead it" answers no, and
 /// those deployments are untouched.
+/// </para>
+/// <para>
+/// A partition the cluster knows and that has no leader is not led here either (#253): its
+/// last in-sync replica is gone, and a replica that is not in sync appends nothing and serves
+/// nothing until a leader is elected. It used to count as "mid-election" and was let through,
+/// which was harmless while every election named a leader within the same entry.
 /// </para>
 /// <para>
 /// The asymmetry is also the safe one under a stale view. Refusing when we are in fact the
@@ -38,10 +44,10 @@ namespace Kuestenlogik.Surgewave.Broker.Abstractions.Routing;
 public interface IPartitionLeadership
 {
     /// <summary>
-    /// <c>true</c> only when this broker knows another broker leads the partition.
-    /// Unknown, unled, or led by us all answer <c>false</c>.
+    /// <c>true</c> only when this broker knows the partition and does not lead it: another broker does, or the
+    /// partition has no leader. Unknown, or led by us, answers <c>false</c>.
     /// </summary>
-    bool IsLedByAnotherBroker(TopicPartition partition);
+    bool IsNotLedHere(TopicPartition partition);
 
     /// <summary>The partition's leader and its epoch, null when this broker does not know one (#228).</summary>
     PartitionLeader? LeaderOf(TopicPartition partition);

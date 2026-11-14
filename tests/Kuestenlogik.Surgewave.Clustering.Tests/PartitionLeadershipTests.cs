@@ -34,7 +34,7 @@ public sealed class PartitionLeadershipTests
         // partition state, so the produce path must keep appending exactly as before.
         var (leadership, _) = New();
 
-        Assert.False(leadership.IsLedByAnotherBroker(Tp));
+        Assert.False(leadership.IsNotLedHere(Tp));
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public sealed class PartitionLeadershipTests
         var (leadership, state) = New();
         state.SetPartitionState(Tp, new PartitionState { TopicPartition = Tp, LeaderBrokerId = 2 });
 
-        Assert.True(leadership.IsLedByAnotherBroker(Tp));
+        Assert.True(leadership.IsNotLedHere(Tp));
     }
 
     [Fact]
@@ -52,19 +52,18 @@ public sealed class PartitionLeadershipTests
         var (leadership, state) = New();
         state.SetPartitionState(Tp, new PartitionState { TopicPartition = Tp, LeaderBrokerId = LocalBroker });
 
-        Assert.False(leadership.IsLedByAnotherBroker(Tp));
+        Assert.False(leadership.IsNotLedHere(Tp));
     }
 
     [Fact]
-    public void APartitionMidElectionIsNotRefused()
+    public void APartitionWithoutALeaderIsRefused()
     {
-        // LeaderBrokerId -1 is "no leader yet", not "led elsewhere". Refusing here would
-        // turn every election into a client-visible error, including for the broker that
-        // is about to win it.
+        // LeaderBrokerId -1 is a partition whose last in-sync replica is gone (#253). A replica that is not in sync
+        // and took a produce for it would hold records no leader ever has.
         var (leadership, state) = New();
         state.SetPartitionState(Tp, new PartitionState { TopicPartition = Tp, LeaderBrokerId = -1 });
 
-        Assert.False(leadership.IsLedByAnotherBroker(Tp));
+        Assert.True(leadership.IsNotLedHere(Tp));
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class PartitionLeadershipTests
         state.SetPartitionState(Tp, new PartitionState { TopicPartition = Tp, LeaderBrokerId = LocalBroker });
         state.SetPartitionState(other, new PartitionState { TopicPartition = other, LeaderBrokerId = 2 });
 
-        Assert.False(leadership.IsLedByAnotherBroker(Tp));
-        Assert.True(leadership.IsLedByAnotherBroker(other));
+        Assert.False(leadership.IsNotLedHere(Tp));
+        Assert.True(leadership.IsNotLedHere(other));
     }
 }

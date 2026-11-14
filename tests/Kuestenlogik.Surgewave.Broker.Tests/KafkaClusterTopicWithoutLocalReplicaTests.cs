@@ -100,12 +100,11 @@ public sealed class KafkaClusterTopicWithoutLocalReplicaTests : IDisposable
     }
 
     /// <remarks>
-    /// Answered, and nothing created, which is what is asked here. The answer itself is an empty fetch without an
-    /// error: the fetch path does not ask who leads the partition, as the produce path does (#164). That is not
-    /// what Kafka answers (NOT_LEADER_OR_FOLLOWER) and is left as found; it is not asserted either way.
+    /// It was answered with an empty fetch and no error, on which a consumer asks the same broker again with no end
+    /// (#287).
     /// </remarks>
     [Fact]
-    public async Task FetchIsAnsweredAndCreatesNothing()
+    public async Task FetchIsAnsweredNotLeaderAndCreatesNothing()
     {
         var response = await _handler.HandleAsync(
             new FetchRequest
@@ -130,7 +129,9 @@ public sealed class KafkaClusterTopicWithoutLocalReplicaTests : IDisposable
             Context(),
             TestContext.Current.CancellationToken);
 
-        Assert.Single(Assert.IsType<FetchResponse>(response).Responses[0].Partitions);
+        var partition = Assert.Single(Assert.IsType<FetchResponse>(response).Responses[0].Partitions);
+        Assert.Equal(ErrorCode.NotLeaderForPartition, partition.ErrorCode);
+        Assert.True(partition.RecordSet.IsEmpty);
         Assert.Empty(_creator.Asked);
         Assert.Null(_logManager.GetTopicMetadata(Topic));
     }
@@ -155,7 +156,7 @@ public sealed class KafkaClusterTopicWithoutLocalReplicaTests : IDisposable
     /// <summary>Every partition is led by broker 1, which this broker is not.</summary>
     private sealed class LedByBrokerOne : IPartitionLeadership
     {
-        public bool IsLedByAnotherBroker(TopicPartition partition) => true;
+        public bool IsNotLedHere(TopicPartition partition) => true;
 
         public PartitionLeader? LeaderOf(TopicPartition partition) => new PartitionLeader(1, 0);
     }

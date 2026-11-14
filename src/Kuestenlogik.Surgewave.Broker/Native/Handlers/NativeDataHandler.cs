@@ -74,7 +74,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
     /// produce for a partition led elsewhere is answered with (#164), and what a client retries with fresh metadata.
     /// </remarks>
     private bool IsTheClustersAndLedElsewhere(string topic, int partition) =>
-        _partitionLeadership?.IsLedByAnotherBroker(new TopicPartition { Topic = topic, Partition = partition }) == true;
+        _partitionLeadership?.IsNotLedHere(new TopicPartition { Topic = topic, Partition = partition }) == true;
 
     public Task HandleAsync(NativeRequestContext context, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
@@ -165,7 +165,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
         // A partition whose log directory has failed is not served either (#162). The native protocol has no storage
         // error; NotLeader is the answer its clients already retry with fresh metadata, which by then names the
         // successor the controller moved the leadership to.
-        if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true || _logManager.IsLogDirOffline(topicPartition))
+        if (_partitionLeadership?.IsNotLedHere(topicPartition) == true || _logManager.IsLogDirOffline(topicPartition))
         {
             await context.SendResponseAsync(context.Header.RequestId, SurgewaveOpCode.ProduceAck,
                 SurgewaveErrorCode.NotLeader, ReadOnlyMemory<byte>.Empty, cancellationToken);
@@ -310,7 +310,7 @@ public sealed class NativeDataHandler : INativeRequestHandler
                     // carries several partitions, so this skips the ones we do not lead
                     // rather than failing the whole request — GetOrCreateLog below would
                     // otherwise MATERIALISE a log for a partition led elsewhere.
-                    if (_partitionLeadership?.IsLedByAnotherBroker(topicPartition) == true
+                    if (_partitionLeadership?.IsNotLedHere(topicPartition) == true
                         || _logManager.IsLogDirOffline(topicPartition))
                         continue;
 

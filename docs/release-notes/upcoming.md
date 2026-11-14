@@ -67,6 +67,13 @@ The loop that looks at the leader balance and the cluster balance was started wi
 never stopped when it lost the office, so a broker ran one more with every re-election, and went on rebalancing as
 a controller it no longer was.
 
+### A fetch sent to a broker that does not lead the partition is refused (#287)
+
+A Kafka Fetch for a partition another broker leads was answered from whatever the asked broker held of it —
+nothing, where it has no replica — and without an error, so a consumer with stale metadata went on polling that
+broker with no end. It is answered `NOT_LEADER_OR_FOLLOWER` now, as a produce is, and the consumer refreshes its
+metadata. The same answer goes to a produce and a fetch for a partition that has no leader.
+
 ## Breaking changes
 
 ### A partition whose last in-sync replica fails has no leader (#253)

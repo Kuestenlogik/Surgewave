@@ -9,13 +9,14 @@ using static Kuestenlogik.Surgewave.Broker.BootTests.KafkaWire;
 namespace Kuestenlogik.Surgewave.Broker.BootTests;
 
 /// <summary>
-/// The shipped broker refuses a produce for a partition another broker leads (#227): NOT_LEADER_OR_FOLLOWER, as Kafka
-/// answers, so a client with stale metadata refreshes it. The embedded runtime had this check since #164; the shipped
+/// The shipped broker refuses a produce (#227) and a fetch (#287) for a partition another broker leads:
+/// NOT_LEADER_OR_FOLLOWER, as Kafka answers, so a client with stale metadata refreshes it. The embedded runtime had this check since #164; the shipped
 /// broker never wired it and appended the records to a follower's copy, where nobody would read them.
 /// </summary>
 /// <remarks>
-/// Two brokers of the shipped binary in one cluster. The produce is written by hand, because a Kafka client sends it
-/// to the leader it knows from the metadata.
+/// Two brokers of the shipped binary in one cluster. The requests are written by hand, because a Kafka client sends
+/// them to the leader it knows from the metadata. A fetch was answered empty and without an error, on which a
+/// consumer asks the same broker again with no end.
 /// </remarks>
 [Trait("Category", "Integration")]
 [Collection("BrokerBoot")]
@@ -24,7 +25,7 @@ public sealed class PartitionLeadershipOnProduceTests
     private const short NotLeaderOrFollower = 6;
 
     [Fact(Timeout = 240_000)]
-    public async Task AProduceForAPartitionAnotherBrokerLeadsIsRefused()
+    public async Task AProduceAndAFetchForAPartitionAnotherBrokerLeadsAreRefused()
     {
         var ct = TestContext.Current.CancellationToken;
         var dirs = new[] { NewDataDir(), NewDataDir() };
@@ -51,6 +52,14 @@ public sealed class PartitionLeadershipOnProduceTests
 
             Assert.True(error == NotLeaderOrFollower,
                 $"broker 1 answered {error} for {topic}-{ledBySecond}, which broker 2 leads\n{first.Dump()}");
+
+            var fetchError = await FetchAsync(first.KafkaPort, topic, ledBySecond, ct);
+
+            Assert.True(fetchError == NotLeaderOrFollower,
+                $"broker 1 answered a fetch with {fetchError} for {topic}-{ledBySecond}, which broker 2 leads\n{first.Dump()}");
+
+            // And the leader itself answers it.
+            Assert.Equal(0, await FetchAsync(second.KafkaPort, topic, ledBySecond, ct));
         }
         finally
         {
@@ -105,6 +114,34 @@ public sealed class PartitionLeadershipOnProduceTests
 
         // correlation id, topics count, topic name, partitions count, partition index, error code
         var at = 4 + 4;
+        at += 2 + BinaryPrimitives.ReadInt16BigEndian(response.AsSpan(at));
+        at += 4 + 4;
+        return BinaryPrimitives.ReadInt16BigEndian(response.AsSpan(at));
+    }
+
+    /// <summary>One Fetch v4 request for one partition from offset 0, sent to <paramref name="port"/>; its error.</summary>
+    private static async Task<short> FetchAsync(int port, string topic, int partition, CancellationToken ct)
+    {
+        var body = new List<byte>();
+        Int16(body, 1); // api key: Fetch
+        Int16(body, 4); // version
+        Int32(body, 2); // correlation id
+        String(body, "boot-test");
+        Int32(body, -1); // replica id: a consumer
+        Int32(body, 0); // max wait
+        Int32(body, 1); // min bytes
+        Int32(body, 1024 * 1024); // max bytes
+        body.Add(0); // isolation level: read uncommitted
+        Int32(body, 1); // topics
+        String(body, topic);
+        Int32(body, 1); // partitions
+        Int32(body, partition);
+        Int64(body, 0); // fetch offset
+        Int32(body, 1024 * 1024); // partition max bytes
+        var response = await ExchangeAsync(port, body, ct);
+
+        // correlation id, throttle time, topics count, topic name, partitions count, partition index, error code
+        var at = 4 + 4 + 4;
         at += 2 + BinaryPrimitives.ReadInt16BigEndian(response.AsSpan(at));
         at += 4 + 4;
         return BinaryPrimitives.ReadInt16BigEndian(response.AsSpan(at));

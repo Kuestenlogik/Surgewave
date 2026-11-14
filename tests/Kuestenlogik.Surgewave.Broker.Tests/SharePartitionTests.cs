@@ -537,7 +537,7 @@ public sealed class SharePartitionTests : IDisposable
 
     private sealed class LedBy(PartitionLeader leader) : IPartitionLeadership
     {
-        public bool IsLedByAnotherBroker(TopicPartition partition) => true;
+        public bool IsNotLedHere(TopicPartition partition) => true;
 
         public PartitionLeader? LeaderOf(TopicPartition partition) => leader;
     }
