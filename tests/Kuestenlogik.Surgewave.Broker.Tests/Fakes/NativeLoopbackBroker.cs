@@ -70,9 +70,12 @@ internal sealed class NativeLoopbackBroker : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // The loop first, the listener after it: stopped under the loop, the listener answered the loop's next accept
+        // with "Not listening" — an InvalidOperationException, which is neither of the two ends the loop expects —
+        // and the dispose rethrew it into a test that had passed.
         await _stopping.CancelAsync();
-        _listener.Stop();
         await _acceptTask;
+        _listener.Stop();
 
         Task[] connections;
         lock (_connections)
