@@ -13,7 +13,10 @@ public record ClusterInfoDto(
     string Host,
     int Port,
     int TopicCount,
-    int PartitionCount);
+    int PartitionCount,
+    // The cluster's controller and id, where the broker is one of a cluster; null where it runs alone and is both.
+    int? ControllerId = null,
+    string? ClusterId = null);
 
 /// <summary>
 /// Broker info for listing.
@@ -33,7 +36,8 @@ public record BrokerInfoDto(
 public record TopicMetadataDto(
     string Name,
     int PartitionCount,
-    List<PartitionMetadataDto> Partitions);
+    List<PartitionMetadataDto> Partitions,
+    short ReplicationFactor = 1);
 
 /// <summary>
 /// Partition metadata for GetMetadata response.
@@ -165,10 +169,11 @@ public class ClusterServiceImpl : ClusterService.ClusterServiceBase
         var brokers = _listBrokers();
         var clusterInfo = _getClusterInfo();
 
+        // The controller and the id of the cluster (#272), not the broker asked under an id made of its own.
         var response = new GetMetadataResponse
         {
-            ControllerId = clusterInfo.BrokerId,
-            ClusterId = $"surgewave-{clusterInfo.BrokerId}"
+            ControllerId = clusterInfo.ControllerId ?? clusterInfo.BrokerId,
+            ClusterId = clusterInfo.ClusterId ?? $"surgewave-{clusterInfo.BrokerId}"
         };
 
         response.Brokers.AddRange(brokers.Select(ToBrokerInfo));
@@ -179,7 +184,7 @@ public class ClusterServiceImpl : ClusterService.ClusterServiceBase
             {
                 Name = topic.Name,
                 NumPartitions = topic.PartitionCount,
-                ReplicationFactor = 1,
+                ReplicationFactor = topic.ReplicationFactor,
                 IsInternal = topic.Name.StartsWith("__", StringComparison.Ordinal)
             };
 
@@ -208,8 +213,8 @@ public class ClusterServiceImpl : ClusterService.ClusterServiceBase
 
         var response = new GetClusterInfoResponse
         {
-            ClusterId = $"surgewave-{info.BrokerId}",
-            ControllerId = info.BrokerId,
+            ClusterId = info.ClusterId ?? $"surgewave-{info.BrokerId}",
+            ControllerId = info.ControllerId ?? info.BrokerId,
             TopicCount = info.TopicCount,
             PartitionCount = info.PartitionCount,
             Status = ResponseStatusFactory.Success

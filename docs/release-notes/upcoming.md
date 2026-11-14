@@ -74,6 +74,15 @@ nothing, where it has no replica — and without an error, so a consumer with st
 broker with no end. It is answered `NOT_LEADER_OR_FOLLOWER` now, as a produce is, and the consumer refreshes its
 metadata. The same answer goes to a produce and a fetch for a partition that has no leader.
 
+### `surgewave cluster` and `/v3/metadata` describe the cluster, whichever broker is asked (#272)
+
+`surgewave cluster status`, `cluster nodes` and `cluster partitions` showed the broker they asked as the
+controller, the only node, and the leader and only replica of every partition; a topic the broker held no replica
+of did not exist for it. gRPC `GetMetadata` (`/v3/metadata`) and `GetClusterInfo` (`/v3/cluster`) did the same,
+under a cluster id made of the broker's own. They answer from the cluster's state now, as the Kafka Metadata does:
+the controller and the id of the cluster, every broker with the health the asked broker holds it in, and each
+partition's leader, replicas and in-sync replicas. A broker that runs alone answers as before.
+
 ## Breaking changes
 
 ### A partition whose last in-sync replica fails has no leader (#253)

@@ -652,6 +652,11 @@ public sealed class SurgewaveRuntime : IAsyncDisposable
         // SurgewaveBroker, which owns the native handler.
         _broker?.SetPartitionLeadership(partitionLeadership);
 
+        // #272 — the native answers that describe the cluster describe it, not this broker alone.
+        // The Raft node is made further down; its term is read when an answer is.
+        _broker?.SetClusterView(new ClusterView(
+            _clusterState, clusteringConfig.BrokerId, _heartbeatManager.IsBrokerAlive, () => _raftNode?.CurrentTerm ?? 0));
+
         // #228 — a share partition is served by its partition's leader.
         _shareGroupCoordinator?.SetPartitionLeadership(partitionLeadership);
 

@@ -60,6 +60,13 @@ public sealed class SurgewaveBroker : IAsyncDisposable, ISurgewaveStreamHandler
     /// </summary>
     public void SetPartitionLeadership(Abstractions.Routing.IPartitionLeadership? leadership)
         => _nativeHandler.SetPartitionLeadership(leadership);
+
+    /// <summary>
+    /// Passes the view of the cluster to the native handlers that describe it (#272). A broker that runs alone never
+    /// calls this, and describes itself.
+    /// </summary>
+    public void SetClusterView(Kuestenlogik.Surgewave.Clustering.Cluster.ClusterView? cluster)
+        => _nativeHandler.SetClusterView(cluster);
     private readonly ILoggerFactory _nativeLoggerFactory;
     private readonly ConnectorRepositoryManager _connectorRepositoryManager;
 

@@ -1279,13 +1279,20 @@ ConsumerGroupServiceImplHolder.Instance = new ConsumerGroupServiceImpl(
         return new FindCoordinatorResultDto(result.ErrorCode, result.CoordinatorId, result.Host, result.Port);
     });
 
+// What this broker knows of its cluster, for the answers that describe it (#272).
+var clusterView = new Kuestenlogik.Surgewave.Clustering.Cluster.ClusterView(
+    clusterState, config.BrokerId, heartbeatManager.IsBrokerAlive, () => raftNode.CurrentTerm);
+
 // Register ClusterServiceImpl with delegates
 ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
     getClusterInfo: () =>
     {
-        var topics = logManager.ListTopics().ToList();
-        var totalPartitions = topics.Sum(t => t.PartitionCount);
-        return new ClusterInfoDto(config.BrokerId, config.Host, config.Port, topics.Count, totalPartitions);
+        // The cluster's topics, controller and id (#272): the broker asked counted the topics it holds a replica of
+        // and named itself the controller.
+        var topics = clusterView.Topics;
+        return new ClusterInfoDto(
+            config.BrokerId, config.Host, config.Port, topics.Count, topics.Sum(t => t.PartitionCount),
+            ControllerId: clusterView.ControllerId, ClusterId: clusterState.ClusterId);
     },
     listBrokers: () =>
     {
@@ -1312,7 +1319,9 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
     },
     getMetadata: (topicNames) =>
     {
-        var allTopics = logManager.ListTopics().ToList();
+        // The cluster's topics, and who leads and replicates each partition as the cluster knows it (#272): the
+        // broker asked named itself the leader and the only replica of every partition of the topics it holds.
+        var allTopics = clusterView.Topics.OrderBy(t => t.Name, StringComparer.Ordinal).ToList();
         var filteredTopics = topicNames != null && topicNames.Count > 0
             ? allTopics.Where(t => topicNames.Contains(t.Name)).ToList()
             : allTopics;
@@ -1321,8 +1330,11 @@ ClusterServiceImplHolder.Instance = new ClusterServiceImpl(
             t.Name,
             t.PartitionCount,
             Enumerable.Range(0, t.PartitionCount)
-                .Select(p => new PartitionMetadataDto(p, config.BrokerId, [config.BrokerId], [config.BrokerId]))
-                .ToList()
+                .Select(p => clusterView.Partition(new Kuestenlogik.Surgewave.Core.Models.TopicPartition { Topic = t.Name, Partition = p }) is { } partition
+                    ? new PartitionMetadataDto(p, partition.Leader, [.. partition.Replicas], [.. partition.Isr])
+                    : new PartitionMetadataDto(p, config.BrokerId, [config.BrokerId], [config.BrokerId]))
+                .ToList(),
+            t.ReplicationFactor
         )).ToList();
     },
     alterReassignments: (reassignments) =>
@@ -1749,6 +1761,9 @@ var lagCalculator = new Kuestenlogik.Surgewave.Core.Monitoring.DefaultLagCalcula
 
 var surgewaveBroker = new SurgewaveBroker(config, logManager, recordBatchSerializer, nativeGroupCoordinator, transactionCoordinator, quotaManager, metrics, brokerLogger, connectionHandlers: kafkaConnectionHandlers, pluginDiscovery: pluginDiscoveryForBroker, dlqManager: dlqManager, crossTopicTxnManager: crossTopicTxnManager, kvBucketManager: kvBucketManager, lagCalculator: lagCalculator, loggerFactory: app.Services.GetRequiredService<ILoggerFactory>());
 surgewaveBroker.SetPartitionLeadership(app.Services.GetRequiredService<Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership>());
+
+// #272 — the native answers that describe the cluster describe it, not this broker alone.
+surgewaveBroker.SetClusterView(clusterView);
 
 // Publish the broker as the Surgewave stream handler so alternative transports
 // (QUIC, shared memory, ...) can pump connections into the shared pipeline.

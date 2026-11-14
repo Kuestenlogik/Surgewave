@@ -10,10 +10,13 @@ namespace Kuestenlogik.Surgewave.Broker.Native.Handlers;
 /// </summary>
 public sealed class NativeClusterHandler : NativeHandlerBase
 {
-    public NativeClusterHandler(LogManager logManager, PartitionReassignmentManager? reassignmentManager = null)
+    /// <param name="cluster">The view of the cluster as it is when a request arrives; null on a broker that runs alone.</param>
+    public NativeClusterHandler(
+        LogManager logManager, PartitionReassignmentManager? reassignmentManager = null, Func<ClusterView?>? cluster = null)
     {
-        RegisterNoRequest<ClusterInfoResult>(SurgewaveOpCode.GetClusterInfo, ctx => new GetClusterInfoOperation(logManager, ctx));
-        RegisterNoRequest<ListBrokersResult>(SurgewaveOpCode.ListBrokers, ctx => new ListBrokersOperation(ctx));
+        RegisterNoRequest<ClusterInfoResult>(
+            SurgewaveOpCode.GetClusterInfo, ctx => new GetClusterInfoOperation(logManager, ctx, cluster?.Invoke()));
+        RegisterNoRequest<ListBrokersResult>(SurgewaveOpCode.ListBrokers, ctx => new ListBrokersOperation(ctx, cluster?.Invoke()));
         Register<AlterPartitionReassignmentsRequest, AlterPartitionReassignmentsResult>(
             SurgewaveOpCode.AlterPartitionReassignments, _ => new AlterPartitionReassignmentsOperation(reassignmentManager));
         RegisterNoRequest<ListPartitionReassignmentsResult>(

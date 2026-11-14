@@ -272,11 +272,14 @@ public sealed class DescribeTopicOperation : IOperationHandler<DescribeTopicRequ
 {
     private readonly LogManager _logManager;
     private readonly NativeRequestContext _context;
+    private readonly Kuestenlogik.Surgewave.Clustering.Cluster.ClusterView? _cluster;
 
-    public DescribeTopicOperation(LogManager logManager, NativeRequestContext context)
+    public DescribeTopicOperation(
+        LogManager logManager, NativeRequestContext context, Kuestenlogik.Surgewave.Clustering.Cluster.ClusterView? cluster = null)
     {
         _logManager = logManager;
         _context = context;
+        _cluster = cluster;
     }
 
     public SurgewaveOpCode OpCode => SurgewaveOpCode.DescribeTopic;
@@ -292,7 +295,9 @@ public sealed class DescribeTopicOperation : IOperationHandler<DescribeTopicRequ
 
     public Task<DescribeTopicResult> ExecuteAsync(DescribeTopicRequestPayload request, CancellationToken cancellationToken)
     {
-        var metadata = _logManager.GetTopicMetadata(request.TopicName);
+        // The cluster's topic first (#272): a broker that holds no replica of a topic has no metadata of its own for
+        // it, and answered that the topic did not exist.
+        var metadata = _cluster?.Topic(request.TopicName) ?? _logManager.GetTopicMetadata(request.TopicName);
         if (metadata == null)
             throw new SurgewaveOperationException(SurgewaveErrorCode.TopicNotFound, $"Topic '{request.TopicName}' not found");
 
@@ -304,14 +309,17 @@ public sealed class DescribeTopicOperation : IOperationHandler<DescribeTopicRequ
             var tp = new TopicPartition { Topic = metadata.Name, Partition = i };
             var log = _logManager.GetLog(tp);
 
-            // In standalone mode, current broker is leader with full replica set
+            // Who leads and replicates it, as the cluster knows it: the broker asked named itself the leader and the
+            // only replica of every partition. A broker that runs alone is both. The offsets are those of this
+            // broker's copy, where it has one.
+            var partition = _cluster?.Partition(tp);
             partitions[i] = new PartitionMetadataPayload
             {
                 PartitionId = i,
-                Leader = brokerId,
-                LeaderEpoch = 0,
-                Replicas = [brokerId],
-                Isr = [brokerId],
+                Leader = partition?.Leader ?? brokerId,
+                LeaderEpoch = partition?.LeaderEpoch ?? 0,
+                Replicas = partition is { } known ? [.. known.Replicas] : [brokerId],
+                Isr = partition is { } inSync ? [.. inSync.Isr] : [brokerId],
                 HighWatermark = log?.HighWatermark ?? 0,
                 LogStartOffset = log?.LogStartOffset ?? 0
             };

@@ -23,24 +23,25 @@ public sealed class GetClusterInfoOperation : INoRequestOperationHandler<Cluster
 {
     private readonly LogManager _logManager;
     private readonly NativeRequestContext _context;
+    private readonly ClusterView? _cluster;
 
-    public GetClusterInfoOperation(LogManager logManager, NativeRequestContext context)
+    public GetClusterInfoOperation(LogManager logManager, NativeRequestContext context, ClusterView? cluster = null)
     {
         _logManager = logManager;
         _context = context;
+        _cluster = cluster;
     }
 
     public SurgewaveOpCode OpCode => SurgewaveOpCode.GetClusterInfo;
 
     public Task<ClusterInfoResult> ExecuteAsync(CancellationToken cancellationToken)
     {
-        var topics = _logManager.ListTopics().ToList();
-        var totalPartitions = topics.Sum(t => t.PartitionCount);
+        // In a cluster, what the cluster knows (#272): its controller and its topics. The broker asked named itself
+        // the controller and counted the topics it holds a replica of.
+        IReadOnlyCollection<TopicMetadata> topics = _cluster is null ? [.. _logManager.ListTopics()] : _cluster.Topics;
 
-        // In single-broker mode, this broker is always the controller
-        // For multi-broker clusters, this should be updated from ClusterState
-        var isController = true;
-        var controllerId = _context.Config.BrokerId;
+        // A broker that runs alone is its own controller.
+        var isController = _cluster?.IsController ?? true;
 
         var payload = new ClusterInfoPayload
         {
@@ -48,12 +49,12 @@ public sealed class GetClusterInfoOperation : INoRequestOperationHandler<Cluster
             Host = _context.Config.Host,
             Port = _context.Config.Port,
             IsController = isController,
-            ControllerId = controllerId,
-            ControllerEpoch = 1,
+            ControllerId = _cluster?.ControllerId ?? _context.Config.BrokerId,
+            ControllerEpoch = _cluster?.ControllerEpoch ?? 1,
             IsRaftLeader = isController,
-            RaftTerm = 1,
+            RaftTerm = _cluster?.RaftTerm ?? 1,
             TopicCount = topics.Count,
-            TotalPartitions = totalPartitions
+            TotalPartitions = topics.Sum(t => t.PartitionCount)
         };
 
         return Task.FromResult(new ClusterInfoResult { Payload = payload });
@@ -77,28 +78,48 @@ public readonly record struct ListBrokersResult
 public sealed class ListBrokersOperation : INoRequestOperationHandler<ListBrokersResult>
 {
     private readonly NativeRequestContext _context;
+    private readonly ClusterView? _cluster;
 
-    public ListBrokersOperation(NativeRequestContext context) => _context = context;
+    public ListBrokersOperation(NativeRequestContext context, ClusterView? cluster = null)
+    {
+        _context = context;
+        _cluster = cluster;
+    }
 
     public SurgewaveOpCode OpCode => SurgewaveOpCode.ListBrokers;
 
     public Task<ListBrokersResult> ExecuteAsync(CancellationToken cancellationToken)
     {
+        // In a cluster, its brokers (#272), with the controller and the health this broker's failure detector holds
+        // them in. A broker that runs alone, or knows no other yet, lists itself.
+        var brokers = _cluster?.Brokers ?? [];
+
         var payload = new ListBrokersPayload
         {
-            Brokers = new[]
-            {
-                new BrokerInfoPayload
+            Brokers = brokers.Count > 0
+                ? [.. brokers.Select(b => new BrokerInfoPayload
                 {
-                    BrokerId = _context.Config.BrokerId,
-                    Host = _context.Config.Host,
-                    Port = _context.Config.Port,
-                    ReplicationPort = _context.Config.ReplicationPort,
-                    IsController = true,
-                    IsAlive = true,
-                    Rack = null
-                }
-            }
+                    BrokerId = b.Broker.BrokerId,
+                    Host = b.Broker.Host,
+                    Port = b.Broker.Port,
+                    ReplicationPort = b.Broker.ReplicationPort,
+                    IsController = b.IsController,
+                    IsAlive = b.IsAlive,
+                    Rack = b.Broker.Rack
+                })]
+                :
+                [
+                    new BrokerInfoPayload
+                    {
+                        BrokerId = _context.Config.BrokerId,
+                        Host = _context.Config.Host,
+                        Port = _context.Config.Port,
+                        ReplicationPort = _context.Config.ReplicationPort,
+                        IsController = true,
+                        IsAlive = true,
+                        Rack = null
+                    }
+                ]
         };
 
         return Task.FromResult(new ListBrokersResult { Payload = payload });

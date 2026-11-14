@@ -18,6 +18,11 @@
        closure (that closure's runtime Kafka-freeness is exactly what the test guards). So the
        references are build-ordering only — ReferenceOutputAssembly=false keeps their assemblies
        out of this test's bin. -->
+  <!-- The native client, as the CLI has one: an outside client like the Kafka one above, not the broker closure. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Client\Kuestenlogik.Surgewave.Client.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kuestenlogik.Surgewave.Broker.App\Kuestenlogik.Surgewave.Broker.App.csproj"
                       ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />

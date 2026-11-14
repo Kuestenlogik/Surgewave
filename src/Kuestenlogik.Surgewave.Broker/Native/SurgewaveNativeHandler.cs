@@ -49,6 +49,15 @@ public sealed class SurgewaveNativeHandler
     public void SetPartitionLeadership(Kuestenlogik.Surgewave.Broker.Abstractions.Routing.IPartitionLeadership? leadership)
         => _dataHandler?.SetPartitionLeadership(leadership);
 
+    private Kuestenlogik.Surgewave.Clustering.Cluster.ClusterView? _clusterView;
+
+    /// <summary>
+    /// Passes the view of the cluster to the handlers that describe it, once clustering exists (#272): the cluster
+    /// info, the broker list and a topic's partitions are then the cluster's and not the asked broker's alone.
+    /// </summary>
+    public void SetClusterView(Kuestenlogik.Surgewave.Clustering.Cluster.ClusterView? cluster)
+        => Volatile.Write(ref _clusterView, cluster);
+
     public SurgewaveNativeHandler(
         LogManager logManager,
         RecordBatchSerializer recordBatchSerializer,
@@ -85,9 +94,9 @@ public sealed class SurgewaveNativeHandler
         {
             _dataHandler,
             new NativeMetadataHandler(logManager),
-            new NativeTopicHandler(logManager),
+            new NativeTopicHandler(logManager, () => Volatile.Read(ref _clusterView)),
             new NativeConsumerGroupHandler(groupCoordinator, lagCalculator),
-            new NativeClusterHandler(logManager, reassignmentManager),
+            new NativeClusterHandler(logManager, reassignmentManager, () => Volatile.Read(ref _clusterView)),
             new NativeTransactionHandler(transactionCoordinator),
             new NativeQuotaHandler(quotaManager),
             new NativeSecurityHandler(aclAuthorizer, config),
