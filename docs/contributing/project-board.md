@@ -27,8 +27,8 @@ The roadmap, in-flight work, and bug triage all live on the [Surgewave Project b
 | **Priority** *(org issue field, on the issue)* | The order within a section | `Urgent` (now — blocks or burns) · `High` (this section) · `Medium` (the next section) · `Low` (someday) |
 | **Effort** *(org issue field)* | Planned size | `Low` (a day or less) · `Medium` (days) · `High` (a week or more — split it) |
 | **Effort (actual)** *(board field)* | What it turned out to be, set at Done | the same scale — plan next to actual, per issue (Bowire's design) |
-| **Milestone** *(built-in)* | The ordered work section | `M<n> — <themes>`; a sibling repo mirrors the product's sections as its own milestones |
-| **Release** *(board field, where the board has one)* | The version a ticket shipped in | `vX.Y`, stamped at the cut; empty while planned |
+| **Milestone** *(built-in)* | The release it is planned for | `vX.Y — <theme>`; on this board, which has no `Release` field, the milestone alone is the plan |
+| **Release** *(board field, where the board has one)* | The release it is planned for | `0.7`, set when planned (Bowire, Terracle, Modelzero); this board has none |
 | **Area** *(board field)* | The component | per product (`terrain`, `workbench`, `broker`, …); the `area:*` label says the same for issue search |
 | **Status** *(board field)* | Where the work sits in the flow | `Backlog` · `Next up` · `In progress` · `In review` · `Done` |
 | **Assignee** | Who holds it | never empty — unassigned means nobody decided |
@@ -48,11 +48,30 @@ cut; they were renamed to the versions they ship in.
 - The order of the milestones is the order of their versions; `ROADMAP.md` sorts them so, and the frontmost open one is
   the release in progress.
 - A release is tagged with the milestone's version — `git tag -a v0.6.0 -m "Surgewave v0.6.0 — Correctness & durability"`
-  — and [`scripts/resolve-milestone.mjs`](../../scripts/resolve-milestone.mjs) finds the milestone whose title starts
-  with `v0.6.0` or `v0.6` for the release title and the drafted notes. After the release the milestone is closed with
+  — and [`scripts/ci/resolve-milestone.mjs`](../../scripts/ci/resolve-milestone.mjs) finds the milestone of that version
+  (`v0.6` for v0.6.0, `v0.6.1` for v0.6.1) for the drafted notes. After the release the milestone is closed with
   *"Shipped in v0.6.0"*. A patch release (`v0.6.1`) gets a milestone of its own when it carries tickets.
-- **Release due** = the frontmost open milestone has no open ticket, the build and the test suites are green, no pull
-  request is open.
+- **Release due** = the frontmost open milestone has no open ticket and something of it is done, the build and the test
+  suites are green, no pull request is open. Releases ship in order: a later milestone with nothing open waits.
+- **The release tool is shared.** `scripts/ci/release.mjs`, `release-plan.mjs`, `release-board.mjs`, `release-body.mjs`,
+  `resolve-milestone.mjs`, `check-release-plan.mjs` and the test `tests/ci/release-tool.test.mjs` are the same files in
+  Bowire, Terracle, Modelzero and Wakeforge (Kuestenlogik/Modelzero#146): change them in every repository at once,
+  never here alone. What is Surgewave's own is in `scripts/ci/release.config.json`.
+
+### Releasing
+
+```bash
+node scripts/ci/release.mjs status          # which release is due, and what the frontmost one waits for
+node scripts/ci/release.mjs notes 0.7.0     # drafts docs/release-notes/v0.7.0.md from the milestone
+node scripts/ci/release.mjs cut 0.7.0 --dry-run
+```
+
+`notes` lists the closed tickets of the release's milestone by area, and those that closed since the last release
+without a milestone; `--highlights` prints the list alone (the *Draft release notes* workflow fills `upcoming.md` with
+it). `cut` refuses while `HEAD` is not `origin/main`, a pull request is open, a release before it is open, an issue
+of its milestone is open, or the notes (`docs/release-notes/v<version>.md` or `upcoming.md`) are missing, uncommitted
+or still a draft; it gives the tickets that closed without a milestone this one, tags, leaves the publishing to
+`release.yml` and closes the milestone with *"Shipped in vX.Y.Z."*.
 
 ## Recommended views
 

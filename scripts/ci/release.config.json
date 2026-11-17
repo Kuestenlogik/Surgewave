@@ -1,0 +1,16 @@
+{
+  "$comment": "The values of this repository for the shared release tool (scripts/ci/release*.mjs, resolve-milestone.mjs, check-release-plan.mjs), whose files are the same in every Kuestenlogik repository that carries it. Every key is required; release-plan.mjs validateConfig says what each holds. The board has no Release field: a ticket's milestone is its plan.",
+  "repository": "Kuestenlogik/Surgewave",
+  "board": { "owner": "Kuestenlogik", "project": 4, "release": null, "product": null, "area": "Area", "status": "Status" },
+  "products": { "Surgewave": "Surgewave" },
+  "milestonePrefixes": [],
+  "required": [],
+  "ignore": [],
+  "version": { "file": "Directory.Build.props", "elements": ["Version"], "atCut": "free" },
+  "notes": {
+    "also": ["docs/release-notes/upcoming.md"],
+    "upgrading": "Coming from {previous}: see [Upgrading from {previous}]({file})."
+  },
+  "pipeline": ".github/workflows/release.yml",
+  "afterCut": "post-release-floor-bump.yml raises <Version> in Directory.Build.props (still {current}) once the release pipeline has passed; plan the next release: every ticket names its milestone."
+}

@@ -27,7 +27,7 @@ on:
         description: 'Version to draft notes for (e.g. 0.5.0). With or without leading v.'
         required: true
       milestone:
-        description: 'Milestone the release ships (e.g. M1). Empty = the frontmost complete section.'
+        description: 'Milestone the release ships (e.g. v0.7 — <theme>, or its start v0.7). Empty = the milestone of the version.'
         required: false
 
 permissions:
@@ -60,11 +60,10 @@ jobs:
             fi
           fi
 
-      # Milestones are ordered work sections `M<n> — <theme>`; the version is
-      # chosen at the cut. Before the tag exists, the milestone to draft for is
-      # the one named here (`milestone` input, e.g. M1) or, unnamed, the
-      # frontmost complete section — scripts/resolve-milestone.mjs applies the
-      # same rules the release pipeline uses on the tag.
+      # A milestone is a release, `vX.Y — <theme>`. Before the tag exists, the
+      # milestone to draft for is the one named here (`milestone` input) or,
+      # unnamed, the milestone of the version: scripts/ci/resolve-milestone.mjs
+      # finds it by the version, as the release tool does.
       - name: Resolve milestone + theme
         id: ms
         env:
@@ -76,9 +75,9 @@ jobs:
           NAMED="${{ github.event.inputs.milestone }}"
           if [ -n "$NAMED" ]; then
             MS_TITLE=$(gh api "repos/${{ github.repository }}/milestones?state=all&per_page=100" --jq ".[] | select(.title | startswith(\"$NAMED \") or . == \"$NAMED\") | .title" | head -n 1 || true)
-            THEME=$(echo "$MS_TITLE" | sed -E 's/^M[0-9]+[[:space:]]*[—-][[:space:]]*//')
+            THEME=$(echo "$MS_TITLE" | sed -E 's/^v[0-9][0-9.]*[[:space:]]*[—-][[:space:]]*//')
           else
-            node scripts/resolve-milestone.mjs "v$VERSION" > resolved.json || echo '{"milestone":"","theme":""}' > resolved.json
+            node scripts/ci/resolve-milestone.mjs "v$VERSION" > resolved.json || echo '{"milestone":"","theme":""}' > resolved.json
             MS_TITLE=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('resolved.json','utf8')).milestone || '')")
             THEME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('resolved.json','utf8')).theme || '')")
           fi
@@ -106,12 +105,12 @@ jobs:
           echo "Previous tag: $PREV_TAG"
 
           # ---- Highlights: the shared release tool (docs/contributing/project-board.md) ----
-          # Closed tickets of the delivered section in this repo AND in every sibling
-          # that mirrors it on the board — grouped by repository, type (Feature / Bug / Task)
-          # and area; the same list the cut delivers.
+          # Closed tickets of the version's milestone, grouped by area, and those that
+          # closed since the last release without a milestone; the same list the drafted
+          # notes carry.
           HIGHLIGHTS=""
           if [ -n "$MS_TITLE" ]; then
-            HIGHLIGHTS=$(node scripts/release.mjs notes "v$VERSION" "$MS_TITLE" --highlights 2>/dev/null || true)
+            HIGHLIGHTS=$(node scripts/ci/release.mjs notes "$VERSION" --highlights 2>/dev/null || true)
           fi
 
           # ---- Maintenance from the commit log ----
